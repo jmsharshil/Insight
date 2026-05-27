@@ -30,12 +30,18 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('branch_manager', 'Branch Manager'),
         ('admin_senior_executive', 'Admin Senior Executive'),
         ('admin_executive', 'Admin Executive'),
-        ('student', 'Student'),
-        ('parents', 'Parents'),
-        ('faculty', 'Faculty'),
+        ('front_desk','Front Desk'),
+        ('counsellor','Counsellor'),
+        ('sales_senior_executive','Sales Senior Executive'),
+        ('sales_executive','Sales Executive'),
+        ('tele_caller','Tele Caller'),
         ('exam_supervisor', 'Exam Supervisor'),
         ('paper_checker', 'Paper Checker'),
         ('accountant', 'Accountant'),
+        ('student', 'Student'),
+        ('parents', 'Parents'),
+        ('faculty', 'Faculty'),
+        
     ]
     id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
     username = models.CharField(max_length=100,unique=True)
@@ -43,6 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=15,unique=True)
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=50,choices=ROLE_CHOICES,default='student')
+    linked_student = models.ForeignKey('self',null=True,blank=True,on_delete=models.SET_NULL,related_name='linked_parents',limit_choices_to={'role': 'student'},)
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
