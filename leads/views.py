@@ -11,6 +11,13 @@ from .models import Lead,LeadStage
 from django.db.models import Q
 import re
 
+from auth_user.models import User
+from auth_user.utils import (
+    generate_temporary_password,
+    send_parent_login_credentials,
+    send_student_login_credentials,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,6 +148,58 @@ class LeadListView(APIView):
         )
 
 class LeadStatusUpdateView(APIView):
+    def _build_unique_username(self, email):
+        base_username = email.split('@')[0].strip() or 'student'
+        username = base_username
+        counter = 1
+
+        while User.objects.filter(username=username).exists():
+            username = f"{base_username}{counter}"
+            counter += 1
+
+        return username
+
+    def _create_or_update_user(self, *, email, phone, name, role, linked_student=None):
+        if not email:
+            raise ValueError("Email is required to create login credentials.")
+
+        if not phone:
+            raise ValueError("Phone is required to create login credentials.")
+
+        password = generate_temporary_password()
+        user = User.objects.filter(email=email).first()
+
+        if user:
+            if User.objects.filter(phone=phone).exclude(id=user.id).exists():
+                raise ValueError(f"Phone number {phone} is already used by another account.")
+
+            if not user.username:
+                user.username = self._build_unique_username(email)
+
+            user.phone = phone
+            user.name = name or user.name
+            user.role = role
+            user.is_active = True
+            user.linked_student = linked_student
+            user.set_password(password)
+            user.save()
+        else:
+            if User.objects.filter(phone=phone).exists():
+                raise ValueError(f"Phone number {phone} is already used by another account.")
+
+            user = User.objects.create_user(
+                username=self._build_unique_username(email),
+                email=email,
+                password=password,
+                role=role,
+                phone=phone,
+                name=name,
+                is_active=True,
+                linked_student=linked_student,
+            )
+
+        return user, password
+
     def patch(self, request, lead_id):
         # Find lead
         try:
@@ -165,6 +224,87 @@ class LeadStatusUpdateView(APIView):
             )
         new_stage = serializer.validated_data["stage"]
         note = serializer.validated_data.get("note", "")
+        
+        old_stage = lead.current_stage
+
+        # Handle conversion to student
+        if new_stage == 'converted' and old_stage != 'converted':
+            if not lead.email:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Lead email is required to create a student login account."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if not lead.phone_student:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Lead phone number is required to create a student login account."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if not lead.email_parent:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Parent email is required to create parent login account."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            parent_phone = lead.phone_father or lead.phone_father_2
+            if not parent_phone:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Parent phone is required to create parent login account."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                student_name = f"{lead.first_name} {lead.surname}".strip() or lead.first_name
+                student_user, student_password = self._create_or_update_user(
+                    email=lead.email,
+                    phone=lead.phone_student,
+                    name=student_name,
+                    role='student',
+                    linked_student=None,
+                )
+
+                parent_name = lead.father_name.strip() if lead.father_name else f"Parent of {student_name}"
+                parent_user, parent_password = self._create_or_update_user(
+                    email=lead.email_parent,
+                    phone=parent_phone,
+                    name=parent_name,
+                    role='parents',
+                    linked_student=student_user,
+                )
+
+                try:
+                    send_student_login_credentials(student_user, student_password)
+                    send_parent_login_credentials(parent_user, student_user, parent_password)
+                    logger.info(
+                        f"Student and parent credentials sent for converted lead {lead.id} "
+                        f"(student={student_user.email}, parent={parent_user.email})"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send credentials email for lead {lead.id}: {str(e)}")
+                    # Continue even if email fails - users are still created
+
+            except Exception as e:
+                logger.error(f"Error creating student user for lead {lead.id}: {str(e)}")
+                return Response(
+                    {
+                        "success": False,
+                        "message": f"Error creating student account: {str(e)}"
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         # Update lead current stage
         lead.current_stage = new_stage
@@ -181,7 +321,11 @@ class LeadStatusUpdateView(APIView):
         return Response(
             {
                 "success": True,
-                "message": "Lead status updated successfully.",
+                "message": "Lead status updated successfully." + (
+                    " Student and parent accounts created, linked, and credentials sent."
+                    if new_stage == 'converted' and old_stage != 'converted'
+                    else ""
+                ),
                 "data": {
                     "lead_id": lead.id,
                     "current_stage": lead.current_stage,
@@ -189,6 +333,7 @@ class LeadStatusUpdateView(APIView):
             },
             status=status.HTTP_200_OK
         )
+
 
 
 class LeadDetailView(APIView):

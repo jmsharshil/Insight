@@ -4,12 +4,15 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from .models import User
 from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer
 from .models import EmailOTP
 from .utils import send_otp_email
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
+from leads.models import Lead
+from leads.serializers import LeadDetailSerializer
 
 class RegisterAPIView(APIView):
     def post(self, request):
@@ -90,6 +93,11 @@ class LoginAPIView(APIView):
                     "phone": user.phone,
                     "name": user.name,
                     "role": user.role,
+                    "linked_student": {
+                        "id": str(user.linked_student.id),
+                        "name": user.linked_student.name,
+                        "email": user.linked_student.email,
+                    } if user.linked_student else None,
                 }
             })
         return Response(
@@ -151,3 +159,52 @@ class ResetPasswordAPIView(APIView):
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
+
+
+class ParentStudentProfileAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        parent_user = request.user
+
+        if parent_user.role != 'parents':
+            return Response(
+                {"success": False, "message": "Only parent users can access this endpoint."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        student_user = parent_user.linked_student
+        if not student_user:
+            return Response(
+                {"success": False, "message": "No student is linked to this parent account."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        lead = Lead.objects.filter(email__iexact=student_user.email).order_by('-created_at').first()
+        if not lead:
+            lead = Lead.objects.filter(phone_student=student_user.phone).order_by('-created_at').first()
+
+        student_data = {
+            "id": str(student_user.id),
+            "username": student_user.username,
+            "email": student_user.email,
+            "phone": student_user.phone,
+            "name": student_user.name,
+            "role": student_user.role,
+        }
+
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "parent": {
+                        "id": str(parent_user.id),
+                        "email": parent_user.email,
+                        "name": parent_user.name,
+                    },
+                    "student": student_data,
+                    "student_lead_profile": LeadDetailSerializer(lead).data if lead else None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
