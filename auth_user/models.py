@@ -49,6 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=15,unique=True)
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=50,choices=ROLE_CHOICES,default='student')
+    branch = models.ForeignKey('branch.Branch',null=True,blank=True,on_delete=models.SET_NULL,related_name='users',)
     linked_student = models.ForeignKey('self',null=True,blank=True,on_delete=models.SET_NULL,related_name='linked_parents',limit_choices_to={'role': 'student'},)
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)

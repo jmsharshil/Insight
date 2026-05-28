@@ -7,16 +7,9 @@ from rest_framework.exceptions import ValidationError
 
 from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
 from .utils import LeadService
-from .models import Lead,LeadStage
+from .models import Lead, LeadStage
 from django.db.models import Q
 import re
-
-from auth_user.models import User
-from auth_user.utils import (
-    generate_temporary_password,
-    send_parent_login_credentials,
-    send_student_login_credentials,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -147,58 +140,8 @@ class LeadListView(APIView):
             status=status.HTTP_200_OK
         )
 
+
 class LeadStatusUpdateView(APIView):
-    def _build_unique_username(self, email):
-        base_username = email.split('@')[0].strip() or 'student'
-        username = base_username
-        counter = 1
-
-        while User.objects.filter(username=username).exists():
-            username = f"{base_username}{counter}"
-            counter += 1
-
-        return username
-
-    def _create_or_update_user(self, *, email, phone, name, role, linked_student=None):
-        if not email:
-            raise ValueError("Email is required to create login credentials.")
-
-        if not phone:
-            raise ValueError("Phone is required to create login credentials.")
-
-        password = generate_temporary_password()
-        user = User.objects.filter(email=email).first()
-
-        if user:
-            if User.objects.filter(phone=phone).exclude(id=user.id).exists():
-                raise ValueError(f"Phone number {phone} is already used by another account.")
-
-            if not user.username:
-                user.username = self._build_unique_username(email)
-
-            user.phone = phone
-            user.name = name or user.name
-            user.role = role
-            user.is_active = True
-            user.linked_student = linked_student
-            user.set_password(password)
-            user.save()
-        else:
-            if User.objects.filter(phone=phone).exists():
-                raise ValueError(f"Phone number {phone} is already used by another account.")
-
-            user = User.objects.create_user(
-                username=self._build_unique_username(email),
-                email=email,
-                password=password,
-                role=role,
-                phone=phone,
-                name=name,
-                is_active=True,
-                linked_student=linked_student,
-            )
-
-        return user, password
 
     def patch(self, request, lead_id):
         # Find lead
@@ -224,91 +167,105 @@ class LeadStatusUpdateView(APIView):
             )
         new_stage = serializer.validated_data["stage"]
         note = serializer.validated_data.get("note", "")
-        
+
         old_stage = lead.current_stage
 
-        # Handle conversion to student
+        # ── Handle conversion: auto-create Admission record ──────────────────
+        admission_created = False
         if new_stage == 'converted' and old_stage != 'converted':
-            if not lead.email:
-                return Response(
-                    {
-                        "success": False,
-                        "message": "Lead email is required to create a student login account."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if not lead.phone_student:
-                return Response(
-                    {
-                        "success": False,
-                        "message": "Lead phone number is required to create a student login account."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if not lead.email_parent:
-                return Response(
-                    {
-                        "success": False,
-                        "message": "Parent email is required to create parent login account."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            parent_phone = lead.phone_father or lead.phone_father_2
-            if not parent_phone:
-                return Response(
-                    {
-                        "success": False,
-                        "message": "Parent phone is required to create parent login account."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
             try:
-                student_name = f"{lead.first_name} {lead.surname}".strip() or lead.first_name
-                student_user, student_password = self._create_or_update_user(
-                    email=lead.email,
-                    phone=lead.phone_student,
-                    name=student_name,
-                    role='student',
-                    linked_student=None,
-                )
+                from onboarding.models import Admission
+                from onboarding.utils import AdmissionService
 
-                parent_name = lead.father_name.strip() if lead.father_name else f"Parent of {student_name}"
-                parent_user, parent_password = self._create_or_update_user(
-                    email=lead.email_parent,
-                    phone=parent_phone,
-                    name=parent_name,
-                    role='parents',
-                    linked_student=student_user,
-                )
+                # Check if an admission already exists for this lead
+                if not Admission.objects.filter(lead=lead).exists():
+                    # Build admission data from lead fields
+                    admission_data = {
+                        'lead_id':          lead.id,
+                        'first_name':       lead.first_name,
+                        'surname':          lead.surname or '',
+                        'father_name':      lead.father_name or '',
+                        'mother_name':      '',
+                        'dob':              None,
+                        'category':         'gen',
+                        'email':            lead.email or '',
+                        'email_parent':     '',
+                        'phone_student':    lead.phone_student or '',
+                        'phone_student_2':  '',
+                        'phone_father':     lead.phone_father or '',
+                        'phone_father_2':   '',
+                        'street':           lead.street or '',
+                        'apartment':        lead.apartment or '',
+                        'city':             lead.city or '',
+                        'state':            lead.state or '',
+                        'pincode':          '',
+                        'country':          lead.country or 'India',
+                        'course':           lead.course or 'cseet',
+                        'group_module':     lead.group_module or 'full',
+                        'batch_attempt':    lead.batch_attempt or 'june',
+                        'location':         lead.location or '',
+                        'qualification':    lead.qualification or 'appearing_12',
+                        'reference':        lead.reference or 'none',
+                        'consent':          True,
+                        'tenth_medium':     lead.tenth_medium or 'cbse',
+                        'tenth_school':     lead.tenth_school or '',
+                        'tenth_coaching':   lead.tenth_coaching or '',
+                        'tenth_percentage': lead.tenth_percentage or 0,
+                        'tenth_percentile': lead.tenth_percentile or 0,
+                        'twelfth_medium':   lead.twelfth_medium or 'cbse',
+                        'twelfth_school':   lead.twelfth_school or '',
+                        'twelfth_coaching': lead.twelfth_coaching or '',
+                        'twelfth_percentage': lead.twelfth_percentage or 0,
+                        'twelfth_percentile': lead.twelfth_percentile or 0,
+                        'grad_university':  lead.grad_university or '',
+                        'grad_college':     lead.grad_college or '',
+                        'grad_last_sem':    lead.grad_last_sem or '',
+                    }
 
-                try:
-                    send_student_login_credentials(student_user, student_password)
-                    send_parent_login_credentials(parent_user, student_user, parent_password)
-                    logger.info(
-                        f"Student and parent credentials sent for converted lead {lead.id} "
-                        f"(student={student_user.email}, parent={parent_user.email})"
+                    # Auto-assign counsellor via round-robin
+                    assigned_counsellor = AdmissionService.get_next_counsellor()
+
+                    # Create Admission with status='pending' (no credentials yet)
+                    counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
+                    auto_note = f'Auto-created from converted lead #{lead.id}. Assigned to {counsellor_name} for review.'
+                    
+                    admission = Admission(
+                        lead=lead,
+                        status='pending',
+                        note=auto_note,
+                        assigned_counsellor=assigned_counsellor,
+                        **{k: v for k, v in admission_data.items() if k != 'lead_id'},
                     )
-                except Exception as e:
-                    logger.error(f"Failed to send credentials email for lead {lead.id}: {str(e)}")
-                    # Continue even if email fails - users are still created
+                    admission.save()
+
+                    from onboarding.models import AdmissionStatusHistory
+                    AdmissionStatusHistory.objects.create(
+                        admission=admission,
+                        status='pending',
+                        changed_by=request.user if request.user.is_authenticated else None,
+                        note=auto_note,
+                    )
+
+                    admission_created = True
+                    logger.info(
+                        f"Admission {admission.id} auto-created from converted lead {lead.id}, "
+                        f"assigned to counsellor: {counsellor_name}"
+                    )
 
             except Exception as e:
-                logger.error(f"Error creating student user for lead {lead.id}: {str(e)}")
+                logger.error(f"Error creating admission for lead {lead.id}: {str(e)}")
                 return Response(
                     {
                         "success": False,
-                        "message": f"Error creating student account: {str(e)}"
+                        "message": f"Error creating admission record: {str(e)}"
                     },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
-        # Update lead current stage
+        # Update lead current stage and note
         lead.current_stage = new_stage
-        lead.save(update_fields=["current_stage", "updated_at"])
+        lead.note = note
+        lead.save(update_fields=["current_stage", "note", "updated_at"])
 
         # Create stage history
         LeadStage.objects.create(
@@ -318,18 +275,33 @@ class LeadStatusUpdateView(APIView):
             note=note
         )
 
+        message = "Lead status updated successfully."
+        response_data = {
+            "lead_id": lead.id,
+            "current_stage": lead.current_stage,
+            "note": lead.note,
+        }
+
+        if admission_created:
+            message += " Admission record created and assigned for counsellor review."
+            counsellor_info = None
+            if assigned_counsellor:
+                counsellor_info = {
+                    "id":    str(assigned_counsellor.id),
+                    "name":  assigned_counsellor.name,
+                    "email": assigned_counsellor.email,
+                }
+            response_data["admission"] = {
+                "admission_id": admission.id,
+                "status": admission.status,
+                "assigned_counsellor": counsellor_info,
+            }
+
         return Response(
             {
                 "success": True,
-                "message": "Lead status updated successfully." + (
-                    " Student and parent accounts created, linked, and credentials sent."
-                    if new_stage == 'converted' and old_stage != 'converted'
-                    else ""
-                ),
-                "data": {
-                    "lead_id": lead.id,
-                    "current_stage": lead.current_stage,
-                }
+                "message": message,
+                "data": response_data,
             },
             status=status.HTTP_200_OK
         )

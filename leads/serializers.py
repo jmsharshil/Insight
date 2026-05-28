@@ -1,17 +1,7 @@
-# leads/serializers.py  (updated — RegistrationSerializer removed)
+# leads/serializers.py
 
 from rest_framework import serializers
-from .models import (
-    Lead,
-    FORM_TYPE_CHOICES,
-    COURSE_TYPE_CHOICES,
-    GROUP_MODULE_CHOICES,
-    ATTEMPT_TYPE_CHOICES,
-    STAGE_CHOICES,
-    QUALIFICATION_TYPE_CHOICES,
-    BOARD_TYPE_CHOICES,
-    REFERENCE_TYPE_CHOICES,
-)
+from .models import (Lead,FORM_TYPE_CHOICES,COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,STAGE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -50,12 +40,22 @@ VALID_COMBINATIONS = {
 # ── Contact Serializer ────────────────────────────────────────────────────────
 
 class ContactSerializer(serializers.Serializer):
+    branch        = serializers.UUIDField(required=False, allow_null=True)
     form_type     = serializers.ChoiceField(choices=FORM_TYPE_CHOICES)
     first_name    = serializers.CharField(max_length=100)
     email         = serializers.EmailField()
     phone_student = serializers.CharField(max_length=15)
     course        = serializers.ChoiceField(choices=COURSE_TYPE_CHOICES)
     consent       = serializers.BooleanField()
+
+    def validate_branch(self, value):
+        if value:
+            from branch.models import Branch
+            try:
+                return Branch.objects.get(id=value)
+            except Branch.DoesNotExist:
+                raise serializers.ValidationError("Branch not found.")
+        return value
 
     def validate_phone_student(self, value):
         return validate_phone(value)
@@ -204,8 +204,8 @@ class LeadListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
         fields = [
-            'id', 'form_type', 'first_name', 'surname', 'email',
-            'phone_student', 'course', 'current_stage', 'location', 'created_at',
+            'id', 'branch', 'form_type', 'first_name', 'surname', 'email',
+            'phone_student', 'course', 'current_stage', 'location', 'note', 'created_at',
         ]
 
 

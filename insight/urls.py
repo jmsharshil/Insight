@@ -22,5 +22,5 @@ urlpatterns = [
     path('api/auth/',include('auth_user.urls')),
     path('api/v1/',include('leads.urls')),
     path('api/v1/',include('onboarding.urls')),
-
+    path("api/v1/",include("branch.urls")),
 ]

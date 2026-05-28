@@ -53,17 +53,27 @@ class AdmissionListView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+        counsellor_data = None
+        if admission.assigned_counsellor:
+            counsellor_data = {
+                'id':    str(admission.assigned_counsellor.id),
+                'name':  admission.assigned_counsellor.name,
+                'email': admission.assigned_counsellor.email,
+            }
+
         return Response(
             {
                 'success': True,
                 'message': (
                     'Your admission form has been submitted successfully. '
-                    'Login credentials have been sent to your email.'
+                    'It is now pending counsellor review. You will receive '
+                    'login credentials once your admission is approved and enrolled.'
                 ),
                 'data': {
-                    'admission_id': admission.id,
-                    'status':       admission.status,
-                    'name':         f"{admission.first_name} {admission.surname}".strip(),
+                    'admission_id':       admission.id,
+                    'status':             admission.status,
+                    'name':               f"{admission.first_name} {admission.surname}".strip(),
+                    'assigned_counsellor': counsellor_data,
                 },
             },
             status=status.HTTP_201_CREATED,
@@ -185,7 +195,7 @@ class AdmissionStatusUpdateView(APIView):
             {
                 'success': True,
                 'message': 'Admission status updated successfully.',
-                'data': {'admission_id': admission.id, 'status': admission.status},
+                'data': {'admission_id': admission.id, 'status': admission.status, 'note': admission.note},
             },
             status=status.HTTP_200_OK,
         )

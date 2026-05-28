@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'auth_user',
     'leads',
     'onboarding',
+    'branch',
 ]
 
 MIDDLEWARE = [
