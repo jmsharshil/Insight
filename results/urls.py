@@ -1,0 +1,24 @@
+from django.urls import path
+from .views import (
+    PaperView, PaperMarksView, PaperRecheckView,
+    CheckerStatusView, CheckerPortalSubmitView,
+    PublishResultView, ResultView,
+    StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
+)
+
+urlpatterns = [
+    # Exempt endpoint
+    path('checker-portal/submit/', CheckerPortalSubmitView.as_view(), name='checker-portal-submit'),
+    
+    path('exams/<uuid:exam_id>/papers/', PaperView.as_view(), name='paper-list'),
+    path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/marks/', PaperMarksView.as_view(), name='paper-marks'),
+    path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/recheck/', PaperRecheckView.as_view(), name='paper-recheck'),
+    path('exams/<uuid:exam_id>/checker-status/', CheckerStatusView.as_view(), name='checker-status'),
+    path('exams/<uuid:exam_id>/results/publish/', PublishResultView.as_view(), name='publish-result'),
+    path('exams/<uuid:exam_id>/results/', ResultView.as_view(), name='exam-results'),
+    
+    # v2 NEW: FRD §4.6.2 Recheck Requests
+    path('exams/<uuid:exam_id>/results/recheck-request/', StudentRecheckRequestView.as_view(), name='student-recheck-request'),
+    path('exams/<uuid:exam_id>/recheck-requests/', RecheckRequestListView.as_view(), name='recheck-request-list'),
+    path('exams/<uuid:exam_id>/recheck-requests/<uuid:request_id>/', RecheckRequestActionView.as_view(), name='recheck-request-action'),
+]
