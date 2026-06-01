@@ -5,7 +5,7 @@ Changes from v2:
 - detect_missing_scans: split into CASE 1 (missing OUT) + CASE 2 (missing IN)
   with correct alert types: missing_checkout_scan / missing_checkin_scan
 - check_no_checkout_eod: uses missing_checkout_scan alert type
-- check_violation_threshold: actually updates StudentProfile.qr_blocked
+- check_violation_threshold: actually updates Student.qr_blocked
 - Notification stubs use: notify(recipient_user_id, title, body, metadata)
 """
 
@@ -186,7 +186,7 @@ def detect_missing_scans(self, branch_id, date_str):
     try:
         # Get all students with active batches in this branch
         from django.apps import apps
-        SP = apps.get_model('students', 'StudentProfile')
+        SP = apps.get_model('students', 'Student')
         students = SP.objects.filter(branch_id=branch_id, is_active=True, batch__isnull=False)
 
         for student in students:
@@ -247,7 +247,7 @@ def check_violation_threshold(student_id):
 
     try:
         from django.apps import apps
-        SP = apps.get_model('students', 'StudentProfile')
+        SP = apps.get_model('students', 'Student')
     except Exception:
         SP = None
 
@@ -295,13 +295,13 @@ def send_low_attendance_alerts(branch_id, threshold=75.0):
 
     try:
         from django.apps import apps
-        SP = apps.get_model('students', 'StudentProfile')
+        SP = apps.get_model('students', 'Student')
         students = SP.objects.filter(branch_id=branch_id)
         if hasattr(SP, 'is_active'):
             students = students.filter(is_active=True)
     except Exception as e:
-        logger.error(f"Cannot load StudentProfile: {e}")
-        return "StudentProfile unavailable"
+        logger.error(f"Cannot load Student model: {e}")
+        return "Student model unavailable"
 
     alerts = 0
     for s in students:

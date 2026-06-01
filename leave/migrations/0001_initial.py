@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('branches', '0001_initial'),
+        ('branch', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
                 ('penalty_type', models.CharField(blank=True, choices=[('half_day_deduction', 'Half Day Deduction'), ('salary_deduction', 'Salary Deduction'), ('warning', 'Warning')], max_length=20)),
                 ('notes', models.CharField(blank=True, max_length=300)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='branch.branch')),
                 ('recorded_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='recorded_late_entries', to=settings.AUTH_USER_MODEL)),
                 ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='late_entries', to=settings.AUTH_USER_MODEL)),
             ],
@@ -56,7 +56,7 @@ class Migration(migrations.Migration):
                 ('rejection_reason', models.CharField(blank=True, max_length=300)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('applied_by', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='leave_applications', to=settings.AUTH_USER_MODEL)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='leave_applications', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='leave_applications', to='branch.branch')),
                 ('first_approver', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='first_approvals', to=settings.AUTH_USER_MODEL)),
                 ('reviewed_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='reviewed_leaves', to=settings.AUTH_USER_MODEL)),
                 ('second_approver', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='second_approvals', to=settings.AUTH_USER_MODEL)),
@@ -95,7 +95,7 @@ class Migration(migrations.Migration):
                 ('allow_half_day', models.BooleanField(default=True)),
                 ('sandwich_rule', models.BooleanField(default=False)),
                 ('is_active', models.BooleanField(default=True)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='leave_policies', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='leave_policies', to='branch.branch')),
             ],
             options={
                 'db_table': 'leave_policies',

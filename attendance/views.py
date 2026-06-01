@@ -149,7 +149,7 @@ class QRScanView(APIView):
         if role == 'student':
             try:
                 from django.apps import apps
-                SP = apps.get_model('students', 'StudentProfile')
+                SP = apps.get_model('students', 'Student')
                 own = SP.objects.get(user=user)
                 if own.id != student.id:
                     return Response({'success': False, 'message': 'You can only scan your own QR.'}, status=status.HTTP_403_FORBIDDEN)
@@ -305,7 +305,7 @@ class StudentAttendanceView(APIView):
         if role == 'student':
             try:
                 from django.apps import apps
-                SP = apps.get_model('students', 'StudentProfile')
+                SP = apps.get_model('students', 'Student')
                 if str(SP.objects.get(user=user).id) != str(student_id):
                     return Response({'success': False, 'message': 'Own attendance only.'}, status=status.HTTP_403_FORBIDDEN)
             except Exception:
@@ -316,7 +316,7 @@ class StudentAttendanceView(APIView):
                 return Response({'success': False, 'message': 'No linked student.'}, status=status.HTTP_404_NOT_FOUND)
             try:
                 from django.apps import apps
-                SP = apps.get_model('students', 'StudentProfile')
+                SP = apps.get_model('students', 'Student')
                 if str(SP.objects.get(user=linked).id) != str(student_id):
                     return Response({'success': False, 'message': 'Not your linked child.'}, status=status.HTTP_403_FORBIDDEN)
             except Exception:
@@ -448,7 +448,7 @@ class AttendanceReportView(APIView):
 
             try:
                 from django.apps import apps
-                SP = apps.get_model('students', 'StudentProfile')
+                SP = apps.get_model('students', 'Student')
                 s = SP.objects.get(id=sid)
                 name = s.user.name if hasattr(s, 'user') else str(s)
                 roll = s.roll_number if hasattr(s, 'roll_number') else ''
@@ -493,12 +493,12 @@ class AttendanceAlertView(APIView):
 
         try:
             from django.apps import apps
-            SP = apps.get_model('students', 'StudentProfile')
+            SP = apps.get_model('students', 'Student')
             students = SP.objects.filter(branch_id=branch_id)
             if hasattr(SP, 'is_active'):
                 students = students.filter(is_active=True)
         except Exception as e:
-            logger.error(f"StudentProfile not available: {e}")
+            logger.error(f"Student model not available: {e}")
             return Response({'success': False, 'message': 'Students not available.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         alerts_created = 0
@@ -576,7 +576,7 @@ class ViolationListCreateView(APIView):
         if count >= 3:
             try:
                 from django.apps import apps
-                SP = apps.get_model('students', 'StudentProfile')
+                SP = apps.get_model('students', 'Student')
                 SP.objects.filter(id=d['student_id']).update(qr_blocked=True)
             except Exception:
                 pass
@@ -616,7 +616,7 @@ class ViolationResolveView(APIView):
         if not should_block_qr(v.student_id):
             try:
                 from django.apps import apps
-                SP = apps.get_model('students', 'StudentProfile')
+                SP = apps.get_model('students', 'Student')
                 SP.objects.filter(id=v.student_id).update(qr_blocked=False)
             except Exception:
                 pass

@@ -116,7 +116,7 @@ class FacultyListCreateView(APIView):
         if not branch_id:
             return Response({'success': False, 'message': 'Branch is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        from branches.models import Branch
+        from branch.models import Branch
         try:
             branch = Branch.objects.get(id=branch_id)
         except Branch.DoesNotExist:

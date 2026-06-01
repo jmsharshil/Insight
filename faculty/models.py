@@ -15,7 +15,7 @@ SESSION_STATUS_CHOICES = [('in_progress', 'In Progress'), ('completed', 'Complet
 class FacultyProfile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='faculty_profile')
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='faculty_profiles')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='faculty_profiles')
     employee_id = models.CharField(max_length=30, unique=True)
     photo = models.ImageField(upload_to='faculty/photos/', null=True, blank=True)
     # NEW (FRD §4.8.1): profile photo field
@@ -76,7 +76,7 @@ class FacultyQRScanLog(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     faculty = models.ForeignKey(FacultyProfile, on_delete=models.CASCADE, related_name='qr_scans')
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE)
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE)
     scanned_at = models.DateTimeField(auto_now_add=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -101,7 +101,7 @@ class SessionReport(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     faculty = models.ForeignKey(FacultyProfile, on_delete=models.CASCADE, related_name='session_reports')
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE)
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE)
     batch = models.ForeignKey('batches.Batch', on_delete=models.CASCADE, related_name='session_reports')
     subject = models.ForeignKey('batches.Subject', on_delete=models.CASCADE, related_name='session_reports')
     timetable_slot = models.ForeignKey(

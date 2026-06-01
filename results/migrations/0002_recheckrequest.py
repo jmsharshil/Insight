@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('marksheet', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='recheck_requests', to='results.marksheet')),
                 ('new_checker', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='recheck_assignments', to=settings.AUTH_USER_MODEL)),
-                ('requested_by', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='recheck_requests', to='students.studentprofile')),
+                ('requested_by', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='recheck_requests', to='students.student')),
                 ('reviewed_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='reviewed_recheck_requests', to=settings.AUTH_USER_MODEL)),
             ],
             options={

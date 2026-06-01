@@ -289,8 +289,8 @@ class StudentRecheckRequestView(APIView):
             return Response({'success': False, 'message': 'Only students can request recheck.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            from students.models import StudentProfile
-            student = StudentProfile.objects.get(user=request.user)
+            from students.models import Student
+            student = Student.objects.get(user=request.user)
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 

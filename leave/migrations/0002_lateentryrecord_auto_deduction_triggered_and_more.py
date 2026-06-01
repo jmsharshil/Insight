@@ -9,7 +9,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('branches', '0001_initial'),
+        ('branch', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
         ('leave', '0001_initial'),
     ]
@@ -38,7 +38,7 @@ class Migration(migrations.Migration):
                 ('name', models.CharField(max_length=200)),
                 ('year', models.IntegerField()),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='public_holidays', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='public_holidays', to='branch.branch')),
                 ('created_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, to=settings.AUTH_USER_MODEL)),
             ],
             options={

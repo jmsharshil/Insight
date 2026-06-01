@@ -105,6 +105,14 @@ class Student(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name='student_profiles',help_text="Login account for this student.",)
     branch = models.ForeignKey('branch.Branch',null=True, blank=True,on_delete=models.SET_NULL,related_name='students',)
     current_batch_name = models.CharField(max_length=200, blank=True, help_text="Batch name — will link to Batch.")
+    batch = models.ForeignKey(
+        'batches.Batch', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='enrolled_students',
+        help_text="Current batch assignment.",
+    )
+    roll_number = models.CharField(max_length=50, blank=True, db_index=True, help_text="Roll number within batch.")
+    is_active = models.BooleanField(default=True, help_text="Active student flag.")
+    qr_blocked = models.BooleanField(default=False, help_text="QR temporarily blocked due to violations.")
     # ── Personal Info ─────────────────────────────────────────────────────────
     first_name  = models.CharField(max_length=100)
     surname     = models.CharField(max_length=100)
@@ -307,3 +315,16 @@ class StudentStatusHistory(models.Model):
             f"{self.student.admission_number}: "
             f"{self.old_status} → {self.new_status} @ {self.changed_at:%Y-%m-%d}"
         )
+
+
+# ── Proxy for cross-app FK references ────────────────────────────────────────
+# Attendance, exams, and results models reference 'students.StudentProfile'.
+# A proxy model registers in Django's model registry so FK strings resolve,
+# while sharing the same database table as Student.
+
+class StudentProfile(Student):
+    """Proxy model — allows other apps to reference 'students.StudentProfile'."""
+
+    class Meta:
+        proxy = True
+        # Keeps all Meta from Student except we suppress extra table creation.

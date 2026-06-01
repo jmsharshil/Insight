@@ -21,7 +21,7 @@ RESULT_RELEASE_CHOICES = [('instant', 'Instant'), ('manual', 'Manual')]
 
 class Exam(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='exams')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='exams')
     batch = models.ForeignKey('batches.Batch', on_delete=models.SET_NULL, null=True, related_name='exams')
     subject = models.ForeignKey('batches.Subject', on_delete=models.SET_NULL, null=True, blank=True, related_name='exams')
     title = models.CharField(max_length=200)
@@ -101,7 +101,7 @@ class Choice(models.Model):
 class ExamSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='sessions')
-    student = models.ForeignKey('students.StudentProfile', on_delete=models.CASCADE, related_name='exam_sessions')
+    student = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='exam_sessions')
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     is_submitted = models.BooleanField(default=False)
@@ -143,7 +143,7 @@ class StudentAnswer(models.Model):
 class SeatArrangement(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='seating')
-    student = models.ForeignKey('students.StudentProfile', on_delete=models.CASCADE, related_name='seat_arrangements')
+    student = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='seat_arrangements')
     room_name = models.CharField(max_length=100)
     seat_number = models.CharField(max_length=20)
     row_number = models.IntegerField(null=True, blank=True)
@@ -160,7 +160,7 @@ class SeatArrangement(models.Model):
 class MalpracticeReport(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='malpractice_reports')
-    student = models.ForeignKey('students.StudentProfile', on_delete=models.CASCADE, related_name='malpractice_reports')
+    student = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='malpractice_reports')
     reported_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     description = models.TextField()
     severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES)

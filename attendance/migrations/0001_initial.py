@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('batches', '0001_initial'),
-        ('branches', '0001_initial'),
+        ('branch', '0001_initial'),
         ('students', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
@@ -29,7 +29,7 @@ class Migration(migrations.Migration):
                 ('sent_at', models.DateTimeField(auto_now_add=True)),
                 ('notified_parent', models.BooleanField(default=False)),
                 ('notified_admin', models.BooleanField(default=False)),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='attendance_alerts', to='students.studentprofile')),
+                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='attendance_alerts', to='students.student')),
             ],
             options={
                 'db_table': 'attendance_alert_logs',
@@ -50,10 +50,10 @@ class Migration(migrations.Migration):
                 ('is_corrected', models.BooleanField(default=False)),
                 ('correction_note', models.TextField(blank=True)),
                 ('batch', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='attendance_records', to='batches.batch')),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='attendance_records', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='attendance_records', to='branch.branch')),
                 ('corrected_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='attendance_corrected', to=settings.AUTH_USER_MODEL)),
                 ('marked_by', models.ForeignKey(help_text='Faculty or admin who marked this record.', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='attendance_marked', to=settings.AUTH_USER_MODEL)),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='attendance_records', to='students.studentprofile')),
+                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='attendance_records', to='students.student')),
             ],
             options={
                 'db_table': 'attendance_records',
@@ -70,9 +70,9 @@ class Migration(migrations.Migration):
                 ('scan_type', models.CharField(choices=[('check_in', 'Check In'), ('check_out', 'Check Out'), ('exam_entry', 'Exam Entry')], max_length=20)),
                 ('is_valid', models.BooleanField(default=True)),
                 ('invalid_reason', models.CharField(blank=True, max_length=255)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='qr_scans', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='qr_scans', to='branch.branch')),
                 ('scanned_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='qr_scans_performed', to=settings.AUTH_USER_MODEL)),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='qr_scans', to='students.studentprofile')),
+                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='qr_scans', to='students.student')),
             ],
             options={
                 'db_table': 'qr_scan_logs',
@@ -91,7 +91,7 @@ class Migration(migrations.Migration):
                 ('resolved_at', models.DateTimeField(blank=True, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('resolved_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='violations_resolved', to=settings.AUTH_USER_MODEL)),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='violations', to='students.studentprofile')),
+                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='violations', to='students.student')),
             ],
             options={
                 'db_table': 'attendance_violations',

@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('branches', '0001_initial'),
+        ('branch', '0001_initial'),
         ('faculty', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
@@ -30,7 +30,7 @@ class Migration(migrations.Migration):
                 ('total_amount', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
                 ('notes', models.TextField(blank=True)),
                 ('approved_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='approved_payrolls', to=settings.AUTH_USER_MODEL)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payroll_runs', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payroll_runs', to='branch.branch')),
                 ('generated_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='generated_payrolls', to=settings.AUTH_USER_MODEL)),
             ],
             options={
@@ -89,7 +89,7 @@ class Migration(migrations.Migration):
                 ('max_deduction_per_session', models.DecimalField(decimal_places=2, default=0, max_digits=8)),
                 ('is_active', models.BooleanField(default=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='late_policies', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='late_policies', to='branch.branch')),
                 ('created_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, to=settings.AUTH_USER_MODEL)),
             ],
             options={

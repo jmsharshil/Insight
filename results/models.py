@@ -12,7 +12,7 @@ RECHECK_STATUS_CHOICES = [
 class MarkSheet(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey('exams.Exam', on_delete=models.CASCADE, related_name='marksheets')
-    student = models.ForeignKey('students.StudentProfile', on_delete=models.CASCADE, related_name='marksheets')
+    student = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='marksheets')
     paper_checker = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_marksheets')
     marks_obtained = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     is_pass = models.BooleanField(null=True)
@@ -37,7 +37,7 @@ class RecheckRequest(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     marksheet = models.ForeignKey(MarkSheet, on_delete=models.CASCADE, related_name='recheck_requests')
-    requested_by = models.ForeignKey('students.StudentProfile', on_delete=models.CASCADE, related_name='recheck_requests')
+    requested_by = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='recheck_requests')
     reason = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=RECHECK_STATUS_CHOICES, default='pending')
 
@@ -77,7 +77,7 @@ class SubmissionReminderLog(models.Model):
 class PublishedResult(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey('exams.Exam', on_delete=models.CASCADE, related_name='published_results')
-    student = models.ForeignKey('students.StudentProfile', on_delete=models.CASCADE, related_name='published_results')
+    student = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='published_results')
     marks_obtained = models.DecimalField(max_digits=6, decimal_places=2)
     total_marks = models.IntegerField()
     percentage = models.FloatField()

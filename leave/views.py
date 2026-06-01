@@ -116,7 +116,7 @@ class LeaveListCreateView(APIView):
 
         # Calculate total days
         sandwich = policy.sandwich_rule if policy else False
-        from branches.models import Branch
+        from branch.models import Branch
         branch_obj = Branch.objects.filter(id=bid).first() if bid else None
         total_days = calculate_leave_days(d['from_date'], d['to_date'], d['is_half_day'], sandwich, branch=branch_obj)
 

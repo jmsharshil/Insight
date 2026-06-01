@@ -125,25 +125,24 @@ def get_batch_attendance_sheet(batch_id, month):
 def resolve_qr_data(qr_data):
     """
     Accepts roll_number (str) or student UUID.
-    Returns StudentProfile or None.
+    Returns Student instance or None.
     """
     from uuid import UUID
 
     try:
-        from django.apps import apps
-        StudentProfile = apps.get_model('students', 'StudentProfile')
+        from students.models import Student
     except Exception:
         return None
 
     # Try UUID first
     try:
         UUID(str(qr_data))
-        return StudentProfile.objects.filter(id=qr_data).first()
+        return Student.objects.filter(id=qr_data).first()
     except (ValueError, AttributeError):
         pass
 
     # Try roll_number
-    return StudentProfile.objects.filter(roll_number=qr_data).first()
+    return Student.objects.filter(roll_number=qr_data).first()
 
 
 def get_active_violations_count(student_id):

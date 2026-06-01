@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['c7bf-2401-4900-8898-ba5f-7e36-6aec-d693-d856.ngrok-free.app','127.0.0.1']
 
@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'leave',
     "students",
     'branch',
+    'core',
 
 ]
 
@@ -138,9 +139,6 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
-    ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
     'DEFAULT_FILTER_BACKENDS': [
@@ -160,27 +158,19 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
-    
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
     'AUDIENCE': None,
     'ISSUER': None,
-    
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
     'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
-    
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
-    
     'JTI_CLAIM': 'jti',
-}
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=36500),
 }
 
 AUTH_USER_MODEL = 'auth_user.User'
@@ -325,3 +315,37 @@ CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
 
 CSRF_COOKIE_SECURE = True      # Only valid if using HTTPS
 SESSION_COOKIE_SECURE = True   # Only valid if using HTTPS
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Celery Configuration (Redis broker)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 300  # 5 minutes max per task
+
+# Periodic task schedule (Celery Beat)
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    # Auto-transition exam statuses every minute
+    'update-exam-statuses': {
+        'task': 'exams.tasks.update_exam_statuses',
+        'schedule': 60.0,  # every 60 seconds
+    },
+    # Auto-submit expired exam sessions every minute
+    'auto-expire-exam-sessions': {
+        'task': 'exams.tasks.auto_expire_exam_sessions',
+        'schedule': 60.0,
+    },
+    # Send pending submission reminders daily at 9 AM
+    'send-submission-reminders': {
+        'task': 'exams.tasks.send_pending_submission_reminders',
+        'schedule': crontab(hour=9, minute=0),
+    },
+}

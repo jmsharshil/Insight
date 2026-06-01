@@ -11,8 +11,8 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('batches', '0002_subject'),
-        ('branches', '0001_initial'),
+        ('batches', '0001_initial'),
+        ('branch', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
                 ('qr_code', models.ImageField(blank=True, null=True, upload_to='qr/faculty/')),
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='faculty_profiles', to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='faculty_profiles', to='branch.branch')),
                 ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='faculty_profile', to=settings.AUTH_USER_MODEL)),
             ],
             options={
@@ -54,7 +54,7 @@ class Migration(migrations.Migration):
                 ('scan_type', models.CharField(choices=[('check_in', 'Check In'), ('check_out', 'Check Out')], default='check_in', max_length=10)),
                 ('is_late', models.BooleanField(default=False)),
                 ('late_minutes', models.IntegerField(default=0)),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='branch.branch')),
                 ('faculty', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='qr_scans', to='faculty.facultyprofile')),
             ],
             options={
@@ -77,7 +77,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('batch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='session_reports', to='batches.batch')),
-                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='branches.branch')),
+                ('branch', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='branch.branch')),
                 ('faculty', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='session_reports', to='faculty.facultyprofile')),
                 ('subject', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='session_reports', to='batches.subject')),
             ],

@@ -10,8 +10,8 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('batches', '0002_subject'),
-        ('branches', '0001_initial'),
+        ('batches', '0001_initial'),
+        ('branch', '0001_initial'),
         ('exams', '0001_initial'),
         ('results', '0001_initial'),
         ('students', '0001_initial'),
@@ -32,7 +32,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='exam',
             name='branch',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='exams', to='branches.branch'),
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='exams', to='branch.branch'),
         ),
         migrations.AddField(
             model_name='exam',
@@ -57,7 +57,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='examsession',
             name='student',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='exam_sessions', to='students.studentprofile'),
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='exam_sessions', to='students.student'),
         ),
         migrations.AddField(
             model_name='malpracticereport',
@@ -72,7 +72,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='malpracticereport',
             name='student',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='malpractice_reports', to='students.studentprofile'),
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='malpractice_reports', to='students.student'),
         ),
         migrations.AddField(
             model_name='question',
@@ -102,7 +102,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='seatarrangement',
             name='student',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='seat_arrangements', to='students.studentprofile'),
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='seat_arrangements', to='students.student'),
         ),
         migrations.AddField(
             model_name='studentanswer',

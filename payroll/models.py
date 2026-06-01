@@ -16,7 +16,7 @@ class LateEntryPolicy(models.Model):
     FRD §4.8.4 + §4.9.3.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='late_policies')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='late_policies')
     grace_period_minutes = models.IntegerField(default=5)
     deduction_per_minute = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     max_deduction_per_session = models.DecimalField(max_digits=8, decimal_places=2, default=0)
@@ -44,7 +44,7 @@ class LateEntryPolicy(models.Model):
 
 class PayrollRun(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='payroll_runs')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='payroll_runs')
     month = models.IntegerField()
     year = models.IntegerField()
     status = models.CharField(max_length=20, choices=PAYROLL_STATUS_CHOICES, default='draft')

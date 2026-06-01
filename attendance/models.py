@@ -65,7 +65,7 @@ class AttendanceRecord(models.Model):
 
     # ── Student / Batch / Branch links ────────────────────────────────────────
     student = models.ForeignKey(
-        'students.StudentProfile',
+        'students.Student',
         on_delete=models.CASCADE,
         related_name='attendance_records',
     )
@@ -76,7 +76,7 @@ class AttendanceRecord(models.Model):
         related_name='attendance_records',
     )
     branch = models.ForeignKey(
-        'branches.Branch',
+        'branch.Branch',
         on_delete=models.CASCADE,
         related_name='attendance_records',
     )
@@ -143,12 +143,12 @@ class QRScanLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     student = models.ForeignKey(
-        'students.StudentProfile',
+        'students.Student',
         on_delete=models.CASCADE,
         related_name='qr_scans',
     )
     branch = models.ForeignKey(
-        'branches.Branch',
+        'branch.Branch',
         on_delete=models.CASCADE,
         related_name='qr_scans',
     )
@@ -196,7 +196,7 @@ class AlertLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     student = models.ForeignKey(
-        'students.StudentProfile',
+        'students.Student',
         on_delete=models.CASCADE,
         related_name='attendance_alerts',
     )
@@ -245,7 +245,7 @@ class ViolationRecord(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     student = models.ForeignKey(
-        'students.StudentProfile',
+        'students.Student',
         on_delete=models.CASCADE,
         related_name='violations',
     )

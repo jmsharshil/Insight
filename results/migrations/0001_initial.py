@@ -30,7 +30,7 @@ class Migration(migrations.Migration):
                 ('is_submitted', models.BooleanField(default=False)),
                 ('exam', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='marksheets', to='exams.exam')),
                 ('paper_checker', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='assigned_marksheets', to=settings.AUTH_USER_MODEL)),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='marksheets', to='students.studentprofile')),
+                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='marksheets', to='students.student')),
             ],
             options={
                 'db_table': 'result_marksheets',
@@ -60,7 +60,7 @@ class Migration(migrations.Migration):
                 ('published_at', models.DateTimeField(auto_now_add=True)),
                 ('exam', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='published_results', to='exams.exam')),
                 ('published_by', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, to=settings.AUTH_USER_MODEL)),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='published_results', to='students.studentprofile')),
+                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='published_results', to='students.student')),
             ],
             options={
                 'db_table': 'result_published',

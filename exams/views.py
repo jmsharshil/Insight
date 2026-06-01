@@ -67,8 +67,8 @@ class ExamListCreateView(APIView):
 
         if role == 'student':
             try:
-                from students.models import StudentProfile
-                sp = StudentProfile.objects.get(user=user)
+                from students.models import Student
+                sp = Student.objects.get(user=user)
                 qs = qs.filter(batch_id=sp.batch_id, status__in=['scheduled', 'ongoing'])
             except Exception:
                 qs = qs.none()
@@ -200,8 +200,8 @@ class QuestionView(APIView):
 
         if role == 'student':
             try:
-                from students.models import StudentProfile
-                sp = StudentProfile.objects.get(user=request.user)
+                from students.models import Student
+                sp = Student.objects.get(user=request.user)
                 if not ExamSession.objects.filter(exam=exam, student=sp).exists() or exam.status != 'ongoing':
                     return Response({'success': False, 'message': 'Exam session not active'}, status=status.HTTP_403_FORBIDDEN)
                 return Response(QuestionStudentSerializer(questions, many=True).data)
@@ -275,8 +275,8 @@ class SeatingView(APIView):
         # Auto-assign: POST {"auto": true}
         is_auto = isinstance(request.data, dict) and request.data.get('auto')
         if is_auto:
-            from students.models import StudentProfile
-            students = list(StudentProfile.objects.filter(batch=exam.batch).order_by('user__name'))
+            from students.models import Student
+            students = list(Student.objects.filter(batch=exam.batch).order_by('user__name'))
             SeatArrangement.objects.filter(exam=exam).delete()
             created = []
             for i, st in enumerate(students):
@@ -319,8 +319,8 @@ class ExamStartView(APIView):
             logger.warning(f"Exam start without device fingerprint — user={request.user.email}")
 
         try:
-            from students.models import StudentProfile
-            student = StudentProfile.objects.get(user=request.user)
+            from students.models import Student
+            student = Student.objects.get(user=request.user)
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 

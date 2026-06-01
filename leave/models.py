@@ -25,7 +25,7 @@ class PublicHoliday(models.Model):
     Public holidays that are counted as leave days when sandwiched between leave dates.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='public_holidays')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='public_holidays')
     date = models.DateField()
     name = models.CharField(max_length=200)
     year = models.IntegerField()
@@ -44,7 +44,7 @@ class PublicHoliday(models.Model):
 
 class LeavePolicy(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='leave_policies')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='leave_policies')
     leave_type = models.CharField(max_length=10, choices=LEAVE_TYPE_CHOICES)
     annual_quota = models.IntegerField()
     max_club_days = models.IntegerField(default=5)
@@ -88,7 +88,7 @@ class LeaveBalance(models.Model):
 class LeaveApplication(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     applied_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='leave_applications')
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE, related_name='leave_applications')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='leave_applications')
     leave_type = models.CharField(max_length=10, choices=LEAVE_TYPE_CHOICES)
     from_date = models.DateField()
     to_date = models.DateField()
@@ -131,7 +131,7 @@ class LateEntryRecord(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='late_entries')
-    branch = models.ForeignKey('branches.Branch', on_delete=models.CASCADE)
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE)
     date = models.DateField()
     expected_time = models.TimeField()
     actual_time = models.TimeField()
