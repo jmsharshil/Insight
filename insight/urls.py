@@ -24,8 +24,15 @@ urlpatterns = [
     path('api/auth/',include('auth_user.urls')),
     path('api/v1/',include('leads.urls')),
     path('api/v1/',include('onboarding.urls')),
+    path('api/v1/', include('attendance.urls')),
+    path('api/v1/', include('exams.urls')),
+    path('api/v1/', include('results.urls')),
+    path('api/v1/', include('faculty.urls')),
+    path('api/v1/', include('payroll.urls')),
+    path('api/v1/', include('leave.urls')),
     path("api/v1/",include("branch.urls")),
     path("api/v1/",include("students.urls")),
+    
 ]
 
 if settings.DEBUG:

@@ -24,9 +24,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['c7bf-2401-4900-8898-ba5f-7e36-6aec-d693-d856.ngrok-free.app','127.0.0.1']
 
 
 # Application definition
@@ -44,6 +44,12 @@ INSTALLED_APPS = [
     'auth_user',
     'leads',
     'onboarding',
+    'attendance',
+    'exams',
+    'results',
+    'faculty',
+    'payroll',
+    'leave',
     "students",
     'branch',
 
