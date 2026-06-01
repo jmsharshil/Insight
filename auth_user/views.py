@@ -4,7 +4,7 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import User
 from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer
 from .models import EmailOTP
@@ -15,6 +15,8 @@ from leads.models import Lead
 from leads.serializers import LeadDetailSerializer
 
 class RegisterAPIView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -35,6 +37,7 @@ class RegisterAPIView(APIView):
     
 
 class VerifyOTPAPIView(APIView):
+    permission_classes = [AllowAny]
 
     def post(self, request):
 
@@ -66,13 +69,19 @@ class VerifyOTPAPIView(APIView):
         return Response(serializer.errors,status=400)
         
 class LoginAPIView(APIView):
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
-            user = authenticate(request,email=email,password=password)
+            user_obj = User.objects.filter(email=email).first()
+            if not user_obj:
+                return Response({
+                    "error": "Invalid credentials"
+                }, status=400)
+            user = authenticate(request, username=user_obj.username, password=password)
             if user is None:
                 return Response({
                     "error": "Invalid credentials"
@@ -107,6 +116,7 @@ class LoginAPIView(APIView):
     
 
 class ForgotPasswordAPIView(APIView):
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
@@ -129,6 +139,7 @@ class ForgotPasswordAPIView(APIView):
         )
     
 class ResetPasswordAPIView(APIView):
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)
