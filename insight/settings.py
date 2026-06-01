@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -43,15 +44,15 @@ INSTALLED_APPS = [
     'auth_user',
     'leads',
     'onboarding',
-    'branches',
-    'batches',
-    'students',
     'attendance',
     'exams',
     'results',
     'faculty',
     'payroll',
     'leave',
+    "students",
+    'branch',
+
 ]
 
 MIDDLEWARE = [
@@ -119,6 +120,10 @@ REST_FRAMEWORK = {
     ),
 }
 
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=36500),
+}
+
 AUTH_USER_MODEL = 'auth_user.User'
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -144,7 +149,6 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-# Media files (uploads: photos, QR codes, documents)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 

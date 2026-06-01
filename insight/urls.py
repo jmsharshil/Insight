@@ -30,8 +30,10 @@ urlpatterns = [
     path('api/v1/', include('faculty.urls')),
     path('api/v1/', include('payroll.urls')),
     path('api/v1/', include('leave.urls')),
+    path("api/v1/",include("branch.urls")),
+    path("api/v1/",include("students.urls")),
+    
 ]
 
-# Serve media files during development
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

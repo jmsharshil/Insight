@@ -16,14 +16,56 @@ logger = logging.getLogger(__name__)
 
 class AdmissionService:
 
+    # ── Counsellor Assignment ─────────────────────────────────────
+
+    @staticmethod
+    def get_next_counsellor():
+        counsellors = list(
+            User.objects.filter(role='counsellor', is_active=True).order_by('id')
+        )
+
+        if not counsellors:
+            logger.warning("No active counsellors found for auto-assignment.")
+            return None
+
+        if len(counsellors) == 1:
+            return counsellors[0]
+
+        # Find the last assigned counsellor from the most recent admission
+        last_admission = (
+            Admission.objects
+            .filter(assigned_counsellor__isnull=False)
+            .order_by('-submitted_at')
+            .values_list('assigned_counsellor_id', flat=True)
+            .first()
+        )
+
+        if last_admission is None:
+            # No previous assignment — start with the first counsellor
+            return counsellors[0]
+
+        # Find the index of the last assigned counsellor
+        counsellor_ids = [c.id for c in counsellors]
+        try:
+            last_index = counsellor_ids.index(last_admission)
+            # Rotate to the next counsellor
+            next_index = (last_index + 1) % len(counsellors)
+        except ValueError:
+            # Last assigned counsellor no longer active/exists — start from first
+            next_index = 0
+
+        return counsellors[next_index]
+
     # ── Create Admission ──────────────────────────────────────────────────────
 
     @staticmethod
     @transaction.atomic
     def create_admission(validated_data: dict, user=None) -> Admission:
         """
-        Creates an Admission record, then immediately creates
-        student + parent login accounts and sends credentials.
+        Creates an Admission record with status='pending'.
+        Auto-assigns a counsellor via round-robin if none is provided.
+        No login credentials are created at this stage —
+        credentials are only issued when the counsellor sets status to 'enrolled'.
         """
         lead_id = validated_data.pop('lead_id', None)
         lead = None
@@ -39,6 +81,10 @@ class AdmissionService:
         ]
         doc_data = {k: validated_data.pop(k) for k in DOC_FIELDS if k in validated_data}
 
+        # Auto-assign counsellor if not already provided
+        if 'assigned_counsellor' not in validated_data or validated_data.get('assigned_counsellor') is None:
+            validated_data['assigned_counsellor'] = AdmissionService.get_next_counsellor()
+
         admission = Admission(lead=lead, **validated_data)
 
         # Save once to get a PK (needed for the upload path)
@@ -50,25 +96,57 @@ class AdmissionService:
         admission.save()
 
         # Record initial status history
+        counsellor_name = (
+            admission.assigned_counsellor.name
+            if admission.assigned_counsellor else 'Unassigned'
+        )
         AdmissionStatusHistory.objects.create(
             admission=admission,
             status=admission.status,
             changed_by=user,
-            note='Admission submitted.',
+            note=f'Admission submitted — assigned to {counsellor_name} for review.',
         )
-
-        # Create student + parent login accounts
-        try:
-            AdmissionService._create_user_accounts(admission)
-        except Exception as e:
-            # Log but don't roll back — admission data is already saved
-            logger.error(
-                f"Failed to create user accounts for admission {admission.id}: {e}"
-            )
 
         return admission
 
-    # ── Create Student + Parent Accounts ─────────────────────────────────────
+    # ── Update Admission Status ───────────────────────────────────────────────
+
+    @staticmethod
+    @transaction.atomic
+    def update_status(admission: Admission, new_status: str, note: str = '', user=None):
+        """
+        Updates admission status. When status changes to 'enrolled',
+        automatically creates student + parent login accounts and sends credentials.
+        """
+        old_status = admission.status
+
+        admission.status = new_status
+        admission.note = note
+        admission.save(update_fields=['status', 'note', 'updated_at'])
+
+        AdmissionStatusHistory.objects.create(
+            admission=admission,
+            status=new_status,
+            changed_by=user,
+            note=note,
+        )
+
+        # Trigger credential creation only on transition to 'enrolled'
+        if new_status == 'enrolled' and old_status != 'enrolled':
+            try:
+                AdmissionService._create_user_accounts(admission)
+                logger.info(
+                    f"Student enrolled — credentials created for admission {admission.id}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to create user accounts for admission {admission.id}: {e}"
+                )
+                # Don't re-raise — status is already saved
+
+        return admission
+
+    # ── Create Student + Parent Accounts (called only on enrollment) ─────────
 
     @staticmethod
     def _create_user_accounts(admission: Admission):
@@ -129,8 +207,6 @@ class AdmissionService:
         user = User.objects.filter(email=email).first()
 
         if user:
-            if User.objects.filter(phone=phone).exclude(id=user.id).exists():
-                raise ValueError(f"Phone {phone} is already used by another account.")
             if not user.username:
                 user.username = AdmissionService._build_unique_username(email)
             user.phone          = phone
@@ -141,8 +217,6 @@ class AdmissionService:
             user.set_password(password)
             user.save()
         else:
-            if User.objects.filter(phone=phone).exists():
-                raise ValueError(f"Phone {phone} is already used by another account.")
             user = User.objects.create_user(
                 username=AdmissionService._build_unique_username(email),
                 email=email,
@@ -155,19 +229,3 @@ class AdmissionService:
             )
 
         return user, password
-
-    # ── Update Admission Status ───────────────────────────────────────────────
-
-    @staticmethod
-    @transaction.atomic
-    def update_status(admission: Admission, new_status: str, note: str = '', user=None):
-        admission.status = new_status
-        admission.save(update_fields=['status', 'updated_at'])
-
-        AdmissionStatusHistory.objects.create(
-            admission=admission,
-            status=new_status,
-            changed_by=user,
-            note=note,
-        )
-        return admission
