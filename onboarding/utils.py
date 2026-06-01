@@ -207,8 +207,6 @@ class AdmissionService:
         user = User.objects.filter(email=email).first()
 
         if user:
-            if User.objects.filter(phone=phone).exclude(id=user.id).exists():
-                raise ValueError(f"Phone {phone} is already used by another account.")
             if not user.username:
                 user.username = AdmissionService._build_unique_username(email)
             user.phone          = phone
@@ -219,8 +217,6 @@ class AdmissionService:
             user.set_password(password)
             user.save()
         else:
-            if User.objects.filter(phone=phone).exists():
-                raise ValueError(f"Phone {phone} is already used by another account.")
             user = User.objects.create_user(
                 username=AdmissionService._build_unique_username(email),
                 email=email,

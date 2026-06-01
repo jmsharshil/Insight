@@ -45,8 +45,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     ]
     id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
     username = models.CharField(max_length=100,unique=True)
-    email = models.EmailField(unique=True)
-    phone = models.CharField(max_length=15,unique=True)
+    email = models.EmailField()
+    phone = models.CharField(max_length=15)
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=50,choices=ROLE_CHOICES,default='student')
     branch = models.ForeignKey('branch.Branch',null=True,blank=True,on_delete=models.SET_NULL,related_name='users',)
@@ -55,8 +55,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     objects = UserManager()
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = ['email']
 
     def __str__(self):
         return self.email

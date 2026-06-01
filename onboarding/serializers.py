@@ -1,17 +1,8 @@
 from rest_framework import serializers
-from .models import Admission, AdmissionStatusHistory, ADMISSION_STATUS_CHOICES
+from .models import Admission, ADMISSION_STATUS_CHOICES
 
-from leads.models import (
-    COURSE_TYPE_CHOICES,
-    GROUP_MODULE_CHOICES,
-    ATTEMPT_TYPE_CHOICES,
-    QUALIFICATION_TYPE_CHOICES,
-    BOARD_TYPE_CHOICES,
-    CATEGORY_TYPE_CHOICES,
-    REFERENCE_TYPE_CHOICES,
-)
-from leads.serializers import VALID_COMBINATIONS  # reuse course-combination rules
-
+from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
+from leads.serializers import VALID_COMBINATIONS
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -287,3 +278,25 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.required = False
+
+# ── Admission Document Upload Serializer ──────────────────────────────────────
+
+ADMISSION_DOCUMENT_FIELDS = ['doc_signature','doc_photo','doc_dob_certificate','doc_id_card','doc_twelfth_receipt','doc_twelfth_marksheet','doc_category_cert',]
+
+class AdmissionDocumentUploadSerializer(serializers.Serializer):
+    field_name = serializers.ChoiceField(
+        choices=[(f, f) for f in ADMISSION_DOCUMENT_FIELDS],
+        error_messages={
+            'invalid_choice': (
+                "'{input}' is not a valid document field. "
+                f"Allowed: {ADMISSION_DOCUMENT_FIELDS}"
+            )
+        },
+    )
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        # doc_photo only allows images; all other fields also allow PDF
+        if self.initial_data.get('field_name') == 'doc_photo':
+            return _validate_file(value, allowed_types=['image/jpeg', 'image/png'])
+        return _validate_file(value, allowed_types=['image/jpeg', 'image/png', 'application/pdf'])
