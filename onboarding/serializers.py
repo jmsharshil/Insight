@@ -1,17 +1,8 @@
 from rest_framework import serializers
-from .models import Admission, AdmissionStatusHistory, ADMISSION_STATUS_CHOICES
+from .models import Admission, ADMISSION_STATUS_CHOICES
 
-from leads.models import (
-    COURSE_TYPE_CHOICES,
-    GROUP_MODULE_CHOICES,
-    ATTEMPT_TYPE_CHOICES,
-    QUALIFICATION_TYPE_CHOICES,
-    BOARD_TYPE_CHOICES,
-    CATEGORY_TYPE_CHOICES,
-    REFERENCE_TYPE_CHOICES,
-)
-from leads.serializers import VALID_COMBINATIONS  # reuse course-combination rules
-
+from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
+from leads.serializers import VALID_COMBINATIONS
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +41,10 @@ class AdmissionSerializer(serializers.Serializer):
 
     # ── Optional lead link ────────────────────────────────────────────────────
     lead_id = serializers.IntegerField(required=False, allow_null=True)
+
+    branch = serializers.UUIDField(required=False, allow_null=True)
+
+    assigned_counsellor = serializers.UUIDField(required=False, allow_null=True)
 
     # ── Personal Info ─────────────────────────────────────────────────────────
     first_name   = serializers.CharField(max_length=100)
@@ -122,6 +117,17 @@ class AdmissionSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("You must agree to the consent to proceed.")
         return value
+
+    def validate_branch(self, value):
+        if not value:
+            return value
+
+        from branch.models import Branch
+
+        try:
+            return Branch.objects.get(id=value)
+        except Branch.DoesNotExist:
+            raise serializers.ValidationError("Branch not found.")
 
     def validate_phone_student(self, value):
         return validate_phone(value)
@@ -199,6 +205,18 @@ class AdmissionSerializer(serializers.Serializer):
             if not Lead.objects.filter(id=lead_id).exists():
                 raise serializers.ValidationError({'lead_id': 'No lead found with this ID.'})
 
+        # Validate and resolve assigned_counsellor UUID
+        counsellor_id = data.get('assigned_counsellor')
+        if counsellor_id:
+            from auth_user.models import User
+            try:
+                counsellor = User.objects.get(id=counsellor_id, role='counsellor')
+                data['assigned_counsellor'] = counsellor
+            except User.DoesNotExist:
+                raise serializers.ValidationError({
+                    'assigned_counsellor': 'No counsellor found with this ID.'
+                })
+
         return data
 
 
@@ -211,16 +229,39 @@ class AdmissionStatusUpdateSerializer(serializers.Serializer):
 
 # ── Admission Read Serializers ────────────────────────────────────────────────
 
+class CounsellorInfoSerializer(serializers.Serializer):
+    """Nested read-only serializer to display assigned counsellor details."""
+    id    = serializers.UUIDField()
+    name  = serializers.CharField()
+    email = serializers.EmailField()
+    phone = serializers.CharField()
+
+
+class BranchInfoSerializer(serializers.Serializer):
+    """Nested read-only serializer to display branch details."""
+    id   = serializers.UUIDField()
+    name = serializers.CharField()
+    code = serializers.CharField()
+    city = serializers.CharField()
+
+
 class AdmissionListSerializer(serializers.ModelSerializer):
+    branch = BranchInfoSerializer(read_only=True)
+    assigned_counsellor = CounsellorInfoSerializer(read_only=True)
+
     class Meta:
         model = Admission
         fields = [
-            'id', 'first_name', 'surname', 'email', 'phone_student',
-            'course', 'batch_attempt', 'status', 'location', 'submitted_at',
+            'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
+            'course', 'batch_attempt', 'status', 'location',
+            'assigned_counsellor', 'note', 'submitted_at',
         ]
 
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
+    branch = BranchInfoSerializer(read_only=True)
+    assigned_counsellor = CounsellorInfoSerializer(read_only=True)
+
     class Meta:
         model = Admission
         fields = '__all__'
@@ -237,3 +278,25 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.required = False
+
+# ── Admission Document Upload Serializer ──────────────────────────────────────
+
+ADMISSION_DOCUMENT_FIELDS = ['doc_signature','doc_photo','doc_dob_certificate','doc_id_card','doc_twelfth_receipt','doc_twelfth_marksheet','doc_category_cert',]
+
+class AdmissionDocumentUploadSerializer(serializers.Serializer):
+    field_name = serializers.ChoiceField(
+        choices=[(f, f) for f in ADMISSION_DOCUMENT_FIELDS],
+        error_messages={
+            'invalid_choice': (
+                "'{input}' is not a valid document field. "
+                f"Allowed: {ADMISSION_DOCUMENT_FIELDS}"
+            )
+        },
+    )
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        # doc_photo only allows images; all other fields also allow PDF
+        if self.initial_data.get('field_name') == 'doc_photo':
+            return _validate_file(value, allowed_types=['image/jpeg', 'image/png'])
+        return _validate_file(value, allowed_types=['image/jpeg', 'image/png', 'application/pdf'])

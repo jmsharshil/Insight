@@ -26,7 +26,7 @@ ADMISSION_STATUS_CHOICES = [
 
 def admission_document_path(instance, filename):
     """All admission documents stored under admissions/<id>/documents/"""
-    return f"admissions/{instance.id}/documents/{filename}"
+    return f"onboarding/media/{instance.id}/documents/{filename}"
 
 
 class Admission(models.Model):
@@ -41,6 +41,9 @@ class Admission(models.Model):
         related_name='admission',
         help_text="The inquiry lead this admission originated from, if any.",
     )
+
+    # ── Branch Scope ──────────────────────────────────────────────────────────
+    branch = models.ForeignKey('branch.Branch',null=True,blank=True,on_delete=models.SET_NULL,related_name='admissions',)
 
     # ── Personal Info ─────────────────────────────────────────────────────────
     first_name      = models.CharField(max_length=100)
@@ -107,8 +110,12 @@ class Admission(models.Model):
     doc_twelfth_marksheet = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     doc_category_cert     = models.FileField(upload_to=admission_document_path, null=True, blank=True)
 
+    # ── Counsellor Assignment ─────────────────────────────────────────────────
+    assigned_counsellor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL,related_name='assigned_admissions',limit_choices_to={'role': 'counsellor'},help_text="Counsellor assigned to review this admission.",)
+
     # ── Status & Timestamps ───────────────────────────────────────────────────
     status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='pending')
+    note         = models.TextField(blank=True, help_text="Latest note added during status update.")
     submitted_at = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
 

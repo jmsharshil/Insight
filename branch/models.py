@@ -1,0 +1,27 @@
+from django.db import models
+
+# Create your models here.
+import uuid
+
+class Branch(models.Model):
+    id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=20,unique=True)
+    address = models.TextField()
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    pincode = models.CharField(max_length=10)
+    phone = models.CharField(max_length=20)
+    email = models.EmailField()
+    principal_name = models.CharField(max_length=150,blank=True)
+    logo = models.ImageField(upload_to="branches/logos/",null=True,blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField(default=False)
+    
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name
