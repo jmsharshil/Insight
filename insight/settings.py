@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['c7bf-2401-4900-8898-ba5f-7e36-6aec-d693-d856.ngrok-free.app','127.0.0.1']
+ALLOWED_HOSTS = ['c7bf-2401-4900-8898-ba5f-7e36-6aec-d693-d856.ngrok-free.app','127.0.0.1',"*"]
 
 
 # Application definition
@@ -136,9 +136,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
-    ],
+    # 'DEFAULT_PERMISSION_CLASSES': [
+    #     'rest_framework.permissions.IsAuthenticated',
+    # ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
     'DEFAULT_FILTER_BACKENDS': [

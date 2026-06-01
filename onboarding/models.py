@@ -50,7 +50,7 @@ class Admission(models.Model):
     surname         = models.CharField(max_length=100)
     father_name     = models.CharField(max_length=100)
     mother_name     = models.CharField(max_length=100)
-    dob             = models.DateField()
+    dob             = models.DateField(blank=True,null=True)
     category        = models.CharField(max_length=10, choices=CATEGORY_TYPE_CHOICES)
 
     # ── Contact ───────────────────────────────────────────────────────────────

@@ -7,9 +7,15 @@ from rest_framework.exceptions import ValidationError
 
 from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
 from .utils import LeadService
-from .models import Lead, LeadStage
+from .models import Lead, LeadStage, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
 from django.db.models import Q
 import re
+
+FORM_TYPE_DISPLAY = dict(FORM_TYPE_CHOICES)
+STAGE_DISPLAY = dict(STAGE_CHOICES)
+COURSE_DISPLAY = dict(COURSE_TYPE_CHOICES)
+GROUP_MODULE_DISPLAY = dict(GROUP_MODULE_CHOICES)
+ATTEMPT_DISPLAY = dict(ATTEMPT_TYPE_CHOICES)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +47,12 @@ class LeadListView(APIView):
                 {
                     "success": False,
                     "message": "Invalid form type.",
+                    "form_type": form_type,
+                    "form_type_display": FORM_TYPE_DISPLAY.get(form_type),
+                    "valid_form_types": [
+                        {"value": key, "display": label}
+                        for key, label in FORM_TYPE_CHOICES
+                    ],
                     "errors": e.detail
                 },
                 status=status.HTTP_400_BAD_REQUEST
@@ -102,10 +114,18 @@ class LeadListView(APIView):
                 "message": "Thank you! Your inquiry has been received. We will contact you shortly.",
                 "tag": tag,
                 "data": {
-                    "lead_id":   lead.id,
-                    "form_type": lead.form_type,
-                    "name":      lead.first_name,
-                    "stage":     lead.current_stage,
+                    "lead_id":             lead.id,
+                    "form_type":           lead.form_type,
+                    "form_type_display":   FORM_TYPE_DISPLAY.get(lead.form_type),
+                    "course":              lead.course,
+                    "course_display":      COURSE_DISPLAY.get(lead.course),
+                    "group_module":        lead.group_module,
+                    "group_module_display": GROUP_MODULE_DISPLAY.get(lead.group_module),
+                    "batch_attempt":       lead.batch_attempt,
+                    "batch_attempt_display": ATTEMPT_DISPLAY.get(lead.batch_attempt),
+                    "name":                lead.first_name,
+                    "stage":               lead.current_stage,
+                    "stage_display":       STAGE_DISPLAY.get(lead.current_stage),
                 }
             },
             status=status.HTTP_201_CREATED
