@@ -25,9 +25,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['c7bf-2401-4900-8898-ba5f-7e36-6aec-d693-d856.ngrok-free.app','127.0.0.1']
 
 
 # Application definition
@@ -47,6 +47,15 @@ INSTALLED_APPS = [
     'onboarding',
     'batches',
     'fees',
+    'attendance',
+    'exams',
+    'results',
+    'faculty',
+    'payroll',
+    'leave',
+    "students",
+    'branch',
+
 ]
 
 MIDDLEWARE = [
@@ -170,6 +179,10 @@ SIMPLE_JWT = {
     'JTI_CLAIM': 'jti',
 }
 
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=36500),
+}
+
 AUTH_USER_MODEL = 'auth_user.User'
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -231,6 +244,9 @@ if USE_AZURE_MEDIA:
 else:
     MEDIA_URL  = "/media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

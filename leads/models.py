@@ -73,6 +73,9 @@ STAGE_NEW = 'new'
 
 class Lead(models.Model):
 
+    # ── Branch Scope ──────────────────────────────────────────────────────────
+    branch = models.ForeignKey('branch.Branch',null=True,blank=True,on_delete=models.SET_NULL,related_name='leads',)
+
     # ── Section 1: Common Fields (Contact + Inquiry) ──────────────────────────
     form_type     = models.CharField(max_length=20, choices=FORM_TYPE_CHOICES)
     first_name    = models.CharField(max_length=100)
@@ -84,6 +87,7 @@ class Lead(models.Model):
     location      = models.CharField(max_length=100, blank=True)
     consent       = models.BooleanField(default=False)
     current_stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default=STAGE_NEW)
+    note          = models.TextField(blank=True, help_text="Latest note added during status update.")
     created_at    = models.DateTimeField(auto_now_add=True)
     updated_at    = models.DateTimeField(auto_now=True)
 
