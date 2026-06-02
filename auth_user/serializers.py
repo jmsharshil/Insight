@@ -40,3 +40,19 @@ class ResetPasswordSerializer(serializers.Serializer):
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError("Passwords do not match")
         return attrs
+
+
+class UpdateUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['username','email','phone','name','role','branch','linked_student','is_active']
+
+    def validate_email(self, value):
+        if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
+            raise serializers.ValidationError("Email already exists")
+        return value
+
+    def validate_username(self, value):
+        if User.objects.exclude(id=self.instance.id).filter(username=value).exists():
+            raise serializers.ValidationError("Username already exists")
+        return value

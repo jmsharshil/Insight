@@ -98,12 +98,25 @@ class StudentService:
         student.save()
 
         # Link parent user(s) to this student profile
-        for parent_user in user.linked_parents.all():
-            ParentLink.objects.create(
+        parent_users = list(user.linked_parents.all())
+        if not parent_users and admission.email_parent:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            parent_user = User.objects.filter(
+                email__iexact=admission.email_parent,
+                role='parents',
+            ).first()
+            if parent_user:
+                parent_users.append(parent_user)
+
+        for parent_user in parent_users:
+            ParentLink.objects.get_or_create(
                 student=student,
                 parent=parent_user,
-                relationship='father', # default relationship
-                is_primary=True,
+                defaults={
+                    'relationship': 'father',
+                    'is_primary': True,
+                }
             )
 
         # Record initial status history

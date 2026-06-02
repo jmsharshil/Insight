@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import User
-from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer, UserSerializer
+from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer, UserSerializer, UpdateUserSerializer
 from .models import EmailOTP
 from .utils import send_otp_email
 from django.contrib.auth import authenticate
@@ -48,6 +48,7 @@ class VerifyOTPAPIView(APIView):
             email = serializer.validated_data['email']
             otp = serializer.validated_data['otp']
 
+            otp_obj = EmailOTP.objects.filter(user__email=email, otp=otp, is_verified=False).last()
             user = User.objects.filter(email=email).first()
             if not user:
                 return Response({"error": "User not found"}, status=404)
@@ -63,11 +64,12 @@ class VerifyOTPAPIView(APIView):
             otp_obj.is_verified = True
             otp_obj.save()
 
+            user = otp_obj.user
             user.is_active = True
             user.save()
             return Response({"message": "Account verified successfully"})
 
-        return Response(serializer.errors,status=400)
+        return Response(serializer.errors, status=400)
         
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
@@ -77,6 +79,14 @@ class LoginAPIView(APIView):
         if serializer.is_valid():
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
+            users = User.objects.filter(email=email)
+            user = None
+            for candidate in users:
+                candidate_user = authenticate(request, username=candidate.username, password=password)
+                if candidate_user is not None:
+                    user = candidate_user
+                    break
+
             user_obj = User.objects.filter(email=email).first()
             if not user_obj:
                 return Response({
@@ -103,6 +113,7 @@ class LoginAPIView(APIView):
                     "phone": user.phone,
                     "name": user.name,
                     "role": user.role,
+                    "role_display": user.get_role_display(),
                     "linked_student": {
                         "id": str(user.linked_student.id),
                         "name": user.linked_student.name,
@@ -133,6 +144,11 @@ class ForgotPasswordAPIView(APIView):
             send_otp_email(user, otp)
             return Response({"message": "OTP sent successfully"})
 
+            otp = EmailOTP.generate_otp()
+            EmailOTP.objects.create(user=user, otp=otp)
+            send_otp_email(user, otp)
+            return Response({"message": "OTP sent successfully"})
+
         return Response(
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
@@ -148,6 +164,24 @@ class ResetPasswordAPIView(APIView):
             email = serializer.validated_data['email']
             otp = serializer.validated_data['otp']
             password = serializer.validated_data['password']
+
+            otp_obj = EmailOTP.objects.filter(user__email=email, otp=otp, is_verified=False).last()
+            if not otp_obj:
+                return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if otp_obj.is_expired():
+                return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
+
+            otp_obj.is_verified = True
+            otp_obj.save()
+
+            user = otp_obj.user
+            user.set_password(password)
+            user.save()
+
+            return Response({"message": "Password reset successful"})
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             user = User.objects.filter(email=email).first()
             if not user:
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -218,6 +252,65 @@ class ParentStudentProfileAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+    
+
+from django.shortcuts import get_object_or_404
+
+class UpdateUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_user(self, user_id):
+        return get_object_or_404(User, id=user_id)
+
+    def put(self, request, user_id):
+        user = self.get_user(user_id)
+
+        serializer = UpdateUserSerializer(
+            user,
+            data=request.data
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "User updated successfully",
+                "data": serializer.data
+            })
+
+        return Response(serializer.errors, status=400)
+
+    def patch(self, request, user_id):
+        user = self.get_user(user_id)
+
+        serializer = UpdateUserSerializer(
+            user,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "User updated successfully",
+                "data": serializer.data
+            })
+
+        return Response(serializer.errors, status=400)
+    
+class DeleteUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, user_id):
+        user = get_object_or_404(User, id=user_id)
+
+        user.delete()
+
+        return Response({
+            "success": True,
+            "message": "User deleted successfully"
+        })
 
 class UserListAPIView(APIView):
     # permission_classes = [IsAuthenticated]

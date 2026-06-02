@@ -21,7 +21,7 @@ def lead_status_changed(sender, instance, created, **kwargs):
     if created:
         return  # Only trigger on updates, not creation
 
-    if instance.status != 'converted':
+    if instance.current_stage != 'converted':
         return
 
     try:
