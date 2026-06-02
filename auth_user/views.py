@@ -182,28 +182,6 @@ class ResetPasswordAPIView(APIView):
             return Response({"message": "Password reset successful"})
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            user = User.objects.filter(email=email).first()
-            if not user:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-            
-            otp_obj = EmailOTP.objects.filter(user=user,otp=otp,is_verified=False).last()
-
-            if not otp_obj:
-                return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
-
-            if otp_obj.is_expired():
-                return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
-
-            otp_obj.is_verified = True
-            otp_obj.save()
-
-            user.set_password(password)
-            user.save()
-
-            return Response({"message": "Password reset successful"})
-
-        return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
-
 
 class ParentStudentProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -261,6 +239,11 @@ class UpdateUserAPIView(APIView):
 
     def get_user(self, user_id):
         return get_object_or_404(User, id=user_id)
+
+    def get(self, request, user_id):
+        user = self.get_user(user_id)
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
 
     def put(self, request, user_id):
         user = self.get_user(user_id)

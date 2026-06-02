@@ -3,9 +3,10 @@ from .models import User
 
 
 class UserSerializer(serializers.ModelSerializer):
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'is_active', 'branch']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch']
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
