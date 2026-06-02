@@ -57,3 +57,15 @@ class UpdateUserSerializer(serializers.ModelSerializer):
         if User.objects.exclude(id=self.instance.id).filter(username=value).exists():
             raise serializers.ValidationError("Username already exists")
         return value
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'linked_student']
+        read_only_fields = ['id', 'username', 'role', 'branch', 'linked_student'] # These fields cannot be updated via this serializer
+    
+    def validate_email(self, value):
+        # Ensure email is unique across users, excluding the current user
+        if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return value

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import User
-from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer, UserSerializer, UpdateUserSerializer
+from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer, UserSerializer, UpdateUserSerializer, UserProfileSerializer
 from .models import EmailOTP
 from .utils import send_otp_email
 from django.contrib.auth import authenticate
@@ -301,3 +301,27 @@ class UserListAPIView(APIView):
     def get(self, request):
         users = User.objects.all().order_by('-created_at')
         return paginate_queryset(users, request, UserSerializer)
+
+class UserProfileAPIView(APIView):
+    
+    def get(self, request):
+        """
+        Get details of the currently authenticated user.
+        """
+        serializer = UserProfileSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def put(self, request):
+        """
+        Update name and email for the currently authenticated user.
+        """
+        user = request.user
+        serializer = UserProfileSerializer(user, data=request.data, partial=True) # Use partial=True to allow partial updates
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "Profile updated successfully",
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
