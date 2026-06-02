@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import User
-from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer
+from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer,UpdateUserSerializer
 from .models import EmailOTP
 from .utils import send_otp_email
 from django.contrib.auth import authenticate
@@ -214,3 +214,62 @@ class ParentStudentProfileAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+    
+
+from django.shortcuts import get_object_or_404
+
+class UpdateUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_user(self, user_id):
+        return get_object_or_404(User, id=user_id)
+
+    def put(self, request, user_id):
+        user = self.get_user(user_id)
+
+        serializer = UpdateUserSerializer(
+            user,
+            data=request.data
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "User updated successfully",
+                "data": serializer.data
+            })
+
+        return Response(serializer.errors, status=400)
+
+    def patch(self, request, user_id):
+        user = self.get_user(user_id)
+
+        serializer = UpdateUserSerializer(
+            user,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "User updated successfully",
+                "data": serializer.data
+            })
+
+        return Response(serializer.errors, status=400)
+    
+class DeleteUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, user_id):
+        user = get_object_or_404(User, id=user_id)
+
+        user.delete()
+
+        return Response({
+            "success": True,
+            "message": "User deleted successfully"
+        })

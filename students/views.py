@@ -109,6 +109,19 @@ class StudentDetailView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+    
+    def delete(self, request, student_id):
+        student = _get_student(student_id)
+        if not student:
+            return _not_found(student_id)
+        student.delete()
+        return Response(
+            {
+                "success": True,
+                "message": "Student deleted successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # ── GET  /api/students/<id>/profile/  — self-profile ─────────────────────────
