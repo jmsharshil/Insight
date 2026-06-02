@@ -144,11 +144,6 @@ class ForgotPasswordAPIView(APIView):
             send_otp_email(user, otp)
             return Response({"message": "OTP sent successfully"})
 
-            otp = EmailOTP.generate_otp()
-            EmailOTP.objects.create(user=user, otp=otp)
-            send_otp_email(user, otp)
-            return Response({"message": "OTP sent successfully"})
-
         return Response(
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
@@ -182,27 +177,6 @@ class ResetPasswordAPIView(APIView):
             return Response({"message": "Password reset successful"})
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            user = User.objects.filter(email=email).first()
-            if not user:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-            
-            otp_obj = EmailOTP.objects.filter(user=user,otp=otp,is_verified=False).last()
-
-            if not otp_obj:
-                return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
-
-            if otp_obj.is_expired():
-                return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
-
-            otp_obj.is_verified = True
-            otp_obj.save()
-
-            user.set_password(password)
-            user.save()
-
-            return Response({"message": "Password reset successful"})
-
-        return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
 
 
 class ParentStudentProfileAPIView(APIView):
