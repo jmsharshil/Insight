@@ -1,4 +1,5 @@
 import logging
+from core.pagination import paginate_queryset
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -51,11 +52,7 @@ class FeeStructureListView(APIView):
         if search:
             queryset = queryset.filter(name__icontains=search)
 
-        serializer = FeeStructureListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, FeeStructureListSerializer)
 
     def post(self, request):
         serializer = FeeStructureCreateUpdateSerializer(data=request.data)
@@ -128,11 +125,7 @@ class StudentFeeListView(APIView):
         if fee_structure_id:
             queryset = queryset.filter(fee_structure_id=fee_structure_id)
 
-        serializer = StudentFeeListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, StudentFeeListSerializer)
 
     def post(self, request):
         serializer = StudentFeeCreateUpdateSerializer(data=request.data)
@@ -244,11 +237,7 @@ class InstallmentPlanListView(APIView):
         if plan_status:
             queryset = queryset.filter(status=plan_status)
 
-        serializer = InstallmentPlanListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, InstallmentPlanListSerializer)
 
 
 class InstallmentPlanCreateView(APIView):
@@ -358,11 +347,7 @@ class PaymentListView(APIView):
         if date_to:
             queryset = queryset.filter(payment_date__lte=date_to)
 
-        serializer = PaymentListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, PaymentListSerializer)
 
     def post(self, request):
         serializer = PaymentCreateSerializer(data=request.data)
@@ -462,11 +447,7 @@ class RefundListView(APIView):
         if refund_status:
             queryset = queryset.filter(status=refund_status)
 
-        serializer = RefundListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, RefundListSerializer)
 
 
 class RefundCreateView(APIView):

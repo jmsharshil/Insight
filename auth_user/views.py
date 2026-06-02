@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from core.pagination import paginate_queryset
 
 # Create your views here.
 from rest_framework.views import APIView
@@ -6,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import User
-from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer,UpdateUserSerializer
+from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer, UserSerializer, UpdateUserSerializer
 from .models import EmailOTP
 from .utils import send_otp_email
 from django.contrib.auth import authenticate
@@ -48,6 +49,11 @@ class VerifyOTPAPIView(APIView):
             otp = serializer.validated_data['otp']
 
             otp_obj = EmailOTP.objects.filter(user__email=email, otp=otp, is_verified=False).last()
+            user = User.objects.filter(email=email).first()
+            if not user:
+                return Response({"error": "User not found"}, status=404)
+            
+            otp_obj = EmailOTP.objects.filter(user=user,otp=otp,is_verified=False).last()
 
             if not otp_obj:
                 return Response({"error": "Invalid OTP"}, status=400)
@@ -81,9 +87,15 @@ class LoginAPIView(APIView):
                     user = candidate_user
                     break
 
+            user_obj = User.objects.filter(email=email).first()
+            if not user_obj:
+                return Response({
+                    "error": "User not found with this email"
+                }, status=400)
+            user = authenticate(request, username=user_obj.username, password=password)
             if user is None:
                 return Response({
-                    "error": "Invalid credentials"
+                    "error": "Incorrect password"
                 }, status=400)
             if not user.is_active:
                 return Response({
@@ -126,6 +138,11 @@ class ForgotPasswordAPIView(APIView):
             user = User.objects.filter(email=email).first()
             if not user:
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+            otp = EmailOTP.generate_otp()
+            EmailOTP.objects.create(user=user,otp=otp)
+            send_otp_email(user, otp)
+            return Response({"message": "OTP sent successfully"})
 
             otp = EmailOTP.generate_otp()
             EmailOTP.objects.create(user=user, otp=otp)
@@ -165,6 +182,27 @@ class ResetPasswordAPIView(APIView):
             return Response({"message": "Password reset successful"})
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.filter(email=email).first()
+            if not user:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+            otp_obj = EmailOTP.objects.filter(user=user,otp=otp,is_verified=False).last()
+
+            if not otp_obj:
+                return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if otp_obj.is_expired():
+                return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
+
+            otp_obj.is_verified = True
+            otp_obj.save()
+
+            user.set_password(password)
+            user.save()
+
+            return Response({"message": "Password reset successful"})
+
+        return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
 
 
 class ParentStudentProfileAPIView(APIView):
@@ -273,3 +311,10 @@ class DeleteUserAPIView(APIView):
             "success": True,
             "message": "User deleted successfully"
         })
+
+class UserListAPIView(APIView):
+    # permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        users = User.objects.all().order_by('-created_at')
+        return paginate_queryset(users, request, UserSerializer)

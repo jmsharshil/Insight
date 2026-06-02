@@ -1,4 +1,5 @@
 import logging
+from core.pagination import paginate_queryset
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -149,16 +150,7 @@ class LeadListView(APIView):
         if form_type:
             queryset = queryset.filter(form_type=form_type)
 
-        serializer = LeadListSerializer(queryset, many=True)
-
-        return Response(
-            {
-                "success": True,
-                "count": queryset.count(),
-                "data": serializer.data
-            },
-            status=status.HTTP_200_OK
-        )
+        return paginate_queryset(queryset, request, LeadListSerializer)
 
 
 class LeadStatusUpdateView(APIView):

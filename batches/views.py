@@ -1,4 +1,5 @@
 import logging
+from core.pagination import paginate_queryset
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -51,11 +52,7 @@ class CourseListView(APIView):
             subject_count=models.Count('subjects')
         )
 
-        serializer = CourseListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, CourseListSerializer)
 
     def post(self, request):
         serializer = CourseCreateUpdateSerializer(data=request.data)
@@ -121,11 +118,7 @@ class SubjectListView(APIView):
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
 
-        serializer = SubjectListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, SubjectListSerializer)
 
     def post(self, request):
         serializer = SubjectCreateUpdateSerializer(data=request.data)
@@ -200,11 +193,7 @@ class BatchListView(APIView):
             enrolled_count=models.Count('batch_students')
         )
 
-        serializer = BatchListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, BatchListSerializer)
 
     def post(self, request):
         serializer = BatchCreateUpdateSerializer(data=request.data)

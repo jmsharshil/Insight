@@ -3,6 +3,7 @@ from django.shortcuts import render
 # Create your views here.
 
 import logging
+from core.pagination import paginate_queryset
 
 from django.db.models import Q
 from rest_framework import status
@@ -70,11 +71,7 @@ class StudentListView(APIView):
                 Q(phone_student__icontains=search)
             )
 
-        serializer = StudentListSerializer(qs, many=True, context={'request': request})
-        return Response(
-            {'success': True, 'count': qs.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(qs, request, StudentListSerializer, serializer_context={'request': request})
 
 
 # ── GET / PATCH  /api/students/<id>/ ─────────────────────────────────────────
