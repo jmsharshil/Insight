@@ -36,7 +36,7 @@ def _user_role(user):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PaperView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -55,7 +55,7 @@ class PaperView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PaperMarksView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, exam_id, marksheet_id):
         role = _user_role(request.user)
@@ -92,7 +92,7 @@ class PaperMarksView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PaperRecheckView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, exam_id, marksheet_id):
         role = _user_role(request.user)
@@ -125,7 +125,7 @@ class PaperRecheckView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CheckerStatusView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -205,7 +205,7 @@ class CheckerPortalSubmitView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PublishResultView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, exam_id):
         role = _user_role(request.user)
@@ -260,7 +260,7 @@ class PublishResultView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ResultView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -282,7 +282,7 @@ class ResultView(APIView):
 
 class StudentRecheckRequestView(APIView):
     """Student raises a recheck request (FRD §4.6.2)."""
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, exam_id):
         if _user_role(request.user) != 'student':
@@ -330,7 +330,7 @@ class StudentRecheckRequestView(APIView):
 
 class RecheckRequestListView(APIView):
     """List recheck requests for an exam (admin/ASE)."""
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -346,7 +346,7 @@ class RecheckRequestListView(APIView):
 
 class RecheckRequestActionView(APIView):
     """ASE approves/rejects a recheck request (FRD §4.6.2)."""
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def patch(self, request, exam_id, request_id):
         role = _user_role(request.user)

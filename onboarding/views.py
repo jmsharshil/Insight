@@ -2,6 +2,7 @@ from django.shortcuts import render
 
 # Create your views here.
 import logging
+from core.pagination import paginate_queryset
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -99,11 +100,7 @@ class AdmissionListView(APIView):
         if course:
             queryset = queryset.filter(course=course)
 
-        serializer = AdmissionListSerializer(queryset, many=True)
-        return Response(
-            {'success': True, 'count': queryset.count(), 'data': serializer.data},
-            status=status.HTTP_200_OK,
-        )
+        return paginate_queryset(queryset, request, AdmissionListSerializer)
 
 
 # ── GET   /api/admissions/<id>/  — retrieve
