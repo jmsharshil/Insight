@@ -144,11 +144,6 @@ class ForgotPasswordAPIView(APIView):
             send_otp_email(user, otp)
             return Response({"message": "OTP sent successfully"})
 
-            otp = EmailOTP.generate_otp()
-            EmailOTP.objects.create(user=user, otp=otp)
-            send_otp_email(user, otp)
-            return Response({"message": "OTP sent successfully"})
-
         return Response(
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
