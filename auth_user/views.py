@@ -178,7 +178,6 @@ class ResetPasswordAPIView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class ParentStudentProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -235,6 +234,11 @@ class UpdateUserAPIView(APIView):
 
     def get_user(self, user_id):
         return get_object_or_404(User, id=user_id)
+
+    def get(self, request, user_id):
+        user = self.get_user(user_id)
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
 
     def put(self, request, user_id):
         user = self.get_user(user_id)
