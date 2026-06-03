@@ -6,10 +6,21 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import User
-from .serializers import RegisterSerializer,LoginSerializer,VerifyOTPSerializer,ForgotPasswordSerializer,ResetPasswordSerializer, UserSerializer, UpdateUserSerializer, UserProfileSerializer
-from .models import EmailOTP
-from .utils import send_otp_email
+from .models import User, Organization, EmailOTP, PasswordSetToken
+from .serializers import (
+    AddUserSerializer,
+    RegisterSerializer,
+    LoginSerializer,
+    VerifyOTPSerializer,
+    ForgotPasswordSerializer,
+    ResetPasswordSerializer,
+    PasswordSetSerializer,
+    OrganizationCreateSerializer,
+    UserSerializer,
+    UpdateUserSerializer,
+    UserProfileSerializer,
+)
+from .utils import send_otp_email, send_password_set_email
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from leads.models import Lead
@@ -19,7 +30,7 @@ class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
+        serializer = RegisterSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             user = serializer.save()
             otp = EmailOTP.generate_otp()
@@ -79,7 +90,10 @@ class LoginAPIView(APIView):
         if serializer.is_valid():
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
+            organization_id = serializer.validated_data.get('organization')
             users = User.objects.filter(email=email)
+            if organization_id:
+                users = users.filter(organization_id=organization_id)
             user = None
             for candidate in users:
                 candidate_user = authenticate(request, username=candidate.username, password=password)
@@ -87,15 +101,9 @@ class LoginAPIView(APIView):
                     user = candidate_user
                     break
 
-            user_obj = User.objects.filter(email=email).first()
-            if not user_obj:
-                return Response({
-                    "error": "User not found with this email"
-                }, status=400)
-            user = authenticate(request, username=user_obj.username, password=password)
             if user is None:
                 return Response({
-                    "error": "Incorrect password"
+                    "error": "Incorrect email or password"
                 }, status=400)
             if not user.is_active:
                 return Response({
@@ -114,6 +122,8 @@ class LoginAPIView(APIView):
                     "name": user.name,
                     "role": user.role,
                     "role_display": user.get_role_display(),
+                    "organization": str(user.organization.id) if user.organization else None,
+                    "organization_name": user.organization.name if user.organization else None,
                     "linked_student": {
                         "id": str(user.linked_student.id),
                         "name": user.linked_student.name,
@@ -125,6 +135,78 @@ class LoginAPIView(APIView):
             serializer.errors,
             status=400
         )
+
+
+class OrganizationCreateAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = OrganizationCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            result = serializer.save()
+            user = result['user']
+            organization = result['organization']
+            token = PasswordSetToken.generate_token()
+            PasswordSetToken.objects.create(user=user, token=token)
+            send_password_set_email(user, token)
+            return Response({
+                "message": "Organization and super admin user created successfully. Password setup email sent.",
+                "organization_id": str(organization.id),
+                "user_id": str(user.id),
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AddUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != 'super_admin':
+            return Response({"error": "You do not have permission to add users."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = AddUserSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            user = serializer.save()
+            token = PasswordSetToken.generate_token()
+            PasswordSetToken.objects.create(user=user, token=token)
+            send_password_set_email(user, token)
+            return Response({
+                "message": "User created successfully. Password setup email sent.",
+                "user_id": str(user.id),
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordSetAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if 'token' not in data and 'token' in request.query_params:
+            data['token'] = request.query_params['token']
+
+        serializer = PasswordSetSerializer(data=data)
+        if serializer.is_valid():
+            token = serializer.validated_data['token']
+            password = serializer.validated_data['password']
+
+            token_obj = PasswordSetToken.objects.filter(token=token, is_used=False).last()
+            if not token_obj:
+                return Response({"error": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if token_obj.is_expired():
+                return Response({"error": "Password set link expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+            token_obj.is_used = True
+            token_obj.save()
+
+            user = token_obj.user
+            user.set_password(password)
+            user.is_active = True
+            user.save()
+            return Response({"message": "Password set successfully. You may now log in."})
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
 class ForgotPasswordAPIView(APIView):
@@ -232,16 +314,16 @@ from django.shortcuts import get_object_or_404
 class UpdateUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_user(self, user_id):
-        return get_object_or_404(User, id=user_id)
+    def get_user(self, request, user_id):
+        return get_object_or_404(User, id=user_id, organization=request.user.organization)
 
     def get(self, request, user_id):
-        user = self.get_user(user_id)
+        user = self.get_user(request, user_id)
         serializer = UserSerializer(user)
         return Response(serializer.data)
 
     def put(self, request, user_id):
-        user = self.get_user(user_id)
+        user = self.get_user(request, user_id)
 
         serializer = UpdateUserSerializer(
             user,
@@ -259,7 +341,7 @@ class UpdateUserAPIView(APIView):
         return Response(serializer.errors, status=400)
 
     def patch(self, request, user_id):
-        user = self.get_user(user_id)
+        user = self.get_user(request, user_id)
 
         serializer = UpdateUserSerializer(
             user,
@@ -281,7 +363,7 @@ class DeleteUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, user_id):
-        user = get_object_or_404(User, id=user_id)
+        user = get_object_or_404(User, id=user_id, organization=request.user.organization)
 
         user.delete()
 
@@ -294,7 +376,7 @@ class UserListAPIView(APIView):
     # permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        users = User.objects.all().order_by('-created_at')
+        users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
         return paginate_queryset(users, request, UserSerializer)
 
 class UserProfileAPIView(APIView):

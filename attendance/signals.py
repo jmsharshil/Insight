@@ -20,7 +20,7 @@ def violation_created_or_updated(sender, instance, created, **kwargs):
     """
     try:
         from attendance.tasks import check_violation_threshold
-        check_violation_threshold.delay(str(instance.student_id))
+        check_violation_threshold(str(instance.student_id))
     except Exception as e:
         # Graceful fallback if Celery is not running
         logger.warning(f"Could not dispatch violation threshold check: {e}")

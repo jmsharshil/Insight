@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1']
+ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost']
 
 
 # Application definition
@@ -184,6 +184,8 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'testing251299@gmail.com'
 EMAIL_HOST_PASSWORD = 'hqnc uhzo lwch iwss'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 
 LANGUAGE_CODE = 'en-us'
 
@@ -321,32 +323,32 @@ SESSION_COOKIE_SECURE = True   # Only valid if using HTTPS
 # Celery Configuration (Redis broker)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 300  # 5 minutes max per task
+# CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+# CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+# CELERY_ACCEPT_CONTENT = ['json']
+# CELERY_TASK_SERIALIZER = 'json'
+# CELERY_RESULT_SERIALIZER = 'json'
+# CELERY_TIMEZONE = TIME_ZONE
+# CELERY_TASK_TRACK_STARTED = True
+# CELERY_TASK_TIME_LIMIT = 300  # 5 minutes max per task
 
-# Periodic task schedule (Celery Beat)
-from celery.schedules import crontab
+# # Periodic task schedule (Celery Beat)
+# from celery.schedules import crontab
 
-CELERY_BEAT_SCHEDULE = {
-    # Auto-transition exam statuses every minute
-    'update-exam-statuses': {
-        'task': 'exams.tasks.update_exam_statuses',
-        'schedule': 60.0,  # every 60 seconds
-    },
-    # Auto-submit expired exam sessions every minute
-    'auto-expire-exam-sessions': {
-        'task': 'exams.tasks.auto_expire_exam_sessions',
-        'schedule': 60.0,
-    },
-    # Send pending submission reminders daily at 9 AM
-    'send-submission-reminders': {
-        'task': 'exams.tasks.send_pending_submission_reminders',
-        'schedule': crontab(hour=9, minute=0),
-    },
-}
+# CELERY_BEAT_SCHEDULE = {
+#     # Auto-transition exam statuses every minute
+#     'update-exam-statuses': {
+#         'task': 'exams.tasks.update_exam_statuses',
+#         'schedule': 60.0,  # every 60 seconds
+#     },
+#     # Auto-submit expired exam sessions every minute
+#     'auto-expire-exam-sessions': {
+#         'task': 'exams.tasks.auto_expire_exam_sessions',
+#         'schedule': 60.0,
+#     },
+#     # Send pending submission reminders daily at 9 AM
+#     'send-submission-reminders': {
+#         'task': 'exams.tasks.send_pending_submission_reminders',
+#         'schedule': crontab(hour=9, minute=0),
+#     },
+# }

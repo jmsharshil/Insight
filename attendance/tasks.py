@@ -10,7 +10,7 @@ Changes from v2:
 """
 
 import logging
-from celery import shared_task
+# from celery import shared_task
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def notify(recipient_user_id, title, body, metadata=None):
 # 1. check_checkin_delay_15  (FRD §4.4.2: 15-min delay → Parent only)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@shared_task(bind=True, max_retries=2)
+# @shared_task(bind=True, max_retries=2)
 def check_checkin_delay_15(self, student_id, date_str, session):
     """
     Scheduled at (batch.session_start + 15 min) for every active student.
@@ -56,10 +56,8 @@ def check_checkin_delay_15(self, student_id, date_str, session):
         # notify(parent_user_id, "15-min delay", f"<Name> has not checked in", {})
 
         # Schedule 30-min escalation
-        check_checkin_delay_30.apply_async(
-            args=[student_id, date_str, session],
-            countdown=900,  # 15 more minutes
-        )
+        # Schedule 30-min escalation
+        check_checkin_delay_30(student_id, date_str, session)
 
         return f"15-min alert created for {student_id}"
 
@@ -72,7 +70,7 @@ def check_checkin_delay_15(self, student_id, date_str, session):
 # 2. check_checkin_delay_30  (FRD §4.4.2: 30-min delay → Parent AND Admin)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@shared_task(bind=True, max_retries=2)
+# @shared_task(bind=True, max_retries=2)
 def check_checkin_delay_30(self, student_id, date_str, session):
     """
     Escalation at session_start + 30 min.
@@ -113,7 +111,7 @@ def check_checkin_delay_30(self, student_id, date_str, session):
 #    v3: uses 'missing_checkout_scan' alert type, notifies Parent only
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@shared_task(bind=True, max_retries=2)
+# @shared_task(bind=True, max_retries=2)
 def check_no_checkout_eod(self, student_id, date_str, session):
     """
     Fired at session end time.
@@ -156,7 +154,7 @@ def check_no_checkout_eod(self, student_id, date_str, session):
         # notify(parent_user_id, "Missing check-out", f"<Name> missing check-out scan", {})
 
         # Check violation threshold
-        check_violation_threshold.delay(student_id)
+        check_violation_threshold(student_id)
 
         return f"No-checkout violation created for {student_id}"
 
@@ -172,7 +170,7 @@ def check_no_checkout_eod(self, student_id, date_str, session):
 #    CASE 2 — missing IN (no IN for scheduled session) → missing_checkin_scan
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@shared_task(bind=True, max_retries=2)
+# @shared_task(bind=True, max_retries=2)
 def detect_missing_scans(self, branch_id, date_str):
     """
     Run at end of each day (23:00).
@@ -233,7 +231,7 @@ def detect_missing_scans(self, branch_id, date_str):
 # 5. check_violation_threshold  (v3: actually updates qr_blocked on StudentProfile)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@shared_task
+# @shared_task
 def check_violation_threshold(student_id):
     """
     Called after any ViolationRecord is created or resolved.
@@ -284,7 +282,7 @@ def check_violation_threshold(student_id):
 # 6. send_low_attendance_alerts  (weekly periodic or on-demand)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@shared_task
+# @shared_task
 def send_low_attendance_alerts(branch_id, threshold=75.0):
     """
     Periodic task (weekly or on-demand).

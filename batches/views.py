@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 class CourseListView(APIView):
 
     def get(self, request):
-        # Optimized: prefetch_related for related objects
-        queryset = Course.objects.all().prefetch_related('subjects', 'batches')
+        # Filter by user's organization
+        queryset = Course.objects.filter(organization=request.user.organization).prefetch_related('subjects', 'batches')
 
         course_type = request.GET.get('course_type')
         is_active = request.GET.get('is_active')
@@ -73,7 +73,7 @@ class CourseDetailView(APIView):
 
     def _get_course(self, pk):
         try:
-            return Course.objects.get(pk=pk)
+            return Course.objects.get(pk=pk, organization=self.request.user.organization)
         except Course.DoesNotExist:
             return None
 
@@ -108,7 +108,7 @@ class CourseDetailView(APIView):
 class SubjectListView(APIView):
 
     def get(self, request):
-        queryset = Subject.objects.select_related('course').all()
+        queryset = Subject.objects.select_related('course').filter(organization=request.user.organization)
 
         course_id = request.GET.get('course_id')
         if course_id:
@@ -139,7 +139,7 @@ class SubjectDetailView(APIView):
 
     def _get_subject(self, pk):
         try:
-            return Subject.objects.get(pk=pk)
+            return Subject.objects.get(pk=pk, organization=self.request.user.organization)
         except Subject.DoesNotExist:
             return None
 
@@ -174,8 +174,7 @@ class SubjectDetailView(APIView):
 class BatchListView(APIView):
 
     def get(self, request):
-        # Optimized: prefetch_related for many-to-many and reverse relations
-        queryset = Batch.objects.select_related('course').prefetch_related('batch_students').all()
+        queryset = Batch.objects.select_related('course').prefetch_related('batch_students').filter(organization=request.user.organization)
 
         course_id = request.GET.get('course_id')
         is_active = request.GET.get('is_active')
@@ -214,7 +213,7 @@ class BatchDetailView(APIView):
 
     def _get_batch(self, pk):
         try:
-            return Batch.objects.select_related('course').get(pk=pk)
+            return Batch.objects.select_related('course').get(pk=pk, organization=self.request.user.organization)
         except Batch.DoesNotExist:
             return None
 
@@ -248,7 +247,7 @@ class BatchAssignStudentsView(APIView):
 
     def post(self, request, pk):
         try:
-            batch = Batch.objects.get(pk=pk)
+            batch = Batch.objects.get(pk=pk, organization=request.user.organization)
         except Batch.DoesNotExist:
             return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -363,7 +362,7 @@ class BatchRemoveFacultyView(APIView):
 class ClassroomListView(APIView):
 
     def get(self, request):
-        queryset = Classroom.objects.all()
+        queryset = Classroom.objects.filter(organization=request.user.organization)
         is_active = request.GET.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
@@ -385,7 +384,7 @@ class ClassroomDetailView(APIView):
 
     def _get_classroom(self, pk):
         try:
-            return Classroom.objects.get(pk=pk)
+            return Classroom.objects.get(pk=pk, organization=self.request.user.organization)
         except Classroom.DoesNotExist:
             return None
 
@@ -422,7 +421,7 @@ class TimetableListView(APIView):
     def get(self, request):
         queryset = TimetableSlot.objects.select_related(
             'batch', 'subject', 'faculty', 'classroom'
-        ).all()
+        ).filter(organization=request.user.organization)
 
         batch_id = request.GET.get('batch_id')
         day_of_week = request.GET.get('day_of_week')
@@ -495,7 +494,7 @@ class TimetableDetailView(APIView):
         try:
             return TimetableSlot.objects.select_related(
                 'batch', 'subject', 'faculty', 'classroom'
-            ).get(pk=pk)
+            ).get(pk=pk, organization=self.request.user.organization)
         except TimetableSlot.DoesNotExist:
             return None
 

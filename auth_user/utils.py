@@ -1,4 +1,6 @@
+from django.conf import settings
 from django.core.mail import send_mail
+from urllib.parse import urlencode
 import secrets
 import string
 
@@ -8,6 +10,37 @@ def generate_temporary_password(length=12):
     characters = string.ascii_letters + string.digits + "!@#$%^&*"
     password = ''.join(secrets.choice(characters) for _ in range(length))
     return password
+
+
+def send_password_set_email(user, token):
+    base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
+    query = urlencode({'token': token})
+    password_set_link = f"{base_url}/api/auth/set-password?{query}"
+
+    subject = "Set your Insight ERP password"
+    message = f"""
+Hello {user.name},
+
+An account has been created for you in the Insight ERP System.
+
+To set your password and activate your account, please use the secure link below:
+
+{password_set_link}
+
+This link is valid for a limited time and can only be used once.
+
+If you did not request this account, please ignore this email.
+
+Thank you,
+Insight ERP Team
+"""
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=None,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
 
 
 def send_otp_email(user, otp):

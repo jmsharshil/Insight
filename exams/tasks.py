@@ -5,16 +5,16 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-try:
-    from celery import shared_task
-except ImportError:
-    def shared_task(func=None, **kwargs):
-        if func is None:
-            return lambda f: f
-        return func
+# try:
+#     from celery import shared_task
+# except ImportError:
+#     def shared_task(func=None, **kwargs):
+#         if func is None:
+#             return lambda f: f
+#         return func
 
 
-@shared_task
+# @shared_task
 def update_exam_statuses():
     """
     Every minute: automatically transition exam statuses.
@@ -56,7 +56,7 @@ def update_exam_statuses():
     return f"{count_ongoing} ongoing, {count_completed} completed"
 
 
-@shared_task
+# @shared_task
 def send_pending_submission_reminders():
     """Daily: remind checkers about overdue marksheets."""
     from results.models import MarkSheet, SubmissionReminderLog
@@ -78,7 +78,7 @@ def send_pending_submission_reminders():
     return f"{count} reminders sent"
 
 
-@shared_task
+# @shared_task
 def auto_expire_exam_sessions():
     """Every minute: auto-submit expired sessions."""
     from .models import ExamSession
