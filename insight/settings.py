@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app','127.0.0.1','192.168.29.226']
+ALLOWED_HOSTS = ['034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app','127.0.0.1','192.168.29.226','localhost']
 
 
 # Application definition
@@ -77,7 +77,7 @@ ROOT_URLCONF = 'insight.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

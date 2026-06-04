@@ -1,0 +1,19 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Action Required: Pending Paper Submission</h2>
+
+<p>Dear {{ checker_name }},</p>
+
+<p>This is a reminder that you have pending papers to evaluate for the following exam:</p>
+
+<div class="info-box">
+    <h3 style="margin-top: 0; margin-bottom: 0; color: {{ primary_color }};">{{ exam_title }}</h3>
+</div>
+
+<p>Please log in to the checker portal and submit your marks at your earliest convenience to avoid delays in result publication.</p>
+
+<p>If you have already submitted the marks, please disregard this reminder. If you are facing any technical difficulties, please contact support.</p>
+
+<p>Thank you for your cooperation.</p>
+{% endblock %}

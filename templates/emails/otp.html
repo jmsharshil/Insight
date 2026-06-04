@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Your OTP Verification Code</h2>
+
+<p>Hello {{ user_name }},</p>
+
+<p>Welcome to <strong>{{ org_name }}</strong>.</p>
+
+<p>We received a request to verify your account. Please use the One-Time Password (OTP) below to complete your verification process:</p>
+
+<div class="info-box" style="text-align: center; font-size: 24px; letter-spacing: 5px;">
+    <strong>{{ otp_code }}</strong>
+</div>
+
+<p>This OTP is valid for the next 5 minutes.</p>
+
+<p>Once verified, you will be able to securely access your account and continue using the platform.</p>
+
+<p>Thank you for choosing {{ org_name }}.</p>
+{% endblock %}

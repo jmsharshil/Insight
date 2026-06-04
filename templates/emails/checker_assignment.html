@@ -1,0 +1,24 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Paper Checker Assignment</h2>
+
+<p>Dear {{ checker_name }},</p>
+
+<p>You have been assigned to check papers for the following exam:</p>
+
+<div class="info-box">
+    <h3 style="margin-top: 0; color: {{ primary_color }};">{{ exam_title }}</h3>
+    {% if deadline %}
+    <p style="margin-bottom: 0;"><strong>Submission Deadline:</strong> {{ deadline }}</p>
+    {% endif %}
+</div>
+
+<p>To access the papers and submit marks, please click the secure link below:</p>
+
+<div style="text-align: center; margin-bottom: 20px;">
+    <a href="{{ submission_link }}" class="button" style="color: white;">Access Checker Portal</a>
+</div>
+
+<p>If you have any questions or are unable to complete this assignment by the deadline, please contact the administration immediately.</p>
+{% endblock %}

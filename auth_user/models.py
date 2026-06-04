@@ -9,6 +9,10 @@ from django.utils import timezone
 class Organization(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    logo_url = models.URLField(blank=True, default='')
+    footer_text = models.TextField(blank=True, default='')
+    primary_color = models.CharField(max_length=7, blank=True, default='#2563EB')
+    website_url = models.URLField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

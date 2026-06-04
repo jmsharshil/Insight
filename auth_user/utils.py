@@ -1,8 +1,8 @@
 from django.conf import settings
-from django.core.mail import send_mail
 from urllib.parse import urlencode
 import secrets
 import string
+from core.email import send_email
 
 
 def generate_temporary_password(length=12):
@@ -17,11 +17,11 @@ def send_password_set_email(user, token):
     query = urlencode({'token': token})
     password_set_link = f"{base_url}/api/auth/set-password?{query}"
 
-    subject = "Set your Insight ERP password"
-    message = f"""
+    subject = f"Set your {user.organization.name if user.organization else 'Insight ERP'} password"
+    text_content = f"""
 Hello {user.name},
 
-An account has been created for you in the Insight ERP System.
+An account has been created for you in the {user.organization.name if user.organization else 'Insight ERP'} System.
 
 To set your password and activate your account, please use the secure link below:
 
@@ -32,25 +32,28 @@ This link is valid for a limited time and can only be used once.
 If you did not request this account, please ignore this email.
 
 Thank you,
-Insight ERP Team
+{user.organization.name if user.organization else 'Insight ERP'} Team
 """
-    send_mail(
+
+    send_email(
+        to=user.email,
         subject=subject,
-        message=message,
-        from_email=None,
-        recipient_list=[user.email],
-        fail_silently=False,
+        text=text_content,
+        template='emails/password_set.html',
+        template_context={
+            'user_name': user.name,
+            'password_set_link': password_set_link,
+        },
+        organization=user.organization,
     )
 
 
 def send_otp_email(user, otp):
-
     subject = "Your OTP Verification Code"
-
-    message = f"""
+    text_content = f"""
 Hello {user.name},
 
-Welcome to Insight ERP System.
+Welcome to {user.organization.name if user.organization else 'Insight ERP'} System.
 
 We received a request to verify your account. Please use the One-Time Password (OTP) below to complete your verification process:
 
@@ -60,25 +63,32 @@ This OTP is valid for the next 5 minutes.
 
 Once verified, you will be able to securely access your account and continue using the platform.
 
-Thank you for choosing Insight ERP System.
+Thank you for choosing {user.organization.name if user.organization else 'Insight ERP'} System.
 
 Best Regards,
-Insight ERP Team
+{user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    send_mail(subject=subject,message=message,from_email=None,recipient_list=[user.email],
-        fail_silently=False
+    send_email(
+        to=user.email,
+        subject=subject,
+        text=text_content,
+        template='emails/otp.html',
+        template_context={
+            'user_name': user.name,
+            'otp_code': otp,
+        },
+        organization=user.organization,
     )
 
 
 def send_student_login_credentials(user, password):
     """Send login credentials to newly converted student"""
     subject = "Welcome! Your Student Account Login Credentials"
-
-    message = f"""
+    text_content = f"""
 Hello {user.name},
 
-Congratulations! Your account has been successfully created in the Insight ERP System.
+Congratulations! Your account has been successfully created in the {user.organization.name if user.organization else 'Insight ERP'} System.
 
 Your Login Credentials:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -87,7 +97,7 @@ Password: {password}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 How to Access Your Account:
-1. Visit the Insight ERP System login page
+1. Visit the {user.organization.name if user.organization else 'Insight ERP'} System login page
 2. Enter your email/username and the password provided above
 3. Log in to your student dashboard
 
@@ -97,32 +107,33 @@ Important Security Notes:
 • Never share your password with anyone
 • If you did not request this account, please contact our support team
 
-Need Help?
-If you have any questions or encounter any issues, please contact our support team at support@insighterpssystem.com
-
-Welcome to Insight!
+Welcome to {user.organization.name if user.organization else 'Insight ERP'}!
 
 Best Regards,
-Insight ERP Team
+{user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    send_mail(
+    send_email(
+        to=user.email,
         subject=subject,
-        message=message,
-        from_email=None,
-        recipient_list=[user.email],
-        fail_silently=False
+        text=text_content,
+        template='emails/student_credentials.html',
+        template_context={
+            'user_name': user.name,
+            'user_email': user.email,
+            'password': password,
+        },
+        organization=user.organization,
     )
 
 
 def send_parent_login_credentials(parent_user, student_user, password):
     """Send login credentials to a parent account linked with a student"""
     subject = "Welcome! Your Parent Portal Login Credentials"
-
-    message = f"""
+    text_content = f"""
 Hello {parent_user.name},
 
-Your parent account has been created in the Insight ERP System.
+Your parent account has been created in the {parent_user.organization.name if parent_user.organization else 'Insight ERP'} System.
 
 Linked Student Profile:
 Student Name: {student_user.name}
@@ -133,7 +144,7 @@ Email/Username: {parent_user.email}
 Password: {password}
 
 How to Access Your Account:
-1. Visit the Insight ERP System login page
+1. Visit the {parent_user.organization.name if parent_user.organization else 'Insight ERP'} System login page
 2. Enter your email/username and the password provided above
 3. Log in to view your linked student's profile and updates
 
@@ -143,13 +154,20 @@ Important Security Notes:
 - Never share your password with anyone
 
 Best Regards,
-Insight ERP Team
+{parent_user.organization.name if parent_user.organization else 'Insight ERP'} Team
 """
 
-    send_mail(
+    send_email(
+        to=parent_user.email,
         subject=subject,
-        message=message,
-        from_email=None,
-        recipient_list=[parent_user.email],
-        fail_silently=False,
+        text=text_content,
+        template='emails/parent_credentials.html',
+        template_context={
+            'parent_name': parent_user.name,
+            'student_name': student_user.name,
+            'student_email': student_user.email,
+            'parent_email': parent_user.email,
+            'password': password,
+        },
+        organization=parent_user.organization,
     )
