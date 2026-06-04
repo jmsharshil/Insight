@@ -222,10 +222,16 @@ if USE_AZURE_MEDIA:
     AZURE_URL_EXPIRATION_SECS = int(os.environ.get("AZURE_URL_EXPIRATION_SECS", "3600"))
     AZURE_OVERWRITE_FILES = False
 
-    # ✅ New-style Django 4.2/5.x storage config
+    # ✅ New-style Django 4.2/5.x storage config with Azure credentials
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.azure_storage.AzureStorage",
+            "OPTIONS": {
+                "account_name": AZURE_ACCOUNT_NAME,
+                "account_key": AZURE_ACCOUNT_KEY,
+                "azure_container_name": AZURE_CONTAINER,
+                "overwrite_files": AZURE_OVERWRITE_FILES,
+            }
         },
         "staticfiles": {
             # keep whatever you use for static files (example with WhiteNoise)
@@ -239,9 +245,6 @@ if USE_AZURE_MEDIA:
 else:
     MEDIA_URL  = "/media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
-
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
