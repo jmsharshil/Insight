@@ -1,5 +1,6 @@
 from django.shortcuts import render
 from core.pagination import paginate_queryset
+from django.db.models import Q
 
 # Create your views here.
 from rest_framework.views import APIView
@@ -18,6 +19,7 @@ from .serializers import (
     OrganizationCreateSerializer,
     OrganizationSerializer,
     UserSerializer,
+    UserListSerializer,
     UpdateUserSerializer,
     UserProfileSerializer,
 )
@@ -379,9 +381,21 @@ class UserListAPIView(APIView):
     def get(self, request):
         users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
         role = self.request.query_params.get('role')
+        is_active = self.request.query_params.get('is_active')
+        search = self.request.query_params.get('search')
+
+        if search:
+            users = users.filter(
+                Q(name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(phone__icontains=search)
+            )
         if role:
             users = users.filter(role=role)
-        return paginate_queryset(users, request, UserSerializer)
+        if is_active:
+            users = users.filter(is_active=is_active.lower() == 'true')
+        
+        return paginate_queryset(users, request, UserListSerializer)
 
 class UserProfileAPIView(APIView):
     
