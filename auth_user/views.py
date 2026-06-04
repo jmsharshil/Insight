@@ -324,7 +324,7 @@ class UpdateUserAPIView(APIView):
 
     def get(self, request, user_id):
         user = self.get_user(request, user_id)
-        serializer = UserSerializer(user)
+        serializer = UserSerializer(user, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, user_id):
@@ -332,7 +332,8 @@ class UpdateUserAPIView(APIView):
 
         serializer = UpdateUserSerializer(
             user,
-            data=request.data
+            data=request.data,
+            context={'request': request}
         )
 
         if serializer.is_valid():
@@ -351,7 +352,8 @@ class UpdateUserAPIView(APIView):
         serializer = UpdateUserSerializer(
             user,
             data=request.data,
-            partial=True
+            partial=True,
+            context={'request': request}
         )
 
         if serializer.is_valid():
@@ -405,7 +407,7 @@ class UserProfileAPIView(APIView):
         """
         Get details of the currently authenticated user.
         """
-        serializer = UserProfileSerializer(request.user)
+        serializer = UserProfileSerializer(request.user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def put(self, request):
@@ -413,7 +415,7 @@ class UserProfileAPIView(APIView):
         Update name and email for the currently authenticated user.
         """
         user = request.user
-        serializer = UserProfileSerializer(user, data=request.data, partial=True) # Use partial=True to allow partial updates
+        serializer = UserProfileSerializer(user, data=request.data, partial=True, context={'request': request}) # Use partial=True to allow partial updates
         if serializer.is_valid():
             serializer.save()
             return Response({

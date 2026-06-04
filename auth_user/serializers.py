@@ -14,7 +14,8 @@ class UserSerializer(serializers.ModelSerializer):
     def get_profile_pic(self, obj):
         if obj.profile_pic:
             request = self.context.get('request')
-            if request:
+            if request is not None:
+                # Use build_absolute_uri to convert relative URL to absolute
                 return request.build_absolute_uri(obj.profile_pic.url)
             return obj.profile_pic.url
         return None
@@ -30,7 +31,8 @@ class UserListSerializer(serializers.ModelSerializer):
     def get_profile_pic(self, obj):
         if obj.profile_pic:
             request = self.context.get('request')
-            if request:
+            if request is not None:
+                # Use build_absolute_uri to convert relative URL to absolute
                 return request.build_absolute_uri(obj.profile_pic.url)
             return obj.profile_pic.url
         return None
@@ -183,7 +185,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def get_profile_pic(self, obj):
         if obj.profile_pic:
             request = self.context.get('request')
-            if request:
+            if request is not None:
+                # Use build_absolute_uri to convert relative URL to absolute
                 return request.build_absolute_uri(obj.profile_pic.url)
             return obj.profile_pic.url
         return None
