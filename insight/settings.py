@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1']
+ALLOWED_HOSTS = ['034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app','127.0.0.1','192.168.29.226']
 
 
 # Application definition
@@ -249,7 +249,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ═══════════════════════════════════════════════════════════════════════════════
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173"
+    "http://localhost:5173",
+    "http://192.168.29.226:5173"
     ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -316,37 +317,3 @@ CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
 
 CSRF_COOKIE_SECURE = True      # Only valid if using HTTPS
 SESSION_COOKIE_SECURE = True   # Only valid if using HTTPS
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Celery Configuration (Redis broker)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 300  # 5 minutes max per task
-
-# Periodic task schedule (Celery Beat)
-from celery.schedules import crontab
-
-CELERY_BEAT_SCHEDULE = {
-    # Auto-transition exam statuses every minute
-    'update-exam-statuses': {
-        'task': 'exams.tasks.update_exam_statuses',
-        'schedule': 60.0,  # every 60 seconds
-    },
-    # Auto-submit expired exam sessions every minute
-    'auto-expire-exam-sessions': {
-        'task': 'exams.tasks.auto_expire_exam_sessions',
-        'schedule': 60.0,
-    },
-    # Send pending submission reminders daily at 9 AM
-    'send-submission-reminders': {
-        'task': 'exams.tasks.send_pending_submission_reminders',
-        'schedule': crontab(hour=9, minute=0),
-    },
-}
