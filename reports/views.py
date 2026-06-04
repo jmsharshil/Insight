@@ -187,8 +187,17 @@ EXPORT_CONFIGS = {
 }
 
 
+from rest_framework.negotiation import DefaultContentNegotiation
+
+class PassthroughNegotiation(DefaultContentNegotiation):
+    def select_renderer(self, request, renderers, format_suffix=None):
+        if request.query_params.get('format') in ['pdf', 'csv']:
+            return (renderers[0], renderers[0].media_type)
+        return super().select_renderer(request, renderers, format_suffix)
+
 class ExportView(APIView):
     """GET /api/v1/reports/export/<report_type>/?format=csv|pdf"""
+    content_negotiation_class = PassthroughNegotiation
 
     def get(self, request, report_type):
         config = EXPORT_CONFIGS.get(report_type)

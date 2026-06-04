@@ -1,0 +1,16 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>New Recheck Request</h2>
+
+<p>A student has submitted a new recheck request. Here are the details:</p>
+
+<div class="info-box">
+    <p style="margin-top: 0;"><strong>Student:</strong> {{ student_name }}</p>
+    <p><strong>Exam:</strong> {{ exam_title }}</p>
+    <p style="margin-bottom: 0;"><strong>Reason Provided:</strong><br>
+    {{ reason|default:"No reason provided" }}</p>
+</div>
+
+<p>Please log in to the administration dashboard to review this request and take appropriate action.</p>
+{% endblock %}

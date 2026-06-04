@@ -34,8 +34,10 @@ logger = logging.getLogger(__name__)
 class CourseListView(APIView):
 
     def get(self, request):
-        # Optimized: prefetch_related for related objects
-        queryset = Course.objects.all().prefetch_related('subjects', 'batches')
+        # Filter by user's organization
+        queryset = Course.objects.prefetch_related('subjects', 'batches').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
 
         course_type = request.GET.get('course_type')
         is_active = request.GET.get('is_active')
@@ -55,7 +57,7 @@ class CourseListView(APIView):
         return paginate_queryset(queryset, request, CourseListSerializer)
 
     def post(self, request):
-        serializer = CourseCreateUpdateSerializer(data=request.data)
+        serializer = CourseCreateUpdateSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response(
                 {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
@@ -73,7 +75,10 @@ class CourseDetailView(APIView):
 
     def _get_course(self, pk):
         try:
-            return Course.objects.get(pk=pk)
+            qs = Course.objects.all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
         except Course.DoesNotExist:
             return None
 
@@ -87,7 +92,7 @@ class CourseDetailView(APIView):
         course = self._get_course(pk)
         if course is None:
             return Response({'success': False, 'message': 'Course not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = CourseCreateUpdateSerializer(course, data=request.data, partial=True)
+        serializer = CourseCreateUpdateSerializer(course, data=request.data, partial=True, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
@@ -109,6 +114,8 @@ class SubjectListView(APIView):
 
     def get(self, request):
         queryset = Subject.objects.select_related('course').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
 
         course_id = request.GET.get('course_id')
         if course_id:
@@ -121,7 +128,7 @@ class SubjectListView(APIView):
         return paginate_queryset(queryset, request, SubjectListSerializer)
 
     def post(self, request):
-        serializer = SubjectCreateUpdateSerializer(data=request.data)
+        serializer = SubjectCreateUpdateSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response(
                 {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
@@ -139,7 +146,10 @@ class SubjectDetailView(APIView):
 
     def _get_subject(self, pk):
         try:
-            return Subject.objects.get(pk=pk)
+            qs = Subject.objects.all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
         except Subject.DoesNotExist:
             return None
 
@@ -153,7 +163,7 @@ class SubjectDetailView(APIView):
         subject = self._get_subject(pk)
         if subject is None:
             return Response({'success': False, 'message': 'Subject not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = SubjectCreateUpdateSerializer(subject, data=request.data, partial=True)
+        serializer = SubjectCreateUpdateSerializer(subject, data=request.data, partial=True, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
@@ -174,8 +184,9 @@ class SubjectDetailView(APIView):
 class BatchListView(APIView):
 
     def get(self, request):
-        # Optimized: prefetch_related for many-to-many and reverse relations
         queryset = Batch.objects.select_related('course').prefetch_related('batch_students').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
 
         course_id = request.GET.get('course_id')
         is_active = request.GET.get('is_active')
@@ -196,7 +207,7 @@ class BatchListView(APIView):
         return paginate_queryset(queryset, request, BatchListSerializer)
 
     def post(self, request):
-        serializer = BatchCreateUpdateSerializer(data=request.data)
+        serializer = BatchCreateUpdateSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response(
                 {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
@@ -214,7 +225,10 @@ class BatchDetailView(APIView):
 
     def _get_batch(self, pk):
         try:
-            return Batch.objects.select_related('course').get(pk=pk)
+            qs = Batch.objects.select_related('course').all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
         except Batch.DoesNotExist:
             return None
 
@@ -228,7 +242,7 @@ class BatchDetailView(APIView):
         batch = self._get_batch(pk)
         if batch is None:
             return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = BatchCreateUpdateSerializer(batch, data=request.data, partial=True)
+        serializer = BatchCreateUpdateSerializer(batch, data=request.data, partial=True, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
@@ -248,11 +262,14 @@ class BatchAssignStudentsView(APIView):
 
     def post(self, request, pk):
         try:
-            batch = Batch.objects.get(pk=pk)
+            qs = Batch.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(organization=request.user.organization)
+            batch = qs.get(pk=pk)
         except Batch.DoesNotExist:
             return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AssignStudentsSerializer(data=request.data)
+        serializer = AssignStudentsSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -303,7 +320,10 @@ class BatchRemoveStudentView(APIView):
 
     def post(self, request, pk, student_id):
         try:
-            bs = BatchStudent.objects.get(batch_id=pk, student_id=student_id)
+            qs = BatchStudent.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(batch__organization=request.user.organization)
+            bs = qs.get(batch_id=pk, student_id=student_id)
         except BatchStudent.DoesNotExist:
             return Response({'success': False, 'message': 'Student not enrolled in this batch.'}, status=status.HTTP_404_NOT_FOUND)
         bs.delete()
@@ -316,11 +336,14 @@ class BatchAssignFacultyView(APIView):
 
     def post(self, request, pk):
         try:
-            batch = Batch.objects.get(pk=pk)
+            qs = Batch.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(organization=request.user.organization)
+            batch = qs.get(pk=pk)
         except Batch.DoesNotExist:
             return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AssignFacultySerializer(data=request.data)
+        serializer = AssignFacultySerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -349,7 +372,10 @@ class BatchRemoveFacultyView(APIView):
     def post(self, request, pk, faculty_id):
         subject_id = request.data.get('subject_id')
         try:
-            bf = BatchFaculty.objects.get(batch_id=pk, faculty_id=faculty_id, subject_id=subject_id)
+            qs = BatchFaculty.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(batch__organization=request.user.organization)
+            bf = qs.get(batch_id=pk, faculty_id=faculty_id, subject_id=subject_id)
         except BatchFaculty.DoesNotExist:
             return Response({'success': False, 'message': 'Faculty assignment not found.'}, status=status.HTTP_404_NOT_FOUND)
         bf.delete()
@@ -364,6 +390,8 @@ class ClassroomListView(APIView):
 
     def get(self, request):
         queryset = Classroom.objects.all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
         is_active = request.GET.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
@@ -371,7 +399,7 @@ class ClassroomListView(APIView):
         return Response({'success': True, 'count': queryset.count(), 'data': serializer.data})
 
     def post(self, request):
-        serializer = ClassroomCreateUpdateSerializer(data=request.data)
+        serializer = ClassroomCreateUpdateSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         classroom = serializer.save()
@@ -385,7 +413,10 @@ class ClassroomDetailView(APIView):
 
     def _get_classroom(self, pk):
         try:
-            return Classroom.objects.get(pk=pk)
+            qs = Classroom.objects.all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
         except Classroom.DoesNotExist:
             return None
 
@@ -399,7 +430,7 @@ class ClassroomDetailView(APIView):
         classroom = self._get_classroom(pk)
         if classroom is None:
             return Response({'success': False, 'message': 'Classroom not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ClassroomCreateUpdateSerializer(classroom, data=request.data, partial=True)
+        serializer = ClassroomCreateUpdateSerializer(classroom, data=request.data, partial=True, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
@@ -423,6 +454,8 @@ class TimetableListView(APIView):
         queryset = TimetableSlot.objects.select_related(
             'batch', 'subject', 'faculty', 'classroom'
         ).all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
 
         batch_id = request.GET.get('batch_id')
         day_of_week = request.GET.get('day_of_week')
@@ -442,7 +475,7 @@ class TimetableListView(APIView):
         return Response({'success': True, 'count': queryset.count(), 'data': serializer.data})
 
     def post(self, request):
-        serializer = TimetableSlotCreateUpdateSerializer(data=request.data)
+        serializer = TimetableSlotCreateUpdateSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response(
                 {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
@@ -493,9 +526,12 @@ class TimetableDetailView(APIView):
 
     def _get_slot(self, pk):
         try:
-            return TimetableSlot.objects.select_related(
+            qs = TimetableSlot.objects.select_related(
                 'batch', 'subject', 'faculty', 'classroom'
-            ).get(pk=pk)
+            ).all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
         except TimetableSlot.DoesNotExist:
             return None
 
@@ -510,7 +546,7 @@ class TimetableDetailView(APIView):
         if slot is None:
             return Response({'success': False, 'message': 'Timetable slot not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = TimetableSlotCreateUpdateSerializer(slot, data=request.data, partial=True)
+        serializer = TimetableSlotCreateUpdateSerializer(slot, data=request.data, partial=True, context={'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -566,7 +602,10 @@ class FacultyTimetableView(APIView):
     def get(self, request, faculty_id):
         slots = TimetableSlot.objects.select_related(
             'batch', 'subject', 'classroom'
-        ).filter(faculty_id=faculty_id).order_by('day_of_week', 'start_time')
+        ).filter(faculty_id=faculty_id)
+        if getattr(request.user, 'organization', None):
+            slots = slots.filter(organization=request.user.organization)
+        slots = slots.order_by('day_of_week', 'start_time')
 
         serializer = FacultyTimetableSerializer(slots, many=True)
 
@@ -590,7 +629,10 @@ class StudentTimetableView(APIView):
 
         slots = TimetableSlot.objects.select_related(
             'subject', 'faculty', 'classroom'
-        ).filter(batch_id__in=batch_ids).order_by('day_of_week', 'start_time')
+        ).filter(batch_id__in=batch_ids)
+        if getattr(request.user, 'organization', None):
+            slots = slots.filter(organization=request.user.organization)
+        slots = slots.order_by('day_of_week', 'start_time')
 
         serializer = StudentTimetableSerializer(slots, many=True)
 
@@ -600,5 +642,3 @@ class StudentTimetableView(APIView):
             grouped.setdefault(day, []).append(s)
 
         return Response({'success': True, 'data': grouped})
-
-

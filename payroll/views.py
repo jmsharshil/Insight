@@ -60,6 +60,8 @@ class PayrollListCreateView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = PayrollRun.objects.select_related('branch').all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
         bid = _user_branch_id(request.user)
         if role != 'super_admin' and bid:
             qs = qs.filter(branch_id=bid)
@@ -121,7 +123,10 @@ class PayrollDetailView(APIView):
         if role not in PAYROLL_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            pr = PayrollRun.objects.get(id=payroll_id)
+            qs = PayrollRun.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            pr = qs.get(id=payroll_id)
         except PayrollRun.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'success': True, 'data': PayrollRunDetailSerializer(pr).data})
@@ -139,6 +144,8 @@ class PayrollPayslipsView(APIView):
         if role not in PAYROLL_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         slips = PaySlip.objects.filter(payroll_run_id=payroll_id).select_related('faculty', 'faculty_profile').prefetch_related('late_logs')
+        if getattr(request.user, 'organization', None):
+            slips = slips.filter(payroll_run__branch__organization=request.user.organization)
         return Response({'success': True, 'count': slips.count(), 'data': PaySlipSerializer(slips, many=True).data})
 
 
@@ -154,7 +161,10 @@ class PayrollApproveView(APIView):
         if role not in PAYROLL_APPROVE_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            pr = PayrollRun.objects.get(id=payroll_id)
+            qs = PayrollRun.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            pr = qs.get(id=payroll_id)
         except PayrollRun.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -196,7 +206,10 @@ class PayrollDisburseView(APIView):
         if role not in PAYROLL_DISBURSE_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            pr = PayrollRun.objects.get(id=payroll_id)
+            qs = PayrollRun.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            pr = qs.get(id=payroll_id)
         except PayrollRun.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -245,7 +258,10 @@ class FacultyPayslipsView(APIView):
         role = _user_role(request.user)
         from faculty.models import FacultyProfile
         try:
-            fp = FacultyProfile.objects.get(id=faculty_id)
+            fp_qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                fp_qs = fp_qs.filter(branch__organization=request.user.organization)
+            fp = fp_qs.get(id=faculty_id)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -278,6 +294,8 @@ class LatePolicyView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         bid = _user_branch_id(request.user)
         qs = LateEntryPolicy.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
         if role != 'super_admin' and bid:
             qs = qs.filter(branch_id=bid)
         return Response({'success': True, 'data': LateEntryPolicySerializer(qs, many=True).data})

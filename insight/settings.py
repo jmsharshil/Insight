@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost']
+ALLOWED_HOSTS = ['034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app','127.0.0.1','192.168.29.226','localhost','192.168.1.226']
 
 
 # Application definition
@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'storages',
     'auth_user',
     'leads',
     'onboarding',
@@ -79,7 +80,7 @@ ROOT_URLCONF = 'insight.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -188,6 +189,9 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'testing251299@gmail.com'
 EMAIL_HOST_PASSWORD = 'hqnc uhzo lwch iwss'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
+FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
 
 LANGUAGE_CODE = 'en-us'
 
@@ -253,7 +257,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ═══════════════════════════════════════════════════════════════════════════════
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173"
+    "http://localhost:5173",
+    "http://192.168.29.226:5173",
+    'http://192.168.1.226:5173'
     ]
 
 CORS_ALLOW_CREDENTIALS = True

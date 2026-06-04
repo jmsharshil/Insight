@@ -1,10 +1,6 @@
-"""
-Email stubs for exam module.
-Replace print() with actual send_mail() when email service is configured.
-FRD §4.6.2: all email stubs also call in-app notification stub.
-"""
 import logging
 from django.conf import settings
+from core.email import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -20,16 +16,30 @@ def send_checker_assignment_email(marksheet):
     if not checker:
         return
     token = marksheet.tokens.filter(is_used=False).order_by('-created_at').first()
-    link = f"{getattr(settings, 'BASE_URL', 'http://localhost:8000')}/api/v1/checker-portal/submit/?token={token.token}" if token else 'N/A'
-
-    msg = (
+    link = f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')}/api/v1/checker-portal/submit/?token={token.token}" if token else 'N/A'
+    deadline = token.expires_at if token else 'N/A'
+    
+    subject = f"Paper Assignment: {marksheet.exam.title}"
+    text_content = (
         f"Dear {checker.name},\n"
         f"You have been assigned to check papers for: {marksheet.exam.title}\n"
         f"Submission link: {link}\n"
-        f"Deadline: {token.expires_at if token else 'N/A'}\n"
+        f"Deadline: {deadline}\n"
     )
-    logger.info(f"[EMAIL STUB] Checker assignment → {checker.email}: {msg}")
-    print(f"[EMAIL STUB] send_checker_assignment_email → {checker.email}")
+
+    send_email(
+        to=checker.email,
+        subject=subject,
+        text=text_content,
+        template='emails/checker_assignment.html',
+        template_context={
+            'checker_name': checker.name,
+            'exam_title': marksheet.exam.title,
+            'submission_link': link,
+            'deadline': deadline,
+        },
+        organization=marksheet.exam.organization if hasattr(marksheet.exam, 'organization') else checker.organization,
+    )
 
     # FRD §4.6.2: in-app notification alongside email
     _notify(
@@ -41,13 +51,25 @@ def send_checker_assignment_email(marksheet):
 
 def send_answer_key_email(checker, exam, signed_url):
     """Send answer key access link to paper_checker + in-app notification."""
-    msg = (
+    subject = f"Answer Key: {exam.title}"
+    text_content = (
         f"Dear {checker.name},\n"
         f"Answer key for: {exam.title}\n"
         f"Access link (expires in 48h): {signed_url}\n"
     )
-    logger.info(f"[EMAIL STUB] Answer key → {checker.email}: {msg}")
-    print(f"[EMAIL STUB] send_answer_key_email → {checker.email}")
+
+    send_email(
+        to=checker.email,
+        subject=subject,
+        text=text_content,
+        template='emails/answer_key.html',
+        template_context={
+            'checker_name': checker.name,
+            'exam_title': exam.title,
+            'access_link': signed_url,
+        },
+        organization=exam.organization if hasattr(exam, 'organization') else checker.organization,
+    )
 
     # FRD §4.6.2: in-app notification
     _notify(
@@ -62,13 +84,25 @@ def send_submission_reminder_email(marksheet):
     checker = marksheet.paper_checker
     if not checker:
         return
-    msg = (
+        
+    subject = f"Reminder: Pending Papers for {marksheet.exam.title}"
+    text_content = (
         f"Dear {checker.name},\n"
         f"Reminder: You have pending papers for {marksheet.exam.title}.\n"
         f"Please submit your marks at your earliest convenience.\n"
     )
-    logger.info(f"[EMAIL STUB] Submission reminder → {checker.email}: {msg}")
-    print(f"[EMAIL STUB] send_submission_reminder_email → {checker.email}")
+
+    send_email(
+        to=checker.email,
+        subject=subject,
+        text=text_content,
+        template='emails/submission_reminder.html',
+        template_context={
+            'checker_name': checker.name,
+            'exam_title': marksheet.exam.title,
+        },
+        organization=marksheet.exam.organization if hasattr(marksheet.exam, 'organization') else checker.organization,
+    )
 
 
 def send_recheck_request_notification(recheck_request):
@@ -83,15 +117,36 @@ def send_recheck_request_notification(recheck_request):
         student_name = str(recheck_request.requested_by_id)
 
     exam_title = marksheet.exam.title
+    organization = marksheet.exam.organization if hasattr(marksheet.exam, 'organization') else None
+    
+    # Needs to go to Admin Senior Executives. Here we will find one or just use default.
+    from auth_user.models import User
+    admin_execs = User.objects.filter(role='admin_senior_executive')
+    if organization:
+        admin_execs = admin_execs.filter(organization=organization)
+        
+    admin_email = admin_execs.first().email if admin_execs.exists() else settings.DEFAULT_FROM_EMAIL
 
-    msg = (
+    subject = f"Recheck Request: {exam_title}"
+    text_content = (
         f"Recheck Request:\n"
         f"Student: {student_name}\n"
         f"Exam: {exam_title}\n"
         f"Reason: {recheck_request.reason or 'No reason provided'}\n"
     )
-    logger.info(f"[EMAIL STUB] Recheck request notification: {msg}")
-    print(f"[EMAIL STUB] send_recheck_request_notification for {exam_title}")
+
+    send_email(
+        to=admin_email,
+        subject=subject,
+        text=text_content,
+        template='emails/recheck_request.html',
+        template_context={
+            'student_name': student_name,
+            'exam_title': exam_title,
+            'reason': recheck_request.reason,
+        },
+        organization=organization,
+    )
 
     # In-app notification to ASE (recipient resolved by caller)
     _notify(

@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Answer Key Available</h2>
+
+<p>Dear {{ checker_name }},</p>
+
+<p>The answer key for the following exam is now available for your reference:</p>
+
+<div class="info-box">
+    <h3 style="margin-top: 0; margin-bottom: 0; color: {{ primary_color }};">{{ exam_title }}</h3>
+</div>
+
+<p>To view or download the answer key, please click the secure link below. Please note that this link is valid for a limited time (48 hours).</p>
+
+<div style="text-align: center; margin-bottom: 20px;">
+    <a href="{{ access_link }}" class="button" style="color: white;">Access Answer Key</a>
+</div>
+
+<p>This answer key is confidential and intended solely for use in evaluating student submissions for {{ org_name }}.</p>
+{% endblock %}

@@ -28,6 +28,7 @@ SESSION_CHOICES = [
 
 class Course(models.Model):
     id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='courses', null=True, blank=True)
     name             = models.CharField(max_length=200)
     code             = models.CharField(max_length=30, unique=True)
     course_type      = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES)
@@ -52,6 +53,7 @@ class Course(models.Model):
 
 class Subject(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     course      = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='subjects')
     name        = models.CharField(max_length=200)
     code        = models.CharField(max_length=30)
@@ -78,6 +80,7 @@ class Subject(models.Model):
 
 class Batch(models.Model):
     id             = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization   = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='batches', null=True, blank=True)
     course         = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='batches')
     name           = models.CharField(max_length=200)
     batch_code     = models.CharField(max_length=30, unique=True)
@@ -161,6 +164,7 @@ class BatchFaculty(models.Model):
 
 class Classroom(models.Model):
     id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='classrooms', null=True, blank=True)
     name     = models.CharField(max_length=100)
     capacity = models.PositiveIntegerField(default=30)
     is_active = models.BooleanField(default=True)
@@ -183,6 +187,7 @@ class Classroom(models.Model):
 
 class TimetableSlot(models.Model):
     id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization  = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='timetable_slots', null=True, blank=True)
     batch         = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='timetable_slots')
     subject       = models.ForeignKey(Subject, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     faculty       = models.ForeignKey(

@@ -17,15 +17,19 @@ from batches.models import Batch
 
 def _branch_filter(user):
     """Return Q filter for branch scoping based on user role."""
+    q = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        q &= Q(branch__organization=org)
     role = getattr(user, 'role', None)
     if role == 'super_admin':
-        return Q()
+        return q
     bid = getattr(user, 'branch_id', None)
     if not bid and hasattr(user, 'profile'):
         bid = getattr(user.profile, 'branch_id', None)
     if bid:
-        return Q(branch_id=bid)
-    return Q()
+        q &= Q(branch_id=bid)
+    return q
 
 
 def get_dashboard_data(user):
@@ -96,11 +100,16 @@ def get_dashboard_data(user):
     # Fees
     # Build branch filter for StudentFee (uses student__branch_id)
     role = getattr(user, 'role', None)
+    fee_bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        fee_bq &= Q(student__branch__organization=org)
     if role == 'super_admin':
-        fee_bq = Q()
+        pass
     else:
         bid = getattr(user, 'branch_id', None)
-        fee_bq = Q(student__branch_id=bid) if bid else Q()
+        if bid:
+            fee_bq &= Q(student__branch_id=bid)
 
     fee_agg = StudentFee.objects.filter(fee_bq).aggregate(
         collected=Sum('amount_paid'),

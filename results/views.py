@@ -44,6 +44,8 @@ class PaperView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = MarkSheet.objects.filter(exam_id=exam_id).select_related('student__user', 'paper_checker')
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(exam__branch__organization=request.user.organization)
         if role == 'paper_checker':
             qs = qs.filter(paper_checker=request.user)
 
@@ -63,7 +65,10 @@ class PaperMarksView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            ms = MarkSheet.objects.get(id=marksheet_id, exam_id=exam_id)
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(id=marksheet_id, exam_id=exam_id)
         except MarkSheet.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -100,7 +105,10 @@ class PaperRecheckView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            ms = MarkSheet.objects.get(id=marksheet_id, exam_id=exam_id)
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(id=marksheet_id, exam_id=exam_id)
         except MarkSheet.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -133,6 +141,8 @@ class CheckerStatusView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         sheets = MarkSheet.objects.filter(exam_id=exam_id).select_related('paper_checker')
+        if getattr(request.user, 'organization', None):
+            sheets = sheets.filter(exam__branch__organization=request.user.organization)
         total = sheets.count()
         submitted = sheets.filter(is_submitted=True).count()
 
@@ -213,7 +223,10 @@ class PublishResultView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            exam = Exam.objects.get(id=exam_id)
+            qs = Exam.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -265,6 +278,8 @@ class ResultView(APIView):
     def get(self, request, exam_id):
         role = _user_role(request.user)
         qs = PublishedResult.objects.filter(exam_id=exam_id).select_related('student__user')
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(exam__branch__organization=request.user.organization)
 
         if role == 'student':
             qs = qs.filter(student__user=request.user)
@@ -295,12 +310,18 @@ class StudentRecheckRequestView(APIView):
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Must have PublishedResult
-        if not PublishedResult.objects.filter(exam_id=exam_id, student=student).exists():
+        pr_qs = PublishedResult.objects.filter(exam_id=exam_id, student=student)
+        if getattr(request.user, 'organization', None):
+            pr_qs = pr_qs.filter(exam__branch__organization=request.user.organization)
+        if not pr_qs.exists():
             return Response({'success': False, 'message': 'Results not published yet. Cannot request recheck.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get marksheet
         try:
-            ms = MarkSheet.objects.get(exam_id=exam_id, student=student)
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(exam_id=exam_id, student=student)
         except MarkSheet.DoesNotExist:
             return Response({'success': False, 'message': 'MarkSheet not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -340,6 +361,8 @@ class RecheckRequestListView(APIView):
         qs = RecheckRequest.objects.filter(
             marksheet__exam_id=exam_id
         ).select_related('marksheet', 'requested_by__user', 'reviewed_by', 'new_checker')
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
 
         return Response({'success': True, 'count': qs.count(), 'data': RecheckRequestSerializer(qs, many=True).data})
 
@@ -354,7 +377,10 @@ class RecheckRequestActionView(APIView):
             return Response({'success': False, 'message': 'Only ASE can review recheck requests.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            rr = RecheckRequest.objects.select_related('marksheet').get(id=request_id, marksheet__exam_id=exam_id)
+            qs = RecheckRequest.objects.select_related('marksheet').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
+            rr = qs.get(id=request_id, marksheet__exam_id=exam_id)
         except RecheckRequest.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 

@@ -35,10 +35,20 @@ class CourseCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Course
         fields = ['name', 'code', 'course_type', 'duration_months',
-                  'fee_amount', 'description', 'is_active']
+                  'fee_amount', 'description', 'is_active', 'organization']
 
     def validate_code(self, value):
         return value.upper().strip()
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = self.context['request'].user.organization
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = instance.organization or self.context['request'].user.organization
+        return super().update(instance, validated_data)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

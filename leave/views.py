@@ -66,6 +66,8 @@ class LeaveListCreateView(APIView):
         role = _user_role(request.user)
         if role in ADMIN_ROLES:
             qs = LeaveApplication.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
             bid = _user_branch_id(request.user)
             if role != 'super_admin' and bid:
                 qs = qs.filter(branch_id=bid)
@@ -184,14 +186,17 @@ class LeaveListCreateView(APIView):
 class LeaveDetailView(APIView):
     # permission_classes = [IsAuthenticated]
 
-    def _get_leave(self, leave_id):
+    def _get_leave(self, request, leave_id):
         try:
-            return LeaveApplication.objects.get(id=leave_id)
+            qs = LeaveApplication.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            return qs.get(id=leave_id)
         except LeaveApplication.DoesNotExist:
             return None
 
     def get(self, request, leave_id):
-        app = self._get_leave(leave_id)
+        app = self._get_leave(request, leave_id)
         if app is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         role = _user_role(request.user)
@@ -200,7 +205,7 @@ class LeaveDetailView(APIView):
         return Response({'success': True, 'data': LeaveApplicationDetailSerializer(app, context={'request': request}).data})
 
     def patch(self, request, leave_id):
-        app = self._get_leave(leave_id)
+        app = self._get_leave(request, leave_id)
         if app is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if app.applied_by != request.user:
@@ -216,7 +221,7 @@ class LeaveDetailView(APIView):
         return Response({'success': True, 'message': 'Leave updated.', 'data': LeaveApplicationDetailSerializer(app, context={'request': request}).data})
 
     def delete(self, request, leave_id):
-        app = self._get_leave(leave_id)
+        app = self._get_leave(request, leave_id)
         if app is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if app.applied_by != request.user:
@@ -242,7 +247,10 @@ class LeaveApproveView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            app = LeaveApplication.objects.get(id=leave_id)
+            qs = LeaveApplication.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            app = qs.get(id=leave_id)
         except LeaveApplication.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -348,7 +356,10 @@ class LeaveRejectView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            app = LeaveApplication.objects.get(id=leave_id)
+            qs = LeaveApplication.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            app = qs.get(id=leave_id)
         except LeaveApplication.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -384,6 +395,8 @@ class LeavePolicyView(APIView):
     def get(self, request):
         bid = _user_branch_id(request.user)
         qs = LeavePolicy.objects.filter(is_active=True)
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
         if bid:
             qs = qs.filter(branch_id=bid)
         return Response({'success': True, 'data': LeavePolicySerializer(qs, many=True).data})
@@ -420,7 +433,10 @@ class LeavePolicyDetailView(APIView):
         if role not in POLICY_EDIT_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            policy = LeavePolicy.objects.get(id=policy_id)
+            qs = LeavePolicy.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            policy = qs.get(id=policy_id)
         except LeavePolicy.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -453,8 +469,10 @@ class LeaveBalanceUserView(APIView):
         if role not in ADMIN_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         year = request.GET.get('year', timezone.now().year)
-        balances = LeaveBalance.objects.filter(user_id=user_id, year=year)
-        return Response({'success': True, 'data': LeaveBalanceSerializer(balances, many=True).data})
+        qs = LeaveBalance.objects.filter(user_id=user_id, year=year)
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(user__organization=request.user.organization)
+        return Response({'success': True, 'data': LeaveBalanceSerializer(qs, many=True).data})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -468,6 +486,8 @@ class LateEntryListCreateView(APIView):
         role = _user_role(request.user)
         if role in LATE_ENTRY_ADMIN + ['super_admin']:
             qs = LateEntryRecord.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
             bid = _user_branch_id(request.user)
             if role != 'super_admin' and bid:
                 qs = qs.filter(branch_id=bid)
@@ -547,6 +567,8 @@ class PublicHolidayListCreateView(APIView):
     def get(self, request):
         bid = _user_branch_id(request.user)
         qs = PublicHoliday.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
         if bid:
             qs = qs.filter(branch_id=bid)
 
@@ -595,7 +617,10 @@ class PublicHolidayDeleteView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            holiday = PublicHoliday.objects.get(id=holiday_id)
+            qs = PublicHoliday.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            holiday = qs.get(id=holiday_id)
         except PublicHoliday.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 

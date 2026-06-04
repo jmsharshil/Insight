@@ -8,6 +8,9 @@ from fees.models import StudentFee, Payment
 def get_fee_report(user, params):
     role = getattr(user, 'role', None)
     bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        bq &= Q(student__branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
@@ -41,6 +44,8 @@ def get_fee_report(user, params):
 
     # Payment mode breakdown for the selected month/year
     pay_bq = Q()
+    if org:
+        pay_bq &= Q(student__branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
@@ -66,8 +71,8 @@ def get_fee_report(user, params):
     student_rows = list(
         sf_qs.values('student_id', 'student__name', 'status')
         .annotate(
-            total_amount=Sum('total_amount'),
-            amount_paid=Sum('amount_paid'),
+            sum_total=Sum('total_amount'),
+            sum_paid=Sum('amount_paid'),
             amount_due=Sum(F('total_amount') - F('discount') - F('amount_paid')),
         )
         .order_by('-amount_due')[:100]
@@ -76,8 +81,8 @@ def get_fee_report(user, params):
         {
             'student_id': r['student_id'],
             'student_name': r['student__name'] or '',
-            'total_amount': r['total_amount'] or 0,
-            'amount_paid': r['amount_paid'] or 0,
+            'total_amount': r['sum_total'] or 0,
+            'amount_paid': r['sum_paid'] or 0,
             'amount_due': r['amount_due'] or 0,
             'status': r['status'] or 'pending',
         }
