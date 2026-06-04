@@ -4,6 +4,7 @@ from django.db.models import Q
 
 # Create your views here.
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -316,6 +317,7 @@ from django.shortcuts import get_object_or_404
 
 class UpdateUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_user(self, request, user_id):
         return get_object_or_404(User, id=user_id, organization=request.user.organization)
@@ -398,7 +400,7 @@ class UserListAPIView(APIView):
         return paginate_queryset(users, request, UserListSerializer)
 
 class UserProfileAPIView(APIView):
-    
+    parser_classes = [MultiPartParser, FormParser]
     def get(self, request):
         """
         Get details of the currently authenticated user.

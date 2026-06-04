@@ -5,17 +5,19 @@ from .models import User, Organization
 class UserSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     organization_name = serializers.CharField(source='organization.name', read_only=True)
+    profile_pic = serializers.ImageField(source='profile_pic', read_only=True, allow_null=True, use_url=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch','organization', 'organization_name']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch','organization', 'organization_name', 'profile_pic']
 
 class UserListSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    profile_pic = serializers.ImageField(source='profile_pic', read_only=True, allow_null=True, use_url=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active','created_at']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active','created_at', 'profile_pic']
 
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -140,7 +142,7 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_student','is_active','organization']
+        fields = ['username','email','phone','name','role','branch','linked_student','is_active','organization','profile_pic']
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -154,10 +156,11 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
+    profile_pic = serializers.ImageField(source='profile_pic', read_only=False, allow_null=True, use_url=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'linked_student', 'organization', 'organization_name']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'linked_student', 'organization', 'organization_name', 'profile_pic']
         read_only_fields = ['id', 'username', 'role', 'branch', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
     
     def validate_email(self, value):
