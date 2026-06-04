@@ -10,6 +10,13 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch','organization', 'organization_name']
 
+class OrganizationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Organization
+        fields = ['id', 'name', 'logo_url', 'footer_text', 'primary_color', 'website_url', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     organization = serializers.PrimaryKeyRelatedField(

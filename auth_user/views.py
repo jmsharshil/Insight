@@ -16,6 +16,7 @@ from .serializers import (
     ResetPasswordSerializer,
     PasswordSetSerializer,
     OrganizationCreateSerializer,
+    OrganizationSerializer,
     UserSerializer,
     UpdateUserSerializer,
     UserProfileSerializer,
@@ -401,4 +402,35 @@ class UserProfileAPIView(APIView):
                 "message": "Profile updated successfully",
                 "data": serializer.data
             }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class OrganizationDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.organization:
+            return Response({"error": "User does not belong to an organization."}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = OrganizationSerializer(request.user.organization)
+        return Response({
+            "success": True,
+            "data": serializer.data
+        })
+
+    def patch(self, request):
+        if not request.user.organization:
+            return Response({"error": "User does not belong to an organization."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Optionally, restrict this to super_admin or admin roles
+        if request.user.role != 'super_admin':
+            return Response({"error": "You do not have permission to update organization details."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = OrganizationSerializer(request.user.organization, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "Organization updated successfully",
+                "data": serializer.data
+            })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
