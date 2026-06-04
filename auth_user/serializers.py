@@ -5,17 +5,35 @@ from .models import User, Organization
 class UserSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     organization_name = serializers.CharField(source='organization.name', read_only=True)
+    profile_pic = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch','organization', 'organization_name', 'profile_pic']
 
+    def get_profile_pic(self, obj):
+        if obj.profile_pic:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_pic.url)
+            return obj.profile_pic.url
+        return None
+
 class UserListSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    profile_pic = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active','created_at', 'profile_pic']
+
+    def get_profile_pic(self, obj):
+        if obj.profile_pic:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_pic.url)
+            return obj.profile_pic.url
+        return None
 
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -137,6 +155,7 @@ class UpdateUserSerializer(serializers.ModelSerializer):
     organization = serializers.PrimaryKeyRelatedField(
         queryset=Organization.objects.all(), required=False, allow_null=True
     )
+    profile_pic = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -154,12 +173,21 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
+    profile_pic = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'linked_student', 'organization', 'organization_name', 'profile_pic']
         read_only_fields = ['id', 'username', 'role', 'branch', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
     
+    def get_profile_pic(self, obj):
+        if obj.profile_pic:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_pic.url)
+            return obj.profile_pic.url
+        return None
+
     def validate_email(self, value):
         # Ensure email is unique across users, excluding the current user
         if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
