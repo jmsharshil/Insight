@@ -378,6 +378,9 @@ class UserListAPIView(APIView):
 
     def get(self, request):
         users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
+        role = self.request.query_params.get('role')
+        if role:
+            users = users.filter(role=role)
         return paginate_queryset(users, request, UserSerializer)
 
 class UserProfileAPIView(APIView):
