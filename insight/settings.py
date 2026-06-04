@@ -184,6 +184,8 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'testing251299@gmail.com'
 EMAIL_HOST_PASSWORD = 'hqnc uhzo lwch iwss'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 
 LANGUAGE_CODE = 'en-us'
 
