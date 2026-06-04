@@ -5,7 +5,6 @@ from .models import User, Organization
 class UserSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     organization_name = serializers.CharField(source='organization.name', read_only=True)
-    profile_pic = serializers.ImageField(source='profile_pic', read_only=True, allow_null=True, use_url=True)
 
     class Meta:
         model = User
@@ -13,7 +12,6 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserListSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
-    profile_pic = serializers.ImageField(source='profile_pic', read_only=True, allow_null=True, use_url=True)
 
     class Meta:
         model = User
@@ -156,7 +154,6 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
-    profile_pic = serializers.ImageField(source='profile_pic', read_only=False, allow_null=True, use_url=True)
 
     class Meta:
         model = User
