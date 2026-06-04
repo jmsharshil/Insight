@@ -1,62 +1,106 @@
 """
-Push-notification helper for the chat module.
+chat/tasks.py
 
-Runs synchronously (no Celery/Redis required).
+Celery tasks for the chat module.
+
+Currently contains the ``notify_new_chat_message`` task that sends push
+notifications to room participants who are offline
 
 """
 
 import logging
 
+from celery import shared_task
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
 
 
-def notify_new_chat_message(room_id: str, message_id: str, sender_id: str):
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=5,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    acks_late=True,
+    name="chat.notify_new_chat_message",
+)
+def notify_new_chat_message(self, room_id: str, message_id: str, sender_id: str):
     """
-    Send push notifications to room participants excluding the sender.
+    Send push notifications to participants who are NOT currently
+    online in the chat room.
 
-    Runs as a plain function — no Celery worker or Redis broker required.
-    Called directly from views.py and consumers.py after a message is saved.
+    Steps:
+      1. Fetch room participants excluding the sender.
+      2. For every participant, delegate to
+         ``NotificationService.send()`` if available, otherwise log.
+
+    Parameters
+    ----------
+    room_id : str
+        UUID of the chat room.
+    message_id : str
+        UUID of the newly created message.
+    sender_id : str
+        UUID of the user who sent the message.
     """
     from chat.models import ChatRoom, Message
+    from django.contrib.auth import get_user_model
 
-    # --- Fetch room ---
+    User = get_user_model()
+
     try:
         room = ChatRoom.objects.get(id=room_id)
     except ChatRoom.DoesNotExist:
         logger.error("notify_new_chat_message: room %s not found", room_id)
         return
 
-    # --- Fetch message ---
     try:
         message = Message.objects.select_related("sender").get(id=message_id)
     except Message.DoesNotExist:
         logger.error("notify_new_chat_message: message %s not found", message_id)
         return
 
-    # --- Participants excluding sender ---
+    # Participants minus the sender
     participants = room.participants.exclude(id=sender_id)
+
     if not participants.exists():
         return
 
+    # Since we are running without Redis online-status tracking,
+    # we consider all other participants as targets for push notifications.
+    offline_participants = list(participants)
+
+    # Attempt to use NotificationService if it exists
+    notification_service = _get_notification_service()
+
     sender_name = getattr(message.sender, "name", "Someone")
-    preview = (
-        message.content[:100] if message.content
-        else (message.file_name or "sent a file")
-    )
+    preview = message.content[:100] if message.content else (message.file_name or "sent a file")
 
-    payload = {
-        "title": f"New message from {sender_name}",
-        "body":  preview,
-        "data": {
-            "type":       "chat_message",
-            "room_id":    str(room_id),
-            "message_id": str(message_id),
-        },
-    }
-
-    for participant in participants:
+    for participant in offline_participants:
         try:
-            _send_push(participant, payload)
+            if notification_service is not None:
+                notification_service.send(
+                    user=participant,
+                    title=f"New message from {sender_name}",
+                    body=preview,
+                    data={
+                        "type": "chat_message",
+                        "room_id": str(room_id),
+                        "message_id": str(message_id),
+                    },
+                )
+            else:
+                logger.info(
+                    "[CHAT PUSH PLACEHOLDER] Notify user %s (%s): "
+                    "New message from %s in room %s -- '%s'",
+                    participant.id,
+                    getattr(participant, "name", ""),
+                    sender_name,
+                    room_id,
+                    preview,
+                )
         except Exception:
             logger.exception(
                 "Failed to notify user %s for message %s",
@@ -65,75 +109,13 @@ def notify_new_chat_message(room_id: str, message_id: str, sender_id: str):
             )
 
 
-def _send_push(user, payload: dict):
+def _get_notification_service():
     """
-    Central push dispatcher with 3 fallback layers.
-
-    Layer 1 — NotificationService (if notifications app installed)
-    Layer 2 — Firebase Admin SDK  (uncomment when ready)
-    Layer 3 — Placeholder log     (current active fallback)
+    Try to import ``NotificationService`` from the notifications module.
+    Returns the class if available, else ``None``.
     """
-
-    # ------------------------------------------------------------------
-    # Layer 1: NotificationService
-    # ------------------------------------------------------------------
     try:
-        from notifications.services import NotificationService
-        NotificationService.send(
-            user=user,
-            title=payload["title"],
-            body=payload["body"],
-            data=payload["data"],
-        )
-        logger.debug("Push sent via NotificationService → user %s", user.id)
-        return
+        from notifications.service import NotificationService
+        return NotificationService
     except ImportError:
-        pass
-
-    # ------------------------------------------------------------------
-    # Layer 2: Firebase Admin SDK
-    # Uncomment this block when you're ready to connect real FCM.
-    #
-    # Setup steps:
-    #   pip install firebase-admin
-    #   Add to settings.py:
-    #     FIREBASE_CREDENTIALS = BASE_DIR / "serviceAccountKey.json"
-    #   Add to your User model:
-    #     fcm_token = models.CharField(max_length=255, blank=True, default="")
-    #   Call firebase_admin.initialize_app() in apps.py ready() method
-    # ------------------------------------------------------------------
-    #
-    # import firebase_admin.messaging as fcm
-    # from django.conf import settings
-    #
-    # device_token = getattr(user, "fcm_token", None)
-    # if device_token:
-    #     try:
-    #         fcm_message = fcm.Message(
-    #             notification=fcm.Notification(
-    #                 title=payload["title"],
-    #                 body=payload["body"],
-    #             ),
-    #             data={k: str(v) for k, v in payload["data"].items()},
-    #             token=device_token,
-    #         )
-    #         response = fcm.send(fcm_message)
-    #         logger.debug("FCM push sent → user %s | response: %s", user.id, response)
-    #         return
-    #     except fcm.UnregisteredError:
-    #         logger.warning("FCM token invalid for user %s — clearing token", user.id)
-    #         type(user).objects.filter(pk=user.pk).update(fcm_token="")
-    #     except Exception as exc:
-    #         logger.exception("FCM send failed for user %s: %s", user.id, exc)
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Layer 3: Placeholder log (active until Firebase is connected)
-    # ------------------------------------------------------------------
-    logger.info(
-        "[PUSH PLACEHOLDER] → user_id=%s | title=%s | body=%s | data=%s",
-        getattr(user, "id", "?"),
-        payload["title"],
-        payload["body"],
-        payload["data"],
-    )
+        return None

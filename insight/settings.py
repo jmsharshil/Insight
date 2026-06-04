@@ -27,13 +27,13 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app','127.0.0.1','192.168.29.226','localhost','192.168.1.226']
+ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost']
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'daphne',                          # must be before django.contrib.staticfiles
+    'daphne',                     # must be first — provides ASGI server
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
-    'storages',
+    'channels',                   # Django Channels for WebSocket support
     'auth_user',
     'leads',
     'onboarding',
@@ -60,7 +60,6 @@ INSTALLED_APPS = [
     'core',
     'reports',
     'chat',
-    'channels',
 ]
 
 MIDDLEWARE = [
@@ -93,6 +92,18 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'insight.wsgi.application'
+ASGI_APPLICATION = 'insight.asgi.application'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Django Channels — WebSocket layer backed by Redis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
+
 
 ASGI_APPLICATION = 'insight.asgi.application'
 
@@ -331,8 +342,10 @@ SESSION_COOKIE_SECURE = True   # Only valid if using HTTPS
 # Celery Configuration (Redis broker)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'memory://')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'cache+memory://')
+CELERY_TASK_ALWAYS_EAGER = True  # Run tasks synchronously without a worker
+CELERY_TASK_STORE_EAGER_RESULT = True
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

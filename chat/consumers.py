@@ -7,10 +7,12 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
+from urllib.parse import parse_qs
+
 
 logger = logging.getLogger(__name__)
 
-FACULTY_ROLE = "faculty"  # ← change if your role field uses a different value
+FACULTY_ROLE = "faculty"
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
@@ -57,7 +59,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
-        # --- ITEM-2: Mark undelivered messages as delivered on connect ---
         await self._mark_messages_delivered(self.room_id, self.user)
         delivered_msgs = await self._get_newly_delivered_messages(self.room_id, self.user)
         for msg in delivered_msgs:
@@ -72,8 +73,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
 
     async def disconnect(self, close_code):
-        if hasattr(self, 'room_group_name'):
-            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     # ------------------------------------------------------------------
     # Inbound dispatcher
@@ -88,12 +88,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         event_type = data.get("type")
         handler_map = {
-            "send_message":   self._handle_send_message,
-            "typing_start":   self._handle_typing_start,
-            "typing_stop":    self._handle_typing_stop,
-            "mark_read":      self._handle_mark_read,
-            "edit_message":   self._handle_edit_message,
-            "delete_message": self._handle_delete_message,
+            "send_message":  self._handle_send_message,
+            "typing_start":  self._handle_typing_start,
+            "typing_stop":   self._handle_typing_stop,
+            "mark_read":     self._handle_mark_read,
         }
 
         handler = handler_map.get(event_type)
@@ -209,76 +207,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             },
         )
 
-    async def _handle_edit_message(self, data: dict):
-        """
-        Inbound: { "type": "edit_message", "message_id": "<uuid>", "content": "new text" }
-        Saves the new content to DB (sender only, not deleted).
-        Broadcasts message_edited to the whole room.
-        """
-        message_id  = data.get("message_id")
-        new_content = (data.get("content") or "").strip()
-
-        if not message_id or not new_content:
-            await self._send_error("MISSING_FIELD", "'message_id' and 'content' are required.")
-            return
-
-        result = await self._edit_message(message_id, self.user, new_content)
-
-        if result == "not_found":
-            await self._send_error("NOT_FOUND", "Message not found.")
-        elif result == "forbidden":
-            await self._send_error("FORBIDDEN", "You can only edit your own messages.")
-        elif result == "deleted":
-            await self._send_error("DELETED", "Cannot edit a deleted message.")
-        else:
-            # result is the updated Message instance
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type":       "chat.message_edited",
-                    "message_id": str(result.id),
-                    "room_id":    self.room_id,
-                    "content":    result.content,
-                    "updated_at": result.updated_at.isoformat(),
-                    "edited_by":  str(self.user.id),
-                },
-            )
-
-    async def _handle_delete_message(self, data: dict):
-        """
-        Inbound: { "type": "delete_message", "message_id": "<uuid>" }
-        Soft-deletes the message (sender only):
-          - sets is_deleted = True
-          - replaces content with 'This message was deleted'
-          - clears file fields
-        Broadcasts message_deleted to the whole room.
-        """
-        message_id = data.get("message_id")
-        if not message_id:
-            await self._send_error("MISSING_FIELD", "'message_id' is required.")
-            return
-
-        result = await self._soft_delete_message(message_id, self.user)
-
-        if result == "not_found":
-            await self._send_error("NOT_FOUND", "Message not found.")
-        elif result == "forbidden":
-            await self._send_error("FORBIDDEN", "You can only delete your own messages.")
-        else:
-            # result is the updated Message instance
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type":       "chat.message_deleted",
-                    "message_id": str(result.id),
-                    "room_id":    self.room_id,
-                    "content":    result.content,   # 'This message was deleted'
-                    "is_deleted": True,
-                    "updated_at": result.updated_at.isoformat(),
-                    "deleted_by": str(self.user.id),
-                },
-            )
-
     # ------------------------------------------------------------------
     # Outbound handlers
     # ------------------------------------------------------------------
@@ -305,7 +233,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "read_at":    event["read_at"],
         }))
 
-    # ITEM-2 — delivered_receipt outbound handler
+    # ITEM-2 — new outbound handler
     async def chat_delivered_receipt(self, event):
         await self.send(text_data=json.dumps({
             "type":         "delivered_receipt",
@@ -314,27 +242,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "delivered_at": event["delivered_at"],
         }))
 
-    async def chat_message_edited(self, event):
-        """Relay message_edited event to the WebSocket client."""
+    async def chat_message_updated(self, event):
         await self.send(text_data=json.dumps({
-            "type":       "message_edited",
+            "type":       "message_updated",
             "message_id": event["message_id"],
-            "room_id":    event["room_id"],
             "content":    event["content"],
-            "updated_at": event["updated_at"],
-            "edited_by":  event["edited_by"],
         }))
 
     async def chat_message_deleted(self, event):
-        """Relay message_deleted event to the WebSocket client."""
         await self.send(text_data=json.dumps({
             "type":       "message_deleted",
             "message_id": event["message_id"],
-            "room_id":    event["room_id"],
-            "content":    event["content"],    # 'This message was deleted'
-            "is_deleted": True,
-            "updated_at": event["updated_at"],
-            "deleted_by": event["deleted_by"],
         }))
 
     # ------------------------------------------------------------------
@@ -433,77 +351,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _dispatch_notification_task(self, *, room_id, message_id, sender_id):
-        """
-        Run the push-notification logic synchronously (no Celery/Redis required).
-        Errors are logged but never propagated so a notification failure
-        cannot crash the WebSocket consumer.
-        """
         from .tasks import notify_new_chat_message
-        try:
-            notify_new_chat_message(room_id, message_id, sender_id)
-        except Exception:
-            logger.exception(
-                "notify_new_chat_message failed for message %s in room %s.",
-                message_id, room_id,
-            )
-
-    @database_sync_to_async
-    def _edit_message(self, message_id: str, user, new_content: str):
-        """
-        Update the content of a message.
-
-        Returns:
-            Message instance on success.
-            'not_found'  if the message does not exist in this room.
-            'forbidden'  if the user is not the sender.
-            'deleted'    if the message has already been soft-deleted.
-        """
-        from .models import Message
-        try:
-            message = Message.objects.get(id=message_id, room_id=self.room_id)
-        except Message.DoesNotExist:
-            return "not_found"
-
-        if str(message.sender_id) != str(user.id):
-            return "forbidden"
-
-        if message.is_deleted:
-            return "deleted"
-
-        message.content = new_content
-        message.save(update_fields=["content", "updated_at"])
-        return message
-
-    @database_sync_to_async
-    def _soft_delete_message(self, message_id: str, user):
-        """
-        Soft-delete a message: sets is_deleted=True, replaces content
-        with the placeholder, and clears file fields.
-
-        Returns:
-            Message instance on success (already deleted counts as success).
-            'not_found'  if the message does not exist in this room.
-            'forbidden'  if the user is not the sender.
-        """
-        from .models import Message
-        try:
-            message = Message.objects.get(id=message_id, room_id=self.room_id)
-        except Message.DoesNotExist:
-            return "not_found"
-
-        if str(message.sender_id) != str(user.id):
-            return "forbidden"
-
-        if not message.is_deleted:
-            message.is_deleted = True
-            message.content    = Message.DELETED_TEXT
-            message.file_url   = None
-            message.file_name  = None
-            message.file_size  = None
-            message.save(update_fields=["is_deleted", "content", "file_url", "file_name", "file_size", "updated_at"])
-
-        return message
-
+        notify_new_chat_message.delay(room_id, message_id, sender_id)
 
 
 # ======================================================================
@@ -511,7 +360,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
 # ======================================================================
 
 def _parse_token(query_string: str) -> str | None:
-    from urllib.parse import parse_qs
     params = parse_qs(query_string)
     tokens = params.get("token")
     return tokens[0] if tokens else None

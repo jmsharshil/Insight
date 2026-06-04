@@ -8,6 +8,7 @@ class UserMiniSerializer(serializers.Serializer):
     avatar_url = serializers.SerializerMethodField()
 
     def get_avatar_url(self, obj) -> str:
+        """Return avatar URL or empty string if the user has no avatar."""
         return getattr(obj, "avatar_url", None) or ""
 
 
@@ -25,17 +26,13 @@ class MessageSerializer(serializers.ModelSerializer):
     read_receipts = ReadReceiptSerializer(many=True, read_only=True)
     created_at = serializers.DateTimeField(format="iso-8601", read_only=True)
     updated_at = serializers.DateTimeField(format="iso-8601", read_only=True)
-    delivered_at = serializers.DateTimeField(format="iso-8601", read_only=True, allow_null=True)
-    tick_status = serializers.SerializerMethodField()
-    # File fields are masked to null when the message is soft-deleted
-    file_url = serializers.SerializerMethodField()
-    file_name = serializers.SerializerMethodField()
-    file_size = serializers.SerializerMethodField()
+    delivered_at  = serializers.DateTimeField(format="iso-8601", read_only=True, allow_null=True)
+    tick_status   = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ("id","room","sender","content","is_deleted","file_url","file_name","file_size","created_at","updated_at","delivered_at","tick_status","read_receipts",)
-        read_only_fields = ("id", "room", "sender", "created_at", "updated_at")
+        fields = ("id","room","sender","content","file_url","file_name","file_size","is_deleted","created_at","updated_at","delivered_at","tick_status", "read_receipts",)
+        read_only_fields = ("id", "room", "sender", "created_at", "updated_at", "is_deleted")
 
     def get_tick_status(self, obj) -> str:
         if obj.read_receipts.all():
@@ -44,42 +41,44 @@ class MessageSerializer(serializers.ModelSerializer):
             return "delivered"
         return "sent"
 
-    def get_file_url(self, obj):
-        return None if obj.is_deleted else obj.file_url
-
-    def get_file_name(self, obj):
-        return None if obj.is_deleted else obj.file_name
-
-    def get_file_size(self, obj):
-        return None if obj.is_deleted else obj.file_size
-
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get('is_deleted'):
+            data['content'] = "This message was deleted"
+            data['file_url'] = None
+            data['file_name'] = None
+            data['file_size'] = None
+        return data
 
 class LastMessageSerializer(serializers.Serializer):
     sender_name = serializers.CharField()
-    content     = serializers.CharField(allow_blank=True)
-    file_name   = serializers.CharField(allow_blank=True, allow_null=True)
-    created_at  = serializers.DateTimeField(format="iso-8601")
+    content = serializers.CharField(allow_blank=True)
+    file_name = serializers.CharField(allow_blank=True, allow_null=True)
+    created_at = serializers.DateTimeField(format="iso-8601")
 
 
 class ChatRoomSerializer(serializers.ModelSerializer):
-    participants  = UserMiniSerializer(many=True, read_only=True)
-    last_message  = serializers.SerializerMethodField()
-    unread_count  = serializers.IntegerField(read_only=True, default=0)
-    created_at    = serializers.DateTimeField(format="iso-8601", read_only=True)
+    participants = UserMiniSerializer(many=True, read_only=True)
+    last_message = serializers.SerializerMethodField()
+    unread_count = serializers.IntegerField(read_only=True, default=0)
+    created_at = serializers.DateTimeField(format="iso-8601", read_only=True)
 
     class Meta:
         model = ChatRoom
         fields = ("id","name","room_type","participants","created_at","last_message","unread_count",)
 
     def get_last_message(self, obj) -> dict | None:
+        # If messages were prefetched, use the cached set
         messages = obj.messages.order_by("-created_at")[:1]
         msg = messages[0] if messages else None
+
         if msg is None:
             return None
+
         return {
             "sender_name": getattr(msg.sender, "name", ""),
-            "content":     msg.content,
-            "file_name":   msg.file_name or "",
-            "created_at":  msg.created_at.isoformat(),
-            "tick_status": msg.tick_status,   # ITEM-2
+            "content": msg.content,
+            "file_name": msg.file_name or "",
+            "created_at": msg.created_at.isoformat(),
+            "tick_status": msg.tick_status,
         }
