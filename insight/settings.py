@@ -213,7 +213,7 @@ USE_AZURE_MEDIA = os.environ.get("USE_AZURE_MEDIA", "0") in ("1", "true", "True"
 if USE_AZURE_MEDIA:
     AZURE_ACCOUNT_NAME = os.environ["AZURE_ACCOUNT_NAME"]
     AZURE_ACCOUNT_KEY  = os.environ["AZURE_ACCOUNT_KEY"]
-    AZURE_CONTAINER    = os.environ.get("AZURE_MEDIA_CONTAINER", "media")
+    AZURE_CONTAINER    = os.environ.get("AZURE_MEDIA_CONTAINER")
     AZURE_ACCOUNT_URL  = f"https://{AZURE_ACCOUNT_NAME}.blob.core.windows.net"
     AZURE_CUSTOM_DOMAIN = os.environ.get(
         "AZURE_CUSTOM_DOMAIN",
@@ -229,7 +229,7 @@ if USE_AZURE_MEDIA:
             "OPTIONS": {
                 "account_name": AZURE_ACCOUNT_NAME,
                 "account_key": AZURE_ACCOUNT_KEY,
-                "azure_container_name": AZURE_CONTAINER,
+                "azure_container": AZURE_CONTAINER,
                 "overwrite_files": AZURE_OVERWRITE_FILES,
             }
         },
