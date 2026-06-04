@@ -114,6 +114,8 @@ class QRScanInputSerializer(serializers.Serializer):
         required=True,
         help_text='ID of the QR reader device or "mobile_app" for in-app scan.',
     )
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
 
 
 class QRScanResponseSerializer(serializers.Serializer):
