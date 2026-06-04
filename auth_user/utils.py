@@ -13,7 +13,7 @@ def generate_temporary_password(length=12):
 
 
 def send_password_set_email(user, token):
-    base_url = getattr(settings, 'BASE_URL', 'http://localhost:8000')
+    base_url = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
     query = urlencode({'token': token})
     password_set_link = f"{base_url}/api/auth/set-password?{query}"
 

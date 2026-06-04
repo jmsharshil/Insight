@@ -186,6 +186,7 @@ EMAIL_HOST_USER = 'testing251299@gmail.com'
 EMAIL_HOST_PASSWORD = 'hqnc uhzo lwch iwss'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
+FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
 
 LANGUAGE_CODE = 'en-us'
 

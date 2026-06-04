@@ -16,7 +16,7 @@ def send_checker_assignment_email(marksheet):
     if not checker:
         return
     token = marksheet.tokens.filter(is_used=False).order_by('-created_at').first()
-    link = f"{getattr(settings, 'BASE_URL', 'http://localhost:8000')}/api/v1/checker-portal/submit/?token={token.token}" if token else 'N/A'
+    link = f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')}/api/v1/checker-portal/submit/?token={token.token}" if token else 'N/A'
     deadline = token.expires_at if token else 'N/A'
     
     subject = f"Paper Assignment: {marksheet.exam.title}"
