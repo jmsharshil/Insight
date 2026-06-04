@@ -28,6 +28,7 @@ SESSION_CHOICES = [
 
 class Course(models.Model):
     id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='courses', null=True, blank=True)
     name             = models.CharField(max_length=200)
     code             = models.CharField(max_length=30, unique=True)
     course_type      = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES)
@@ -45,8 +46,6 @@ class Course(models.Model):
             models.Index(fields=['course_type', 'is_active']),
             models.Index(fields=['-created_at']),
         ]
-
-    organization     = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='courses', null=True, blank=True)
 
     def __str__(self):
         return f"{self.code} — {self.name}"

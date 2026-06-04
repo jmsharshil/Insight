@@ -1,5 +1,6 @@
 from django.db import models
 from auth_user.models import Organization
+
 # Create your models here.
 import uuid
 
