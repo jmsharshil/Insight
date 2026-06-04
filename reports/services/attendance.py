@@ -10,6 +10,9 @@ from attendance.models import AttendanceRecord, ViolationRecord
 def get_attendance_report(user, params):
     role = getattr(user, 'role', None)
     bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        bq &= Q(branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
@@ -121,6 +124,8 @@ def get_attendance_report(user, params):
 
     # Violation summary
     v_bq = Q()
+    if org:
+        v_bq &= Q(student__branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:

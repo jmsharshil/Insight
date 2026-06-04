@@ -8,6 +8,9 @@ from fees.models import StudentFee, Payment
 def get_fee_report(user, params):
     role = getattr(user, 'role', None)
     bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        bq &= Q(student__branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
@@ -41,6 +44,8 @@ def get_fee_report(user, params):
 
     # Payment mode breakdown for the selected month/year
     pay_bq = Q()
+    if org:
+        pay_bq &= Q(student__branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:

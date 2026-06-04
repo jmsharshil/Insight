@@ -19,16 +19,19 @@ logger = logging.getLogger(__name__)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _get_student(student_id):
+def _get_student(request, student_id):
     try:
-        return Student.objects.select_related(
+        queryset = Student.objects.select_related(
             'branch', 'assigned_counsellor', 'user', 'admission', 'id_card',
         ).prefetch_related(
             'parent_links__parent',
             'batch_history',
             'inventory_issues',
             'status_history',
-        ).get(id=student_id)
+        )
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(branch__organization=request.user.organization)
+        return queryset.get(id=student_id)
     except Student.DoesNotExist:
         return None
 
@@ -46,6 +49,8 @@ class StudentListView(APIView):
 
     def get(self, request):
         qs = Student.objects.select_related('branch').all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
 
         # Filters
         stu_status = request.GET.get('status')
@@ -79,7 +84,7 @@ class StudentListView(APIView):
 class StudentDetailView(APIView):
 
     def get(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -87,7 +92,7 @@ class StudentDetailView(APIView):
         return Response({'success': True, 'data': serializer.data}, status=status.HTTP_200_OK)
 
     def patch(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -108,7 +113,7 @@ class StudentDetailView(APIView):
         )
     
     def delete(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
         student.delete()
@@ -126,7 +131,7 @@ class StudentDetailView(APIView):
 class StudentSelfProfileView(APIView):
 
     def get(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -139,7 +144,7 @@ class StudentSelfProfileView(APIView):
 class StudentQRIdentityView(APIView):
 
     def get(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -174,7 +179,7 @@ class StudentQRIdentityView(APIView):
 class StudentStatusUpdateView(APIView):
 
     def post(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -211,7 +216,7 @@ class StudentStatusUpdateView(APIView):
 class StudentBatchAllocateView(APIView):
 
     def post(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -250,7 +255,7 @@ class StudentBatchAllocateView(APIView):
 class StudentDocumentUploadView(APIView):
 
     def post(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -295,7 +300,7 @@ class StudentDocumentUploadView(APIView):
 class StudentInventoryView(APIView):
 
     def get(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 
@@ -307,7 +312,7 @@ class StudentInventoryView(APIView):
         )
 
     def post(self, request, student_id):
-        student = _get_student(student_id)
+        student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
 

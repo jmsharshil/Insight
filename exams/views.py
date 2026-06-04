@@ -65,6 +65,8 @@ class ExamListCreateView(APIView):
         user = request.user
         role = _user_role(user)
         qs = Exam.objects.filter(is_deleted=False).select_related('batch', 'subject', 'branch', 'created_by')
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
 
         if role == 'student':
             try:
@@ -136,14 +138,17 @@ class ExamListCreateView(APIView):
 class ExamDetailView(APIView):
     # permission_classes = [IsAuthenticated]
 
-    def _get_exam(self, exam_id):
+    def _get_exam(self, request, exam_id):
         try:
-            return Exam.objects.get(id=exam_id, is_deleted=False)
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            return qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return None
 
     def get(self, request, exam_id):
-        exam = self._get_exam(exam_id)
+        exam = self._get_exam(request, exam_id)
         if exam is None:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'success': True, 'data': ExamListSerializer(exam).data})
@@ -153,7 +158,7 @@ class ExamDetailView(APIView):
         if role not in EXAM_EDIT_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        exam = self._get_exam(exam_id)
+        exam = self._get_exam(request, exam_id)
         if exam is None:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -171,7 +176,7 @@ class ExamDetailView(APIView):
         if role not in EXAM_DELETE_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        exam = self._get_exam(exam_id)
+        exam = self._get_exam(request, exam_id)
         if exam is None:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -190,7 +195,10 @@ class QuestionView(APIView):
     def get(self, request, exam_id):
         role = _user_role(request.user)
         try:
-            exam = Exam.objects.get(id=exam_id, is_deleted=False)
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -216,7 +224,10 @@ class QuestionView(APIView):
     def post(self, request, exam_id):
         role = _user_role(request.user)
         try:
-            exam = Exam.objects.get(id=exam_id, is_deleted=False)
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -258,6 +269,8 @@ class SeatingView(APIView):
         if role not in ['super_admin', 'exam_supervisor', 'admin_senior_executive', 'branch_manager']:
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         seats = SeatArrangement.objects.filter(exam_id=exam_id).select_related('student__user')
+        if getattr(request.user, 'organization', None):
+            seats = seats.filter(exam__branch__organization=request.user.organization)
         return Response(SeatArrangementSerializer(seats, many=True).data)
 
     def post(self, request, exam_id):
@@ -266,7 +279,10 @@ class SeatingView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         
         try:
-            exam = Exam.objects.get(id=exam_id, is_deleted=False)
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -323,7 +339,10 @@ class ExamStartView(APIView):
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            exam = Exam.objects.get(id=exam_id, is_deleted=False)
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -396,7 +415,10 @@ class ExamSubmitView(APIView):
             return Response({'success': False, 'message': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            session = ExamSession.objects.get(id=ser.validated_data['session_id'], exam_id=exam_id)
+            qs = ExamSession.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            session = qs.get(id=ser.validated_data['session_id'], exam_id=exam_id)
         except ExamSession.DoesNotExist:
             return Response({'success': False, 'message': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -452,7 +474,10 @@ class AutosaveView(APIView):
             return Response({'success': False, 'message': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            session = ExamSession.objects.get(id=session_id, exam_id=exam_id)
+            qs = ExamSession.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            session = qs.get(id=session_id, exam_id=exam_id)
         except ExamSession.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
             
@@ -484,7 +509,10 @@ class ScreenEventView(APIView):
             return Response({'success': False, 'message': 'Invalid event'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            session = ExamSession.objects.select_related('exam').get(id=session_id, exam_id=exam_id, student__user=request.user)
+            qs = ExamSession.objects.select_related('exam').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            session = qs.get(id=session_id, exam_id=exam_id, student__user=request.user)
         except ExamSession.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -540,8 +568,10 @@ class GeoCheckView(APIView):
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            session = ExamSession.objects.select_related('exam').get(
-                id=session_id, exam_id=exam_id, student__user=request.user)
+            qs = ExamSession.objects.select_related('exam').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            session = qs.get(id=session_id, exam_id=exam_id, student__user=request.user)
         except ExamSession.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -593,7 +623,13 @@ class AnswerKeyDistributeView(APIView):
             return Response({'success': False, 'message': 'No checkers assigned'}, status=status.HTTP_400_BAD_REQUEST)
             
         sent = []
-        exam = Exam.objects.get(id=exam_id)
+        try:
+            qs = Exam.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found'}, status=status.HTTP_404_NOT_FOUND)
         for cid in checkers:
             checker = get_user_model().objects.get(id=cid)
             log = AnswerKeyDistributionLog.objects.create(
@@ -641,6 +677,8 @@ class MalpracticeView(APIView):
         if role not in ['super_admin', 'exam_supervisor', 'admin_senior_executive', 'branch_manager']:
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         reps = MalpracticeReport.objects.filter(exam_id=exam_id).select_related('student__user', 'reported_by')
+        if getattr(request.user, 'organization', None):
+            reps = reps.filter(exam__branch__organization=request.user.organization)
         return Response(MalpracticeSerializer(reps, many=True).data)
 
 
@@ -648,6 +686,12 @@ class MalpracticeView(APIView):
         if _user_role(request.user) not in ['super_admin', 'exam_supervisor']:
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
             
+        qs = Exam.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+        if not qs.filter(id=exam_id).exists():
+            return Response({'success': False, 'message': 'Exam not found'}, status=status.HTTP_404_NOT_FOUND)
+
         ser = MalpracticeInputSerializer(data=request.data)
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)

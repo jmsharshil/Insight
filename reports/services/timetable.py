@@ -12,16 +12,20 @@ WORKING_DAYS = 6  # Mon-Sat
 
 def get_timetable_report(user, params):
     role = getattr(user, 'role', None)
+    bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        bq &= Q(organization=org)
 
     # Classroom occupancy
-    total_classrooms = Classroom.objects.filter(is_active=True).count() or 1
+    total_classrooms = Classroom.objects.filter(bq, is_active=True).count() or 1
     total_possible = total_classrooms * WORKING_DAYS * MAX_SLOTS_PER_DAY
-    total_used = TimetableSlot.objects.filter(classroom__isnull=False).count()
+    total_used = TimetableSlot.objects.filter(bq, classroom__isnull=False).count()
     occupancy_rate = round((total_used / total_possible) * 100, 2) if total_possible else 0
 
     # Faculty load
     faculty_load_qs = (
-        TimetableSlot.objects.filter(faculty__isnull=False)
+        TimetableSlot.objects.filter(bq, faculty__isnull=False)
         .values('faculty_id', 'faculty__name')
         .annotate(total_slots=Count('id'))
         .order_by('-total_slots')
@@ -29,7 +33,7 @@ def get_timetable_report(user, params):
     faculty_load = []
     for f in faculty_load_qs:
         # Estimate hours: each slot ~1 hour average
-        slots = TimetableSlot.objects.filter(faculty_id=f['faculty_id'])
+        slots = TimetableSlot.objects.filter(bq, faculty_id=f['faculty_id'])
         total_mins = 0
         for s in slots.only('start_time', 'end_time'):
             from datetime import datetime, timedelta
@@ -47,11 +51,11 @@ def get_timetable_report(user, params):
 
     # Free slot analysis per classroom per day
     free_slots = []
-    classrooms = Classroom.objects.filter(is_active=True).values('id', 'name')
+    classrooms = Classroom.objects.filter(bq, is_active=True).values('id', 'name')
     for cr in classrooms:
         for day_num in range(WORKING_DAYS):
             used = TimetableSlot.objects.filter(
-                classroom_id=cr['id'], day_of_week=day_num
+                bq, classroom_id=cr['id'], day_of_week=day_num
             ).count()
             free = max(0, MAX_SLOTS_PER_DAY - used)
             if free > 0:

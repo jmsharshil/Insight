@@ -7,6 +7,9 @@ from leave.models import LeaveBalance, LeaveApplication
 def get_leave_report(user, params):
     role = getattr(user, 'role', None)
     bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        bq &= Q(branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
@@ -19,8 +22,9 @@ def get_leave_report(user, params):
     now = timezone.now()
     year = int(params.get('year', now.year))
 
-    # Leave balance per employee
     bal_q = Q(year=year)
+    if org:
+        bal_q &= Q(user__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:

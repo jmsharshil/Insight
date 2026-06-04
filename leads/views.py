@@ -135,6 +135,9 @@ class LeadListView(APIView):
     def get(self, request):
 
         queryset = Lead.objects.all().order_by("-created_at")
+        
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(branch__organization=request.user.organization)
 
         # Optional filters
         stage = request.GET.get("stage")
@@ -158,7 +161,10 @@ class LeadStatusUpdateView(APIView):
     def patch(self, request, lead_id):
         # Find lead
         try:
-            lead = Lead.objects.get(id=lead_id)
+            queryset = Lead.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(branch__organization=request.user.organization)
+            lead = queryset.get(id=lead_id)
         except Lead.DoesNotExist:
             return Response(
                 {
@@ -328,15 +334,18 @@ class LeadDetailView(APIView):
     DELETE /leads/<id>/   — soft-delete / hard-delete
     """
 
-    def _get_lead(self, lead_id):
+    def _get_lead(self, request, lead_id):
         try:
-            return Lead.objects.get(id=lead_id)
+            queryset = Lead.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(branch__organization=request.user.organization)
+            return queryset.get(id=lead_id)
         except Lead.DoesNotExist:
             return None
 
     # ── GET ────────────────────────────────────────────────────────────
     def get(self, request, lead_id):
-        lead = self._get_lead(lead_id)
+        lead = self._get_lead(request, lead_id)
         if lead is None:
             return Response(
                 {"success": False, "message": "Lead not found."},
@@ -350,7 +359,7 @@ class LeadDetailView(APIView):
 
     # ── PUT / PATCH ───────────────────────────────────────────────
     def _update(self, request, lead_id, partial: bool):
-        lead = self._get_lead(lead_id)
+        lead = self._get_lead(request, lead_id)
         if lead is None:
             return Response(
                 {"success": False, "message": "Lead not found."},
@@ -390,7 +399,7 @@ class LeadDetailView(APIView):
 
     # ── DELETE ───────────────────────────────────────────────────
     def delete(self, request, lead_id):
-        lead = self._get_lead(lead_id)
+        lead = self._get_lead(request, lead_id)
         if lead is None:
             return Response(
                 {"success": False, "message": "Lead not found."},

@@ -8,6 +8,9 @@ from leads.models import Lead, LeadStage
 def get_lead_report(user, params):
     role = getattr(user, 'role', None)
     bq = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        bq &= Q(branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
@@ -77,6 +80,8 @@ def get_lead_report(user, params):
     # Use the Admission model counsellor linkage
     from onboarding.models import Admission
     adm_bq = Q()
+    if org:
+        adm_bq &= Q(branch__organization=org)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:

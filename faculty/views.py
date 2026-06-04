@@ -75,6 +75,8 @@ class FacultyListCreateView(APIView):
         qs = FacultyProfile.objects.select_related('user', 'branch').annotate(
             batch_count=Count('session_reports__batch', distinct=True)
         )
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
         bid = _user_branch_id(request.user)
         if role != 'super_admin' and bid:
             qs = qs.filter(branch_id=bid)
@@ -176,15 +178,18 @@ class FacultyDetailView(APIView):
     # permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def _get_faculty(self, faculty_id):
+    def _get_faculty(self, request, faculty_id):
         try:
-            return FacultyProfile.objects.select_related('user', 'branch').get(id=faculty_id)
+            qs = FacultyProfile.objects.select_related('user', 'branch').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            return qs.get(id=faculty_id)
         except FacultyProfile.DoesNotExist:
             return None
 
     def get(self, request, faculty_id):
         role = _user_role(request.user)
-        fp = self._get_faculty(faculty_id)
+        fp = self._get_faculty(request, faculty_id)
         if fp is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if role == 'faculty' and fp.user != request.user:
@@ -197,7 +202,7 @@ class FacultyDetailView(APIView):
         role = _user_role(request.user)
         if role not in FACULTY_EDIT_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-        fp = self._get_faculty(faculty_id)
+        fp = self._get_faculty(request, faculty_id)
         if fp is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -218,7 +223,10 @@ class FacultyQRIDView(APIView):
     def get(self, request, faculty_id):
         role = _user_role(request.user)
         try:
-            fp = FacultyProfile.objects.get(id=faculty_id)
+            qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            fp = qs.get(id=faculty_id)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -251,7 +259,10 @@ class SubjectHourlyRateView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            fp = FacultyProfile.objects.get(id=faculty_id)
+            qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            fp = qs.get(id=faculty_id)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -267,7 +278,10 @@ class SubjectHourlyRateView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            fp = FacultyProfile.objects.get(id=faculty_id)
+            qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            fp = qs.get(id=faculty_id)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -309,7 +323,10 @@ class FacultyQRCheckinView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            fp = FacultyProfile.objects.get(user=request.user)
+            qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            fp = qs.get(user=request.user)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -403,8 +420,12 @@ class SessionListCreateView(APIView):
             qs = SessionReport.objects.filter(faculty=fp)
         elif role in SESSION_VIEW_ROLES and faculty_id:
             qs = SessionReport.objects.filter(faculty_id=faculty_id)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
         elif role in SESSION_VIEW_ROLES:
             qs = SessionReport.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
             bid = _user_branch_id(request.user)
             if role != 'super_admin' and bid:
                 qs = qs.filter(branch_id=bid)
@@ -436,7 +457,10 @@ class SessionListCreateView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            fp = FacultyProfile.objects.get(user=request.user)
+            qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            fp = qs.get(user=request.user)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -466,7 +490,10 @@ class SessionDetailView(APIView):
 
     def get(self, request, session_id):
         try:
-            sr = SessionReport.objects.get(id=session_id)
+            qs = SessionReport.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            sr = qs.get(id=session_id)
         except SessionReport.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'success': True, 'data': SessionReportSerializer(sr).data})
@@ -474,7 +501,10 @@ class SessionDetailView(APIView):
     def patch(self, request, session_id):
         role = _user_role(request.user)
         try:
-            sr = SessionReport.objects.get(id=session_id)
+            qs = SessionReport.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            sr = qs.get(id=session_id)
         except SessionReport.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -513,6 +543,8 @@ class SessionSummaryView(APIView):
             qs = SessionReport.objects.filter(faculty=fp)
         elif role in SESSION_VIEW_ROLES and faculty_id:
             qs = SessionReport.objects.filter(faculty_id=faculty_id)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
         else:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -564,7 +596,10 @@ class FacultySessionsView(APIView):
     def get(self, request, faculty_id):
         role = _user_role(request.user)
         try:
-            fp = FacultyProfile.objects.get(id=faculty_id)
+            qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            fp = qs.get(id=faculty_id)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 

@@ -14,11 +14,14 @@ from .utils import AdmissionService
 
 logger = logging.getLogger(__name__)
 
-def _get_admission(admission_id):
+def _get_admission(request, admission_id):
     try:
-        return Admission.objects.select_related(
+        queryset = Admission.objects.select_related(
             'branch', 'assigned_counsellor', 'lead',
-        ).get(id=admission_id)
+        )
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(branch__organization=request.user.organization)
+        return queryset.get(id=admission_id)
     except Admission.DoesNotExist:
         return None
  
@@ -90,6 +93,9 @@ class AdmissionListView(APIView):
 
     def get(self, request):
         queryset = Admission.objects.all()
+        
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(branch__organization=request.user.organization)
 
         # Optional filters
         adm_status = request.GET.get('status')
@@ -109,14 +115,17 @@ class AdmissionListView(APIView):
 # ── DELETE /api/admissions/<id>/ — delete
 class AdmissionDetailView(APIView):
 
-    def _get_admission(self, admission_id):
+    def _get_admission(self, request, admission_id):
         try:
-            return Admission.objects.get(id=admission_id)
+            queryset = Admission.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(branch__organization=request.user.organization)
+            return queryset.get(id=admission_id)
         except Admission.DoesNotExist:
             return None
 
     def get(self, request, admission_id):
-        admission = self._get_admission(admission_id)
+        admission = self._get_admission(request, admission_id)
         if admission is None:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},
@@ -128,7 +137,7 @@ class AdmissionDetailView(APIView):
         )
 
     def _update(self, request, admission_id, partial: bool):
-        admission = self._get_admission(admission_id)
+        admission = self._get_admission(request, admission_id)
         if admission is None:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},
@@ -154,7 +163,7 @@ class AdmissionDetailView(APIView):
         return self._update(request, admission_id, partial=True)
 
     def delete(self, request, admission_id):
-        admission = self._get_admission(admission_id)
+        admission = self._get_admission(request, admission_id)
         if admission is None:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},
@@ -172,7 +181,10 @@ class AdmissionStatusUpdateView(APIView):
 
     def patch(self, request, admission_id):
         try:
-            admission = Admission.objects.get(id=admission_id)
+            queryset = Admission.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(branch__organization=request.user.organization)
+            admission = queryset.get(id=admission_id)
         except Admission.DoesNotExist:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},
@@ -209,7 +221,7 @@ class AdmissionStatusUpdateView(APIView):
 class AdmissionUpdateView(APIView):
  
     def patch(self, request, admission_id):
-        admission = _get_admission(admission_id)
+        admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
  
@@ -243,7 +255,7 @@ class AdmissionUpdateView(APIView):
 class AdmissionApproveView(APIView):
  
     def post(self, request, admission_id):
-        admission = _get_admission(admission_id)
+        admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
  
@@ -361,7 +373,7 @@ class AdmissionApproveView(APIView):
 class AdmissionRejectView(APIView):
  
     def post(self, request, admission_id):
-        admission = _get_admission(admission_id)
+        admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
  
@@ -413,7 +425,7 @@ class AdmissionRejectView(APIView):
 class AdmissionDocumentUploadView(APIView):
  
     def post(self, request, admission_id):
-        admission = _get_admission(admission_id)
+        admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
  

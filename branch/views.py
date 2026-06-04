@@ -14,6 +14,8 @@ class BranchListCreateAPIView(APIView):
     def get(self, request):
 
         branches = Branch.objects.all()
+        if getattr(request.user, 'organization', None):
+            branches = branches.filter(organization=request.user.organization)
         # Filters
         is_active = request.GET.get("is_active")
         city = request.GET.get("city")
@@ -44,7 +46,10 @@ class BranchListCreateAPIView(APIView):
 class BranchDetailAPIView(APIView):
     def get_object(self, pk):
         try:
-            return Branch.objects.get(pk=pk)
+            qs = Branch.objects.all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
         except Branch.DoesNotExist:
             return None
     def get(self, request, pk):
@@ -100,7 +105,10 @@ class BranchDetailAPIView(APIView):
 class BranchSummaryAPIView(APIView):
 
     def get(self, request, pk):
-        branch = Branch.objects.filter(pk=pk).first()
+        branch_qs = Branch.objects.all()
+        if getattr(request.user, 'organization', None):
+            branch_qs = branch_qs.filter(organization=request.user.organization)
+        branch = branch_qs.filter(pk=pk).first()
         if not branch:
             return Response(
                 {"message": "Branch not found"},

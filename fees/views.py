@@ -37,6 +37,8 @@ class FeeStructureListView(APIView):
     def get(self, request):
         # Optimized: prefetch_related for reverse relations
         queryset = FeeStructure.objects.select_related('course', 'batch').prefetch_related('student_fees').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(course__organization=request.user.organization)
 
         course_id = request.GET.get('course_id')
         batch_id = request.GET.get('batch_id')
@@ -73,20 +75,23 @@ class FeeStructureListView(APIView):
 
 class FeeStructureDetailView(APIView):
 
-    def _get(self, pk):
+    def _get(self, request, pk):
         try:
-            return FeeStructure.objects.select_related('course', 'batch').get(pk=pk)
+            queryset = FeeStructure.objects.select_related('course', 'batch').all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(course__organization=request.user.organization)
+            return queryset.get(pk=pk)
         except FeeStructure.DoesNotExist:
             return None
 
     def get(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Fee structure not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'success': True, 'data': FeeStructureDetailSerializer(obj).data})
 
     def patch(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Fee structure not found.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = FeeStructureCreateUpdateSerializer(obj, data=request.data, partial=True)
@@ -97,7 +102,7 @@ class FeeStructureDetailView(APIView):
                          'data': FeeStructureDetailSerializer(obj).data})
 
     def delete(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Fee structure not found.'}, status=status.HTTP_404_NOT_FOUND)
         obj.delete()
@@ -113,6 +118,8 @@ class StudentFeeListView(APIView):
     def get(self, request):
         # Optimized: prefetch_related for reverse relations
         queryset = StudentFee.objects.select_related('student', 'fee_structure').prefetch_related('payments', 'installment_plans').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(student__organization=request.user.organization)
 
         student_id = request.GET.get('student_id')
         status_filter = request.GET.get('status')
@@ -144,20 +151,23 @@ class StudentFeeListView(APIView):
 
 class StudentFeeDetailView(APIView):
 
-    def _get(self, pk):
+    def _get(self, request, pk):
         try:
-            return StudentFee.objects.select_related('student', 'fee_structure').get(pk=pk)
+            queryset = StudentFee.objects.select_related('student', 'fee_structure').all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(student__organization=request.user.organization)
+            return queryset.get(pk=pk)
         except StudentFee.DoesNotExist:
             return None
 
     def get(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Student fee not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'success': True, 'data': StudentFeeDetailSerializer(obj).data})
 
     def patch(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Student fee not found.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = StudentFeeCreateUpdateSerializer(obj, data=request.data, partial=True)
@@ -169,7 +179,7 @@ class StudentFeeDetailView(APIView):
                          'data': StudentFeeDetailSerializer(obj).data})
 
     def delete(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Student fee not found.'}, status=status.HTTP_404_NOT_FOUND)
         obj.delete()
@@ -182,7 +192,10 @@ class StudentFeeByStudentView(APIView):
     def get(self, request, student_id):
         from auth_user.models import User
         try:
-            student = User.objects.get(id=student_id, role='student')
+            queryset = User.objects.filter(role='student')
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(organization=request.user.organization)
+            student = queryset.get(id=student_id)
         except User.DoesNotExist:
             return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -228,6 +241,8 @@ class InstallmentPlanListView(APIView):
         queryset = InstallmentPlan.objects.select_related(
             'student_fee__student', 'student_fee__fee_structure'
         ).prefetch_related('items').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(student_fee__student__organization=request.user.organization)
 
         student_fee_id = request.GET.get('student_fee_id')
         plan_status = request.GET.get('status')
@@ -290,7 +305,10 @@ class InstallmentPlanApproveView(APIView):
 
     def post(self, request, pk):
         try:
-            plan = InstallmentPlan.objects.get(pk=pk)
+            queryset = InstallmentPlan.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(student_fee__student__organization=request.user.organization)
+            plan = queryset.get(pk=pk)
         except InstallmentPlan.DoesNotExist:
             return Response({'success': False, 'message': 'Installment plan not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -329,6 +347,8 @@ class PaymentListView(APIView):
     def get(self, request):
         # Optimized: select_related for foreign keys
         queryset = Payment.objects.select_related('student', 'student_fee').prefetch_related('refunds').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(student__organization=request.user.organization)
 
         student_id = request.GET.get('student_id')
         payment_status = request.GET.get('status')
@@ -380,14 +400,17 @@ class PaymentListView(APIView):
 
 class PaymentDetailView(APIView):
 
-    def _get(self, pk):
+    def _get(self, request, pk):
         try:
-            return Payment.objects.select_related('student', 'student_fee').get(pk=pk)
+            queryset = Payment.objects.select_related('student', 'student_fee').all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(student__organization=request.user.organization)
+            return queryset.get(pk=pk)
         except Payment.DoesNotExist:
             return None
 
     def get(self, request, pk):
-        obj = self._get(pk)
+        obj = self._get(request, pk)
         if obj is None:
             return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'success': True, 'data': PaymentDetailSerializer(obj).data})
@@ -397,7 +420,10 @@ class PaymentVerifyView(APIView):
 
     def post(self, request, pk):
         try:
-            payment = Payment.objects.get(pk=pk)
+            queryset = Payment.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(student__organization=request.user.organization)
+            payment = queryset.get(pk=pk)
         except Payment.DoesNotExist:
             return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -443,6 +469,8 @@ class RefundListView(APIView):
 
     def get(self, request):
         queryset = Refund.objects.select_related('payment').all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(payment__student__organization=request.user.organization)
         refund_status = request.GET.get('status')
         if refund_status:
             queryset = queryset.filter(status=refund_status)
@@ -480,7 +508,10 @@ class RefundUpdateView(APIView):
 
     def patch(self, request, pk):
         try:
-            refund = Refund.objects.get(pk=pk)
+            queryset = Refund.objects.all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(payment__student__organization=request.user.organization)
+            refund = queryset.get(pk=pk)
         except Refund.DoesNotExist:
             return Response({'success': False, 'message': 'Refund not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -576,6 +607,8 @@ class FeeReportView(APIView):
 
         # Base queryset — student fees
         sf_qs = StudentFee.objects.all()
+        if getattr(request.user, 'organization', None):
+            sf_qs = sf_qs.filter(student__organization=request.user.organization)
 
         if course_id:
             sf_qs = sf_qs.filter(fee_structure__course_id=course_id)
@@ -590,6 +623,8 @@ class FeeReportView(APIView):
 
         # Collection by payment mode
         payment_qs = Payment.objects.filter(status='verified')
+        if getattr(request.user, 'organization', None):
+            payment_qs = payment_qs.filter(student__organization=request.user.organization)
         if month:
             payment_qs = payment_qs.filter(payment_date__month=int(month.split('-')[1]),
                                             payment_date__year=int(month.split('-')[0]))
