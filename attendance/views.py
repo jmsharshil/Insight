@@ -17,7 +17,7 @@ from .serializers import (
 from .utils import (
     compute_attendance_percentage, get_batch_attendance_sheet,
     resolve_qr_data, should_block_qr, get_active_violations_count,
-    compute_avg_times, get_violations_breakdown,
+    compute_avg_times, get_violations_breakdown, haversine_distance,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,6 +171,31 @@ class QRScanView(APIView):
                 QRScanLog.objects.create(student=student, branch_id=student_branch_id, scan_type=scan_type,
                                          device_id=device_id, scanned_by=user, is_valid=False, invalid_reason='Branch mismatch.')
                 return Response({'success': False, 'message': 'Branch mismatch.', 'is_valid': False}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Geofencing check for students (if lat/long provided and branch has coords)
+        if role == 'student':
+            student_lat = ser.validated_data.get('latitude')
+            student_lon = ser.validated_data.get('longitude')
+            if student_lat is not None and student_lon is not None:
+                from django.apps import apps
+                Branch = apps.get_model('branch', 'Branch')
+                try:
+                    branch = Branch.objects.get(id=student_branch_id)
+                    if branch.latitude is not None and branch.longitude is not None:
+                        distance = haversine_distance(
+                            student_lat, student_lon, 
+                            float(branch.latitude), float(branch.longitude)
+                        )
+                        if distance > 100:
+                            QRScanLog.objects.create(student=student, branch_id=student_branch_id, scan_type=scan_type,
+                                         device_id=device_id, scanned_by=user, is_valid=False, invalid_reason=f'Geofence failed: {int(distance)}m away.')
+                            return Response({
+                                'success': False, 
+                                'message': f'You must be within 100m of the institute to scan attendance. You are {int(distance)}m away.',
+                                'is_valid': False
+                            }, status=status.HTTP_403_FORBIDDEN)
+                except Branch.DoesNotExist:
+                    pass
 
         scan_log = QRScanLog.objects.create(
             student=student, branch_id=student_branch_id, scan_type=scan_type,
