@@ -275,6 +275,7 @@ class LeadReportSerializer(serializers.Serializer):
     new = serializers.IntegerField()
     contacted = serializers.IntegerField()
     interested = serializers.IntegerField()
+    follow_up = serializers.IntegerField()
     converted = serializers.IntegerField()
     lost = serializers.IntegerField()
     conversion_rate = serializers.FloatField()

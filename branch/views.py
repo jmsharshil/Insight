@@ -29,7 +29,7 @@ class BranchListCreateAPIView(APIView):
         if city:
             branches = branches.filter(city__icontains=city)
         if search:
-            branches = branches.filter(Q(name__icontains=search) | Q(code__icontains=search))
+            branches = branches.filter(Q(name__icontains=search))
             
         serializer = BranchListSerializer(branches,many=True)
 
@@ -86,7 +86,11 @@ class BranchDetailAPIView(APIView):
                 },
                 status=status.HTTP_404_NOT_FOUND
             )
-        serializer = BranchCreateSerializer(branch,data=request.data,partial=True)
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if 'logo' in data and isinstance(data.get('logo'), str):
+            data.pop('logo')
+
+        serializer = BranchCreateSerializer(branch,data=data,partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
