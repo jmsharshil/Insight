@@ -264,6 +264,32 @@ class ResetPasswordAPIView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+class ChangePasswordAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        current_password = serializer.validated_data['current_password']
+        new_password = serializer.validated_data['new_password']
+
+        if not user.check_password(current_password):
+            return Response(
+                {"current_password": "Current password is incorrect"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+
+        return Response({"message": "Password changed successfully"}, status=status.HTTP_200_OK)
+
 class ParentStudentProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -367,7 +393,7 @@ class UpdateUserAPIView(APIView):
         return Response(serializer.errors, status=400)
     
 class DeleteUserAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def delete(self, request, user_id):
         user = get_object_or_404(User, id=user_id, organization=request.user.organization)
@@ -380,7 +406,7 @@ class DeleteUserAPIView(APIView):
         })
 
 class UserListAPIView(APIView):
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
