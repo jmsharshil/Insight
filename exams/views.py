@@ -261,6 +261,47 @@ class QuestionView(APIView):
         return Response({'success': True, 'message': 'Questions added', 'details': {}}, status=status.HTTP_201_CREATED)
 
 
+class QuestionDetailView(APIView):
+    """PATCH, DELETE /api/v1/exams/{exam_id}/questions/{question_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def _get_question(self, request, exam_id, question_id):
+        role = _user_role(request.user)
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return None, None, Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if role not in ['super_admin', 'admin_senior_executive'] and not (role == 'faculty' and exam.created_by == request.user):
+            return None, None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        if exam.status in ['ongoing', 'completed', 'results_published']:
+            return None, None, Response({'success': False, 'message': 'Cannot modify questions in current exam status.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            q = Question.objects.get(id=question_id, exam=exam)
+        except Question.DoesNotExist:
+            return None, None, Response({'success': False, 'message': 'Question not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return exam, q, None
+
+    def patch(self, request, exam_id, question_id):
+        exam, q, err = self._get_question(request, exam_id, question_id)
+        if err:
+            return err
+        for field in ['question_text', 'question_type', 'marks', 'order']:
+            if field in request.data:
+                setattr(q, field, request.data[field])
+        q.save()
+        return Response({'success': True, 'message': 'Question updated.', 'data': QuestionSerializer(q).data})
+
+    def delete(self, request, exam_id, question_id):
+        exam, q, err = self._get_question(request, exam_id, question_id)
+        if err:
+            return err
+        q.delete()
+        return Response({'success': True, 'message': 'Question deleted.'}, status=status.HTTP_200_OK)
+
+
 class SeatingView(APIView):
     # permission_classes = [IsAuthenticated]
 
@@ -318,6 +359,41 @@ class SeatingView(APIView):
             ))
         SeatArrangement.objects.bulk_create(created)
         return Response({'success': True, 'message': f'Assigned {len(created)} seats.'}, status=status.HTTP_201_CREATED)
+
+
+class SeatingDetailView(APIView):
+    """PATCH, DELETE /api/v1/exams/{exam_id}/seating/{seat_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def _get_seat(self, request, exam_id, seat_id):
+        role = _user_role(request.user)
+        if role not in SEATING_EDIT_ROLES:
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = SeatArrangement.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            seat = qs.get(id=seat_id, exam_id=exam_id)
+        except SeatArrangement.DoesNotExist:
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return seat, None
+
+    def patch(self, request, exam_id, seat_id):
+        seat, err = self._get_seat(request, exam_id, seat_id)
+        if err:
+            return err
+        for field in ['room_name', 'seat_number', 'row_number']:
+            if field in request.data:
+                setattr(seat, field, request.data[field])
+        seat.save()
+        return Response({'success': True, 'message': 'Seat updated.', 'data': SeatArrangementSerializer(seat).data})
+
+    def delete(self, request, exam_id, seat_id):
+        seat, err = self._get_seat(request, exam_id, seat_id)
+        if err:
+            return err
+        seat.delete()
+        return Response({'success': True, 'message': 'Seat removed.'}, status=status.HTTP_200_OK)
 
 
 class ExamStartView(APIView):
@@ -708,3 +784,41 @@ class MalpracticeView(APIView):
                 auto_submit_session(sess)
                 
         return Response({'success': True, 'report_id': rep.id})
+
+
+class MalpracticeDetailView(APIView):
+    """PATCH, DELETE /api/v1/exams/{exam_id}/malpractice/{report_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def _get_report(self, request, exam_id, report_id):
+        role = _user_role(request.user)
+        if role not in MALPRACTICE_VIEW_ROLES:
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = MalpracticeReport.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            rep = qs.get(id=report_id, exam_id=exam_id)
+        except MalpracticeReport.DoesNotExist:
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return rep, None
+
+    def patch(self, request, exam_id, report_id):
+        """Update action_taken or severity on a malpractice report."""
+        rep, err = self._get_report(request, exam_id, report_id)
+        if err:
+            return err
+        for field in ['action_taken', 'severity', 'description']:
+            if field in request.data:
+                setattr(rep, field, request.data[field])
+        rep.save()
+        return Response({'success': True, 'message': 'Report updated.', 'data': MalpracticeSerializer(rep).data})
+
+    def delete(self, request, exam_id, report_id):
+        rep, err = self._get_report(request, exam_id, report_id)
+        if err:
+            return err
+        if _user_role(request.user) not in ['super_admin', 'admin_senior_executive']:
+            return Response({'success': False, 'message': 'Only super_admin or ASE can delete.'}, status=status.HTTP_403_FORBIDDEN)
+        rep.delete()
+        return Response({'success': True, 'message': 'Report deleted.'}, status=status.HTTP_200_OK)

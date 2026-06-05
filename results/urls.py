@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     PaperView, PaperMarksView, PaperRecheckView,
     CheckerStatusView, CheckerPortalSubmitView,
-    PublishResultView, ResultView,
+    PublishResultView, ResultView, ResultDeleteView,
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
 )
 
@@ -16,6 +16,7 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/checker-status/', CheckerStatusView.as_view(), name='checker-status'),
     path('exams/<uuid:exam_id>/results/publish/', PublishResultView.as_view(), name='publish-result'),
     path('exams/<uuid:exam_id>/results/', ResultView.as_view(), name='exam-results'),
+    path('exams/<uuid:exam_id>/results/<uuid:result_id>/', ResultDeleteView.as_view(), name='result-delete'),
     
     # v2 NEW: FRD §4.6.2 Recheck Requests
     path('exams/<uuid:exam_id>/results/recheck-request/', StudentRecheckRequestView.as_view(), name='student-recheck-request'),

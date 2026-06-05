@@ -283,21 +283,25 @@ class QRScanView(APIView):
 class AttendanceCorrectionView(APIView):
     # permission_classes = [IsAuthenticated]
 
-    def patch(self, request, record_id):
+    def _get_record(self, request, record_id):
         user = request.user
         role = _user_role(user)
         if role not in CORRECTION_ROLES:
-            return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
-
+            return None, Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             record = AttendanceRecord.objects.get(id=record_id)
         except AttendanceRecord.DoesNotExist:
-            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if role == 'branch_manager':
             ub = _user_branch_id(user)
             if ub and str(record.branch_id) != str(ub):
-                return Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
+                return None, Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
+        return record, None
+
+    def patch(self, request, record_id):
+        record, err = self._get_record(request, record_id)
+        if err:
+            return err
 
         ser = AttendanceCorrectionSerializer(data=request.data)
         if not ser.is_valid():
@@ -311,11 +315,40 @@ class AttendanceCorrectionView(APIView):
             record.checked_out_at = ser.validated_data['checked_out_at']
 
         record.is_corrected = True
-        record.corrected_by = user
+        record.corrected_by = request.user
         record.correction_note = ser.validated_data.get('correction_note', '')
         record.save()
 
         return Response({'success': True, 'message': 'Corrected.', 'data': AttendanceRecordListSerializer(record).data})
+
+    def put(self, request, record_id):
+        """PUT /api/v1/attendance/{id}/ — full update of an attendance record."""
+        record, err = self._get_record(request, record_id)
+        if err:
+            return err
+
+        ser = AttendanceCorrectionSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        record.status = ser.validated_data.get('status', record.status)
+        record.checked_in_at = ser.validated_data.get('checked_in_at')
+        record.checked_out_at = ser.validated_data.get('checked_out_at')
+        record.is_corrected = True
+        record.corrected_by = request.user
+        record.correction_note = ser.validated_data.get('correction_note', '')
+        record.save()
+
+        return Response({'success': True, 'message': 'Record fully updated.', 'data': AttendanceRecordListSerializer(record).data})
+
+    def delete(self, request, record_id):
+        """DELETE /api/v1/attendance/{id}/ — remove an attendance record."""
+        record, err = self._get_record(request, record_id)
+        if err:
+            return err
+
+        record.delete()
+        return Response({'success': True, 'message': 'Attendance record deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -617,18 +650,23 @@ class ViolationListCreateView(APIView):
 
 
 class ViolationResolveView(APIView):
-    """Resolve a violation."""
+    """Resolve or delete a violation."""
     # permission_classes = [IsAuthenticated]
 
-    def patch(self, request, violation_id):
+    def _get_violation(self, request, violation_id):
         role = _user_role(request.user)
         if role not in VIOLATION_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             v = ViolationRecord.objects.get(id=violation_id)
         except ViolationRecord.DoesNotExist:
-            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return v, None
+
+    def patch(self, request, violation_id):
+        v, err = self._get_violation(request, violation_id)
+        if err:
+            return err
 
         ser = ViolationResolveSerializer(data=request.data)
         if not ser.is_valid():
@@ -649,3 +687,23 @@ class ViolationResolveView(APIView):
                 pass
 
         return Response({'success': True, 'message': 'Violation resolved.', 'data': ViolationRecordSerializer(v).data})
+
+    def delete(self, request, violation_id):
+        """DELETE /api/v1/attendance/violations/{id}/ — remove a violation record."""
+        v, err = self._get_violation(request, violation_id)
+        if err:
+            return err
+
+        student_id = v.student_id
+        v.delete()
+
+        # Re-enable QR if violations drop below 3 after deletion
+        if not should_block_qr(student_id):
+            try:
+                from django.apps import apps
+                SP = apps.get_model('students', 'Student')
+                SP.objects.filter(id=student_id).update(qr_blocked=False)
+            except Exception:
+                pass
+
+        return Response({'success': True, 'message': 'Violation deleted.'}, status=status.HTTP_200_OK)

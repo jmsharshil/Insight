@@ -447,6 +447,23 @@ class LeavePolicyDetailView(APIView):
         policy.save()
         return Response({'success': True, 'message': 'Policy updated.', 'data': LeavePolicySerializer(policy).data})
 
+    def delete(self, request, policy_id):
+        """DELETE /api/v1/leave/policy/{id}/ — deactivate a leave policy."""
+        role = _user_role(request.user)
+        if role not in POLICY_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = LeavePolicy.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            policy = qs.get(id=policy_id)
+        except LeavePolicy.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        policy.is_active = False
+        policy.save(update_fields=['is_active'])
+        return Response({'success': True, 'message': 'Leave policy deactivated.'})
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6. GET  /api/v1/leave/balance/
@@ -557,6 +574,40 @@ class LateEntryListCreateView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+class LateEntryDetailView(APIView):
+    """PATCH, DELETE /api/v1/leave/late-entries/{entry_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def _get_entry(self, request, entry_id):
+        role = _user_role(request.user)
+        if role not in LATE_ENTRY_ADMIN + ['super_admin']:
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = LateEntryRecord.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            return qs.get(id=entry_id), None
+        except LateEntryRecord.DoesNotExist:
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    def patch(self, request, entry_id):
+        record, err = self._get_entry(request, entry_id)
+        if err:
+            return err
+        for field in ['is_penalized', 'penalty_type', 'notes']:
+            if field in request.data:
+                setattr(record, field, request.data[field])
+        record.save()
+        return Response({'success': True, 'message': 'Late entry updated.', 'data': LateEntryRecordSerializer(record).data})
+
+    def delete(self, request, entry_id):
+        record, err = self._get_entry(request, entry_id)
+        if err:
+            return err
+        record.delete()
+        return Response({'success': True, 'message': 'Late entry deleted.'}, status=status.HTTP_200_OK)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8. GET, POST, DELETE  /api/v1/leave/public-holidays/
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -608,8 +659,33 @@ class PublicHolidayListCreateView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
-class PublicHolidayDeleteView(APIView):
+class PublicHolidayDetailView(APIView):
     # permission_classes = [IsAuthenticated]
+
+    def patch(self, request, holiday_id):
+        """PATCH /api/v1/leave/public-holidays/{id}/ — update a public holiday."""
+        role = _user_role(request.user)
+        if role not in HOLIDAY_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = PublicHoliday.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            holiday = qs.get(id=holiday_id)
+        except PublicHoliday.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if 'name' in request.data:
+            holiday.name = request.data['name']
+        if 'date' in request.data:
+            from datetime import date as _date
+            holiday.date = request.data['date']
+            if isinstance(holiday.date, str):
+                holiday.date = _date.fromisoformat(holiday.date)
+            holiday.year = holiday.date.year
+        holiday.save()
+        return Response({'success': True, 'message': 'Holiday updated.', 'data': PublicHolidaySerializer(holiday).data})
 
     def delete(self, request, holiday_id):
         role = _user_role(request.user)

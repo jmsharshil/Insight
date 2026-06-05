@@ -114,6 +114,12 @@ class LoginAPIView(APIView):
                     "error": "Account is not verified"
                 }, status=400)
             refresh = RefreshToken.for_user(user)
+
+            # Build profile pic URL
+            profile_pic_url = None
+            if user.profile_pic and hasattr(user.profile_pic, 'url'):
+                profile_pic_url = request.build_absolute_uri(user.profile_pic.url)
+
             return Response({
                 "message": "Login successful",
                 "access": str(refresh.access_token),
@@ -126,6 +132,7 @@ class LoginAPIView(APIView):
                     "name": user.name,
                     "role": user.role,
                     "role_display": user.get_role_display(),
+                    "profile_pic": profile_pic_url,
                     "organization": str(user.organization.id) if user.organization else None,
                     "organization_name": user.organization.name if user.organization else None,
                     "linked_student": {

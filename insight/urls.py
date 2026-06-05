@@ -35,6 +35,7 @@ urlpatterns = [
     path("api/v1/",include("branch.urls")),
     path("api/v1/",include("students.urls")),
     path('api/v1/', include('reports.urls')),
+    path('api/v1/', include('core.urls')),
     
 ]
 
