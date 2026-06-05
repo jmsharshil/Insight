@@ -1,3 +1,5 @@
+from auth_user.serializers import ChangePasswordSerializer
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.shortcuts import render
 from core.pagination import paginate_queryset
 from django.db.models import Q
