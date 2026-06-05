@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost']
+ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost','*']
 
 
 # Application definition
@@ -228,7 +228,7 @@ USE_AZURE_MEDIA = os.environ.get("USE_AZURE_MEDIA", "0") in ("1", "true", "True"
 if USE_AZURE_MEDIA:
     AZURE_ACCOUNT_NAME = os.environ["AZURE_ACCOUNT_NAME"]
     AZURE_ACCOUNT_KEY  = os.environ["AZURE_ACCOUNT_KEY"]
-    AZURE_CONTAINER    = os.environ.get("AZURE_MEDIA_CONTAINER", "media")
+    AZURE_CONTAINER    = os.environ.get("AZURE_MEDIA_CONTAINER")
     AZURE_ACCOUNT_URL  = f"https://{AZURE_ACCOUNT_NAME}.blob.core.windows.net"
     AZURE_CUSTOM_DOMAIN = os.environ.get(
         "AZURE_CUSTOM_DOMAIN",
@@ -237,10 +237,16 @@ if USE_AZURE_MEDIA:
     AZURE_URL_EXPIRATION_SECS = int(os.environ.get("AZURE_URL_EXPIRATION_SECS", "3600"))
     AZURE_OVERWRITE_FILES = False
 
-    # ✅ New-style Django 4.2/5.x storage config
+    # ✅ New-style Django 4.2/5.x storage config with Azure credentials
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.azure_storage.AzureStorage",
+            "OPTIONS": {
+                "account_name": AZURE_ACCOUNT_NAME,
+                "account_key": AZURE_ACCOUNT_KEY,
+                "azure_container": AZURE_CONTAINER,
+                "overwrite_files": AZURE_OVERWRITE_FILES,
+            }
         },
         "staticfiles": {
             # keep whatever you use for static files (example with WhiteNoise)
@@ -255,9 +261,6 @@ else:
     MEDIA_URL  = "/media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -270,8 +273,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://192.168.29.226:5173",
-    'http://192.168.1.226:5173'
-    ]
+    'http://192.168.1.226:5173',
+    'https://034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app',
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -333,50 +337,11 @@ if not DEBUG:
         },
     }
 
-CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5173",'https://034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app']
 
-CSRF_COOKIE_SECURE = True      # Only valid if using HTTPS
-SESSION_COOKIE_SECURE = True   # Only valid if using HTTPS
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Celery Configuration (Redis broker)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'memory://')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'cache+memory://')
-CELERY_TASK_ALWAYS_EAGER = True  # Run tasks synchronously without a worker
-CELERY_TASK_STORE_EAGER_RESULT = True
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 300  # 5 minutes max per task
-
-# Periodic task schedule (Celery Beat)
-from celery.schedules import crontab
-
-CELERY_BEAT_SCHEDULE = {
-    # Auto-transition exam statuses every minute
-    'update-exam-statuses': {
-        'task': 'exams.tasks.update_exam_statuses',
-        'schedule': 60.0,  # every 60 seconds
-    },
-    # Auto-submit expired exam sessions every minute
-    'auto-expire-exam-sessions': {
-        'task': 'exams.tasks.auto_expire_exam_sessions',
-        'schedule': 60.0,
-    },
-    # Send pending submission reminders daily at 9 AM
-    'send-submission-reminders': {
-        'task': 'exams.tasks.send_pending_submission_reminders',
-        'schedule': crontab(hour=9, minute=0),
-    },
-}
-
-
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
+# Only enable secure cookies in production (HTTPS).
+# In DEBUG/local dev (plain HTTP), secure cookies are silently dropped by the
+# browser, which causes 403 responses that surface as CORS errors.
+if not DEBUG:
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True

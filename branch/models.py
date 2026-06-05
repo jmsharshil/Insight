@@ -17,6 +17,8 @@ class Branch(models.Model):
     email = models.EmailField()
     principal_name = models.CharField(max_length=150,blank=True)
     logo = models.ImageField(upload_to="branches/logos/",null=True,blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import User, Organization
+from django.conf import settings
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -13,11 +14,21 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
-            request = self.context.get('request')
-            if request is not None:
-                # Use build_absolute_uri to convert relative URL to absolute
-                return request.build_absolute_uri(obj.profile_pic.url)
-            return obj.profile_pic.url
+            file_url = obj.profile_pic.url
+            # If Azure storage is enabled and URL is relative, build absolute URL
+            if settings.USE_AZURE_MEDIA:
+                if not file_url.startswith(('http://', 'https://')):
+                    # Relative URL with Azure - shouldn't happen but handle it
+                    return f"{settings.MEDIA_URL.rstrip('/')}/{file_url.lstrip('/')}"
+                return file_url
+            else:
+                # Local storage - build absolute URI if relative
+                if file_url.startswith(('http://', 'https://')):
+                    return file_url
+                request = self.context.get('request')
+                if request is not None:
+                    return request.build_absolute_uri(file_url)
+                return file_url
         return None
 
 class UserListSerializer(serializers.ModelSerializer):
@@ -30,11 +41,21 @@ class UserListSerializer(serializers.ModelSerializer):
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
-            request = self.context.get('request')
-            if request is not None:
-                # Use build_absolute_uri to convert relative URL to absolute
-                return request.build_absolute_uri(obj.profile_pic.url)
-            return obj.profile_pic.url
+            file_url = obj.profile_pic.url
+            # If Azure storage is enabled and URL is relative, build absolute URL
+            if settings.USE_AZURE_MEDIA:
+                if not file_url.startswith(('http://', 'https://')):
+                    # Relative URL with Azure - shouldn't happen but handle it
+                    return f"{settings.MEDIA_URL.rstrip('/')}/{file_url.lstrip('/')}"
+                return file_url
+            else:
+                # Local storage - build absolute URI if relative
+                if file_url.startswith(('http://', 'https://')):
+                    return file_url
+                request = self.context.get('request')
+                if request is not None:
+                    return request.build_absolute_uri(file_url)
+                return file_url
         return None
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -199,11 +220,21 @@ class UserProfileSerializer(serializers.ModelSerializer):
     
     def get_profile_pic(self, obj):
         if obj.profile_pic:
-            request = self.context.get('request')
-            if request is not None:
-                # Use build_absolute_uri to convert relative URL to absolute
-                return request.build_absolute_uri(obj.profile_pic.url)
-            return obj.profile_pic.url
+            file_url = obj.profile_pic.url
+            # If Azure storage is enabled and URL is relative, build absolute URL
+            if settings.USE_AZURE_MEDIA:
+                if not file_url.startswith(('http://', 'https://')):
+                    # Relative URL with Azure - shouldn't happen but handle it
+                    return f"{settings.MEDIA_URL.rstrip('/')}/{file_url.lstrip('/')}"
+                return file_url
+            else:
+                # Local storage - build absolute URI if relative
+                if file_url.startswith(('http://', 'https://')):
+                    return file_url
+                request = self.context.get('request')
+                if request is not None:
+                    return request.build_absolute_uri(file_url)
+                return file_url
         return None
 
     def validate_email(self, value):
