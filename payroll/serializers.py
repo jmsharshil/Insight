@@ -95,3 +95,11 @@ class PayrollGenerateSerializer(serializers.Serializer):
     branch_id = serializers.UUIDField()
     month = serializers.IntegerField(min_value=1, max_value=12)
     year = serializers.IntegerField(min_value=2020)
+
+
+class PaySlipAdjustSerializer(serializers.Serializer):
+    """PATCH /api/v1/payroll/{id}/payslips/{slip_id}/ — adjust payslip amounts."""
+    bonus = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
+    other_deductions = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
+    deduction_note = serializers.CharField(max_length=300, required=False, allow_blank=True)
+    leave_deductions = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)

@@ -11,6 +11,7 @@ from .models import PayrollRun, PaySlip, LateEntryPolicy
 from .serializers import (
     PayrollRunListSerializer, PayrollRunDetailSerializer, PaySlipSerializer,
     PayrollGenerateSerializer, LateEntryPolicySerializer, LateEntryPolicyInputSerializer,
+    PaySlipAdjustSerializer,
 )
 from .utils import compute_payslip_for_faculty
 
@@ -118,18 +119,61 @@ class PayrollListCreateView(APIView):
 class PayrollDetailView(APIView):
     # permission_classes = [IsAuthenticated]
 
-    def get(self, request, payroll_id):
+    def _get_payroll(self, request, payroll_id):
         role = _user_role(request.user)
         if role not in PAYROLL_VIEW_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             qs = PayrollRun.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            pr = qs.get(id=payroll_id)
+            return qs.get(id=payroll_id), None
         except PayrollRun.DoesNotExist:
-            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request, payroll_id):
+        pr, err = self._get_payroll(request, payroll_id)
+        if err:
+            return err
         return Response({'success': True, 'data': PayrollRunDetailSerializer(pr).data})
+
+    def patch(self, request, payroll_id):
+        """PATCH /api/v1/payroll/{id}/ — update payroll notes or status."""
+        pr, err = self._get_payroll(request, payroll_id)
+        if err:
+            return err
+        role = _user_role(request.user)
+        if role not in PAYROLL_GENERATE_ROLES + PAYROLL_APPROVE_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if 'notes' in request.data:
+            pr.notes = request.data['notes']
+        if 'status' in request.data and role in PAYROLL_APPROVE_ROLES:
+            allowed_transitions = {
+                'draft': ['pending_approval'],
+                'pending_approval': ['draft'],
+            }
+            new_status = request.data['status']
+            if new_status in allowed_transitions.get(pr.status, []):
+                pr.status = new_status
+            else:
+                return Response({'success': False, 'message': f'Cannot transition from {pr.status} to {new_status}.'}, status=status.HTTP_400_BAD_REQUEST)
+        pr.save()
+        return Response({'success': True, 'message': 'Payroll updated.', 'data': PayrollRunDetailSerializer(pr).data})
+
+    def delete(self, request, payroll_id):
+        """DELETE /api/v1/payroll/{id}/ — delete a draft payroll run."""
+        pr, err = self._get_payroll(request, payroll_id)
+        if err:
+            return err
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'accountant']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        if pr.status not in ('draft', 'pending_approval'):
+            return Response({'success': False, 'message': 'Can only delete draft or pending payrolls.'}, status=status.HTTP_400_BAD_REQUEST)
+        pr.payslips.all().delete()
+        pr.delete()
+        return Response({'success': True, 'message': 'Payroll deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -147,6 +191,75 @@ class PayrollPayslipsView(APIView):
         if getattr(request.user, 'organization', None):
             slips = slips.filter(payroll_run__branch__organization=request.user.organization)
         return Response({'success': True, 'count': slips.count(), 'data': PaySlipSerializer(slips, many=True).data})
+
+
+class PayslipAdjustView(APIView):
+    """PATCH, DELETE /api/v1/payroll/{payroll_id}/payslips/{slip_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def patch(self, request, payroll_id, slip_id):
+        """Adjust payslip amounts (bonus, deductions, etc.)."""
+        role = _user_role(request.user)
+        if role not in ['accountant', 'super_admin']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = PaySlip.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(payroll_run__branch__organization=request.user.organization)
+            ps = qs.get(id=slip_id, payroll_run_id=payroll_id)
+        except PaySlip.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if ps.is_disbursed:
+            return Response({'success': False, 'message': 'Cannot adjust disbursed payslip.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ser = PaySlipAdjustSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        d = ser.validated_data
+        for field in ['bonus', 'other_deductions', 'deduction_note', 'leave_deductions']:
+            if field in d:
+                setattr(ps, field, d[field])
+
+        # Recompute net salary
+        ps.net_salary = (
+            ps.basic_salary + ps.hour_based_amount + ps.bonus
+            - ps.late_penalty - ps.absence_deductions - ps.leave_deductions - ps.other_deductions
+        )
+        ps.save()
+
+        # Update payroll run total
+        pr = ps.payroll_run
+        pr.total_amount = sum(s.net_salary for s in pr.payslips.all())
+        pr.save(update_fields=['total_amount'])
+
+        return Response({'success': True, 'message': 'Payslip adjusted.', 'data': PaySlipSerializer(ps).data})
+
+    def delete(self, request, payroll_id, slip_id):
+        """Remove a payslip from a payroll run."""
+        role = _user_role(request.user)
+        if role not in ['super_admin']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = PaySlip.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(payroll_run__branch__organization=request.user.organization)
+            ps = qs.get(id=slip_id, payroll_run_id=payroll_id)
+        except PaySlip.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if ps.is_disbursed:
+            return Response({'success': False, 'message': 'Cannot delete disbursed payslip.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pr = ps.payroll_run
+        ps.delete()
+
+        # Update payroll run total
+        pr.total_amount = sum(s.net_salary for s in pr.payslips.all())
+        pr.save(update_fields=['total_amount'])
+
+        return Response({'success': True, 'message': 'Payslip deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -322,3 +435,42 @@ class LatePolicyView(APIView):
             'message': 'Late policy created.' if created else 'Late policy updated.',
             'data': LateEntryPolicySerializer(policy).data,
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class LatePolicyDetailView(APIView):
+    """PATCH, DELETE /api/v1/payroll/late-policy/{policy_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def patch(self, request, policy_id):
+        role = _user_role(request.user)
+        if role not in LATE_POLICY_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = LateEntryPolicy.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            policy = qs.get(id=policy_id)
+        except LateEntryPolicy.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        for field in ['grace_period_minutes', 'deduction_per_minute', 'max_deduction_per_session',
+                       'absence_deduction_per_day', 'late_entry_threshold', 'auto_halfday_deduction', 'is_active']:
+            if field in request.data:
+                setattr(policy, field, request.data[field])
+        policy.save()
+        return Response({'success': True, 'message': 'Policy updated.', 'data': LateEntryPolicySerializer(policy).data})
+
+    def delete(self, request, policy_id):
+        role = _user_role(request.user)
+        if role not in LATE_POLICY_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = LateEntryPolicy.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            policy = qs.get(id=policy_id)
+        except LateEntryPolicy.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        policy.delete()
+        return Response({'success': True, 'message': 'Late policy deleted.'}, status=status.HTTP_200_OK)

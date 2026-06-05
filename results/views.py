@@ -59,21 +59,25 @@ class PaperView(APIView):
 class PaperMarksView(APIView):
     # permission_classes = [IsAuthenticated]
 
-    def post(self, request, exam_id, marksheet_id):
+    def _get_marksheet(self, request, exam_id, marksheet_id):
         role = _user_role(request.user)
         if role not in PAPER_MARK_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             qs = MarkSheet.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
         except MarkSheet.DoesNotExist:
-            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if ms.paper_checker != request.user and role != 'super_admin':
-            return Response({'success': False, 'message': 'Not assigned to you.'}, status=status.HTTP_403_FORBIDDEN)
+            return None, Response({'success': False, 'message': 'Not assigned to you.'}, status=status.HTTP_403_FORBIDDEN)
+        return ms, None
+
+    def post(self, request, exam_id, marksheet_id):
+        ms, err = self._get_marksheet(request, exam_id, marksheet_id)
+        if err:
+            return err
 
         if ms.is_submitted:
             return Response({'success': False, 'message': 'Already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -90,6 +94,51 @@ class PaperMarksView(APIView):
         ms.save()
 
         return Response({'success': True, 'message': 'Marks submitted.', 'data': {'marksheet_id': str(ms.id), 'marks_obtained': marks}})
+
+    def put(self, request, exam_id, marksheet_id):
+        """PUT — re-submit / update marks on a marksheet (e.g. after recheck)."""
+        ms, err = self._get_marksheet(request, exam_id, marksheet_id)
+        if err:
+            return err
+
+        marks = request.data.get('marks_obtained')
+        if marks is None or float(marks) < 0 or float(marks) > ms.exam.total_marks:
+            return Response({'success': False, 'message': 'Invalid marks.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ms.marks_obtained = marks
+        ms.remarks = request.data.get('remarks', '')
+        ms.checked_at = timezone.now()
+        ms.is_submitted = True
+        ms.is_pass = float(marks) >= ms.exam.pass_marks
+        ms.save()
+
+        # Update published result if exists
+        try:
+            pr = PublishedResult.objects.get(exam_id=exam_id, student=ms.student)
+            pr.marks_obtained = marks
+            pr.percentage = round((float(marks) / ms.exam.total_marks) * 100, 2) if ms.exam.total_marks else 0
+            pr.is_pass = ms.is_pass
+            pr.save(update_fields=['marks_obtained', 'percentage', 'is_pass'])
+        except PublishedResult.DoesNotExist:
+            pass
+
+        return Response({'success': True, 'message': 'Marks updated.', 'data': MarkSheetSerializer(ms).data})
+
+    def delete(self, request, exam_id, marksheet_id):
+        """DELETE — remove a marksheet."""
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(id=marksheet_id, exam_id=exam_id)
+        except MarkSheet.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        ms.delete()
+        return Response({'success': True, 'message': 'Marksheet deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -287,6 +336,26 @@ class ResultView(APIView):
             qs = qs.filter(student__user__linked_parents=request.user)
 
         return Response({'success': True, 'count': qs.count(), 'data': PublishedResultSerializer(qs, many=True).data})
+
+
+class ResultDeleteView(APIView):
+    """DELETE /api/v1/exams/{exam_id}/results/{result_id}/ — unpublish a result."""
+    # permission_classes = [IsAuthenticated]
+
+    def delete(self, request, exam_id, result_id):
+        role = _user_role(request.user)
+        if role not in PUBLISH_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = PublishedResult.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            pr = qs.get(id=result_id, exam_id=exam_id)
+        except PublishedResult.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        pr.delete()
+        return Response({'success': True, 'message': 'Result deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

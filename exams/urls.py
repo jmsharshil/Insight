@@ -1,8 +1,10 @@
 from django.urls import path
 from .views import (
-    ExamListCreateView, ExamDetailView, QuestionView, SeatingView,
+    ExamListCreateView, ExamDetailView, QuestionView, QuestionDetailView,
+    SeatingView, SeatingDetailView,
     ExamStartView, ExamSubmitView, AutosaveView, ScreenEventView,
-    GeoCheckView, AnswerKeyDistributeView, AnswerKeyView, MalpracticeView,
+    GeoCheckView, AnswerKeyDistributeView, AnswerKeyView,
+    MalpracticeView, MalpracticeDetailView,
 )
 
 urlpatterns = [
@@ -15,9 +17,11 @@ urlpatterns = [
 
     # Questions
     path('exams/<uuid:exam_id>/questions/', QuestionView.as_view(), name='exam-questions'),
+    path('exams/<uuid:exam_id>/questions/<uuid:question_id>/', QuestionDetailView.as_view(), name='exam-question-detail'),
 
     # Seating
     path('exams/<uuid:exam_id>/seating/', SeatingView.as_view(), name='exam-seating'),
+    path('exams/<uuid:exam_id>/seating/<uuid:seat_id>/', SeatingDetailView.as_view(), name='exam-seating-detail'),
 
     # Online exam flow
     path('exams/<uuid:exam_id>/start/', ExamStartView.as_view(), name='exam-start'),
@@ -30,4 +34,5 @@ urlpatterns = [
     # Answer key & malpractice
     path('exams/<uuid:exam_id>/answer-key/distribute/', AnswerKeyDistributeView.as_view(), name='exam-answer-key-dist'),
     path('exams/<uuid:exam_id>/malpractice/', MalpracticeView.as_view(), name='exam-malpractice'),
+    path('exams/<uuid:exam_id>/malpractice/<uuid:report_id>/', MalpracticeDetailView.as_view(), name='exam-malpractice-detail'),
 ]

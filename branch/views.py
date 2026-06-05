@@ -7,35 +7,47 @@ from django.utils import timezone
 from .models import Branch
 from .serializers import (BranchListSerializer,BranchDetailSerializer,BranchCreateSerializer,BranchSummarySerializer,)
 
+from django.db.models import Q
+
 # ==========================================
 # LIST + CREATE API
 # ==========================================
 class BranchListCreateAPIView(APIView):
     def get(self, request):
 
-        branches = Branch.objects.all()
+        branches = Branch.objects.filter(is_deleted=False)
         if getattr(request.user, 'organization', None):
             branches = branches.filter(organization=request.user.organization)
+            
         # Filters
         is_active = request.GET.get("is_active")
         city = request.GET.get("city")
         search = request.GET.get("search")
 
-        if is_active:
-            branches = branches.filter(is_active=is_active)
+        if is_active is not None:
+            branches = branches.filter(is_active=str(is_active).lower() == 'true')
         if city:
             branches = branches.filter(city__icontains=city)
         if search:
-            branches = branches.filter(name__icontains=search) | branches.filter(code__icontains=search)
+            branches = branches.filter(Q(name__icontains=search) | Q(code__icontains=search))
+            
         serializer = BranchListSerializer(branches,many=True)
 
-        return Response(serializer.data)
+        return Response({
+            "success": True,
+            "data": serializer.data
+        })
     
     def post(self, request):
         serializer = BranchCreateSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data,status=status.HTTP_201_CREATED)
+            org = getattr(request.user, 'organization', None)
+            serializer.save(organization=org)
+            return Response({
+                "success": True,
+                "message": "Branch created successfully.",
+                "data": serializer.data
+            }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors,status=status.HTTP_400_BAD_REQUEST)
 
 

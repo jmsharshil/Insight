@@ -212,6 +212,22 @@ class FacultyDetailView(APIView):
         ser.save()
         return Response({'success': True, 'message': 'Faculty updated.', 'data': FacultyDetailSerializer(fp, context={'request': request}).data})
 
+    def delete(self, request, faculty_id):
+        """DELETE /api/v1/faculty/{id}/ — soft-delete (deactivate) a faculty profile."""
+        role = _user_role(request.user)
+        if role not in FACULTY_CREATE_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        fp = self._get_faculty(request, faculty_id)
+        if fp is None:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        fp.is_active = False
+        fp.save(update_fields=['is_active'])
+        # Also deactivate the user account
+        fp.user.is_active = False
+        fp.user.save(update_fields=['is_active'])
+        return Response({'success': True, 'message': 'Faculty deactivated.'}, status=status.HTTP_200_OK)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 3. GET  /api/v1/faculty/{id}/qr-id/
@@ -304,6 +320,42 @@ class SubjectHourlyRateView(APIView):
             'success': True, 'message': 'Subject rate created.',
             'data': SubjectHourlyRateSerializer(rate).data,
         }, status=status.HTTP_201_CREATED)
+
+
+class SubjectRateDetailView(APIView):
+    """PATCH, DELETE /api/v1/faculty/{faculty_id}/subject-rates/{rate_id}/"""
+    # permission_classes = [IsAuthenticated]
+
+    def _get_rate(self, request, faculty_id, rate_id):
+        role = _user_role(request.user)
+        if role not in SUBJECT_RATE_EDIT_ROLES:
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = SubjectHourlyRate.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(faculty__branch__organization=request.user.organization)
+            rate = qs.get(id=rate_id, faculty_id=faculty_id)
+        except SubjectHourlyRate.DoesNotExist:
+            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return rate, None
+
+    def patch(self, request, faculty_id, rate_id):
+        rate, err = self._get_rate(request, faculty_id, rate_id)
+        if err:
+            return err
+        if 'hourly_rate' in request.data:
+            rate.hourly_rate = request.data['hourly_rate']
+        if 'effective_from' in request.data:
+            rate.effective_from = request.data['effective_from']
+        rate.save()
+        return Response({'success': True, 'message': 'Rate updated.', 'data': SubjectHourlyRateSerializer(rate).data})
+
+    def delete(self, request, faculty_id, rate_id):
+        rate, err = self._get_rate(request, faculty_id, rate_id)
+        if err:
+            return err
+        rate.delete()
+        return Response({'success': True, 'message': 'Rate deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -521,6 +573,28 @@ class SessionDetailView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': s.errors}, status=status.HTTP_400_BAD_REQUEST)
         s.save()
         return Response({'success': True, 'message': 'Session updated.', 'data': SessionReportSerializer(sr).data})
+
+    def delete(self, request, session_id):
+        """DELETE /api/v1/faculty/sessions/{id}/ — delete a session report."""
+        role = _user_role(request.user)
+        try:
+            qs = SessionReport.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            sr = qs.get(id=session_id)
+        except SessionReport.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role == 'faculty' and sr.faculty.user != request.user:
+            return Response({'success': False, 'message': 'Not your session.'}, status=status.HTTP_403_FORBIDDEN)
+        if role not in ['faculty', 'admin_senior_executive', 'super_admin']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if (timezone.now().date() - sr.session_date).days > 7:
+            return Response({'success': False, 'message': 'Cannot delete sessions older than 7 days.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sr.delete()
+        return Response({'success': True, 'message': 'Session deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
