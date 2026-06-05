@@ -36,6 +36,7 @@ urlpatterns = [
     path("api/v1/",include("students.urls")),
     path('api/v1/', include('reports.urls')),
     path('api/v1/', include('core.urls')),
+    path('api/v1/', include('chat.urls')),
     
 ]
 

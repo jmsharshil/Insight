@@ -9,6 +9,7 @@ urlpatterns = [
     path('token/refresh/',TokenRefreshView.as_view(),name='refresh-token'),
     path('forgot-password/',ForgotPasswordAPIView.as_view(),name='forgot-password'),
     path('reset-password/',ResetPasswordAPIView.as_view(),name='reset-password'),
+    path('change-password/',ChangePasswordAPIView.as_view(),name='change-password'),
     # path('parent/student-profile/', ParentStudentProfileAPIView.as_view(), name='parent-student-profile'),
     path('users/<uuid:user_id>/',UpdateUserAPIView.as_view(),name='update-user'),
     path('users/<uuid:user_id>/delete/',DeleteUserAPIView.as_view(),name='delete-user'),
