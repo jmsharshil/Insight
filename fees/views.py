@@ -627,6 +627,14 @@ class FeeReportView(APIView):
             total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
         )['total'] or 0
 
+        total_partial = sf_qs.filter(status='partial').aggregate(
+            total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
+        )['total'] or 0
+
+        total_approval_pending = sf_qs.filter(status='approval_pending').aggregate(
+            total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
+        )['total'] or 0
+
         # Collection by payment mode
         payment_qs = Payment.objects.filter(status='verified')
         if getattr(request.user, 'organization', None):
@@ -659,7 +667,10 @@ class FeeReportView(APIView):
             'total_billed': total_billed,
             'total_collected': total_paid,
             'total_pending': total_pending,
+            "total_discount":total_discount,
             'total_overdue': total_overdue,
+            'total_partial': total_partial,
+            'total_approval_pending': total_approval_pending,
             'collection_by_mode': collection_by_mode,
             'monthly_trend': monthly_trend,
         }
