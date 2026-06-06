@@ -150,6 +150,7 @@ class FacultyQRScanLogSerializer(serializers.ModelSerializer):
 # ═══ Session Report ═══════════════════════════════════════════════════════════
 
 class SessionReportSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     faculty_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
@@ -160,7 +161,7 @@ class SessionReportSerializer(serializers.ModelSerializer):
             'id', 'faculty', 'faculty_name', 'batch', 'batch_name',
             'subject', 'subject_name', 'session_date',
             'chapter_covered', 'topics_covered', 'completion_percentage',
-            'status', 'start_time', 'end_time', 'duration_minutes', 'notes',
+            'status', 'status_display', 'start_time', 'end_time', 'duration_minutes', 'notes',
             'created_at', 'updated_at',
         ]
 
@@ -198,9 +199,10 @@ class SessionReportCreateSerializer(serializers.Serializer):
 
 
 class SessionReportUpdateSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     class Meta:
         model = SessionReport
         fields = [
             'chapter_covered', 'topics_covered', 'completion_percentage',
-            'status', 'start_time', 'end_time', 'notes',
+            'status', 'status_display', 'start_time', 'end_time', 'notes',
         ]

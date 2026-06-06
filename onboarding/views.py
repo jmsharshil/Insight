@@ -317,7 +317,7 @@ class AdmissionApproveView(APIView):
         # STEP 1: First Approval (pending → payment_pending)
         #   → Assign a bank account, send email with bank details + payment link
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if admission.status in ('pending', 'approved'):
+        if admission.status in ('approval_pending', 'approved'):
             from .models import BANK_ACCOUNTS
 
             # Round-robin bank assignment based on admission ID
@@ -387,6 +387,7 @@ class AdmissionApproveView(APIView):
                     'data': {
                         'admission_id': admission.id,
                         'status': admission.status,
+                        'status_display': admission.get_status_display(),
                         'assigned_bank': assigned_bank,
                     },
                 },
@@ -432,6 +433,7 @@ class AdmissionApproveView(APIView):
                         'data': {
                             'admission_id'    : admission.id,
                             'admission_status': admission.status,
+                            'status_display'  : admission.get_status_display(),
                         },
                     },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -459,6 +461,7 @@ class AdmissionApproveView(APIView):
                         'data': {
                             'admission_id'    : admission.id,
                             'admission_status': admission.status,
+                            'status_display'  : admission.get_status_display(),
                         },
                     },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -475,6 +478,7 @@ class AdmissionApproveView(APIView):
                     'data': {
                         'admission_id'    : admission.id,
                         'admission_status': admission.status,
+                        'status_display'  : admission.get_status_display(),
                         'student_id'      : str(student.id),
                         'admission_number': student.admission_number,
                         'student_status'  : student.status,
@@ -580,6 +584,7 @@ class AdmissionPaymentSubmitView(APIView):
                 'data': {
                     'admission_id':   admission.id,
                     'status':         admission.status,
+                    'status_display': admission.get_status_display(),
                     'transaction_id': admission.transaction_id,
                 },
             },

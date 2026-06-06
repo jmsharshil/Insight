@@ -210,7 +210,7 @@ class LeaveDetailView(APIView):
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if app.applied_by != request.user:
             return Response({'success': False, 'message': 'Only the applicant can edit.'}, status=status.HTTP_403_FORBIDDEN)
-        if app.status != 'pending':
+        if app.status != 'approval_pending':
             return Response({'success': False, 'message': 'Can only edit pending applications.'}, status=status.HTTP_400_BAD_REQUEST)
 
         allowed_fields = ['from_date', 'to_date', 'is_half_day', 'half_day_session', 'reason']
@@ -226,7 +226,7 @@ class LeaveDetailView(APIView):
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if app.applied_by != request.user:
             return Response({'success': False, 'message': 'Only the applicant can cancel.'}, status=status.HTTP_403_FORBIDDEN)
-        if app.status != 'pending':
+        if app.status != 'approval_pending':
             return Response({'success': False, 'message': 'Can only cancel pending applications.'}, status=status.HTTP_400_BAD_REQUEST)
 
         app.status = 'cancelled'
@@ -257,7 +257,7 @@ class LeaveApproveView(APIView):
         if app.applied_by == request.user:
             return Response({'success': False, 'message': 'Cannot approve your own leave.'}, status=status.HTTP_403_FORBIDDEN)
 
-        if app.status != 'pending':
+        if app.status != 'approval_pending':
             return Response({'success': False, 'message': 'Only pending leaves can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()

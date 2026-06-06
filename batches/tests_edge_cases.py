@@ -454,7 +454,7 @@ class PaymentEdgeCaseTest(TestCase):
             amount=10000,
             payment_mode='upi',
             payment_date=date.today(),
-            status='pending',
+            status='approval_pending',
         )
         
         # Transition: pending -> verified

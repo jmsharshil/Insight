@@ -67,7 +67,7 @@ def get_leave_report(user, params):
     ]
 
     # Pending approvals
-    pending_q = bq & Q(status='pending')
+    pending_q = bq & Q(status='approval_pending')
     pending_approvals = LeaveApplication.objects.filter(pending_q).count()
 
     return {

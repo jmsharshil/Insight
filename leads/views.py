@@ -251,7 +251,7 @@ class LeadStatusUpdateView(APIView):
                     # Auto-assign counsellor via round-robin
                     assigned_counsellor = AdmissionService.get_next_counsellor()
 
-                    # Create Admission with status='pending' (no credentials yet)
+                    # Create Admission with status='approval_pending' (no credentials yet)
                     counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
                     auto_note = f'Auto-created from converted lead #{lead.id}. Assigned to {counsellor_name} for review.'
                     
@@ -259,7 +259,7 @@ class LeadStatusUpdateView(APIView):
                         id=lead.id,
                         lead=lead,
                         branch=lead.branch,
-                        status='pending',
+                        status='approval_pending',
                         note=auto_note,
                         assigned_counsellor=assigned_counsellor,
                         **{k: v for k, v in admission_data.items() if k != 'lead_id'},
@@ -269,7 +269,7 @@ class LeadStatusUpdateView(APIView):
                     from onboarding.models import AdmissionStatusHistory
                     AdmissionStatusHistory.objects.create(
                         admission=admission,
-                        status='pending',
+                        status='approval_pending',
                         changed_by=request.user if request.user.is_authenticated else None,
                         note=auto_note,
                     )

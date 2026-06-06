@@ -201,6 +201,7 @@ class LeadStageUpdateSerializer(serializers.Serializer):
 
 
 class LeadListSerializer(serializers.ModelSerializer):
+    current_stage_display = serializers.CharField(source='get_current_stage_display', read_only=True)
     form_type_display = serializers.CharField(source='get_form_type_display', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
 
@@ -208,7 +209,7 @@ class LeadListSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             'id', 'branch', 'branch_name', 'form_type', 'form_type_display', 'first_name', 'surname', 'email',
-            'phone_student', 'course', 'current_stage', 'location', 'note', 'created_at',
+            'phone_student', 'course', 'current_stage', 'current_stage_display', 'location', 'note', 'created_at',
         ]
 
 

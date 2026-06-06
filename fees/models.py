@@ -13,13 +13,13 @@ PAYMENT_MODE_CHOICES = [
 ]
 
 PAYMENT_STATUS_CHOICES = [
-    ('pending',  'Pending Verification'),
+    ('approval_pending', 'Approval Pending'),
     ('verified', 'Verified'),
     ('rejected', 'Rejected'),
 ]
 
 FEE_STATUS_CHOICES = [
-    ('pending', 'Pending'),
+    ('approval_pending', 'Approval Pending'),
     ('partial', 'Partial'),
     ('paid',    'Paid'),
     ('overdue', 'Overdue'),
@@ -34,7 +34,7 @@ INSTALLMENT_PLAN_STATUS_CHOICES = [
 ]
 
 REFUND_STATUS_CHOICES = [
-    ('pending',   'Pending'),
+    ('approval_pending', 'Approval Pending'),
     ('completed', 'Completed'),
     ('rejected',  'Rejected'),
 ]
@@ -98,7 +98,7 @@ class StudentFee(models.Model):
     discount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_reason = models.CharField(max_length=255, blank=True)
     amount_paid    = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    status         = models.CharField(max_length=20, choices=FEE_STATUS_CHOICES, default='pending')
+    status         = models.CharField(max_length=20, choices=FEE_STATUS_CHOICES, default='approval_pending')
     due_date       = models.DateField(null=True, blank=True)
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
@@ -225,7 +225,7 @@ class Payment(models.Model):
         upload_to='payments/proofs/', null=True, blank=True,
     )
     status            = models.CharField(
-        max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending',
+        max_length=20, choices=PAYMENT_STATUS_CHOICES, default='approval_pending',
     )
     receipt_number    = models.CharField(
         max_length=50, unique=True, blank=True,
@@ -294,7 +294,7 @@ class Refund(models.Model):
         null=True, blank=True, related_name='processed_refunds',
     )
     status        = models.CharField(
-        max_length=20, choices=REFUND_STATUS_CHOICES, default='pending',
+        max_length=20, choices=REFUND_STATUS_CHOICES, default='approval_pending',
     )
     created_at    = models.DateTimeField(auto_now_add=True)
 

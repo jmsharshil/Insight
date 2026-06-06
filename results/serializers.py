@@ -59,6 +59,7 @@ class PublishedResultSerializer(serializers.ModelSerializer):
 # v2 NEW: Recheck Request serializers (FRD §4.6.2)
 
 class RecheckRequestSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     reviewed_by_name = serializers.SerializerMethodField()
@@ -68,7 +69,7 @@ class RecheckRequestSerializer(serializers.ModelSerializer):
         model = RecheckRequest
         fields = [
             'id', 'marksheet', 'requested_by', 'student_name', 'roll_number',
-            'reason', 'status', 'reviewed_by', 'reviewed_by_name',
+            'reason', 'status', 'status_display', 'reviewed_by', 'reviewed_by_name',
             'reviewed_at', 'new_checker', 'new_checker_name', 'created_at',
         ]
 

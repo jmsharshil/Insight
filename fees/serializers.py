@@ -43,6 +43,7 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class StudentFeeListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     student_name = serializers.CharField(source='student.name', read_only=True)
     fee_name = serializers.CharField(source='fee_structure.name', read_only=True)
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
@@ -51,7 +52,7 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
         model = StudentFee
         fields = ['id', 'student', 'student_name', 'fee_structure', 'fee_name',
                   'total_amount', 'discount', 'amount_paid', 'amount_due',
-                  'status', 'due_date', 'created_at']
+                  'status', 'status_display', 'due_date', 'created_at']
 
 
 class StudentFeeDetailSerializer(serializers.ModelSerializer):
@@ -109,12 +110,13 @@ class InstallmentItemSerializer(serializers.ModelSerializer):
 
 
 class InstallmentPlanListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     items = InstallmentItemSerializer(many=True, read_only=True)
     student_name = serializers.CharField(source='student_fee.student.name', read_only=True)
 
     class Meta:
         model = InstallmentPlan
-        fields = ['id', 'student_fee', 'student_name', 'status',
+        fields = ['id', 'student_fee', 'student_name', 'status', 'status_display',
                   'approved_by', 'approved_at', 'rejection_reason',
                   'created_at', 'items']
 
@@ -145,13 +147,14 @@ class InstallmentPlanApproveSerializer(serializers.Serializer):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PaymentListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     student_name = serializers.CharField(source='student.name', read_only=True)
 
     class Meta:
         model = Payment
         fields = ['id', 'student', 'student_name', 'student_fee',
                   'installment_item', 'amount', 'payment_mode',
-                  'transaction_ref', 'status', 'receipt_number',
+                  'transaction_ref', 'status', 'status_display', 'receipt_number',
                   'payment_date', 'created_at']
 
 
@@ -196,9 +199,10 @@ class PaymentVerifySerializer(serializers.Serializer):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class RefundListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     class Meta:
         model = Refund
-        fields = ['id', 'payment', 'amount', 'reason', 'status', 'created_at']
+        fields = ['id', 'payment', 'amount', 'reason', 'status', 'status_display', 'created_at']
 
 
 class RefundCreateSerializer(serializers.ModelSerializer):

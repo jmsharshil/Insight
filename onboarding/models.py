@@ -17,7 +17,7 @@ from leads.models import (
 )
 
 ADMISSION_STATUS_CHOICES = [
-    ('pending',           'Pending Review'),
+    ('approval_pending', 'Approval Pending'),
     ('approved',          'Approved'),
     ('payment_pending',   'Payment Pending'),
     ('payment_submitted', 'Payment Submitted'),
@@ -165,7 +165,7 @@ class Admission(models.Model):
     assigned_counsellor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL,related_name='assigned_admissions',limit_choices_to={'role': 'counsellor'},help_text="Counsellor assigned to review this admission.",)
 
     # ── Status & Timestamps ───────────────────────────────────────────────────
-    status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='pending')
+    status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='approval_pending')
     note         = models.TextField(blank=True, help_text="Latest note added during status update.")
     submitted_at = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)

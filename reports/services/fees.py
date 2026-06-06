@@ -33,7 +33,7 @@ def get_fee_report(user, params):
         collected=Sum('amount_paid'),
         total_due=Sum(F('total_amount') - F('discount') - F('amount_paid')),
         pending=Sum(
-            Case(When(status='pending', then=F('total_amount') - F('discount') - F('amount_paid')),
+            Case(When(status='approval_pending', then=F('total_amount') - F('discount') - F('amount_paid')),
                  default=Value(0), output_field=FloatField())
         ),
         overdue=Sum(
@@ -84,7 +84,7 @@ def get_fee_report(user, params):
             'total_amount': r['sum_total'] or 0,
             'amount_paid': r['sum_paid'] or 0,
             'amount_due': r['amount_due'] or 0,
-            'status': r['status'] or 'pending',
+            'status': r['status'] or 'approval_pending',
         }
         for r in student_rows
     ]
@@ -106,7 +106,7 @@ def get_fee_report(user, params):
     return {
         'total_collected': agg['collected'] or 0,
         'total_due': agg['total_due'] or 0,
-        'total_pending': agg['pending'] or 0,
+        'total_pending': agg['approval_pending'] or 0,
         'total_overdue': agg['overdue'] or 0,
         'payment_mode_breakdown': payment_mode_breakdown,
         'student_wise_breakdown': student_wise,

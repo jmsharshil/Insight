@@ -54,13 +54,14 @@ class PaySlipSerializer(serializers.ModelSerializer):
 
 
 class PayrollRunListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     faculty_count = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PayrollRun
         fields = [
-            'id', 'branch', 'branch_name', 'month', 'year', 'status',
+            'id', 'branch', 'branch_name', 'month', 'year', 'status', 'status_display',
             'total_amount', 'faculty_count', 'generated_at', 'approved_at', 'disbursed_at',
         ]
 
@@ -72,6 +73,7 @@ class PayrollRunListSerializer(serializers.ModelSerializer):
 
 
 class PayrollRunDetailSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     payslips = PaySlipSerializer(many=True, read_only=True)
     generated_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
@@ -79,7 +81,7 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = PayrollRun
         fields = [
-            'id', 'branch', 'month', 'year', 'status', 'total_amount',
+            'id', 'branch', 'month', 'year', 'status', 'status_display', 'total_amount',
             'generated_by', 'generated_by_name', 'approved_by', 'approved_by_name',
             'generated_at', 'approved_at', 'disbursed_at', 'notes', 'payslips',
         ]

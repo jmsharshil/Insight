@@ -215,7 +215,7 @@ class CheckerStatusView(APIView):
             'success': True,
             'data': {
                 'total_papers': total, 'submitted': submitted,
-                'pending': total - submitted, 'overdue': 0,
+                'approval_pending': total - submitted, 'overdue': 0,
                 'checkers': res_checkers,
             },
         })
@@ -395,7 +395,7 @@ class StudentRecheckRequestView(APIView):
             return Response({'success': False, 'message': 'MarkSheet not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Check no pending/approved recheck already exists
-        if RecheckRequest.objects.filter(marksheet=ms, status__in=['pending', 'approved']).exists():
+        if RecheckRequest.objects.filter(marksheet=ms, status__in=['approval_pending', 'approved']).exists():
             return Response({'success': False, 'message': 'A recheck request is already pending or approved.'}, status=status.HTTP_409_CONFLICT)
 
         ser = RecheckRequestCreateSerializer(data=request.data)
@@ -406,14 +406,14 @@ class StudentRecheckRequestView(APIView):
             marksheet=ms,
             requested_by=student,
             reason=ser.validated_data.get('reason', ''),
-            status='pending',
+            status='approval_pending',
         )
 
         # Notify ASE
         send_recheck_request_notification(rr)
 
         return Response({
-            'recheck_requested': True, 'status': 'pending',
+            'recheck_requested': True, 'status': 'approval_pending',
             'message': 'Your recheck request has been submitted for review.',
         }, status=status.HTTP_201_CREATED)
 
@@ -453,7 +453,7 @@ class RecheckRequestActionView(APIView):
         except RecheckRequest.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if rr.status not in ['pending']:
+        if rr.status not in ['approval_pending']:
             return Response({'success': False, 'message': f'Cannot act on a request with status "{rr.status}".'}, status=status.HTTP_400_BAD_REQUEST)
 
         ser = RecheckRequestActionSerializer(data=request.data)

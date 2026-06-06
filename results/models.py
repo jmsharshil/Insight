@@ -4,7 +4,7 @@ from django.conf import settings
 
 
 RECHECK_STATUS_CHOICES = [
-    ('pending', 'Pending'), ('approved', 'Approved'),
+    ('approval_pending', 'Approval Pending'), ('approved', 'Approved'),
     ('rejected', 'Rejected'), ('completed', 'Completed'),
 ]
 
@@ -26,7 +26,7 @@ class MarkSheet(models.Model):
         db_table = 'result_marksheets'
 
     def __str__(self):
-        return f"{self.student} - {self.exam.title} ({self.marks_obtained or 'pending'})"
+        return f"{self.student} - {self.exam.title} ({self.marks_obtained or 'approval_pending'})"
 
 
 class RecheckRequest(models.Model):
@@ -39,7 +39,7 @@ class RecheckRequest(models.Model):
     marksheet = models.ForeignKey(MarkSheet, on_delete=models.CASCADE, related_name='recheck_requests')
     requested_by = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='recheck_requests')
     reason = models.TextField(blank=True)
-    status = models.CharField(max_length=20, choices=RECHECK_STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=RECHECK_STATUS_CHOICES, default='approval_pending')
 
     # ASE who approves/rejects
     reviewed_by = models.ForeignKey(

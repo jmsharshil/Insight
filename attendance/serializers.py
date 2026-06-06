@@ -12,6 +12,7 @@ from django.utils import timezone
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class AttendanceRecordListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     """Read-only serializer for listing attendance records."""
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
@@ -24,7 +25,7 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'student', 'student_name', 'roll_number',
             'batch', 'batch_name', 'branch', 'date', 'session',
-            'status', 'checked_in_at', 'checked_out_at',
+            'status', 'status_display', 'checked_in_at', 'checked_out_at',
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'corrected_by_name',
             'correction_note',

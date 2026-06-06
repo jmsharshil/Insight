@@ -70,6 +70,7 @@ class StudentStatusHistorySerializer(serializers.ModelSerializer):
 # ── Student List Serializer ───────────────────────────────────────────────────
 
 class StudentListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     """Lightweight — used for paginated list views."""
     full_name = serializers.SerializerMethodField()
     branch_name = serializers.CharField(source='branch.name', default=None)
@@ -82,7 +83,7 @@ class StudentListSerializer(serializers.ModelSerializer):
             'id', 'admission_number', 'full_name', 'email', 'phone_student',
             'course', 'group_module', 'batch_attempt',
             'branch_name', 'batch_name',
-            'status', 'enrolled_at', 'photo_url',
+            'status', 'status_display', 'enrolled_at', 'photo_url',
         ]
 
     def get_full_name(self, obj):
@@ -128,6 +129,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
 # ── Student Self-Profile Serializer (student mobile app view) ─────────────────
 
 class StudentSelfProfileSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     """
     Read-only view for the student themselves.
     Excludes internal admin fields (notes, status_history, counsellor details).
@@ -151,7 +153,7 @@ class StudentSelfProfileSerializer(serializers.ModelSerializer):
             'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship',
             'course', 'group_module', 'batch_attempt', 'qualification', 'location',
             'branch', 'current_batch_name',
-            'photo_url', 'status', 'enrolled_at',
+            'photo_url', 'status', 'status_display', 'enrolled_at',
             'parent_links', 'id_card', 'id_card_ready',
         ]
 

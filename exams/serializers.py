@@ -66,6 +66,7 @@ class QuestionInputSerializer(serializers.Serializer):
 # ═══ Exam ═════════════════════════════════════════════════════════════════════
 
 class ExamListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
@@ -75,7 +76,7 @@ class ExamListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'exam_type', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
-            'status', 'batch', 'batch_name', 'subject', 'subject_name',
+            'status', 'status_display', 'batch', 'batch_name', 'subject', 'subject_name',
             'branch', 'created_by', 'created_by_name', 'created_at',
             # v2 fields
             'geo_radius_meters', 'geo_check_interval_minutes',

@@ -245,6 +245,7 @@ class BranchInfoSerializer(serializers.Serializer):
 
 
 class AdmissionListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
@@ -252,7 +253,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
         model = Admission
         fields = [
             'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
-            'course', 'batch_attempt', 'status', 'location',
+            'course', 'batch_attempt', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
         ]
 

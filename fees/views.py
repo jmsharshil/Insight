@@ -432,7 +432,7 @@ class PaymentVerifyView(APIView):
         except Payment.DoesNotExist:
             return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if payment.status != 'pending':
+        if payment.status != 'approval_pending':
             return Response(
                 {'success': False, 'message': f'Payment is already {payment.status}.'},
                 status=status.HTTP_400_BAD_REQUEST,

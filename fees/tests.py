@@ -362,7 +362,7 @@ class RefundModelTest(TestCase):
 
     def test_refund_creation(self):
 
-        self.assertEqual(self.refund.status, 'pending')
+        self.assertEqual(self.refund.status, 'approval_pending')
 
         self.assertEqual(self.refund.amount, 5000)
 
@@ -422,7 +422,7 @@ class UpdateStudentFeeStatusTest(TestCase):
 
         self.student_fee.refresh_from_db()
 
-        self.assertEqual(self.student_fee.status, 'pending')
+        self.assertEqual(self.student_fee.status, 'approval_pending')
 
 
 
@@ -528,7 +528,7 @@ class UpdateStudentFeeStatusTest(TestCase):
 
             payment_date=date.today(),
 
-            status='pending',
+            status='approval_pending',
 
         )
 
@@ -536,7 +536,7 @@ class UpdateStudentFeeStatusTest(TestCase):
 
         self.student_fee.refresh_from_db()
 
-        self.assertEqual(self.student_fee.status, 'pending')
+        self.assertEqual(self.student_fee.status, 'approval_pending')
 
 
 
@@ -1290,7 +1290,7 @@ class PaymentAPITest(TestCase):
 
             student=self.student, student_fee=self.student_fee,
 
-            amount=10000, payment_mode='upi', payment_date=date.today(), status='pending',
+            amount=10000, payment_mode='upi', payment_date=date.today(), status='approval_pending',
 
         )
 

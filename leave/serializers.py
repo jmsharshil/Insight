@@ -33,6 +33,7 @@ class LeaveBalanceSerializer(serializers.ModelSerializer):
 
 
 class LeaveApplicationListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
 
@@ -41,7 +42,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'applied_by', 'applied_by_name', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'total_days',
-            'status', 'is_auto_generated', 'supporting_document_url', 'created_at',
+            'status', 'status_display', 'is_auto_generated', 'supporting_document_url', 'created_at',
         ]
 
     def get_applied_by_name(self, obj):
@@ -57,6 +58,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
 
 
 class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
     first_approver_name = serializers.SerializerMethodField()
     second_approver_name = serializers.SerializerMethodField()
@@ -68,7 +70,7 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
             'id', 'applied_by', 'applied_by_name', 'branch', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'half_day_session', 'total_days',
             'reason', 'supporting_document', 'supporting_document_url',
-            'is_auto_generated', 'status',
+            'is_auto_generated', 'status', 'status_display',
             'first_approver', 'first_approver_name', 'first_approved_at',
             'second_approver', 'second_approver_name', 'second_approved_at',
             'reviewed_by', 'reviewed_at', 'rejection_reason', 'created_at',
