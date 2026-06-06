@@ -35,10 +35,12 @@ logger = logging.getLogger(__name__)
 class FeeStructureListView(APIView):
 
     def get(self, request):
-        # Optimized: prefetch_related for reverse relations
         queryset = FeeStructure.objects.select_related('course', 'batch').prefetch_related('student_fees').all()
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(course__organization=request.user.organization)
+            queryset = queryset.filter(
+                Q(course__organization=request.user.organization) |
+                Q(batch__organization=request.user.organization)
+            )
 
         course_id = request.GET.get('course_id')
         batch_id = request.GET.get('batch_id')
@@ -79,7 +81,10 @@ class FeeStructureDetailView(APIView):
         try:
             queryset = FeeStructure.objects.select_related('course', 'batch').all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(course__organization=request.user.organization)
+                queryset = queryset.filter(
+                    Q(course__organization=request.user.organization) |
+                    Q(batch__organization=request.user.organization)
+                )
             return queryset.get(pk=pk)
         except FeeStructure.DoesNotExist:
             return None

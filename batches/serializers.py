@@ -67,10 +67,20 @@ class SubjectListSerializer(serializers.ModelSerializer):
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
-        fields = ['course', 'name', 'code', 'total_hours', 'is_active']
+        fields = ['course', 'name', 'code', 'total_hours', 'is_active', 'organization']
 
     def validate_code(self, value):
         return value.upper().strip()
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = self.context['request'].user.organization
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = instance.organization or self.context['request'].user.organization
+        return super().update(instance, validated_data)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -112,7 +122,7 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
         model = Batch
         fields = ['course', 'name', 'batch_code', 'group_module',
                   'batch_attempt', 'location', 'start_date', 'end_date',
-                  'max_students', 'timing', 'is_active']
+                  'max_students', 'timing', 'is_active', 'organization']
 
     def validate(self, data):
         start = data.get('start_date')
@@ -125,6 +135,16 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate_batch_code(self, value):
         return value.upper().strip()
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = self.context['request'].user.organization
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = instance.organization or self.context['request'].user.organization
+        return super().update(instance, validated_data)
 
 
 # ── Batch-Student / Faculty link serializers ──────────────────────────────────
@@ -171,7 +191,17 @@ class ClassroomListSerializer(serializers.ModelSerializer):
 class ClassroomCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classroom
-        fields = ['name', 'capacity', 'is_active']
+        fields = ['name', 'capacity', 'is_active', 'organization']
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = self.context['request'].user.organization
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = instance.organization or self.context['request'].user.organization
+        return super().update(instance, validated_data)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -201,7 +231,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
         model = TimetableSlot
         fields = ['batch', 'subject', 'faculty', 'classroom',
                   'day_of_week', 'start_time', 'end_time', 'session',
-                  'is_recurring', 'effective_from', 'effective_to']
+                  'is_recurring', 'effective_from', 'effective_to', 'organization']
 
     def validate(self, data):
         start = data.get('start_time')
@@ -211,6 +241,16 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
                 {'end_time': 'End time must be after start time.'}
             )
         return data
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = self.context['request'].user.organization
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'organization' not in validated_data or validated_data['organization'] is None:
+            validated_data['organization'] = instance.organization or self.context['request'].user.organization
+        return super().update(instance, validated_data)
 
 
 # ── Faculty / Student personal timetable views ────────────────────────────────
