@@ -241,7 +241,6 @@ class BranchInfoSerializer(serializers.Serializer):
     """Nested read-only serializer to display branch details."""
     id   = serializers.UUIDField()
     name = serializers.CharField()
-    code = serializers.CharField()
     city = serializers.CharField()
 
 

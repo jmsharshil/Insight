@@ -41,27 +41,41 @@ class AdmissionListView(APIView):
         data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
         data.update({k: v for k, v in request.FILES.items()})
 
-        serializer = AdmissionSerializer(data=data)
-        if not serializer.is_valid():
-            logger.warning(f"Admission validation failed: {serializer.errors}")
+        admission_id = data.get('id') or data.get('admission_id')
+
+        if not admission_id:
             return Response(
                 {
                     'success': False,
-                    'message': 'Please fix the errors below.',
-                    'errors': serializer.errors,
+                    'message': 'id is required. Admissions are created automatically when a lead is converted.',
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Find admission by ID or by linked lead ID
         try:
-            admission = AdmissionService.create_admission(
-                validated_data=serializer.validated_data,
-                user=request.user if request.user.is_authenticated else None,
-            )
+            from django.db.models import Q
+            admission = Admission.objects.filter(
+                Q(id=admission_id) | Q(lead__id=admission_id)
+            ).first()
+            if not admission:
+                return Response({'success': False, 'message': 'Admission not found for this ID.'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Check permissions if necessary
+            if getattr(request.user, 'organization', None) and admission.branch and admission.branch.organization != request.user.organization:
+                return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            
+            serializer = AdmissionUpdateSerializer(admission, data=data, partial=True)
+            if not serializer.is_valid():
+                return Response(
+                    {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            serializer.save()
         except Exception as e:
-            logger.error(f"Admission creation error: {e}")
+            logger.error(f"Admission update error: {e}")
             return Response(
-                {'success': False, 'message': 'Something went wrong. Please try again.'},
+                {'success': False, 'message': f'Something went wrong: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -115,13 +129,18 @@ class AdmissionListView(APIView):
 # ── DELETE /api/admissions/<id>/ — delete
 class AdmissionDetailView(APIView):
 
-    def _get_admission(self, request, admission_id):
+    def _get_admission(self, request, identifier):
         try:
+            from django.db.models import Q
             queryset = Admission.objects.all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(branch__organization=request.user.organization)
-            return queryset.get(id=admission_id)
-        except Admission.DoesNotExist:
+                queryset = queryset.filter(
+                    Q(branch__organization=request.user.organization) | Q(branch__isnull=True)
+                )
+
+            # Match either by admission's own ID or by the associated lead's ID
+            return queryset.filter(Q(id=identifier) | Q(lead__id=identifier)).first()
+        except Exception:
             return None
 
     def get(self, request, admission_id):
@@ -160,6 +179,9 @@ class AdmissionDetailView(APIView):
         return self._update(request, admission_id, partial=False)
 
     def patch(self, request, admission_id):
+        return self._update(request, admission_id, partial=True)
+
+    def post(self, request, admission_id):
         return self._update(request, admission_id, partial=True)
 
     def delete(self, request, admission_id):

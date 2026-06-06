@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.exceptions import ValidationError
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from core.email import send_email
 
 from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
 from .utils import LeadService
@@ -255,7 +256,9 @@ class LeadStatusUpdateView(APIView):
                     auto_note = f'Auto-created from converted lead #{lead.id}. Assigned to {counsellor_name} for review.'
                     
                     admission = Admission(
+                        id=lead.id,
                         lead=lead,
+                        branch=lead.branch,
                         status='pending',
                         note=auto_note,
                         assigned_counsellor=assigned_counsellor,
@@ -276,6 +279,24 @@ class LeadStatusUpdateView(APIView):
                         f"Admission {admission.id} auto-created from converted lead {lead.id}, "
                         f"assigned to counsellor: {counsellor_name}"
                     )
+                    
+                    if admission.email:
+                        try:
+                            admission_link = f"http://localhost:5173/insight/student/admission-form?id={lead.id}"
+                            subject = "Complete Your Admission Process"
+                            text_content = f"Hello {admission.first_name},\n\nWe are thrilled to welcome you! Your lead has been converted, and we are ready to proceed with your admission.\n\nPlease click the link below to complete your admission form and upload the necessary documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\nInsight Institute Team"
+                            
+                            send_email(
+                                to=admission.email,
+                                subject=subject,
+                                text=text_content,
+                                template=None,
+                                template_context={},
+                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                            )
+                            logger.info(f"Admission form email sent to {admission.email}")
+                        except Exception as e:
+                            logger.error(f"Failed to send admission form email to {admission.email}: {e}")
 
             except Exception as e:
                 logger.error(f"Error creating admission for lead {lead.id}: {str(e)}")
