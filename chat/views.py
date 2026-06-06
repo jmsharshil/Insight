@@ -49,7 +49,10 @@ class DirectRoomView(APIView):
             )
 
         try:
-            other_user = User.objects.get(id=other_user_id)
+            if getattr(request.user, 'organization', None):
+                other_user = User.objects.get(id=other_user_id, organization=request.user.organization)
+            else:
+                other_user = User.objects.get(id=other_user_id)
         except User.DoesNotExist:
             return Response(
                 {"detail": "User not found."},
@@ -108,7 +111,10 @@ class GroupRoomView(APIView):
             )
 
         # Resolve participant user objects
-        participants = list(User.objects.filter(id__in=participant_ids))
+        if getattr(request.user, 'organization', None):
+            participants = list(User.objects.filter(id__in=participant_ids, organization=request.user.organization))
+        else:
+            participants = list(User.objects.filter(id__in=participant_ids))
         # Always include the requesting user
         if request.user not in participants:
             participants.append(request.user)
@@ -484,7 +490,10 @@ class GroupAddMembersView(APIView):
             )
 
         # Resolve users
-        users_to_add = list(User.objects.filter(id__in=user_ids))
+        if getattr(request.user, 'organization', None):
+            users_to_add = list(User.objects.filter(id__in=user_ids, organization=request.user.organization))
+        else:
+            users_to_add = list(User.objects.filter(id__in=user_ids))
         found_ids = {str(u.id) for u in users_to_add}
         not_found = [uid for uid in user_ids if str(uid) not in found_ids]
 

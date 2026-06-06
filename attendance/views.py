@@ -64,6 +64,9 @@ class AttendanceListCreateView(APIView):
 
         qs = AttendanceRecord.objects.select_related('student', 'batch', 'branch', 'marked_by', 'corrected_by')
 
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+
         if role in ('branch_manager', 'admin_senior_executive', 'admin_executive'):
             bid = _user_branch_id(user)
             if bid:
@@ -389,6 +392,10 @@ class StudentAttendanceView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = AttendanceRecord.objects.filter(student_id=student_id).select_related('marked_by').order_by('-date', 'session')
+        
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+            
         month = request.GET.get('month')
         batch_id = request.GET.get('batch_id')
         if month:
@@ -441,6 +448,12 @@ class BatchAttendanceSheetView(APIView):
             if bids and batch_id not in bids:
                 return Response({'success': False, 'message': 'Not your batch.'}, status=status.HTTP_403_FORBIDDEN)
 
+        if getattr(request.user, 'organization', None):
+            from django.apps import apps
+            Batch = apps.get_model('batches', 'Batch')
+            if not Batch.objects.filter(id=batch_id, organization=request.user.organization).exists():
+                return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
+
         date_filter = request.GET.get('date')
         month_filter = request.GET.get('month')
 
@@ -487,6 +500,9 @@ class AttendanceReportView(APIView):
                 branch_id = str(ub)
 
         qs = AttendanceRecord.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
         if batch_id:
@@ -595,6 +611,9 @@ class ViolationListCreateView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = ViolationRecord.objects.select_related('student', 'resolved_by', 'created_by').all()
+
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(student__branch__organization=request.user.organization)
 
         for param, field in [('student_id','student_id'), ('date','date'), ('violation_type','violation_type')]:
             val = request.GET.get(param)
