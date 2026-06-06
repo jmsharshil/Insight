@@ -213,7 +213,9 @@ class StudentService:
                 "profile photo is required."
             )
 
-        qr_payload = str(student.id)
+        from django.conf import settings
+        frontend_url = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+        qr_payload = f"{frontend_url}/students/{student.id}"
 
         # Generate QR image in-memory
         qr = qrcode.QRCode(
@@ -275,10 +277,11 @@ class StudentService:
             # Header Text
             draw.text((200, 40), "STUDENT ID CARD", font=title_font, fill='white', anchor="mm")
 
-            # Paste Student Photo
-            if student.photo and hasattr(student.photo, 'path') and os.path.exists(student.photo.path):
+            if student.photo:
                 try:
-                    photo_img = Image.open(student.photo.path).convert("RGBA")
+                    student.photo.open('rb')
+                    photo_data = io.BytesIO(student.photo.read())
+                    photo_img = Image.open(photo_data).convert("RGBA")
                     # Crop center and resize to 120x120
                     w, h = photo_img.size
                     min_dim = min(w, h)

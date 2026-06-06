@@ -174,6 +174,47 @@ class StudentQRIdentityView(APIView):
         return Response({'success': True, 'data': serializer.data}, status=status.HTTP_200_OK)
 
 
+# ── POST /api/students/<id>/regenerate-id-card/ ───────────────────────────────
+
+class StudentRegenerateIDCardView(APIView):
+
+    def post(self, request, student_id):
+        student = _get_student(request, student_id)
+        if not student:
+            return _not_found(student_id)
+
+        if not student.has_photo:
+            return Response(
+                {'success': False, 'message': 'Student does not have a photo uploaded. Cannot generate ID card.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Delete existing card so it regenerates fresh
+        from .models import DigitalIDCard
+        DigitalIDCard.objects.filter(student=student).delete()
+
+        try:
+            id_card = StudentService.generate_id_card(student)
+        except Exception as exc:
+            logger.error(f"ID card regeneration error for student {student_id}: {exc}")
+            return Response(
+                {'success': False, 'message': f'ID card regeneration failed: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {
+                'success': True,
+                'message': 'ID card regenerated successfully.',
+                'data': {
+                    'qr_image': request.build_absolute_uri(id_card.qr_image.url) if id_card.qr_image else None,
+                    'card_image': request.build_absolute_uri(id_card.card_image.url) if id_card.card_image else None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 # ── POST /api/students/<id>/status/ ──────────────────────────────────────────
 
 class StudentStatusUpdateView(APIView):
