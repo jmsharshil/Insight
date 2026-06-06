@@ -64,13 +64,16 @@ class RecheckRequestSerializer(serializers.ModelSerializer):
     reviewed_by_name = serializers.SerializerMethodField()
     new_checker_name = serializers.SerializerMethodField()
 
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model = RecheckRequest
         fields = [
             'id', 'marksheet', 'requested_by', 'student_name', 'roll_number',
             'reason', 'status', 'reviewed_by', 'reviewed_by_name',
             'reviewed_at', 'new_checker', 'new_checker_name', 'created_at',
-        ]
+         'status_display']
 
     def get_student_name(self, obj):
         try:

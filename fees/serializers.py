@@ -47,11 +47,14 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
     fee_name = serializers.CharField(source='fee_structure.name', read_only=True)
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model = StudentFee
         fields = ['id', 'student', 'student_name', 'fee_structure', 'fee_name',
                   'total_amount', 'discount', 'amount_paid', 'amount_due',
-                  'status', 'due_date', 'created_at']
+                  'status', 'due_date', 'created_at', 'status_display']
 
 
 class StudentFeeDetailSerializer(serializers.ModelSerializer):
@@ -61,6 +64,9 @@ class StudentFeeDetailSerializer(serializers.ModelSerializer):
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     payments = serializers.SerializerMethodField()
     installment_plans = serializers.SerializerMethodField()
+
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = StudentFee
@@ -147,18 +153,24 @@ class InstallmentPlanApproveSerializer(serializers.Serializer):
 class PaymentListSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.name', read_only=True)
 
+
+    payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
+
     class Meta:
         model = Payment
         fields = ['id', 'student', 'student_name', 'student_fee',
                   'installment_item', 'amount', 'payment_mode',
                   'transaction_ref', 'status', 'receipt_number',
-                  'payment_date', 'created_at']
+                  'payment_date', 'created_at', 'payment_mode_display']
 
 
 class PaymentDetailSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.name', read_only=True)
     student_email = serializers.CharField(source='student.email', read_only=True)
     refunds = serializers.SerializerMethodField()
+
+
+    payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
 
     class Meta:
         model = Payment

@@ -30,19 +30,21 @@ class ChoiceInputSerializer(serializers.Serializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     choices = ChoiceSerializer(many=True, read_only=True)
+    question_type_display = serializers.CharField(source="get_question_type_display", read_only=True)
 
     class Meta:
         model = Question
-        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'image', 'choices']
+        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'image', 'choices', 'question_type_display']
 
 
 class QuestionStudentSerializer(serializers.ModelSerializer):
     """Strips is_correct from choices."""
     choices = ChoiceStudentSerializer(many=True, read_only=True)
+    question_type_display = serializers.CharField(source="get_question_type_display", read_only=True)
 
     class Meta:
         model = Question
-        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'choices']
+        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'choices', 'question_type_display']
 
 
 class QuestionInputSerializer(serializers.Serializer):
@@ -69,6 +71,11 @@ class ExamListSerializer(serializers.ModelSerializer):
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
+    exam_type_display = serializers.CharField(source="get_exam_type_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    screen_lock_action_display = serializers.CharField(source="get_screen_lock_action_display", read_only=True)
+    split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
+    result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
 
     class Meta:
         model = Exam
@@ -82,7 +89,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
-        ]
+         'exam_type_display', 'status_display', 'screen_lock_action_display', 'split_screen_action_display', 'result_release_mode_display']
 
     def get_batch_name(self, obj):
         return obj.batch.name if obj.batch else None
@@ -196,11 +203,12 @@ class MalpracticeInputSerializer(serializers.Serializer):
 class MalpracticeSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     reported_by_name = serializers.SerializerMethodField()
+    severity_display = serializers.CharField(source="get_severity_display", read_only=True)
 
     class Meta:
         model = MalpracticeReport
         fields = ['id', 'student', 'student_name', 'reported_by', 'reported_by_name',
-                  'description', 'severity', 'reported_at', 'action_taken']
+                  'description', 'severity', 'reported_at', 'action_taken', 'severity_display']
 
     def get_student_name(self, obj):
         try:

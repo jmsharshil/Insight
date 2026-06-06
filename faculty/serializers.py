@@ -9,6 +9,8 @@ class FacultyListSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     batch_count = serializers.IntegerField(read_only=True, default=0)
+    level_display = serializers.CharField(source="get_level_display", read_only=True)
+    employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
 
     class Meta:
         model = FacultyProfile
@@ -16,7 +18,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'full_name', 'photo_url', 'branch', 'branch_name',
             'level', 'employment_type', 'specialization', 'subject_expertise',
             'joining_date', 'is_active', 'batch_count', 'created_at',
-        ]
+         'level_display', 'employment_type_display']
 
     def get_full_name(self, obj):
         return obj.user.name if obj.user else ''
@@ -39,6 +41,8 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
     phone = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     qr_code_url = serializers.SerializerMethodField()
+    level_display = serializers.CharField(source="get_level_display", read_only=True)
+    employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
 
     class Meta:
         model = FacultyProfile
@@ -48,7 +52,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             'level', 'employment_type', 'joining_date',
             'salary', 'hourly_rate', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
-        ]
+         'level_display', 'employment_type_display']
 
     def get_full_name(self, obj):
         return obj.user.name if obj.user else ''
@@ -138,10 +142,11 @@ class FacultyQRCheckinSerializer(serializers.Serializer):
 
 class FacultyQRScanLogSerializer(serializers.ModelSerializer):
     faculty_name = serializers.SerializerMethodField()
+    scan_type_display = serializers.CharField(source="get_scan_type_display", read_only=True)
 
     class Meta:
         model = FacultyQRScanLog
-        fields = ['id', 'faculty', 'faculty_name', 'scanned_at', 'scan_type', 'is_late', 'late_minutes']
+        fields = ['id', 'faculty', 'faculty_name', 'scanned_at', 'scan_type', 'is_late', 'late_minutes', 'scan_type_display']
 
     def get_faculty_name(self, obj):
         return obj.faculty.user.name if obj.faculty and obj.faculty.user else ''
@@ -153,6 +158,7 @@ class SessionReportSerializer(serializers.ModelSerializer):
     faculty_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = SessionReport
@@ -162,7 +168,7 @@ class SessionReportSerializer(serializers.ModelSerializer):
             'chapter_covered', 'topics_covered', 'completion_percentage',
             'status', 'start_time', 'end_time', 'duration_minutes', 'notes',
             'created_at', 'updated_at',
-        ]
+         'status_display']
 
     def get_faculty_name(self, obj):
         return obj.faculty.user.name if obj.faculty and obj.faculty.user else ''

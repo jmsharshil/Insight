@@ -3,13 +3,16 @@ from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord
 
 
 class LeavePolicySerializer(serializers.ModelSerializer):
+
+    leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
+
     class Meta:
         model = LeavePolicy
         fields = [
             'id', 'branch', 'leave_type', 'annual_quota', 'max_club_days',
             'carry_forward', 'max_carry_days', 'min_advance_days',
             'allow_half_day', 'sandwich_rule', 'is_active',
-        ]
+         'leave_type_display']
         read_only_fields = ['id']
 
 
@@ -27,14 +30,22 @@ class LeavePolicyInputSerializer(serializers.Serializer):
 class LeaveBalanceSerializer(serializers.ModelSerializer):
     remaining_days = serializers.DecimalField(max_digits=5, decimal_places=1, read_only=True)
 
+
+    leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
+
     class Meta:
         model = LeaveBalance
-        fields = ['id', 'leave_type', 'year', 'total_days', 'used_days', 'carried_forward', 'remaining_days']
+        fields = ['id', 'leave_type', 'year', 'total_days', 'used_days', 'carried_forward', 'remaining_days', 'leave_type_display']
 
 
 class LeaveApplicationListSerializer(serializers.ModelSerializer):
     applied_by_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
+
+
+    leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
+    half_day_session_display = serializers.CharField(source="get_half_day_session_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = LeaveApplication
@@ -42,7 +53,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             'id', 'applied_by', 'applied_by_name', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'total_days',
             'status', 'is_auto_generated', 'supporting_document_url', 'created_at',
-        ]
+         'leave_type_display', 'half_day_session_display', 'status_display']
 
     def get_applied_by_name(self, obj):
         return obj.applied_by.name if obj.applied_by else ''
@@ -62,6 +73,11 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
     second_approver_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
 
+
+    leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
+    half_day_session_display = serializers.CharField(source="get_half_day_session_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model = LeaveApplication
         fields = [
@@ -72,7 +88,7 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
             'first_approver', 'first_approver_name', 'first_approved_at',
             'second_approver', 'second_approver_name', 'second_approved_at',
             'reviewed_by', 'reviewed_at', 'rejection_reason', 'created_at',
-        ]
+         'leave_type_display', 'half_day_session_display', 'status_display']
 
     def get_applied_by_name(self, obj):
         return obj.applied_by.name if obj.applied_by else ''
@@ -113,13 +129,16 @@ class LeaveApplicationCreateSerializer(serializers.Serializer):
 class LateEntryRecordSerializer(serializers.ModelSerializer):
     user_name = serializers.SerializerMethodField()
 
+
+    penalty_type_display = serializers.CharField(source="get_penalty_type_display", read_only=True)
+
     class Meta:
         model = LateEntryRecord
         fields = [
             'id', 'user', 'user_name', 'date', 'expected_time', 'actual_time',
             'late_minutes', 'grace_minutes', 'is_penalized', 'penalty_type',
             'auto_deduction_triggered', 'notes', 'created_at',
-        ]
+         'penalty_type_display']
 
     def get_user_name(self, obj):
         return obj.user.name if obj.user else ''

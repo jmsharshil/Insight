@@ -248,18 +248,40 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
+
+    category_display = serializers.CharField(source="get_category_display", read_only=True)
+    course_display = serializers.CharField(source="get_course_display", read_only=True)
+    group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
+    batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
+    qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
+    reference_display = serializers.CharField(source="get_reference_display", read_only=True)
+    tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model = Admission
         fields = [
             'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
             'course', 'batch_attempt', 'status', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
-        ]
+         'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display']
 
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
+
+
+    category_display = serializers.CharField(source="get_category_display", read_only=True)
+    course_display = serializers.CharField(source="get_course_display", read_only=True)
+    group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
+    batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
+    qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
+    reference_display = serializers.CharField(source="get_reference_display", read_only=True)
+    tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = Admission

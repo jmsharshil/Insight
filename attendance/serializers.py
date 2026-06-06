@@ -18,6 +18,8 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
     batch_name = serializers.SerializerMethodField()
     marked_by_name = serializers.SerializerMethodField()
     corrected_by_name = serializers.SerializerMethodField()
+    session_display = serializers.CharField(source="get_session_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = AttendanceRecord
@@ -28,7 +30,7 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'corrected_by_name',
             'correction_note',
-        ]
+         'session_display', 'status_display']
 
     def get_student_name(self, obj):
         try:
@@ -149,6 +151,7 @@ class AlertTriggerSerializer(serializers.Serializer):
 
 class AlertLogSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
+    alert_type_display = serializers.CharField(source="get_alert_type_display", read_only=True)
 
     class Meta:
         model = AlertLog
@@ -156,7 +159,7 @@ class AlertLogSerializer(serializers.ModelSerializer):
             'id', 'student', 'student_name', 'alert_type',
             'message', 'threshold', 'current_pct', 'sent_at',
             'notified_parent', 'notified_admin',
-        ]
+         'alert_type_display']
 
     def get_student_name(self, obj):
         try:
@@ -175,6 +178,7 @@ class ViolationRecordSerializer(serializers.ModelSerializer):
     roll_number = serializers.SerializerMethodField()
     resolved_by_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
+    violation_type_display = serializers.CharField(source="get_violation_type_display", read_only=True)
 
     class Meta:
         model = ViolationRecord
@@ -184,7 +188,7 @@ class ViolationRecordSerializer(serializers.ModelSerializer):
             'logged_by_admin', 'is_resolved',
             'resolved_by', 'resolved_by_name', 'resolved_at',
             'created_by', 'created_by_name', 'created_at',
-        ]
+         'violation_type_display']
 
     def get_student_name(self, obj):
         try:
