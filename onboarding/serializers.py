@@ -299,3 +299,38 @@ class AdmissionDocumentUploadSerializer(serializers.Serializer):
         if self.initial_data.get('field_name') == 'doc_photo':
             return _validate_file(value, allowed_types=['image/jpeg', 'image/png'])
         return _validate_file(value, allowed_types=['image/jpeg', 'image/png', 'application/pdf'])
+
+
+# ── Payment Submit Serializer (student uploads payment proof) ─────────────────
+
+class PaymentSubmitSerializer(serializers.Serializer):
+    payment_screenshot = serializers.ImageField(
+        required=True,
+        help_text="Upload a screenshot of the payment transaction.",
+    )
+    transaction_id = serializers.CharField(
+        max_length=100,
+        required=True,
+        help_text="UPI / Bank transaction reference number.",
+    )
+    payment_note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default='',
+        help_text="Optional note regarding payment.",
+    )
+
+    def validate_payment_screenshot(self, value):
+        allowed_types = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+        if value.content_type not in allowed_types:
+            raise serializers.ValidationError(
+                f"Unsupported file type '{value.content_type}'. "
+                f"Allowed: {', '.join(allowed_types)}"
+            )
+        max_size_mb = 5
+        if value.size > max_size_mb * 1024 * 1024:
+            raise serializers.ValidationError(
+                f"File size must be under {max_size_mb}MB. "
+                f"Uploaded: {value.size / (1024 * 1024):.1f}MB."
+            )
+        return value

@@ -128,6 +128,8 @@ class AdmissionListView(APIView):
 # ── PATCH /api/admissions/<id>/  — partial update
 # ── DELETE /api/admissions/<id>/ — delete
 class AdmissionDetailView(APIView):
+    from rest_framework.permissions import AllowAny
+    permission_classes = [AllowAny]
 
     def _get_admission(self, request, identifier):
         try:
@@ -162,6 +164,15 @@ class AdmissionDetailView(APIView):
                 {'success': False, 'message': 'Admission not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        # Check if the student has already filled out the form. 
+        # (Auto-created admissions have dob=None until the student submits the form)
+        if request.method == 'POST' and admission.dob is not None:
+            return Response(
+                {'success': False, 'message': 'You have already submitted this admission form.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         serializer = AdmissionUpdateSerializer(admission, data=request.data, partial=partial)
         if not serializer.is_valid():
             return Response(
@@ -301,89 +312,275 @@ class AdmissionApproveView(APIView):
  
         note        = request.data.get('note', 'Approved by counsellor.').strip()
         acting_user = request.user if request.user.is_authenticated else None
- 
-        # ── Step 1: AdmissionService handles status + user account creation ──
-        try:
-            AdmissionService.update_status(
-                admission  = admission,
-                new_status = 'enrolled',
-                note       = note,
-                user       = acting_user,
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # STEP 1: First Approval (pending → payment_pending)
+        #   → Assign a bank account, send email with bank details + payment link
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if admission.status in ('pending', 'approved'):
+            from .models import BANK_ACCOUNTS
+
+            # Round-robin bank assignment based on admission ID
+            bank_index = (admission.id - 1) % len(BANK_ACCOUNTS)
+            assigned_bank = BANK_ACCOUNTS[bank_index]
+
+            admission.assigned_bank_id = assigned_bank['id']
+            admission.status = 'payment_pending'
+            admission.note = note
+            admission.save(update_fields=['assigned_bank_id', 'status', 'note', 'updated_at'])
+
+            from .models import AdmissionStatusHistory
+            AdmissionStatusHistory.objects.create(
+                admission=admission,
+                status='payment_pending',
+                changed_by=acting_user,
+                note=note,
             )
-        except Exception as exc:
-            logger.error(f"AdmissionService.update_status failed for {admission_id}: {exc}")
-            return Response(
-                {'success': False, 'message': f'Enrolment failed: {exc}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
- 
-        from auth_user.models import User
-        student_user = User.objects.filter(
-            email=admission.email, role='student'
-        ).first()
- 
-        if not student_user:
-            logger.error(
-                f"Student user account missing for admission {admission_id} "
-                f"(email={admission.email}) after enrolment."
-            )
+
+            # Send email with bank details + payment upload link
+            if admission.email:
+                try:
+                    from core.email import send_email
+                    payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
+
+                    text_content = (
+                        f"Hello {admission.first_name},\n\n"
+                        f"Congratulations! Your admission has been approved. "
+                        f"Please complete your fee payment to finalize your enrollment.\n\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"BANK DETAILS FOR FEE PAYMENT\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Bank Name       : {assigned_bank['bank_name']}\n"
+                        f"Account Holder  : {assigned_bank['account_holder']}\n"
+                        f"Account Number  : {assigned_bank['account_number']}\n"
+                        f"IFSC Code       : {assigned_bank['ifsc_code']}\n"
+                        f"Branch          : {assigned_bank['branch']}\n"
+                        f"Account Type    : {assigned_bank['account_type']}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"After making the payment, please click the link below to "
+                        f"upload your payment screenshot and transaction ID:\n\n"
+                        f"{payment_link}\n\n"
+                        f"If you have any questions, feel free to reach out to your counsellor.\n\n"
+                        f"Best Regards,\n"
+                        f"Insight Institute Team"
+                    )
+
+                    send_email(
+                        to=admission.email,
+                        subject="Admission Approved - Complete Your Fee Payment",
+                        text=text_content,
+                        template=None,
+                        template_context={},
+                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                    )
+                    logger.info(f"Payment email sent to {admission.email} with bank: {assigned_bank['bank_name']}")
+                except Exception as e:
+                    logger.error(f"Failed to send payment email to {admission.email}: {e}")
+
             return Response(
                 {
-                    'success': False,
+                    'success': True,
                     'message': (
-                        'Admission status set to enrolled but student user account '
-                        'was not found. Please check server logs.'
+                        'Admission approved. Bank details email sent to student. '
+                        'Waiting for fee payment confirmation.'
+                    ),
+                    'data': {
+                        'admission_id': admission.id,
+                        'status': admission.status,
+                        'assigned_bank': assigned_bank,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # STEP 2: Second Approval (payment_submitted → enrolled)
+        #   → Verify payment, create user accounts + student profile
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if admission.status == 'payment_submitted':
+            try:
+                AdmissionService.update_status(
+                    admission  = admission,
+                    new_status = 'enrolled',
+                    note       = note,
+                    user       = acting_user,
+                )
+            except Exception as exc:
+                logger.error(f"AdmissionService.update_status failed for {admission_id}: {exc}")
+                return Response(
+                    {'success': False, 'message': f'Enrolment failed: {exc}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+ 
+            from auth_user.models import User
+            student_user = User.objects.filter(
+                email=admission.email, role='student'
+            ).first()
+ 
+            if not student_user:
+                logger.error(
+                    f"Student user account missing for admission {admission_id} "
+                    f"(email={admission.email}) after enrolment."
+                )
+                return Response(
+                    {
+                        'success': False,
+                        'message': (
+                            'Admission status set to enrolled but student user account '
+                            'was not found. Please check server logs.'
+                        ),
+                        'data': {
+                            'admission_id'    : admission.id,
+                            'admission_status': admission.status,
+                        },
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+ 
+            try:
+                from students.utils import StudentService
+                student = StudentService.create_from_admission(
+                    admission   = admission,
+                    user        = student_user,
+                    acting_user = acting_user,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"StudentService.create_from_admission failed for admission "
+                    f"{admission_id}: {exc}"
+                )
+                return Response(
+                    {
+                        'success': False,
+                        'message': (
+                            'Admission enrolled and user accounts created, but student '
+                            f'profile creation failed: {exc}'
+                        ),
+                        'data': {
+                            'admission_id'    : admission.id,
+                            'admission_status': admission.status,
+                        },
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+ 
+            return Response(
+                {
+                    'success': True,
+                    'message': (
+                        f"Payment verified. Admission approved and student enrolled. "
+                        f"Admission number: {student.admission_number}. "
+                        f"Login credentials dispatched to student and parent."
                     ),
                     'data': {
                         'admission_id'    : admission.id,
                         'admission_status': admission.status,
+                        'student_id'      : str(student.id),
+                        'admission_number': student.admission_number,
+                        'student_status'  : student.status,
                     },
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_200_OK,
             )
- 
-        # ── Step 3: Create Student master profile (students app) ─────────────
-        try:
-            from students.utils import StudentService
-            student = StudentService.create_from_admission(
-                admission   = admission,
-                user        = student_user,
-                acting_user = acting_user,
-            )
-        except Exception as exc:
-            logger.error(
-                f"StudentService.create_from_admission failed for admission "
-                f"{admission_id}: {exc}"
-            )
+
+        # ── Status not eligible for approval ──────────────────────────────────
+        if admission.status == 'payment_pending':
             return Response(
                 {
                     'success': False,
-                    'message': (
-                        'Admission enrolled and user accounts created, but student '
-                        f'profile creation failed: {exc}'
-                    ),
-                    'data': {
-                        'admission_id'    : admission.id,
-                        'admission_status': admission.status,
-                    },
+                    'message': 'Waiting for student to submit payment proof. Cannot approve yet.',
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_400_BAD_REQUEST,
             )
- 
+
+        return Response(
+            {'success': False, 'message': f"Cannot approve admission with status '{admission.status}'."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+# ── POST /api/admissions/<id>/payment/ — Student uploads payment proof ────────
+
+class AdmissionPaymentSubmitView(APIView):
+    """
+    Public endpoint (no auth required).
+    Student opens the email link and submits payment screenshot + transaction ID.
+    """
+    from rest_framework.permissions import AllowAny
+
+    def get_permissions(self):
+        from rest_framework.permissions import AllowAny
+        return [AllowAny()]
+
+    def post(self, request, admission_id):
+        from django.db.models import Q
+
+        try:
+            admission = Admission.objects.filter(
+                Q(id=admission_id) | Q(lead__id=admission_id)
+            ).first()
+        except Exception:
+            admission = None
+
+        if not admission:
+            return Response(
+                {'success': False, 'message': 'Admission not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if admission.status != 'payment_pending':
+            return Response(
+                {
+                    'success': False,
+                    'message': f"Payment upload is not expected at this stage. Current status: '{admission.status}'.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .serializers import PaymentSubmitSerializer
+        serializer = PaymentSubmitSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.utils import timezone
+        admission.payment_screenshot   = serializer.validated_data['payment_screenshot']
+        admission.transaction_id       = serializer.validated_data['transaction_id']
+        admission.payment_note         = serializer.validated_data.get('payment_note', '')
+        admission.payment_submitted_at = timezone.now()
+        admission.status               = 'payment_submitted'
+        admission.save(update_fields=[
+            'payment_screenshot', 'transaction_id', 'payment_note',
+            'payment_submitted_at', 'status', 'updated_at',
+        ])
+
+        from .models import AdmissionStatusHistory
+        AdmissionStatusHistory.objects.create(
+            admission=admission,
+            status='payment_submitted',
+            changed_by=None,
+            note=f"Payment proof submitted by student. Transaction ID: {admission.transaction_id}",
+        )
+
+        logger.info(
+            f"Payment proof submitted for admission {admission.id} — "
+            f"Transaction ID: {admission.transaction_id}"
+        )
+
         return Response(
             {
                 'success': True,
                 'message': (
-                    f"Admission approved and student enrolled. "
-                    f"Admission number: {student.admission_number}. "
-                    f"Login credentials dispatched to student and parent."
+                    'Payment proof submitted successfully! '
+                    'Your counsellor will verify the payment and complete your enrollment. '
+                    'You will receive your login credentials via email once approved.'
                 ),
                 'data': {
-                    'admission_id'    : admission.id,
-                    'admission_status': admission.status,
-                    'student_id'      : str(student.id),
-                    'admission_number': student.admission_number,
-                    'student_status'  : student.status,
+                    'admission_id':   admission.id,
+                    'status':         admission.status,
+                    'transaction_id': admission.transaction_id,
                 },
             },
             status=status.HTTP_200_OK,
