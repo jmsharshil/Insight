@@ -50,13 +50,15 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
 
 
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    course_name = serializers.CharField(source='student.course.name', read_only=True)
+    batch_name = serializers.CharField(source='student.batch.name', read_only=True)
 
     class Meta:
         model = StudentFee
         fields = ['id', 'student', 'student_name', 'fee_structure', 'fee_name',
                   'total_amount', 'discount', 'amount_paid', 'amount_due',
-                  'status', 'status_display', 'due_date', 'created_at']
-                  
+                  'status', 'status_display', 'due_date', 'created_at',
+                  'course_name','batch_name']
 
 
 class StudentFeeDetailSerializer(serializers.ModelSerializer):
