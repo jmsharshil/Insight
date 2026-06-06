@@ -67,7 +67,7 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         model = ChatRoom
         fields = ("id","name","room_type","participants","created_at","last_message","unread_count",)
 
-    def get_last_message(self, obj) -> dict | None:
+    def get_last_message(self, obj):
         # If messages were prefetched, use the cached set
         messages = obj.messages.order_by("-created_at")[:1]
         msg = messages[0] if messages else None
