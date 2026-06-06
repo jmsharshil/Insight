@@ -294,7 +294,7 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Admission
         exclude = ['submitted_at', 'updated_at']
-        read_only_fields = ['id', 'lead']
+        read_only_fields = ['id', 'lead', 'status']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
