@@ -204,18 +204,39 @@ class LeadListSerializer(serializers.ModelSerializer):
     current_stage_display = serializers.CharField(source='get_current_stage_display', read_only=True)
     form_type_display = serializers.CharField(source='get_form_type_display', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
+    course_display = serializers.CharField(source="get_course_display", read_only=True)
+    group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
+    batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
+    current_stage_display = serializers.CharField(source="get_current_stage_display", read_only=True)
+    qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
+    reference_display = serializers.CharField(source="get_reference_display", read_only=True)
+    tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    stage_display = serializers.CharField(source="get_stage_display", read_only=True)
 
     class Meta:
         model = Lead
         fields = [
             'id', 'branch', 'branch_name', 'form_type', 'form_type_display', 'first_name', 'surname', 'email',
             'phone_student', 'course', 'current_stage', 'current_stage_display', 'location', 'note', 'created_at',
-        ]
+            'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'stage_display']
+        
+          
+         
 
 
 class LeadDetailSerializer(serializers.ModelSerializer):
     form_type_display = serializers.CharField(source='get_form_type_display', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
+    course_display = serializers.CharField(source="get_course_display", read_only=True)
+    group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
+    batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
+    current_stage_display = serializers.CharField(source="get_current_stage_display", read_only=True)
+    qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
+    reference_display = serializers.CharField(source="get_reference_display", read_only=True)
+    tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    stage_display = serializers.CharField(source="get_stage_display", read_only=True)
 
     class Meta:
         model = Lead

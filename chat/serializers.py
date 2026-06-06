@@ -62,10 +62,11 @@ class ChatRoomSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.IntegerField(read_only=True, default=0)
     created_at = serializers.DateTimeField(format="iso-8601", read_only=True)
+    room_type_display = serializers.CharField(source="get_room_type_display", read_only=True)
 
     class Meta:
         model = ChatRoom
-        fields = ("id","name","room_type","participants","created_at","last_message","unread_count",)
+        fields = ("id","name","room_type","participants","created_at","last_message","unread_count", 'room_type_display')
 
     def get_last_message(self, obj):
         # If messages were prefetched, use the cached set
