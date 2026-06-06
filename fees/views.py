@@ -12,6 +12,7 @@ from .models import (
     FeeStructure, StudentFee,
     InstallmentPlan, InstallmentItem,
     Payment, Refund, BankAccount,
+    FEE_STATUS_CHOICES,
 )
 from .serializers import (
     FeeStructureListSerializer, FeeStructureDetailSerializer, FeeStructureCreateUpdateSerializer,
@@ -663,3 +664,46 @@ class FeeReportView(APIView):
             'monthly_trend': monthly_trend,
         }
         return Response({'success': True, 'data': data})
+
+class StudentFeeSummaryView(APIView):
+    """GET /api/v1/fees/student-fees/summary/ — summary of student fees grouped by status."""
+
+    def get(self, request):
+        qs = StudentFee.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(student__organization=request.user.organization)
+
+        course_id = request.GET.get('course_id')
+        batch_id = request.GET.get('batch_id')
+        if course_id:
+            qs = qs.filter(fee_structure__course_id=course_id)
+        if batch_id:
+            qs = qs.filter(fee_structure__batch_id=batch_id)
+
+        # Aggregate by status
+        summary_data = qs.values('status').annotate(
+            student_count=Count('id'),
+            total_amount=Sum('total_amount'),
+            total_paid=Sum('amount_paid'),
+            total_discount=Sum('discount')
+        )
+
+        status_choices_dict = dict(FEE_STATUS_CHOICES)
+        results = []
+        for item in summary_data:
+            t_amount = item['total_amount'] or 0
+            t_paid = item['total_paid'] or 0
+            t_discount = item['total_discount'] or 0
+            amount_due = t_amount - t_discount - t_paid
+
+            results.append({
+                'status': item['status'],
+                'status_display': status_choices_dict.get(item['status'], item['status']),
+                'student_count': item['student_count'],
+                'total_amount': t_amount,
+                'total_paid': t_paid,
+                'total_discount': t_discount,
+                'amount_due': amount_due
+            })
+
+        return Response({'success': True, 'data': results})

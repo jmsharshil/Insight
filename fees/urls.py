@@ -7,6 +7,7 @@ from .views import (
     RefundListView, RefundCreateView, RefundUpdateView,
     BankAccountListView, BankAccountDetailView,
     FeeReportView,
+    StudentFeeSummaryView,
 )
 
 urlpatterns = [
@@ -16,6 +17,7 @@ urlpatterns = [
 
     # ── Student Fees ───────────────────────────────────────────────────────
     path('student-fees/', StudentFeeListView.as_view(), name='student-fee-list'),
+    path('student-fees/summary/', StudentFeeSummaryView.as_view(), name='student-fee-summary'),
     path('student-fees/<uuid:pk>/', StudentFeeDetailView.as_view(), name='student-fee-detail'),
     path('fees/student/<uuid:student_id>/', StudentFeeByStudentView.as_view(), name='student-fee-overview'),
 
