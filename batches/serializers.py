@@ -38,6 +38,8 @@ class CourseCreateUpdateSerializer(serializers.ModelSerializer):
                   'fee_amount', 'description', 'is_active', 'organization']
 
     def validate_code(self, value):
+        if not value:
+            return ''
         return value.upper().strip()
 
     def create(self, validated_data):
@@ -70,6 +72,8 @@ class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
         fields = ['course', 'name', 'code', 'total_hours', 'is_active', 'organization']
 
     def validate_code(self, value):
+        if not value:
+            return ''
         return value.upper().strip()
 
     def create(self, validated_data):
@@ -134,6 +138,8 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
         return data
 
     def validate_batch_code(self, value):
+        if not value:
+            return ''
         return value.upper().strip()
 
     def create(self, validated_data):

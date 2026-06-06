@@ -30,7 +30,7 @@ class Course(models.Model):
     id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='courses', null=True, blank=True)
     name             = models.CharField(max_length=200)
-    code             = models.CharField(max_length=30, unique=True)
+    code             = models.CharField(max_length=30, unique=True, blank=True)
     course_type      = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES)
     duration_months  = models.PositiveIntegerField(default=0)
     fee_amount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -50,13 +50,26 @@ class Course(models.Model):
     def __str__(self):
         return f"{self.code} — {self.name}"
 
+    def save(self, *args, **kwargs):
+        if not self.code:
+            last = Course.objects.filter(code__startswith='CRS-').order_by('-code').first()
+            if last and last.code:
+                try:
+                    seq = int(last.code.split('-')[-1]) + 1
+                except (ValueError, IndexError):
+                    seq = 1
+            else:
+                seq = 1
+            self.code = f"CRS-{seq:04d}"
+        super().save(*args, **kwargs)
+
 
 class Subject(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     course      = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='subjects')
     name        = models.CharField(max_length=200)
-    code        = models.CharField(max_length=30)
+    code        = models.CharField(max_length=30, blank=True)
     total_hours = models.PositiveIntegerField(default=0)
     is_active   = models.BooleanField(default=True)
     created_at  = models.DateTimeField(auto_now_add=True)
@@ -73,6 +86,19 @@ class Subject(models.Model):
     def __str__(self):
         return f"{self.code} — {self.name}"
 
+    def save(self, *args, **kwargs):
+        if not self.code:
+            last = Subject.objects.filter(code__startswith='SUB-').order_by('-code').first()
+            if last and last.code:
+                try:
+                    seq = int(last.code.split('-')[-1]) + 1
+                except (ValueError, IndexError):
+                    seq = 1
+            else:
+                seq = 1
+            self.code = f"SUB-{seq:04d}"
+        super().save(*args, **kwargs)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Batch
@@ -83,7 +109,7 @@ class Batch(models.Model):
     organization   = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='batches', null=True, blank=True)
     course         = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='batches')
     name           = models.CharField(max_length=200)
-    batch_code     = models.CharField(max_length=30, unique=True)
+    batch_code     = models.CharField(max_length=30, unique=True, blank=True)
     group_module   = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES, blank=True)
     batch_attempt  = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True)
     location       = models.CharField(max_length=100, blank=True)
@@ -107,6 +133,22 @@ class Batch(models.Model):
 
     def __str__(self):
         return f"{self.batch_code} — {self.name}"
+
+    def save(self, *args, **kwargs):
+        if not self.batch_code:
+            from django.utils import timezone
+            year = timezone.now().year
+            prefix = f"BAT-{year}-"
+            last = Batch.objects.filter(batch_code__startswith=prefix).order_by('-batch_code').first()
+            if last and last.batch_code:
+                try:
+                    seq = int(last.batch_code.split('-')[-1]) + 1
+                except (ValueError, IndexError):
+                    seq = 1
+            else:
+                seq = 1
+            self.batch_code = f"{prefix}{seq:04d}"
+        super().save(*args, **kwargs)
 
 
 class BatchStudent(models.Model):
