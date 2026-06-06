@@ -6,6 +6,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 
+from rest_framework.permissions import AllowAny, IsAuthenticated
+
 from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
 from .utils import LeadService
 from .models import Lead, LeadStage, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
@@ -22,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 class LeadListView(APIView):
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def post(self, request):
 

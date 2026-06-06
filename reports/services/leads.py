@@ -41,6 +41,7 @@ def get_lead_report(user, params):
     new = stage_counts.get('new', 0)
     contacted = stage_counts.get('contacted', 0)
     interested = stage_counts.get('interested', 0)
+    follow_up = stage_counts.get('follow_up', 0)
     converted = stage_counts.get('converted', 0)
     lost = stage_counts.get('lost', 0)
 
@@ -126,6 +127,7 @@ def get_lead_report(user, params):
         'new': new,
         'contacted': contacted,
         'interested': interested,
+        'follow_up': follow_up,
         'converted': converted,
         'lost': lost,
         'conversion_rate': conversion_rate,
