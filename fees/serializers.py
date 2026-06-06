@@ -50,8 +50,19 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
 
 
     status_display = serializers.CharField(source="get_status_display", read_only=True)
-    course_name = serializers.CharField(source='student.course.name', read_only=True)
-    batch_name = serializers.CharField(source='student.batch.name', read_only=True)
+    course_name = serializers.SerializerMethodField()
+    batch_name = serializers.SerializerMethodField()
+
+    def get_course_name(self, obj):
+        fs_course = obj.fee_structure.course
+        if fs_course and fs_course.course_type:
+            from leads.models import COURSE_TYPE_CHOICES
+            return dict(COURSE_TYPE_CHOICES).get(fs_course.course_type, fs_course.course_type)
+        return None
+
+    def get_batch_name(self, obj):
+        fs_batch = obj.fee_structure.batch
+        return fs_batch.name if fs_batch else None
 
     class Meta:
         model = StudentFee

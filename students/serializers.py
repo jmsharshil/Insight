@@ -8,7 +8,6 @@ from .models import (Student,ParentLink,BatchHistory,InventoryIssue,DigitalIDCar
 class BranchInfoSerializer(serializers.Serializer):
     id   = serializers.UUIDField()
     name = serializers.CharField()
-    code = serializers.CharField()
     city = serializers.CharField()
 
 
