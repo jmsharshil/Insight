@@ -60,6 +60,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
+        # await self._set_user_online(self.room_id, str(self.user.id))
+        # # --- Broadcast presence: user is online ---
+        # await self.channel_layer.group_send(
+        #     self.room_group_name,
+        #     {
+        #         "type":      "chat.presence",
+        #         "user_id":   str(self.user.id),
+        #         "full_name": getattr(self.user, "name", ""),
+        #         "is_online": True,
+        #     },
+        # )
+
         await self._mark_messages_delivered(self.room_id, self.user)
         delivered_msgs = await self._get_newly_delivered_messages(self.room_id, self.user)
         for msg in delivered_msgs:
@@ -75,6 +87,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    # async def disconnect(self, close_code):
+    #     if self.user:
+    #         await self._set_user_offline(self.room_id, str(self.user.id))
+    #         await self.channel_layer.group_send(
+    #             self.room_group_name,
+    #             {
+    #                 "type":      "chat.presence",
+    #                 "user_id":   str(self.user.id),
+    #                 "full_name": getattr(self.user, "name", ""),
+    #                 "is_online": False,
+    #             },
+    #         )
+    #     await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     # ------------------------------------------------------------------
     # Inbound dispatcher
@@ -273,6 +299,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             {
                 "type":       "chat.message_deleted",
                 "message_id": message_id,
+                "content":    "This message was deleted", 
+                "is_deleted": True,   
             },
         )
 
@@ -324,7 +352,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             "type":       "message_deleted",
             "message_id": event["message_id"],
+            "content":    event["content"],   
+            "is_deleted": event["is_deleted"],   
         }))
+
+    # async def chat_presence(self, event):
+    #     await self.send(text_data=json.dumps({
+    #         "type":      "presence",
+    #         "user_id":   event["user_id"],
+    #         "full_name": event["full_name"],
+    #         "is_online": event["is_online"],
+    #     }))
 
     # ------------------------------------------------------------------
     # Error helper
@@ -443,11 +481,23 @@ class ChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _delete_message(self, message_id: str, user) -> bool:
         from .models import Message
-        deleted_count, _ = Message.objects.filter(
+        updated = Message.objects.filter(
             id=message_id,
-            sender=user,        # only sender can delete
-        ).delete()
-        return deleted_count > 0
+            sender=user,
+        ).update(is_deleted=True, updated_at=timezone.now())
+        return updated > 0
+    
+    # @database_sync_to_async
+    # def _set_user_online(self, room_id: str, user_id: str):
+    #     from django.core.cache import cache
+    #     key = f"online_{room_id}_{user_id}"
+    #     cache.set(key, True, timeout=None)
+
+    # @database_sync_to_async
+    # def _set_user_offline(self, room_id: str, user_id: str):
+    #     from django.core.cache import cache
+    #     key = f"online_{room_id}_{user_id}"
+    #     cache.delete(key)
     # @database_sync_to_async
     # def _dispatch_notification_task(self, *, room_id, message_id, sender_id):
     #     from .tasks import notify_new_chat_message
