@@ -351,6 +351,8 @@ class MessageDetailAPIView(APIView):
         self._broadcast_event(message.room_id, {
             "type": "chat.message_deleted",
             "message_id": str(message.id),
+            "content": "This message was deleted", 
+            "is_deleted": True,
         })
 
         return Response({"detail": "Message deleted."}, status=status.HTTP_204_NO_CONTENT)
