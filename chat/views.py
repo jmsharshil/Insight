@@ -155,7 +155,7 @@ class RoomListView(APIView):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['room_type']
-    search_fields = ['name']
+    search_fields = ['name', 'participants__name']
     ordering_fields = '__all__'
 
     def get(self, request):
