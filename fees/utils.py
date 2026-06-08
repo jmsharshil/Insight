@@ -37,7 +37,7 @@ def update_student_fee_status(student_fee_id):
         if student_fee.due_date and student_fee.due_date < timezone.now().date():
             student_fee.status = 'overdue'
         else:
-            student_fee.status = 'pending'
+            student_fee.status = 'approval_pending'
 
     student_fee.save(update_fields=['amount_paid', 'status', 'updated_at'])
     return student_fee

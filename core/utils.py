@@ -49,3 +49,15 @@ def get_student_profile(user):
         return Student.objects.select_related('branch', 'batch').get(user=user)
     except Exception:
         return None
+
+
+def apply_filters(view_instance, request, queryset):
+    """
+    Helper to apply DRF filter backends manually to an APIView.
+    Uses view_instance.filter_backends to determine which filters to apply.
+    """
+    backends = getattr(view_instance, 'filter_backends', [])
+    for backend_class in backends:
+        backend = backend_class()
+        queryset = backend.filter_queryset(request, queryset, view_instance)
+    return queryset

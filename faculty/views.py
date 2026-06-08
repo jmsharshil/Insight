@@ -7,6 +7,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHourlyRate
 from .serializers import (
@@ -60,6 +63,10 @@ def notify(recipient_user_id, title, body, metadata=None):
 class FacultyListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'employment_type', 'level']
+    search_fields = ['user__name', 'employee_id', 'specialization']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
@@ -89,13 +96,7 @@ class FacultyListCreateView(APIView):
                 else:
                     qs = qs.filter(**{field: val})
 
-        search = request.GET.get('search')
-        if search:
-            qs = qs.filter(
-                Q(user__name__icontains=search) |
-                Q(employee_id__icontains=search) |
-                Q(specialization__icontains=search)
-            )
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, FacultyListSerializer, serializer_context={'request': request})
 
@@ -459,6 +460,10 @@ class FacultyQRCheckinView(APIView):
 
 class SessionListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['batch_id', 'subject_id', 'status']
+    search_fields = ['chapter_covered', 'topics_covered', 'notes']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
@@ -496,6 +501,8 @@ class SessionListCreateView(APIView):
                 qs = qs.filter(session_date__year=y, session_date__month=m)
             except (ValueError, AttributeError):
                 pass
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, SessionReportSerializer)
 
@@ -666,6 +673,10 @@ class SessionSummaryView(APIView):
 
 class FacultySessionsView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['batch_id', 'subject_id', 'status']
+    search_fields = ['chapter_covered', 'topics_covered']
+    ordering_fields = '__all__'
 
     def get(self, request, faculty_id):
         role = _user_role(request.user)
@@ -696,5 +707,7 @@ class FacultySessionsView(APIView):
                 qs = qs.filter(session_date__year=y, session_date__month=m)
             except (ValueError, AttributeError):
                 pass
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, SessionReportSerializer)

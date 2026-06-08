@@ -8,7 +8,6 @@ from .models import (Student,ParentLink,BatchHistory,InventoryIssue,DigitalIDCar
 class BranchInfoSerializer(serializers.Serializer):
     id   = serializers.UUIDField()
     name = serializers.CharField()
-    code = serializers.CharField()
     city = serializers.CharField()
 
 
@@ -25,13 +24,16 @@ class ParentLinkReadSerializer(serializers.ModelSerializer):
     parent_email = serializers.EmailField(source='parent.email')
     parent_phone = serializers.CharField(source='parent.phone')
 
+
+    relationship_display = serializers.CharField(source="get_relationship_display", read_only=True)
+
     class Meta:
         model  = ParentLink
         fields = [
             'id', 'relationship', 'is_primary',
             'parent_id', 'parent_name', 'parent_email', 'parent_phone',
             'linked_at',
-        ]
+         'relationship_display']
 
 
 class BatchHistoryReadSerializer(serializers.ModelSerializer):
@@ -45,12 +47,15 @@ class BatchHistoryReadSerializer(serializers.ModelSerializer):
 class InventoryIssueReadSerializer(serializers.ModelSerializer):
     issued_by_name = serializers.CharField(source='issued_by.name', default=None)
 
+
+    item_type_display = serializers.CharField(source="get_item_type_display", read_only=True)
+
     class Meta:
         model  = InventoryIssue
         fields = [
             'id', 'item_type', 'item_name', 'quantity', 'size', 'isbn',
             'issued_by_name', 'issued_at', 'returned_at', 'notes',
-        ]
+         'item_type_display']
 
 
 class DigitalIDCardReadSerializer(serializers.ModelSerializer):
@@ -62,19 +67,30 @@ class DigitalIDCardReadSerializer(serializers.ModelSerializer):
 class StudentStatusHistorySerializer(serializers.ModelSerializer):
     changed_by_name = serializers.CharField(source='changed_by.name', default=None)
 
+
+    old_status_display = serializers.CharField(source="get_old_status_display", read_only=True)
+    new_status_display = serializers.CharField(source="get_new_status_display", read_only=True)
+
     class Meta:
         model  = StudentStatusHistory
-        fields = ['id', 'old_status', 'new_status', 'reason', 'changed_by_name', 'changed_at']
+        fields = ['id', 'old_status', 'new_status', 'reason', 'changed_by_name', 'changed_at', 'old_status_display', 'new_status_display']
 
 
 # ── Student List Serializer ───────────────────────────────────────────────────
 
 class StudentListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     """Lightweight — used for paginated list views."""
     full_name = serializers.SerializerMethodField()
     branch_name = serializers.CharField(source='branch.name', default=None)
     batch_name = serializers.CharField(source='current_batch_name', default=None)
     photo_url = serializers.SerializerMethodField()
+
+
+    gender_display = serializers.CharField(source="get_gender_display", read_only=True)
+    blood_group_display = serializers.CharField(source="get_blood_group_display", read_only=True)
+    emergency_contact_relationship_display = serializers.CharField(source="get_emergency_contact_relationship_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model  = Student
@@ -82,8 +98,10 @@ class StudentListSerializer(serializers.ModelSerializer):
             'id', 'admission_number', 'full_name', 'email', 'phone_student',
             'course', 'group_module', 'batch_attempt',
             'branch_name', 'batch_name',
-            'status', 'enrolled_at', 'photo_url',
-        ]
+            'status', 'status_display', 'enrolled_at', 'photo_url',
+            'gender_display', 'blood_group_display', 'emergency_contact_relationship_display']
+        
+         
 
     def get_full_name(self, obj):
         return obj.full_name
@@ -111,6 +129,12 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     photo_url = serializers.SerializerMethodField()
     id_card_ready = serializers.BooleanField(read_only=True)
 
+
+    gender_display = serializers.CharField(source="get_gender_display", read_only=True)
+    blood_group_display = serializers.CharField(source="get_blood_group_display", read_only=True)
+    emergency_contact_relationship_display = serializers.CharField(source="get_emergency_contact_relationship_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model  = Student
         fields = '__all__'
@@ -128,6 +152,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
 # ── Student Self-Profile Serializer (student mobile app view) ─────────────────
 
 class StudentSelfProfileSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     """
     Read-only view for the student themselves.
     Excludes internal admin fields (notes, status_history, counsellor details).
@@ -140,6 +165,12 @@ class StudentSelfProfileSerializer(serializers.ModelSerializer):
     photo_url = serializers.SerializerMethodField()
     id_card_ready = serializers.BooleanField(read_only=True)
 
+
+    gender_display = serializers.CharField(source="get_gender_display", read_only=True)
+    blood_group_display = serializers.CharField(source="get_blood_group_display", read_only=True)
+    emergency_contact_relationship_display = serializers.CharField(source="get_emergency_contact_relationship_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
     class Meta:
         model = Student
         fields = [
@@ -151,9 +182,9 @@ class StudentSelfProfileSerializer(serializers.ModelSerializer):
             'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship',
             'course', 'group_module', 'batch_attempt', 'qualification', 'location',
             'branch', 'current_batch_name',
-            'photo_url', 'status', 'enrolled_at',
+            'photo_url', 'status', 'status_display', 'enrolled_at',
             'parent_links', 'id_card', 'id_card_ready',
-        ]
+         'gender_display', 'blood_group_display', 'emergency_contact_relationship_display', 'status_display']
 
     def get_full_name(self, obj):
         return obj.full_name

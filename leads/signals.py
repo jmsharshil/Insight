@@ -39,7 +39,7 @@ def lead_status_changed(sender, instance, created, **kwargs):
             student_email=instance.email,
             student_phone=instance.phone,
             course=instance.course,
-            status='pending',
+            status='approval_pending',
         )
         logger.info(f"Auto-created Admission {admission.id} from Lead {instance.id}")
 

@@ -17,10 +17,61 @@ from leads.models import (
 )
 
 ADMISSION_STATUS_CHOICES = [
-    ('pending',  'Pending Review'),
-    ('approved', 'Approved'),
-    ('rejected', 'Rejected'),
-    ('enrolled', 'Enrolled'),
+    ('approval_pending', 'Approval Pending'),
+    ('approved',          'Approved'),
+    ('payment_pending',   'Payment Pending'),
+    ('payment_submitted', 'Payment Submitted'),
+    ('rejected',          'Rejected'),
+    ('enrolled',          'Enrolled'),
+]
+
+# ── 5 Bank Accounts (round-robin assignment) ─────────────────────────────────
+BANK_ACCOUNTS = [
+    {
+        'id': 1,
+        'bank_name': 'State Bank of India (SBI)',
+        'account_holder': 'Insight Institute Pvt. Ltd.',
+        'account_number': '38976542103',
+        'ifsc_code': 'SBIN0001234',
+        'branch': 'Ashram Road, Ahmedabad',
+        'account_type': 'Current Account',
+    },
+    {
+        'id': 2,
+        'bank_name': 'HDFC Bank',
+        'account_holder': 'Insight Institute Pvt. Ltd.',
+        'account_number': '50200045678901',
+        'ifsc_code': 'HDFC0000567',
+        'branch': 'CG Road, Ahmedabad',
+        'account_type': 'Current Account',
+    },
+    {
+        'id': 3,
+        'bank_name': 'ICICI Bank',
+        'account_holder': 'Insight Institute Pvt. Ltd.',
+        'account_number': '123405001234',
+        'ifsc_code': 'ICIC0003456',
+        'branch': 'Navrangpura, Ahmedabad',
+        'account_type': 'Current Account',
+    },
+    {
+        'id': 4,
+        'bank_name': 'Bank of Baroda',
+        'account_holder': 'Insight Institute Pvt. Ltd.',
+        'account_number': '21340100045678',
+        'ifsc_code': 'BARB0AHMEDA',
+        'branch': 'Law Garden, Ahmedabad',
+        'account_type': 'Current Account',
+    },
+    {
+        'id': 5,
+        'bank_name': 'Kotak Mahindra Bank',
+        'account_holder': 'Insight Institute Pvt. Ltd.',
+        'account_number': '9876543210012',
+        'ifsc_code': 'KKBK0007890',
+        'branch': 'Prahlad Nagar, Ahmedabad',
+        'account_type': 'Current Account',
+    },
 ]
 
 
@@ -114,10 +165,17 @@ class Admission(models.Model):
     assigned_counsellor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL,related_name='assigned_admissions',limit_choices_to={'role': 'counsellor'},help_text="Counsellor assigned to review this admission.",)
 
     # ── Status & Timestamps ───────────────────────────────────────────────────
-    status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='pending')
+    status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='approval_pending')
     note         = models.TextField(blank=True, help_text="Latest note added during status update.")
     submitted_at = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
+
+    # ── Fee Payment Tracking ──────────────────────────────────────────────────
+    assigned_bank_id      = models.IntegerField(null=True, blank=True, help_text="ID of the bank from BANK_ACCOUNTS assigned to this student.")
+    payment_screenshot    = models.FileField(upload_to=admission_document_path, null=True, blank=True)
+    transaction_id        = models.CharField(max_length=100, blank=True, help_text="UPI / Bank transaction reference number.")
+    payment_note          = models.TextField(blank=True, help_text="Optional note from student regarding payment.")
+    payment_submitted_at  = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'admissions'

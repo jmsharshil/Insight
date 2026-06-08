@@ -6,6 +6,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
+from core.email import send_email
+
 from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
 from .utils import LeadService
 from .models import Lead, LeadStage, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
@@ -23,6 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 class LeadListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['current_stage', 'course', 'form_type']
+    search_fields = ['first_name', 'surname', 'email', 'phone_student']
+    ordering_fields = '__all__'
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     permission_classes=[AllowAny]
 
@@ -156,6 +171,8 @@ class LeadListView(APIView):
         if form_type:
             queryset = queryset.filter(form_type=form_type)
 
+        queryset = apply_filters(self, request, queryset)
+
         return paginate_queryset(queryset, request, LeadListSerializer)
 
 
@@ -246,13 +263,15 @@ class LeadStatusUpdateView(APIView):
                     # Auto-assign counsellor via round-robin
                     assigned_counsellor = AdmissionService.get_next_counsellor()
 
-                    # Create Admission with status='pending' (no credentials yet)
+                    # Create Admission with status='approval_pending' (no credentials yet)
                     counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
                     auto_note = f'Auto-created from converted lead #{lead.id}. Assigned to {counsellor_name} for review.'
                     
                     admission = Admission(
+                        id=lead.id,
                         lead=lead,
-                        status='pending',
+                        branch=lead.branch,
+                        status='approval_pending',
                         note=auto_note,
                         assigned_counsellor=assigned_counsellor,
                         **{k: v for k, v in admission_data.items() if k != 'lead_id'},
@@ -262,7 +281,7 @@ class LeadStatusUpdateView(APIView):
                     from onboarding.models import AdmissionStatusHistory
                     AdmissionStatusHistory.objects.create(
                         admission=admission,
-                        status='pending',
+                        status='approval_pending',
                         changed_by=request.user if request.user.is_authenticated else None,
                         note=auto_note,
                     )
@@ -272,6 +291,24 @@ class LeadStatusUpdateView(APIView):
                         f"Admission {admission.id} auto-created from converted lead {lead.id}, "
                         f"assigned to counsellor: {counsellor_name}"
                     )
+                    
+                    if admission.email:
+                        try:
+                            admission_link = f"http://localhost:5173/insight/student/admission-form?id={lead.id}"
+                            subject = "Complete Your Admission Process"
+                            text_content = f"Hello {admission.first_name},\n\nWe are thrilled to welcome you! Your lead has been converted, and we are ready to proceed with your admission.\n\nPlease click the link below to complete your admission form and upload the necessary documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\nInsight Institute Team"
+                            
+                            send_email(
+                                to=admission.email,
+                                subject=subject,
+                                text=text_content,
+                                template=None,
+                                template_context={},
+                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                            )
+                            logger.info(f"Admission form email sent to {admission.email}")
+                        except Exception as e:
+                            logger.error(f"Failed to send admission form email to {admission.email}: {e}")
 
             except Exception as e:
                 logger.error(f"Error creating admission for lead {lead.id}: {str(e)}")

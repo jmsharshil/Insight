@@ -16,7 +16,7 @@ class FacultyProfile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='faculty_profile')
     branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='faculty_profiles')
-    employee_id = models.CharField(max_length=30, unique=True)
+    employee_id = models.CharField(max_length=30, unique=True, blank=True)
     photo = models.ImageField(upload_to='faculty/photos/', null=True, blank=True)
     # NEW (FRD §4.8.1): profile photo field
     qualification = models.CharField(max_length=200)
@@ -42,6 +42,22 @@ class FacultyProfile(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} — {self.user.name}"
+
+    def save(self, *args, **kwargs):
+        if not self.employee_id:
+            from django.utils import timezone
+            year = timezone.now().year
+            prefix = f"EMP-{year}-"
+            last = FacultyProfile.objects.filter(employee_id__startswith=prefix).order_by('-employee_id').first()
+            if last and last.employee_id:
+                try:
+                    seq = int(last.employee_id.split('-')[-1]) + 1
+                except (ValueError, IndexError):
+                    seq = 1
+            else:
+                seq = 1
+            self.employee_id = f"{prefix}{seq:04d}"
+        super().save(*args, **kwargs)
 
 
 class SubjectHourlyRate(models.Model):

@@ -6,7 +6,7 @@ from .models import Branch
 class BranchListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
-        fields = ["id","name","code","city","is_active","created_at",]
+        fields = ["id","name","city","is_active","created_at",]
 
 class BranchDetailSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)
@@ -20,14 +20,9 @@ class BranchDetailSerializer(serializers.ModelSerializer):
 class BranchCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
-        fields = ["name","code","address","city","state","pincode","phone","email","principal_name","logo","is_active",]
+        fields = ["name","address","city","state","pincode","phone","email","principal_name","logo","is_active",]
         
-    def validate_code(self, value):
-        if Branch.objects.filter(code=value,is_deleted=False).exists():
-            raise serializers.ValidationError(
-                "Branch code already exists."
-            )
-        return value
+
 
 class BranchSummarySerializer(serializers.Serializer):
     total_students = serializers.IntegerField()

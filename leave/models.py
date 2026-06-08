@@ -8,7 +8,7 @@ LEAVE_TYPE_CHOICES = [
     ('club', 'Club Leave'), ('unpaid', 'Unpaid Leave'),
 ]
 LEAVE_STATUS_CHOICES = [
-    ('pending', 'Pending'), ('approved', 'Approved'),
+    ('approval_pending', 'Approval Pending'), ('approved', 'Approved'),
     ('rejected', 'Rejected'), ('cancelled', 'Cancelled'),
 ]
 HALF_DAY_CHOICES = [('morning', 'Morning'), ('afternoon', 'Afternoon')]
@@ -103,7 +103,7 @@ class LeaveApplication(models.Model):
     is_auto_generated = models.BooleanField(default=False)
     # NEW (FRD §4.9.3): True when auto-created by late entry threshold task
 
-    status = models.CharField(max_length=10, choices=LEAVE_STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=LEAVE_STATUS_CHOICES, default='approval_pending')
 
     # Multi-level approval (FRD §4.9.2)
     first_approver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='first_approvals')

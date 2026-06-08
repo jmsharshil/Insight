@@ -10,6 +10,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
@@ -60,6 +63,10 @@ def _user_branch_id(user):
 
 class ExamListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['exam_type', 'status', 'batch_id', 'scheduled_date']
+    search_fields = ['title', 'description']
+    ordering_fields = '__all__'
 
     def _get_queryset(self, request):
         user = request.user
@@ -88,11 +95,7 @@ class ExamListCreateView(APIView):
             if bid:
                 qs = qs.filter(branch_id=bid)
 
-        for param, field in [('exam_type', 'exam_type'), ('status', 'status'), ('batch_id', 'batch_id'), ('scheduled_date', 'scheduled_date')]:
-            val = request.GET.get(param)
-            if val:
-                qs = qs.filter(**{field: val})
-
+        qs = apply_filters(self, request, qs)
         return qs
 
     def get(self, request):
