@@ -192,7 +192,7 @@ class BatchStudentReadSerializer(serializers.ModelSerializer):
 
     def get_student_name(self, obj):
         profile = self._get_student_profile(obj)
-        return profile.full_name if profile else obj.student.name
+        return profile.full_name if profile else obj.student.full_name
 
     def get_student_email(self, obj):
         profile = self._get_student_profile(obj)

@@ -337,21 +337,20 @@ class BatchAssignStudentsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Convert Student IDs -> User IDs
-        user_ids = [
-            student.user_id
+        student_ids_list = [
+            student.id
             for student in students
         ]
 
         current_count = BatchStudent.objects.filter(batch=batch).count()
         already_enrolled = set(
-            BatchStudent.objects.filter(batch=batch, student_id__in=user_ids)
+            BatchStudent.objects.filter(batch=batch, student_id__in=student_ids_list)
             .values_list('student_id', flat=True)
         )
         to_enroll = [
-            user_id
-            for user_id in user_ids
-            if user_id not in already_enrolled
+            student_id
+            for student_id in student_ids_list
+            if student_id not in already_enrolled
         ]
 
         if current_count + len(to_enroll) > batch.max_students:
@@ -366,10 +365,10 @@ class BatchAssignStudentsView(APIView):
 
         created = []
 
-        for user_id in to_enroll:
+        for student_id in to_enroll:
             enrollment = BatchStudent.objects.create(
                 batch=batch,
-                student_id=user_id
+                student_id=student_id
             )
             created.append(enrollment)
 
@@ -409,7 +408,7 @@ class BatchRemoveStudentView(APIView):
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(batch__organization=request.user.organization)
 
-            enrollment = qs.get(batch_id=pk, student_id=student.user_id)
+            enrollment = qs.get(batch_id=pk, student_id=student.id)
 
         except BatchStudent.DoesNotExist:
             return Response(
@@ -483,7 +482,7 @@ class BatchAssignFacultyView(APIView):
 
         bf, created = BatchFaculty.objects.get_or_create(
             batch=batch,
-            faculty_id=faculty.user_id,
+            faculty_id=faculty.id,
             subject_id=subject_id,
         )
 
@@ -528,7 +527,7 @@ class BatchRemoveFacultyView(APIView):
             qs = BatchFaculty.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(batch__organization=request.user.organization)
-            assignment = qs.get(batch_id=pk, faculty_id=faculty.user_id, subject_id=subject_id)
+            assignment = qs.get(batch_id=pk, faculty_id=faculty.id, subject_id=subject_id)
         except BatchFaculty.DoesNotExist:
             return Response(
                 {
