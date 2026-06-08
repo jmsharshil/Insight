@@ -19,6 +19,7 @@ class ChatRoom(models.Model):
 
     id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False,)
     name = models.CharField(max_length=255,blank=True,default="",help_text="Human-readable name (blank for direct rooms).",)
+    avatar = models.ImageField(upload_to="chat/group_avatars/", blank=True, null=True, help_text="Group avatar image.")
     room_type = models.CharField(max_length=10,choices=ROOM_TYPE_CHOICES,)
     participants = models.ManyToManyField(settings.AUTH_USER_MODEL,related_name="chat_rooms",blank=True,)
     direct_hash = models.CharField(max_length=100,blank=True,default="",help_text=("For direct rooms only: sorted user-UUID pair ""separated by '_' to guarantee uniqueness."),)

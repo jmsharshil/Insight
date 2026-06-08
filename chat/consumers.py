@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
 from urllib.parse import parse_qs
+from .notifications import notify_new_message
 
 
 logger = logging.getLogger(__name__)
@@ -155,11 +156,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
             },
         )
 
-        # await self._dispatch_notification_task(
-        #     room_id=self.room_id,
-        #     message_id=str(message.id),
-        #     sender_id=str(self.user.id),
-        # )
+        # Fire push notifications to offline participants
+        room_participant_ids = await self._get_room_participant_ids(self.room_id)
+        # Exclude the sender from notifications
+        recipient_ids = [uid for uid in room_participant_ids if str(uid) != str(self.user.id)]
+        if recipient_ids:
+            notify_new_message(
+                room_id=self.room_id,
+                message_id=str(message.id),
+                sender_name=getattr(self.user, "name", "Someone"),
+                content=content or "📎 Attachment",
+                participant_ids=recipient_ids,
+            )
 
     async def _handle_typing_start(self, _data: dict):
         await self.channel_layer.group_send(
@@ -356,6 +364,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return ChatRoom.objects.values_list("room_type", flat=True).get(id=room_id)
         except ChatRoom.DoesNotExist:
             return ""
+
+    @database_sync_to_async
+    def _get_room_participant_ids(self, room_id: str) -> list:
+        """Return list of participant user IDs (as strings) in the room."""
+        from .models import ChatRoom
+        try:
+            room = ChatRoom.objects.prefetch_related('participants').get(id=room_id)
+            return [str(u.id) for u in room.participants.all()]
+        except ChatRoom.DoesNotExist:
+            return []
 
     @database_sync_to_async
     def _save_message(self, *, room_id, sender, content, file_url, file_name, file_size):

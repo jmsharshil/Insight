@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import ChatRoom, Message, MessageReadReceipt
-from .serializers import ChatRoomSerializer, MessageSerializer
+from .serializers import ChatRoomSerializer, ChatRoomListSerializer, MessageSerializer
 
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
@@ -106,7 +106,18 @@ class GroupRoomView(APIView):
 
     def post(self, request):
         name = request.data.get("name", "").strip()
-        participant_ids = request.data.get("participant_ids", [])
+        avatar = request.FILES.get("avatar") or request.FILES.get("avatar_url")
+        
+        if hasattr(request.data, "getlist"):
+            participant_ids = request.data.getlist("participant_ids")
+            if len(participant_ids) == 1 and ',' in participant_ids[0]:
+                participant_ids = [x.strip() for x in participant_ids[0].split(',') if x.strip()]
+        else:
+            participant_ids = request.data.get("participant_ids", [])
+            if not isinstance(participant_ids, list):
+                participant_ids = [participant_ids]
+        
+        participant_ids = [str(pid).strip().strip('"').strip("'") for pid in participant_ids if str(pid).strip().strip('"').strip("'")]
 
         if not name:
             return Response(
@@ -126,6 +137,7 @@ class GroupRoomView(APIView):
         with transaction.atomic():
             room = ChatRoom.objects.create(
                 name=name,
+                avatar=avatar,
                 room_type="group",
                 direct_hash="",  # Not used for group rooms
                 is_active=True,
@@ -140,8 +152,28 @@ class GroupRoomView(APIView):
 
 
 # ======================================================================
-# Room listing
+# Room listing & detail
 # ======================================================================
+
+class RoomDetailView(APIView):
+    """
+    GET /api/chat/rooms/<room_id>/
+
+    Return details for a single chat room including participants.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, room_id):
+        try:
+            room = ChatRoom.objects.prefetch_related("participants").get(id=room_id, is_active=True)
+        except ChatRoom.DoesNotExist:
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not room.participants.filter(id=request.user.id).exists():
+            return Response({"detail": "You are not a participant of this room."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = ChatRoomSerializer(room, context={"request": request})
+        return Response(serializer.data)
 
 
 class RoomListView(APIView):
@@ -178,7 +210,7 @@ class RoomListView(APIView):
 
         rooms = apply_filters(self, request, rooms)
 
-        serializer = ChatRoomSerializer(
+        serializer = ChatRoomListSerializer(
             rooms,
             many=True,
             context={"request": request},
@@ -435,35 +467,28 @@ class FileUploadView(APIView):
 # ======================================================================
 
 
-class GroupAddMembersView(APIView):
+class GroupUpdateView(APIView):
     """
-    POST /api/chat/rooms/<room_id>/add-members/
+    PATCH /api/chat/rooms/<room_id>/update-group/
 
-    Add one or more users to a group chat room.
+    Update group name, add members, or remove members in a single API call.
 
     Request body::
 
         {
-            "user_ids": ["<uuid>", "<uuid>", ...]
+            "name": "New Group Name",
+            "add_user_ids": ["<uuid>", ...],
+            "remove_user_ids": ["<uuid>", ...]
         }
 
     Rules:
     * Only works on ``group`` rooms (returns 400 for direct rooms).
-    * The requesting user must already be a participant.
-    * Users who are already participants are silently skipped.
-
-    Response::
-
-        {
-            "added": ["<uuid>", ...],
-            "already_in_room": ["<uuid>", ...],
-            "not_found": ["<uuid>", ...]
-        }
+    * The requesting user must be a participant.
     """
 
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, room_id):
+    def patch(self, request, room_id):
         # Fetch room
         try:
             room = ChatRoom.objects.get(id=room_id, is_active=True)  # Prevent operations on deleted rooms
@@ -476,7 +501,7 @@ class GroupAddMembersView(APIView):
         # Must be a group room
         if room.room_type != "group":
             return Response(
-                {"detail": "Cannot add members to a direct room."},
+                {"detail": "Cannot update a direct room."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -487,117 +512,78 @@ class GroupAddMembersView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        user_ids = request.data.get("user_ids", [])
-        if not user_ids or not isinstance(user_ids, list):
-            return Response(
-                {"detail": "'user_ids' must be a non-empty list."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        name = request.data.get("name")
+        avatar = request.FILES.get("avatar") or request.FILES.get("avatar_url")
 
-        # Resolve users
-        if getattr(request.user, 'organization', None):
-            users_to_add = list(User.objects.filter(id__in=user_ids, organization=request.user.organization))
+        if hasattr(request.data, "getlist"):
+            add_user_ids = request.data.getlist("add_user_ids")
+            if len(add_user_ids) == 1 and ',' in add_user_ids[0]:
+                add_user_ids = [x.strip() for x in add_user_ids[0].split(',') if x.strip()]
+            
+            remove_user_ids = request.data.getlist("remove_user_ids")
+            if len(remove_user_ids) == 1 and ',' in remove_user_ids[0]:
+                remove_user_ids = [x.strip() for x in remove_user_ids[0].split(',') if x.strip()]
         else:
-            users_to_add = list(User.objects.filter(id__in=user_ids))
-        found_ids = {str(u.id) for u in users_to_add}
-        not_found = [uid for uid in user_ids if str(uid) not in found_ids]
+            add_user_ids = request.data.get("add_user_ids", [])
+            remove_user_ids = request.data.get("remove_user_ids", [])
+            if not isinstance(add_user_ids, list):
+                add_user_ids = [add_user_ids]
+            if not isinstance(remove_user_ids, list):
+                remove_user_ids = [remove_user_ids]
+                
+        add_user_ids = [str(pid).strip().strip('"').strip("'") for pid in add_user_ids if str(pid).strip().strip('"').strip("'")]
+        remove_user_ids = [str(pid).strip().strip('"').strip("'") for pid in remove_user_ids if str(pid).strip().strip('"').strip("'")]
 
-        # Check who is already a participant
-        existing_ids = set(
-            room.participants.filter(id__in=[u.id for u in users_to_add])
-            .values_list("id", flat=True)
-        )
-        existing_ids = {str(eid) for eid in existing_ids}
-
-        new_users = [u for u in users_to_add if str(u.id) not in existing_ids]
-
-        # Add new participants
-        if new_users:
-            room.participants.add(*new_users)
-
-        return Response(
-            {
-                "added": [str(u.id) for u in new_users],
-                "already_in_room": list(existing_ids),
-                "not_found": not_found,
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
-class GroupRemoveMemberView(APIView):
-    """
-    POST /api/chat/rooms/<room_id>/remove-member/
-
-    Remove a user from a group chat room.
-
-    Request body::
-
-        {
-            "user_id": "<uuid>"
-        }
-
-    Rules:
-    * Only works on ``group`` rooms (returns 400 for direct rooms).
-    * The requesting user must be a participant of the room.
-    * A user can remove themselves (leave the group).
-    * The target user must currently be a participant.
-
-    Response::
-
-        {
-            "removed": "<uuid>",
-            "room_id": "<uuid>"
-        }
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, room_id):
-        # Fetch room
-        try:
-            room = ChatRoom.objects.get(id=room_id, is_active=True)  # Prevent operations on deleted rooms
-        except ChatRoom.DoesNotExist:
+        if not isinstance(add_user_ids, list) or not isinstance(remove_user_ids, list):
             return Response(
-                {"detail": "Room not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # Must be a group room
-        if room.room_type != "group":
-            return Response(
-                {"detail": "Cannot remove members from a direct room."},
+                {"detail": "'add_user_ids' and 'remove_user_ids' must be lists."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Caller must be a participant
-        if not room.participants.filter(id=request.user.id).exists():
-            return Response(
-                {"detail": "You are not a participant of this room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # Update name
+        if name and isinstance(name, str) and name.strip():
+            room.name = name.strip()
+            room.save(update_fields=['name'])
 
-        user_id = request.data.get("user_id")
-        if not user_id:
-            return Response(
-                {"detail": "'user_id' is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Update avatar
+        if avatar:
+            room.avatar = avatar
+            room.save(update_fields=['avatar'])
 
-        # Check target user is in the room
-        if not room.participants.filter(id=user_id).exists():
-            return Response(
-                {"detail": "User is not a participant of this room."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # Add users
+        added_ids = []
+        not_found = []
+        if add_user_ids:
+            if getattr(request.user, 'organization', None):
+                users_to_add = list(User.objects.filter(id__in=add_user_ids, organization=request.user.organization))
+            else:
+                users_to_add = list(User.objects.filter(id__in=add_user_ids))
+            
+            found_ids = {str(u.id) for u in users_to_add}
+            not_found = [uid for uid in add_user_ids if str(uid) not in found_ids]
+            
+            existing_ids = set(room.participants.filter(id__in=[u.id for u in users_to_add]).values_list("id", flat=True))
+            new_users = [u for u in users_to_add if u.id not in existing_ids]
+            
+            if new_users:
+                room.participants.add(*new_users)
+                added_ids = [str(u.id) for u in new_users]
 
-        # Remove the participant
-        room.participants.remove(user_id)
+        # Remove users
+        removed_ids = []
+        if remove_user_ids:
+            users_to_remove = room.participants.filter(id__in=remove_user_ids)
+            removed_ids = [str(u.id) for u in users_to_remove]
+            if users_to_remove:
+                room.participants.remove(*users_to_remove)
 
         return Response(
             {
-                "removed": str(user_id),
                 "room_id": str(room_id),
+                "name": room.name,
+                "added": added_ids,
+                "removed": removed_ids,
+                "not_found": not_found
             },
             status=status.HTTP_200_OK,
         )

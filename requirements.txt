@@ -42,3 +42,5 @@ ujson==5.12.1
 wcwidth==0.7.0
 whitenoise==6.12.0
 zope.interface==8.5
+python-dotenv
+google-auth

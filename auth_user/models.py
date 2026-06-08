@@ -65,6 +65,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     branch = models.ForeignKey('branch.Branch',null=True,blank=True,on_delete=models.SET_NULL,related_name='users',)
     linked_student = models.ForeignKey('self',null=True,blank=True,on_delete=models.SET_NULL,related_name='linked_parents',limit_choices_to={'role': 'student'},)
     profile_pic = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
+    fcm_token = models.TextField(blank=True, default='', help_text="Firebase Cloud Messaging device token for push notifications.")
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
