@@ -25,7 +25,28 @@ ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "image/png",
     "image/gif",
+    "image/webp",
     "application/pdf",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+    "video/mp4",
+    "video/webm",
+    "video/mpeg",
+    "video/ogg",
+    "video/quicktime",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/webm",
+    "audio/ogg",
+    "application/octet-stream",
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-powerpoint",
+
 }
 
 
