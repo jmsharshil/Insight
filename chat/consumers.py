@@ -92,6 +92,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "typing_start":  self._handle_typing_start,
             "typing_stop":   self._handle_typing_stop,
             "mark_read":     self._handle_mark_read,
+            "edit_message":   self._handle_edit_message,
+            "delete_message": self._handle_delete_message, 
         }
 
         handler = handler_map.get(event_type)
@@ -153,11 +155,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             },
         )
 
-        await self._dispatch_notification_task(
-            room_id=self.room_id,
-            message_id=str(message.id),
-            sender_id=str(self.user.id),
-        )
+        # await self._dispatch_notification_task(
+        #     room_id=self.room_id,
+        #     message_id=str(message.id),
+        #     sender_id=str(self.user.id),
+        # )
 
     async def _handle_typing_start(self, _data: dict):
         await self.channel_layer.group_send(
@@ -206,6 +208,67 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 "read_at":    receipt.read_at.isoformat(),
             },
         )
+
+
+    async def _handle_edit_message(self, data: dict):
+        message_id = data.get("message_id")
+        new_content = data.get("content", "").strip()
+
+        if not message_id:
+            await self._send_error("MISSING_FIELD", "'message_id' is required.")
+            return
+        if not new_content:
+            await self._send_error("MISSING_FIELD", "'content' is required.")
+            return
+
+        try:
+            UUID(message_id)
+        except (ValueError, AttributeError):
+            await self._send_error("INVALID_UUID", "'message_id' is not a valid UUID.")
+            return
+
+        updated = await self._update_message(message_id, self.user, new_content)
+        if not updated:
+            await self._send_error("FORBIDDEN", "Message not found or you are not the sender.")
+            return
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":       "chat.message_updated",
+                "message_id": message_id,
+                "content":    new_content,
+            },
+        )
+
+
+    async def _handle_delete_message(self, data: dict):
+        message_id = data.get("message_id")
+
+        if not message_id:
+            await self._send_error("MISSING_FIELD", "'message_id' is required.")
+            return
+
+        try:
+            UUID(message_id)
+        except (ValueError, AttributeError):
+            await self._send_error("INVALID_UUID", "'message_id' is not a valid UUID.")
+            return
+
+        deleted = await self._delete_message(message_id, self.user)
+        if not deleted:
+            await self._send_error("FORBIDDEN", "Message not found or you are not the sender.")
+            return
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":       "chat.message_deleted",
+                "message_id": message_id,
+            },
+        )
+
+        
 
     # ------------------------------------------------------------------
     # Outbound handlers
@@ -349,6 +412,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
             .order_by("-created_at")[:50]
         )
 
+    @database_sync_to_async
+    def _update_message(self, message_id: str, user, new_content: str) -> bool:
+        from .models import Message
+        updated = Message.objects.filter(
+            id=message_id,
+            sender=user,        # only sender can edit
+        ).update(content=new_content, updated_at=timezone.now())
+        return updated > 0
+
+
+    @database_sync_to_async
+    def _delete_message(self, message_id: str, user) -> bool:
+        from .models import Message
+        deleted_count, _ = Message.objects.filter(
+            id=message_id,
+            sender=user,        # only sender can delete
+        ).delete()
+        return deleted_count > 0
     # @database_sync_to_async
     # def _dispatch_notification_task(self, *, room_id, message_id, sender_id):
     #     from .tasks import notify_new_chat_message
