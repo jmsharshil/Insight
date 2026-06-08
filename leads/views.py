@@ -17,6 +17,7 @@ from .utils import LeadService
 from .models import Lead, LeadStage, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
 from django.db.models import Q
 import re
+from rest_framework.permissions import AllowAny
 
 FORM_TYPE_DISPLAY = dict(FORM_TYPE_CHOICES)
 STAGE_DISPLAY = dict(STAGE_CHOICES)
@@ -37,6 +38,8 @@ class LeadListView(APIView):
         if self.request.method == 'POST':
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    permission_classes=[AllowAny]
 
     def post(self, request):
 
@@ -174,7 +177,7 @@ class LeadListView(APIView):
 
 
 class LeadStatusUpdateView(APIView):
-
+    permission_classes=[AllowAny]
     def patch(self, request, lead_id):
         # Find lead
         try:
@@ -364,6 +367,8 @@ class LeadStatusUpdateView(APIView):
 
 
 class LeadDetailView(APIView):
+    permission_classes=[AllowAny]
+
     """
     GET    /leads/<id>/   — retrieve a single lead (full detail)
     PUT    /leads/<id>/   — full update

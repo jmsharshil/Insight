@@ -349,10 +349,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             .order_by("-created_at")[:50]
         )
 
-    @database_sync_to_async
-    def _dispatch_notification_task(self, *, room_id, message_id, sender_id):
-        from .tasks import notify_new_chat_message
-        notify_new_chat_message.delay(room_id, message_id, sender_id)
+    # @database_sync_to_async
+    # def _dispatch_notification_task(self, *, room_id, message_id, sender_id):
+    #     from .tasks import notify_new_chat_message
+    #     notify_new_chat_message.delay(room_id, message_id, sender_id)
 
 
 # ======================================================================

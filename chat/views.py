@@ -277,14 +277,6 @@ class MessageListCreateView(APIView):
             file_size=file_size,
         )
 
-        # Fire Celery task for push notifications
-        from .tasks import notify_new_chat_message
-
-        notify_new_chat_message.delay(
-            str(room_id),
-            str(message.id),
-            str(request.user.id),
-        )
 
         serializer = MessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
