@@ -195,9 +195,20 @@ class MessageListCreateView(APIView):
     """
     GET  /api/chat/rooms/<room_id>/messages/  — paginated message history
     POST /api/chat/rooms/<room_id>/messages/  — REST fallback for sending
+
+    The POST endpoint accepts **multipart/form-data** (for file + text in one
+    request) as well as plain JSON (for text-only or pre-uploaded file URL).
+
+    Multipart fields:
+      - ``content``  (str, optional)  — text body
+      - ``file``     (file, optional) — binary attachment (max 10 MB)
+      - ``file_url`` (str, optional)  — pre-uploaded URL (ignored when ``file`` is sent)
+      - ``file_name``(str, optional)  — override file name (for pre-uploaded URL flow)
+      - ``file_size``(int, optional)  — override file size (for pre-uploaded URL flow)
     """
 
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]  # supports both multipart and JSON
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['sender']
     search_fields = ['content', 'file_name']
@@ -250,6 +261,10 @@ class MessageListCreateView(APIView):
         """
         REST fallback for sending a message (same semantics as the
         WebSocket ``send_message`` event).
+
+        Accepts multipart/form-data so a file can be sent in the same
+        request as the message text.  Also still accepts plain JSON with
+        a pre-uploaded ``file_url``.
         """
         if not self._is_participant(room_id, request.user):
             return Response(
@@ -258,10 +273,49 @@ class MessageListCreateView(APIView):
             )
 
         content = request.data.get("content", "")
-        file_url = request.data.get("file_url")
+        uploaded_file = request.FILES.get("file")  # multipart upload
+        file_url = request.data.get("file_url")     # pre-uploaded URL fallback
         file_name = request.data.get("file_name")
         file_size = request.data.get("file_size")
 
+        # ── Handle direct file upload ─────────────────────────────────────
+        if uploaded_file:
+            # Validate content type
+            if uploaded_file.content_type not in ALLOWED_CONTENT_TYPES:
+                return Response(
+                    {
+                        "detail": (
+                            f"Unsupported file type '{uploaded_file.content_type}'. "
+                            f"Allowed: {', '.join(sorted(ALLOWED_CONTENT_TYPES))}."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate size
+            if uploaded_file.size > MAX_UPLOAD_SIZE:
+                return Response(
+                    {
+                        "detail": (
+                            f"File size {uploaded_file.size} bytes exceeds the "
+                            f"maximum of {MAX_UPLOAD_SIZE} bytes (10 MB)."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Save to storage
+            from django.core.files.storage import default_storage
+            import uuid as _uuid
+            ext = uploaded_file.name.rsplit(".", 1)[-1] if "." in uploaded_file.name else ""
+            unique_name = f"{_uuid.uuid4().hex}.{ext}" if ext else _uuid.uuid4().hex
+            path = f"chat/attachments/{unique_name}"
+            saved_path = default_storage.save(path, uploaded_file)
+            file_url = default_storage.url(saved_path)
+            file_name = uploaded_file.name
+            file_size = uploaded_file.size
+
+        # ── Must have at least text or an attachment ───────────────────────
         if not content and not file_url:
             return Response(
                 {"detail": "Message must contain content or a file attachment."},
@@ -274,9 +328,8 @@ class MessageListCreateView(APIView):
             content=content or "",
             file_url=file_url,
             file_name=file_name,
-            file_size=file_size,
+            file_size=int(file_size) if file_size else None,
         )
-
 
         serializer = MessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
