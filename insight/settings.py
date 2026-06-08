@@ -12,6 +12,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(os.path.join(Path(__file__).resolve().parent.parent, '.env'))
 from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -203,6 +207,10 @@ EMAIL_HOST_PASSWORD = 'hqnc uhzo lwch iwss'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
+
+# Firebase Cloud Messaging (v1 API) — set path to your service account JSON in .env
+# Download from: Firebase Console → Project Settings → Service accounts → Generate new private key
+FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH', '')
 
 LANGUAGE_CODE = 'en-us'
 

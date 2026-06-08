@@ -494,3 +494,42 @@ class OrganizationDetailAPIView(APIView):
                 "data": serializer.data
             })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RegisterFCMTokenView(APIView):
+    """
+    POST /api/auth/fcm-token/
+
+    Register or update the device FCM push notification token for the
+    currently authenticated user.
+
+    Request body:
+        { "fcm_token": "<device_token_from_firebase>" }
+
+    The mobile app should call this endpoint:
+      - After the user logs in
+      - When Firebase issues a new token (onTokenRefresh)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        fcm_token = request.data.get("fcm_token", "").strip()
+        if not fcm_token:
+            return Response(
+                {"detail": "'fcm_token' is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        request.user.fcm_token = fcm_token
+        request.user.save(update_fields=["fcm_token"])
+
+        return Response({"detail": "FCM token registered successfully."}, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        """
+        DELETE /api/auth/fcm-token/
+        Clear the FCM token (e.g. on logout so no notifications are sent).
+        """
+        request.user.fcm_token = ""
+        request.user.save(update_fields=["fcm_token"])
+        return Response({"detail": "FCM token cleared."}, status=status.HTTP_200_OK)
