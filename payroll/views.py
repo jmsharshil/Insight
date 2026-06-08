@@ -6,6 +6,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import PayrollRun, PaySlip, LateEntryPolicy
 from .serializers import (
@@ -54,6 +57,10 @@ def notify(recipient_user_id, title, body, metadata=None):
 
 class PayrollListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['year', 'month', 'status']
+    search_fields = ['branch__name']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
@@ -71,6 +78,8 @@ class PayrollListCreateView(APIView):
             val = request.GET.get(param)
             if val:
                 qs = qs.filter(**{field: val})
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, PayrollRunListSerializer)
 
@@ -366,6 +375,10 @@ class PayrollDisburseView(APIView):
 
 class FacultyPayslipsView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['payroll_run__year', 'payroll_run__month']
+    search_fields = ['faculty_profile__user__name']
+    ordering_fields = '__all__'
 
     def get(self, request, faculty_id):
         role = _user_role(request.user)
@@ -390,6 +403,8 @@ class FacultyPayslipsView(APIView):
             qs = qs.filter(payroll_run__year=year)
         if month:
             qs = qs.filter(payroll_run__month=month)
+
+        qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'count': qs.count(), 'data': PaySlipSerializer(qs, many=True).data})
 

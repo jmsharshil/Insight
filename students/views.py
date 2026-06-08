@@ -9,6 +9,10 @@ from django.db.models import Q
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+
+from core.utils import apply_filters
 
 from .models import Student, InventoryIssue
 from .serializers import (StudentListSerializer,StudentDetailSerializer,StudentSelfProfileSerializer,StudentUpdateSerializer,StudentStatusUpdateSerializer,BatchAllocateSerializer,DocumentUploadSerializer,InventoryIssueCreateSerializer,InventoryIssueReadSerializer,QRIdentitySerializer,)
@@ -46,35 +50,22 @@ def _not_found(student_id):
 # ── GET  /api/students/  — list ───────────────────────────────────────────────
 
 class StudentListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'course', 'branch', 'current_batch_name']
+    search_fields = ['first_name', 'surname', 'admission_number', 'email', 'phone_student']
+    ordering_fields = '__all__'
 
     def get(self, request):
         qs = Student.objects.select_related('branch').all()
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
 
-        # Filters
-        stu_status = request.GET.get('status')
-        course     = request.GET.get('course')
-        branch_id  = request.GET.get('branch')
+        # Retain custom param mapping for backwards compatibility
         batch_name = request.GET.get('batch')
-        search     = request.GET.get('search')   # name / admission_number / email
-
-        if stu_status:
-            qs = qs.filter(status=stu_status)
-        if course:
-            qs = qs.filter(course=course)
-        if branch_id:
-            qs = qs.filter(branch__id=branch_id)
         if batch_name:
             qs = qs.filter(current_batch_name=batch_name)
-        if search:
-            qs = qs.filter(
-                Q(first_name__icontains=search) |
-                Q(surname__icontains=search) |
-                Q(admission_number__icontains=search) |
-                Q(email__icontains=search) |
-                Q(phone_student__icontains=search)
-            )
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, StudentListSerializer, serializer_context={'request': request})
 

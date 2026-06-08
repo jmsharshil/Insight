@@ -4,6 +4,9 @@ from core.pagination import paginate_queryset
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from django.conf import settings
 from django.db import models
@@ -32,6 +35,10 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CourseListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['course_type', 'is_active']
+    search_fields = ['name', 'code']
+    ordering_fields = '__all__'
 
     def get(self, request):
         # Filter by user's organization
@@ -41,18 +48,17 @@ class CourseListView(APIView):
 
         course_type = request.GET.get('course_type')
         is_active = request.GET.get('is_active')
-        search = request.GET.get('search')
 
         if course_type:
             queryset = queryset.filter(course_type=course_type)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        if search:
-            queryset = queryset.filter(name__icontains=search) | queryset.filter(code__icontains=search)
 
         queryset = queryset.annotate(
             subject_count=models.Count('subjects')
         )
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, CourseListSerializer)
 
@@ -111,6 +117,10 @@ class CourseDetailView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SubjectListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['course', 'is_active']
+    search_fields = ['name', 'code']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = Subject.objects.select_related('course').all()
@@ -124,6 +134,8 @@ class SubjectListView(APIView):
         is_active = request.GET.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, SubjectListSerializer)
 
@@ -182,6 +194,10 @@ class SubjectDetailView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class BatchListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['course', 'is_active']
+    search_fields = ['name', 'batch_code']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = Batch.objects.select_related('course').prefetch_related('batch_students').all()
@@ -190,19 +206,18 @@ class BatchListView(APIView):
 
         course_id = request.GET.get('course_id')
         is_active = request.GET.get('is_active')
-        search = request.GET.get('search')
 
         if course_id:
             queryset = queryset.filter(course_id=course_id)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        if search:
-            queryset = queryset.filter(name__icontains=search) | queryset.filter(batch_code__icontains=search)
 
         # Annotate enrolled student count
         queryset = queryset.annotate(
             enrolled_count=models.Count('batch_students')
         )
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, BatchListSerializer)
 
@@ -387,6 +402,10 @@ class BatchRemoveFacultyView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ClassroomListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'building', 'room_number']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = Classroom.objects.all()
@@ -395,6 +414,9 @@ class ClassroomListView(APIView):
         is_active = request.GET.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+            
+        queryset = apply_filters(self, request, queryset)
+        
         serializer = ClassroomListSerializer(queryset, many=True)
         return Response({'success': True, 'count': queryset.count(), 'data': serializer.data})
 
@@ -449,6 +471,10 @@ class ClassroomDetailView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TimetableListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject']
+    search_fields = []
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = TimetableSlot.objects.select_related(
@@ -470,6 +496,8 @@ class TimetableListView(APIView):
             queryset = queryset.filter(faculty_id=faculty_id)
         if subject_id:
             queryset = queryset.filter(subject_id=subject_id)
+
+        queryset = apply_filters(self, request, queryset)
 
         serializer = TimetableSlotListSerializer(queryset, many=True)
         return Response({'success': True, 'count': queryset.count(), 'data': serializer.data})

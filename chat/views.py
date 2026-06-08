@@ -12,6 +12,10 @@ from rest_framework.views import APIView
 from .models import ChatRoom, Message, MessageReadReceipt
 from .serializers import ChatRoomSerializer, MessageSerializer
 
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
@@ -149,6 +153,10 @@ class RoomListView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['room_type']
+    search_fields = ['name']
+    ordering_fields = '__all__'
 
     def get(self, request):
         user = request.user
@@ -167,6 +175,8 @@ class RoomListView(APIView):
             )
             .order_by("-created_at")
         )
+
+        rooms = apply_filters(self, request, rooms)
 
         serializer = ChatRoomSerializer(
             rooms,
@@ -188,6 +198,10 @@ class MessageListCreateView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['sender']
+    search_fields = ['content', 'file_name']
+    ordering_fields = '__all__'
 
     def get(self, request, room_id):
         """
@@ -212,8 +226,7 @@ class MessageListCreateView(APIView):
             .order_by("-created_at")
         )
 
-        if search:
-            qs = qs.filter(content__icontains=search)
+        qs = apply_filters(self, request, qs)
 
         if before:
             try:

@@ -5,6 +5,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import MarkSheet, PublishedResult, RecheckRequest
 from .serializers import (
@@ -37,6 +40,10 @@ def _user_role(user):
 
 class PaperView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_submitted', 'is_pass', 'is_rechecked']
+    search_fields = ['student__user__name', 'paper_checker__name']
+    ordering_fields = '__all__'
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -48,6 +55,8 @@ class PaperView(APIView):
             qs = qs.filter(exam__branch__organization=request.user.organization)
         if role == 'paper_checker':
             qs = qs.filter(paper_checker=request.user)
+
+        qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'count': qs.count(), 'data': MarkSheetSerializer(qs, many=True).data})
 
@@ -323,6 +332,10 @@ class PublishResultView(APIView):
 
 class ResultView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_pass']
+    search_fields = ['student__user__name']
+    ordering_fields = '__all__'
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -334,6 +347,8 @@ class ResultView(APIView):
             qs = qs.filter(student__user=request.user)
         elif role == 'parents':
             qs = qs.filter(student__user__linked_parents=request.user)
+
+        qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'count': qs.count(), 'data': PublishedResultSerializer(qs, many=True).data})
 
@@ -421,6 +436,10 @@ class StudentRecheckRequestView(APIView):
 class RecheckRequestListView(APIView):
     """List recheck requests for an exam (admin/ASE)."""
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status']
+    search_fields = ['requested_by__user__name']
+    ordering_fields = '__all__'
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
@@ -432,6 +451,8 @@ class RecheckRequestListView(APIView):
         ).select_related('marksheet', 'requested_by__user', 'reviewed_by', 'new_checker')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
+
+        qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'count': qs.count(), 'data': RecheckRequestSerializer(qs, many=True).data})
 

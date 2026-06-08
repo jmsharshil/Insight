@@ -9,6 +9,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday
 from .serializers import (
@@ -61,6 +64,10 @@ def notify(recipient_user_id, title, body, metadata=None):
 class LeaveListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'leave_type', 'applied_by']
+    search_fields = ['applied_by__name', 'reason']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
@@ -85,6 +92,8 @@ class LeaveListCreateView(APIView):
             qs = qs.filter(from_date__gte=from_date)
         if to_date:
             qs = qs.filter(to_date__lte=to_date)
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, LeaveApplicationListSerializer, serializer_context={'request': request})
 
@@ -498,6 +507,10 @@ class LeaveBalanceUserView(APIView):
 
 class LateEntryListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['user', 'is_penalized', 'penalty_type']
+    search_fields = ['user__name', 'notes']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
@@ -526,6 +539,8 @@ class LateEntryListCreateView(APIView):
             qs = qs.filter(date__gte=from_date)
         if to_date:
             qs = qs.filter(date__lte=to_date)
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, LateEntryRecordSerializer)
 
@@ -614,6 +629,10 @@ class LateEntryDetailView(APIView):
 
 class PublicHolidayListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['year']
+    search_fields = ['name']
+    ordering_fields = '__all__'
 
     def get(self, request):
         bid = _user_branch_id(request.user)
@@ -626,6 +645,8 @@ class PublicHolidayListCreateView(APIView):
         year = request.GET.get('year')
         if year:
             qs = qs.filter(year=year)
+
+        qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'data': PublicHolidaySerializer(qs, many=True).data})
 

@@ -7,6 +7,9 @@ from rest_framework import status
 from rest_framework.exceptions import ValidationError
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 from core.email import send_email
 
 from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
@@ -25,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 class LeadListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['current_stage', 'course', 'form_type']
+    search_fields = ['first_name', 'surname', 'email', 'phone_student']
+    ordering_fields = '__all__'
 
     def get_permissions(self):
         if self.request.method == 'POST':
@@ -160,6 +167,8 @@ class LeadListView(APIView):
 
         if form_type:
             queryset = queryset.filter(form_type=form_type)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, LeadListSerializer)
 

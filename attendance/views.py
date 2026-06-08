@@ -6,6 +6,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import AttendanceRecord, QRScanLog, AlertLog, ViolationRecord
 from .serializers import (
@@ -54,6 +57,10 @@ def _user_batch_ids(user):
 
 class AttendanceListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['date', 'batch_id', 'student_id', 'status', 'session']
+    search_fields = ['student__first_name', 'student__surname']
+    ordering_fields = '__all__'
 
     def get(self, request):
         user = request.user
@@ -79,6 +86,8 @@ class AttendanceListCreateView(APIView):
             val = request.GET.get(param)
             if val:
                 qs = qs.filter(**{field: val})
+
+        qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, AttendanceRecordListSerializer)
 
@@ -604,6 +613,10 @@ class AttendanceAlertView(APIView):
 class ViolationListCreateView(APIView):
     """List violations + manually create violations (FRD §4.4.3)."""
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['student_id', 'date', 'violation_type', 'is_resolved', 'logged_by_admin']
+    search_fields = ['student__first_name', 'student__surname', 'description']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
@@ -627,6 +640,8 @@ class ViolationListCreateView(APIView):
         logged_by_admin = request.GET.get('logged_by_admin')
         if logged_by_admin is not None:
             qs = qs.filter(logged_by_admin=logged_by_admin.lower() == 'true')
+
+        qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'count': qs.count(), 'data': ViolationRecordSerializer(qs, many=True).data})
 

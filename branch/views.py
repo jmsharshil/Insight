@@ -8,35 +8,33 @@ from .models import Branch
 from .serializers import (BranchListSerializer,BranchDetailSerializer,BranchCreateSerializer,BranchSummarySerializer,)
 
 from django.db.models import Q
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
+from core.pagination import paginate_queryset
 
 # ==========================================
 # LIST + CREATE API
 # ==========================================
 class BranchListCreateAPIView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active', 'city']
+    search_fields = ['name', 'address', 'city', 'state']
+    ordering_fields = '__all__'
+
     def get(self, request):
 
         branches = Branch.objects.filter(is_deleted=False)
         if getattr(request.user, 'organization', None):
             branches = branches.filter(organization=request.user.organization)
             
-        # Filters
         is_active = request.GET.get("is_active")
-        city = request.GET.get("city")
-        search = request.GET.get("search")
-
         if is_active is not None:
             branches = branches.filter(is_active=str(is_active).lower() == 'true')
-        if city:
-            branches = branches.filter(city__icontains=city)
-        if search:
-            branches = branches.filter(Q(name__icontains=search))
             
-        serializer = BranchListSerializer(branches,many=True)
-
-        return Response({
-            "success": True,
-            "data": serializer.data
-        })
+        branches = apply_filters(self, request, branches)
+            
+        return paginate_queryset(branches, request, BranchListSerializer)
     
     def post(self, request):
         serializer = BranchCreateSerializer(data=request.data)

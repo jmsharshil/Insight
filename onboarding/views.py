@@ -7,6 +7,9 @@ from core.pagination import paginate_queryset
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from .models import Admission
 from .serializers import (AdmissionSerializer,AdmissionStatusUpdateSerializer,AdmissionListSerializer,AdmissionDetailSerializer,AdmissionUpdateSerializer,AdmissionDocumentUploadSerializer,)
@@ -35,6 +38,10 @@ def _not_found():
 # ── POST /api/admissions/   — submit registration form
 # ── GET  /api/admissions/   — list all admissions (with optional filters)
 class AdmissionListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'course']
+    search_fields = ['first_name', 'surname', 'email', 'phone_student']
+    ordering_fields = '__all__'
 
     def post(self, request):
         # Merge body + files
@@ -119,6 +126,8 @@ class AdmissionListView(APIView):
             queryset = queryset.filter(status=adm_status)
         if course:
             queryset = queryset.filter(course=course)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, AdmissionListSerializer)
 

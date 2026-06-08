@@ -4,6 +4,9 @@ from core.pagination import paginate_queryset
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 
 from django.db.models import Sum, Count, Q
 from django.utils import timezone
@@ -34,6 +37,10 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FeeStructureListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['course', 'batch', 'is_active']
+    search_fields = ['name']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = FeeStructure.objects.select_related('course', 'batch').prefetch_related('student_fees').all()
@@ -46,7 +53,6 @@ class FeeStructureListView(APIView):
         course_id = request.GET.get('course_id')
         batch_id = request.GET.get('batch_id')
         is_active = request.GET.get('is_active')
-        search = request.GET.get('search')
 
         if course_id:
             queryset = queryset.filter(course_id=course_id)
@@ -54,8 +60,8 @@ class FeeStructureListView(APIView):
             queryset = queryset.filter(batch_id=batch_id)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        if search:
-            queryset = queryset.filter(name__icontains=search)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, FeeStructureListSerializer)
 
@@ -120,6 +126,10 @@ class FeeStructureDetailView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class StudentFeeListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['student', 'status', 'fee_structure']
+    search_fields = ['student__first_name', 'student__surname', 'fee_structure__name']
+    ordering_fields = '__all__'
 
     def get(self, request):
         # Optimized: prefetch_related for reverse relations
@@ -137,6 +147,8 @@ class StudentFeeListView(APIView):
             queryset = queryset.filter(status=status_filter)
         if fee_structure_id:
             queryset = queryset.filter(fee_structure_id=fee_structure_id)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, StudentFeeListSerializer)
 
@@ -242,6 +254,10 @@ class StudentFeeByStudentView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class InstallmentPlanListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['student_fee', 'status']
+    search_fields = ['student_fee__student__first_name', 'student_fee__student__surname']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = InstallmentPlan.objects.select_related(
@@ -257,6 +273,8 @@ class InstallmentPlanListView(APIView):
             queryset = queryset.filter(student_fee_id=student_fee_id)
         if plan_status:
             queryset = queryset.filter(status=plan_status)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, InstallmentPlanListSerializer)
 
@@ -349,6 +367,10 @@ class InstallmentPlanApproveView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PaymentListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['student', 'status', 'payment_mode']
+    search_fields = ['student__first_name', 'student__surname', 'transaction_ref', 'receipt_number']
+    ordering_fields = '__all__'
 
     def get(self, request):
         # Optimized: select_related for foreign keys
@@ -372,6 +394,8 @@ class PaymentListView(APIView):
             queryset = queryset.filter(payment_date__gte=date_from)
         if date_to:
             queryset = queryset.filter(payment_date__lte=date_to)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, PaymentListSerializer)
 
@@ -472,6 +496,10 @@ class PaymentVerifyView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class RefundListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'payment']
+    search_fields = ['payment__receipt_number', 'reason']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = Refund.objects.select_related('payment').all()
@@ -480,6 +508,8 @@ class RefundListView(APIView):
         refund_status = request.GET.get('status')
         if refund_status:
             queryset = queryset.filter(status=refund_status)
+
+        queryset = apply_filters(self, request, queryset)
 
         return paginate_queryset(queryset, request, RefundListSerializer)
 
@@ -545,12 +575,19 @@ class RefundUpdateView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class BankAccountListView(APIView):
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'bank_name', 'account_number', 'ifsc_code']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = BankAccount.objects.all()
         is_active = request.GET.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+            
+        queryset = apply_filters(self, request, queryset)
+        
         serializer = BankAccountListSerializer(queryset, many=True)
         return Response({'success': True, 'count': queryset.count(), 'data': serializer.data})
 

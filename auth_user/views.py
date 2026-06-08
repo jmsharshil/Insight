@@ -10,6 +10,9 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from core.utils import apply_filters
 from .models import User, Organization, EmailOTP, PasswordSetToken
 from .serializers import (
     AddUserSerializer,
@@ -416,23 +419,22 @@ class DeleteUserAPIView(APIView):
 
 class UserListAPIView(APIView):
     permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['role', 'is_active']
+    search_fields = ['name', 'email', 'phone']
+    ordering_fields = '__all__'
 
     def get(self, request):
         users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
         role = self.request.query_params.get('role')
         is_active = self.request.query_params.get('is_active')
-        search = self.request.query_params.get('search')
 
-        if search:
-            users = users.filter(
-                Q(name__icontains=search) |
-                Q(email__icontains=search) |
-                Q(phone__icontains=search)
-            )
         if role:
             users = users.filter(role=role)
         if is_active:
             users = users.filter(is_active=is_active.lower() == 'true')
+        
+        users = apply_filters(self, request, users)
         
         return paginate_queryset(users, request, UserListSerializer)
 
