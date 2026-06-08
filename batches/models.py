@@ -170,17 +170,13 @@ class BatchStudent(models.Model):
     def __str__(self):
         return f"{self.student.full_name} → {self.batch.batch_code}"
 
+from faculty.models import FacultyProfile
+
 class BatchFaculty(models.Model):
-    """Links a faculty User to a Batch (+ optional Subject)."""
-    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    batch       = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='batch_faculty')
-    faculty     = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='batch_assignments',
-        limit_choices_to={'role': 'faculty'},
-    )
-    subject     = models.ForeignKey(Subject, on_delete=models.SET_NULL, null=True, blank=True, related_name='faculty_assignments')
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(Batch,on_delete=models.CASCADE, related_name='batch_faculty')
+    faculty = models.ForeignKey(FacultyProfile,on_delete=models.CASCADE,related_name='batch_assignments')
+    subject = models.ForeignKey(Subject,on_delete=models.SET_NULL,null=True,blank=True,related_name='faculty_assignments')
     assigned_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -192,8 +188,7 @@ class BatchFaculty(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.faculty.name} → {self.batch.batch_code} ({self.subject})"
-
+        return f"{self.faculty.user.name} → {self.batch.batch_code} ({self.subject})"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Classroom
@@ -227,12 +222,11 @@ class TimetableSlot(models.Model):
     organization  = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='timetable_slots', null=True, blank=True)
     batch         = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='timetable_slots')
     subject       = models.ForeignKey(Subject, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
-    faculty       = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+    faculty = models.ForeignKey(
+        FacultyProfile,
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='timetable_slots',
-        limit_choices_to={'role': 'faculty'},
     )
     classroom     = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     day_of_week   = models.IntegerField(choices=DAY_CHOICES)

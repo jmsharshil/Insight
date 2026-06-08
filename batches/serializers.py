@@ -172,14 +172,7 @@ class BatchStudentReadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BatchStudent
-        fields = [
-            'id',
-            'student_id',
-            'admission_number',
-            'student_name',
-            'student_email',
-            'enrolled_at',
-        ]
+        fields = ['id', 'student_id', 'admission_number', 'student_name', 'student_email', 'enrolled_at']
 
     def _get_student_profile(self, obj):
         if not hasattr(obj, "_student_profile"):
@@ -211,14 +204,54 @@ class AssignStudentsSerializer(serializers.Serializer):
     )
 
 
+from faculty.models import FacultyProfile
+
+
 class BatchFacultyReadSerializer(serializers.ModelSerializer):
-    faculty_name = serializers.CharField(source='faculty.name', read_only=True)
-    subject_name = serializers.CharField(source='subject.name', read_only=True, default=None)
+    faculty_id = serializers.SerializerMethodField()
+    employee_id = serializers.SerializerMethodField()
+    faculty_name = serializers.SerializerMethodField()
+    subject_name = serializers.CharField(
+        source='subject.name',
+        read_only=True,
+        default=None
+    )
 
     class Meta:
         model = BatchFaculty
-        fields = ['id', 'faculty', 'faculty_name', 'subject', 'subject_name', 'assigned_at']
+        fields = [
+            'id',
+            'faculty_id',
+            'employee_id',
+            'faculty_name',
+            'subject',
+            'subject_name',
+            'assigned_at',
+        ]
 
+    def _get_faculty_profile(self, obj):
+        if not hasattr(obj, '_faculty_profile'):
+            obj._faculty_profile = FacultyProfile.objects.filter(
+                user_id=obj.faculty_id
+            ).first()
+
+        return obj._faculty_profile
+
+    def get_faculty_id(self, obj):
+        profile = self._get_faculty_profile(obj)
+        return str(profile.id) if profile else None
+
+    def get_employee_id(self, obj):
+        profile = self._get_faculty_profile(obj)
+        return profile.employee_id if profile else None
+
+    def get_faculty_name(self, obj):
+        profile = self._get_faculty_profile(obj)
+
+        if profile:
+            return profile.user.name
+
+        return obj.faculty.name
 
 class AssignFacultySerializer(serializers.Serializer):
     faculty_id = serializers.UUIDField()
@@ -258,7 +291,8 @@ class ClassroomCreateUpdateSerializer(serializers.ModelSerializer):
 class TimetableSlotListSerializer(serializers.ModelSerializer):
     batch_name = serializers.CharField(source='batch.name', read_only=True)
     subject_name = serializers.CharField(source='subject.name', read_only=True, default=None)
-    faculty_name = serializers.CharField(source='faculty.name', read_only=True, default=None)
+    faculty_name = serializers.CharField(source='faculty.user.name', read_only=True, default=None)
+    faculty_employee_id = serializers.CharField(source='faculty.employee_id',read_only=True,default=None)
     classroom_name = serializers.CharField(source='classroom.name', read_only=True, default=None)
     day_label = serializers.SerializerMethodField()
     day_of_week_display = serializers.CharField(source="get_day_of_week_display", read_only=True)
@@ -271,7 +305,7 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
         model = TimetableSlot
         fields = ['id', 'batch', 'batch_name',
                   'course', 'course_name', 'course_code',
-                  'subject', 'subject_name',
+                  'subject', 'subject_name','faculty_employee_id',
                   'faculty', 'faculty_name', 'classroom', 'classroom_name',
                   'day_of_week', 'day_label', 'start_time', 'end_time',
                   'session', 'is_recurring', 'effective_from', 'effective_to',
@@ -331,7 +365,8 @@ class FacultyTimetableSerializer(serializers.ModelSerializer):
 
 class StudentTimetableSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True, default=None)
-    faculty_name = serializers.CharField(source='faculty.name', read_only=True, default=None)
+    faculty_name = serializers.CharField(source='faculty.user.name', read_only=True, default=None)
+    faculty_employee_id = serializers.CharField(source='faculty.employee_id',read_only=True,default=None)
     classroom_name = serializers.CharField(source='classroom.name', read_only=True, default=None)
     day_label = serializers.SerializerMethodField()
     day_of_week_display = serializers.CharField(source="get_day_of_week_display", read_only=True)
@@ -340,7 +375,7 @@ class StudentTimetableSerializer(serializers.ModelSerializer):
     class Meta:
         model = TimetableSlot
         fields = ['id', 'subject', 'subject_name', 'faculty', 'faculty_name',
-                  'classroom', 'classroom_name',
+                  'classroom', 'classroom_name','faculty_employee_id',
                   'day_of_week', 'day_label', 'start_time', 'end_time', 'session', 'day_of_week_display', 'session_display']
 
     def get_day_label(self, obj):

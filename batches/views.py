@@ -343,20 +343,11 @@ class BatchAssignStudentsView(APIView):
             for student in students
         ]
 
-        current_count = BatchStudent.objects.filter(
-            batch=batch
-        ).count()
-
+        current_count = BatchStudent.objects.filter(batch=batch).count()
         already_enrolled = set(
-            BatchStudent.objects.filter(
-                batch=batch,
-                student_id__in=user_ids
-            ).values_list(
-                'student_id',
-                flat=True
-            )
+            BatchStudent.objects.filter(batch=batch, student_id__in=user_ids)
+            .values_list('student_id', flat=True)
         )
-
         to_enroll = [
             user_id
             for user_id in user_ids
@@ -365,7 +356,6 @@ class BatchAssignStudentsView(APIView):
 
         if current_count + len(to_enroll) > batch.max_students:
             remaining = batch.max_students - current_count
-
             return Response(
                 {
                     'success': False,
@@ -416,16 +406,10 @@ class BatchRemoveStudentView(APIView):
 
         try:
             qs = BatchStudent.objects.all()
-
             if getattr(request.user, 'organization', None):
-                qs = qs.filter(
-                    batch__organization=request.user.organization
-                )
+                qs = qs.filter(batch__organization=request.user.organization)
 
-            enrollment = qs.get(
-                batch_id=pk,
-                student_id=student.user_id
-            )
+            enrollment = qs.get(batch_id=pk, student_id=student.user_id)
 
         except BatchStudent.DoesNotExist:
             return Response(
@@ -446,6 +430,7 @@ class BatchRemoveStudentView(APIView):
         )
 
 # ── Batch Faculty Assignment ──────────────────────────────────────────────────
+from faculty.models import FacultyProfile
 
 class BatchAssignFacultyView(APIView):
 
@@ -456,46 +441,111 @@ class BatchAssignFacultyView(APIView):
                 qs = qs.filter(organization=request.user.organization)
             batch = qs.get(pk=pk)
         except Batch.DoesNotExist:
-            return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Batch not found.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        serializer = AssignFacultySerializer(data=request.data, context={'request': request})
+        serializer = AssignFacultySerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
         if not serializer.is_valid():
-            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    'success': False,
+                    'errors': serializer.errors
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         faculty_id = serializer.validated_data['faculty_id']
         subject_id = serializer.validated_data.get('subject_id')
 
-        from auth_user.models import User
-        if not User.objects.filter(id=faculty_id, role='faculty').exists():
-            return Response({'success': False, 'message': 'Invalid faculty ID.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            faculty = FacultyProfile.objects.select_related('user').get(
+                id=faculty_id,
+                is_active=True
+            )
+
+        except FacultyProfile.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Invalid faculty ID.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         bf, created = BatchFaculty.objects.get_or_create(
-            batch=batch, faculty_id=faculty_id, subject_id=subject_id,
+            batch=batch,
+            faculty_id=faculty.user_id,
+            subject_id=subject_id,
         )
+
         if not created:
-            return Response({'success': False, 'message': 'Faculty already assigned to this batch/subject.'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Faculty already assigned to this batch/subject.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        return Response({
-            'success': True, 'message': 'Faculty assigned successfully.',
-            'data': BatchFacultyReadSerializer(bf).data,
-        }, status=status.HTTP_201_CREATED)
-
+        return Response(
+            {
+                'success': True,
+                'message': 'Faculty assigned successfully.',
+                'data': BatchFacultyReadSerializer(bf).data,
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 class BatchRemoveFacultyView(APIView):
 
     def post(self, request, pk, faculty_id):
         subject_id = request.data.get('subject_id')
+
+        try:
+            faculty = FacultyProfile.objects.get(
+                id=faculty_id
+            )
+
+        except FacultyProfile.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Faculty not found.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         try:
             qs = BatchFaculty.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(batch__organization=request.user.organization)
-            bf = qs.get(batch_id=pk, faculty_id=faculty_id, subject_id=subject_id)
+            assignment = qs.get(batch_id=pk, faculty_id=faculty.user_id, subject_id=subject_id)
         except BatchFaculty.DoesNotExist:
-            return Response({'success': False, 'message': 'Faculty assignment not found.'}, status=status.HTTP_404_NOT_FOUND)
-        bf.delete()
-        return Response({'success': True, 'message': 'Faculty removed from batch.'})
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Faculty assignment not found.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
 
+        assignment.delete()
+
+        return Response(
+            {
+                'success': True,
+                'message': 'Faculty removed from batch.'
+            }
+        )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Classroom Views
