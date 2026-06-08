@@ -228,13 +228,19 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
     day_label = serializers.SerializerMethodField()
     day_of_week_display = serializers.CharField(source="get_day_of_week_display", read_only=True)
     session_display = serializers.CharField(source="get_session_display", read_only=True)
+    course = serializers.UUIDField(source='batch.course.id', read_only=True, default=None)
+    course_name = serializers.CharField(source='batch.course.name', read_only=True, default=None)
+    course_code = serializers.CharField(source='batch.course.code', read_only=True, default=None)
 
     class Meta:
         model = TimetableSlot
-        fields = ['id', 'batch', 'batch_name', 'subject', 'subject_name',
+        fields = ['id', 'batch', 'batch_name',
+                  'course', 'course_name', 'course_code',
+                  'subject', 'subject_name',
                   'faculty', 'faculty_name', 'classroom', 'classroom_name',
                   'day_of_week', 'day_label', 'start_time', 'end_time',
-                  'session', 'is_recurring', 'effective_from', 'effective_to', 'day_of_week_display', 'session_display']
+                  'session', 'is_recurring', 'effective_from', 'effective_to',
+                  'day_of_week_display', 'session_display']
 
     def get_day_label(self, obj):
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
