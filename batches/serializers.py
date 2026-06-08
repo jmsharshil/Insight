@@ -161,14 +161,49 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
 
 # ── Batch-Student / Faculty link serializers ──────────────────────────────────
 
+from students.models import Student
+
+
 class BatchStudentReadSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.name', read_only=True)
-    student_email = serializers.CharField(source='student.email', read_only=True)
+    student_id = serializers.SerializerMethodField()
+    admission_number = serializers.SerializerMethodField()
+    student_name = serializers.SerializerMethodField()
+    student_email = serializers.SerializerMethodField()
 
     class Meta:
         model = BatchStudent
-        fields = ['id', 'student', 'student_name', 'student_email', 'enrolled_at']
+        fields = [
+            'id',
+            'student_id',
+            'admission_number',
+            'student_name',
+            'student_email',
+            'enrolled_at',
+        ]
 
+    def _get_student_profile(self, obj):
+        if not hasattr(obj, "_student_profile"):
+            obj._student_profile = Student.objects.filter(
+                user_id=obj.student_id
+            ).first()
+
+        return obj._student_profile
+
+    def get_student_id(self, obj):
+        profile = self._get_student_profile(obj)
+        return str(profile.id) if profile else None
+
+    def get_admission_number(self, obj):
+        profile = self._get_student_profile(obj)
+        return profile.admission_number if profile else None
+
+    def get_student_name(self, obj):
+        profile = self._get_student_profile(obj)
+        return profile.full_name if profile else obj.student.name
+
+    def get_student_email(self, obj):
+        profile = self._get_student_profile(obj)
+        return profile.email if profile else obj.student.email
 
 class AssignStudentsSerializer(serializers.Serializer):
     student_ids = serializers.ListField(

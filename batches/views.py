@@ -273,6 +273,8 @@ class BatchDetailView(APIView):
 
 # ── Batch Student Assignment ──────────────────────────────────────────────────
 
+from students.models import Student
+
 class BatchAssignStudentsView(APIView):
 
     def post(self, request, pk):
@@ -280,70 +282,168 @@ class BatchAssignStudentsView(APIView):
             qs = Batch.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(organization=request.user.organization)
+
             batch = qs.get(pk=pk)
+
         except Batch.DoesNotExist:
-            return Response({'success': False, 'message': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        serializer = AssignStudentsSerializer(data=request.data, context={'request': request})
-        if not serializer.is_valid():
-            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        student_ids = serializer.validated_data['student_ids']
-        User = settings.AUTH_USER_MODEL
-
-        # Validate students exist and have role=student
-        from auth_user.models import User
-        students = User.objects.filter(id__in=student_ids, role='student')
-        found_ids = set(students.values_list('id', flat=True))
-        invalid_ids = set(student_ids) - found_ids
-        if invalid_ids:
             return Response(
-                {'success': False, 'message': f'Invalid student IDs: {invalid_ids}'},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    'success': False,
+                    'message': 'Batch not found.'
+                },
+                status=status.HTTP_404_NOT_FOUND
             )
 
-        # Check max_students constraint
-        current_count = BatchStudent.objects.filter(batch=batch).count()
-        new_count = len(student_ids)
-        # Filter out already enrolled
-        already_enrolled = set(
-            BatchStudent.objects.filter(batch=batch, student_id__in=student_ids)
-            .values_list('student_id', flat=True)
+        serializer = AssignStudentsSerializer(
+            data=request.data,
+            context={'request': request}
         )
-        to_enroll = [sid for sid in student_ids if sid not in already_enrolled]
+
+        if not serializer.is_valid():
+            return Response(
+                {
+                    'success': False,
+                    'errors': serializer.errors
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        student_ids = serializer.validated_data['student_ids']
+
+        # Fetch Student records
+        students = Student.objects.select_related('user').filter(
+            id__in=student_ids,
+            is_active=True
+        )
+
+        found_student_ids = {
+            str(student.id)
+            for student in students
+        }
+
+        requested_student_ids = {
+            str(student_id)
+            for student_id in student_ids
+        }
+
+        invalid_ids = requested_student_ids - found_student_ids
+
+        if invalid_ids:
+            return Response(
+                {
+                    'success': False,
+                    'message': f'Invalid student IDs: {list(invalid_ids)}'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Convert Student IDs -> User IDs
+        user_ids = [
+            student.user_id
+            for student in students
+        ]
+
+        current_count = BatchStudent.objects.filter(
+            batch=batch
+        ).count()
+
+        already_enrolled = set(
+            BatchStudent.objects.filter(
+                batch=batch,
+                student_id__in=user_ids
+            ).values_list(
+                'student_id',
+                flat=True
+            )
+        )
+
+        to_enroll = [
+            user_id
+            for user_id in user_ids
+            if user_id not in already_enrolled
+        ]
 
         if current_count + len(to_enroll) > batch.max_students:
             remaining = batch.max_students - current_count
+
             return Response(
-                {'success': False, 'message': f'Batch capacity exceeded. Only {remaining} seats remaining.'},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    'success': False,
+                    'message': f'Batch capacity exceeded. Only {remaining} seats remaining.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         created = []
-        for sid in to_enroll:
-            bs = BatchStudent.objects.create(batch=batch, student_id=sid)
-            created.append(bs)
 
-        return Response({
-            'success': True,
-            'message': f'{len(created)} student(s) enrolled. {len(already_enrolled)} already enrolled.',
-            'data': BatchStudentReadSerializer(created, many=True).data if created else [],
-        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        for user_id in to_enroll:
+            enrollment = BatchStudent.objects.create(
+                batch=batch,
+                student_id=user_id
+            )
+            created.append(enrollment)
 
+        return Response(
+            {
+                'success': True,
+                'message': (
+                    f'{len(created)} student(s) enrolled. '
+                    f'{len(already_enrolled)} already enrolled.'
+                ),
+                'data': BatchStudentReadSerializer(
+                    created,
+                    many=True
+                ).data if created else []
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
 
 class BatchRemoveStudentView(APIView):
 
     def post(self, request, pk, student_id):
         try:
-            qs = BatchStudent.objects.all()
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(batch__organization=request.user.organization)
-            bs = qs.get(batch_id=pk, student_id=student_id)
-        except BatchStudent.DoesNotExist:
-            return Response({'success': False, 'message': 'Student not enrolled in this batch.'}, status=status.HTTP_404_NOT_FOUND)
-        bs.delete()
-        return Response({'success': True, 'message': 'Student removed from batch.'})
+            student = Student.objects.select_related('user').get(
+                id=student_id
+            )
+        except Student.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Student not found.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
 
+        try:
+            qs = BatchStudent.objects.all()
+
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(
+                    batch__organization=request.user.organization
+                )
+
+            enrollment = qs.get(
+                batch_id=pk,
+                student_id=student.user_id
+            )
+
+        except BatchStudent.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Student not enrolled in this batch.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        enrollment.delete()
+
+        return Response(
+            {
+                'success': True,
+                'message': 'Student removed from batch.'
+            }
+        )
 
 # ── Batch Faculty Assignment ──────────────────────────────────────────────────
 

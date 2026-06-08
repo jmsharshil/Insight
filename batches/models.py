@@ -151,16 +151,12 @@ class Batch(models.Model):
         super().save(*args, **kwargs)
 
 
+from students.models import Student
+
 class BatchStudent(models.Model):
-    """Links a student User to a Batch."""
-    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    batch       = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='batch_students')
-    student     = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='batch_enrollments',
-        limit_choices_to={'role': 'student'},
-    )
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='batch_students')
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='batch_enrollments')
     enrolled_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -172,8 +168,7 @@ class BatchStudent(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.student.name} → {self.batch.batch_code}"
-
+        return f"{self.student.full_name} → {self.batch.batch_code}"
 
 class BatchFaculty(models.Model):
     """Links a faculty User to a Batch (+ optional Subject)."""
