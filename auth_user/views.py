@@ -23,12 +23,14 @@ from .serializers import (
     UserListSerializer,
     UpdateUserSerializer,
     UserProfileSerializer,
+    ChangePasswordSerializer
 )
 from .utils import send_otp_email, send_password_set_email
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from leads.models import Lead
 from leads.serializers import LeadDetailSerializer
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
