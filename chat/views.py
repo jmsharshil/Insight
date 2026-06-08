@@ -155,7 +155,7 @@ class RoomListView(APIView):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['room_type']
-    search_fields = ['name']
+    search_fields = ['name', 'participants__name']
     ordering_fields = '__all__'
 
     def get(self, request):
@@ -404,6 +404,8 @@ class MessageDetailAPIView(APIView):
         self._broadcast_event(message.room_id, {
             "type": "chat.message_deleted",
             "message_id": str(message.id),
+            "content": "This message was deleted", 
+            "is_deleted": True,
         })
 
         return Response({"detail": "Message deleted."}, status=status.HTTP_204_NO_CONTENT)

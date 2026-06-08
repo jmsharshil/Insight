@@ -59,6 +59,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
+        # await self._set_user_online(self.room_id, str(self.user.id))
+        # # --- Broadcast presence: user is online ---
+        # await self.channel_layer.group_send(
+        #     self.room_group_name,
+        #     {
+        #         "type":      "chat.presence",
+        #         "user_id":   str(self.user.id),
+        #         "full_name": getattr(self.user, "name", ""),
+        #         "is_online": True,
+        #     },
+        # )
+
         await self._mark_messages_delivered(self.room_id, self.user)
         delivered_msgs = await self._get_newly_delivered_messages(self.room_id, self.user)
         for msg in delivered_msgs:
@@ -74,6 +86,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    # async def disconnect(self, close_code):
+    #     if self.user:
+    #         await self._set_user_offline(self.room_id, str(self.user.id))
+    #         await self.channel_layer.group_send(
+    #             self.room_group_name,
+    #             {
+    #                 "type":      "chat.presence",
+    #                 "user_id":   str(self.user.id),
+    #                 "full_name": getattr(self.user, "name", ""),
+    #                 "is_online": False,
+    #             },
+    #         )
+    #     await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     # ------------------------------------------------------------------
     # Inbound dispatcher
@@ -92,6 +118,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "typing_start":  self._handle_typing_start,
             "typing_stop":   self._handle_typing_stop,
             "mark_read":     self._handle_mark_read,
+            "edit_message":   self._handle_edit_message,
+            "delete_message": self._handle_delete_message, 
         }
 
         handler = handler_map.get(event_type)
@@ -153,11 +181,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             },
         )
 
-        await self._dispatch_notification_task(
-            room_id=self.room_id,
-            message_id=str(message.id),
-            sender_id=str(self.user.id),
-        )
+        # await self._dispatch_notification_task(
+        #     room_id=self.room_id,
+        #     message_id=str(message.id),
+        #     sender_id=str(self.user.id),
+        # )
 
     async def _handle_typing_start(self, _data: dict):
         await self.channel_layer.group_send(
@@ -207,6 +235,69 @@ class ChatConsumer(AsyncWebsocketConsumer):
             },
         )
 
+
+    async def _handle_edit_message(self, data: dict):
+        message_id = data.get("message_id")
+        new_content = data.get("content", "").strip()
+
+        if not message_id:
+            await self._send_error("MISSING_FIELD", "'message_id' is required.")
+            return
+        if not new_content:
+            await self._send_error("MISSING_FIELD", "'content' is required.")
+            return
+
+        try:
+            UUID(message_id)
+        except (ValueError, AttributeError):
+            await self._send_error("INVALID_UUID", "'message_id' is not a valid UUID.")
+            return
+
+        updated = await self._update_message(message_id, self.user, new_content)
+        if not updated:
+            await self._send_error("FORBIDDEN", "Message not found or you are not the sender.")
+            return
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":       "chat.message_updated",
+                "message_id": message_id,
+                "content":    new_content,
+            },
+        )
+
+
+    async def _handle_delete_message(self, data: dict):
+        message_id = data.get("message_id")
+
+        if not message_id:
+            await self._send_error("MISSING_FIELD", "'message_id' is required.")
+            return
+
+        try:
+            UUID(message_id)
+        except (ValueError, AttributeError):
+            await self._send_error("INVALID_UUID", "'message_id' is not a valid UUID.")
+            return
+
+        deleted = await self._delete_message(message_id, self.user)
+        if not deleted:
+            await self._send_error("FORBIDDEN", "Message not found or you are not the sender.")
+            return
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":       "chat.message_deleted",
+                "message_id": message_id,
+                "content":    "This message was deleted", 
+                "is_deleted": True,   
+            },
+        )
+
+        
+
     # ------------------------------------------------------------------
     # Outbound handlers
     # ------------------------------------------------------------------
@@ -253,7 +344,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             "type":       "message_deleted",
             "message_id": event["message_id"],
+            "content":    event["content"],   
+            "is_deleted": event["is_deleted"],   
         }))
+
+    # async def chat_presence(self, event):
+    #     await self.send(text_data=json.dumps({
+    #         "type":      "presence",
+    #         "user_id":   event["user_id"],
+    #         "full_name": event["full_name"],
+    #         "is_online": event["is_online"],
+    #     }))
 
     # ------------------------------------------------------------------
     # Error helper
@@ -349,6 +450,36 @@ class ChatConsumer(AsyncWebsocketConsumer):
             .order_by("-created_at")[:50]
         )
 
+    @database_sync_to_async
+    def _update_message(self, message_id: str, user, new_content: str) -> bool:
+        from .models import Message
+        updated = Message.objects.filter(
+            id=message_id,
+            sender=user,        # only sender can edit
+        ).update(content=new_content, updated_at=timezone.now())
+        return updated > 0
+
+
+    @database_sync_to_async
+    def _delete_message(self, message_id: str, user) -> bool:
+        from .models import Message
+        updated = Message.objects.filter(
+            id=message_id,
+            sender=user,
+        ).update(is_deleted=True, updated_at=timezone.now())
+        return updated > 0
+    
+    # @database_sync_to_async
+    # def _set_user_online(self, room_id: str, user_id: str):
+    #     from django.core.cache import cache
+    #     key = f"online_{room_id}_{user_id}"
+    #     cache.set(key, True, timeout=None)
+
+    # @database_sync_to_async
+    # def _set_user_offline(self, room_id: str, user_id: str):
+    #     from django.core.cache import cache
+    #     key = f"online_{room_id}_{user_id}"
+    #     cache.delete(key)
     # @database_sync_to_async
     # def _dispatch_notification_task(self, *, room_id, message_id, sender_id):
     #     from .tasks import notify_new_chat_message
