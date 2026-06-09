@@ -126,9 +126,16 @@ class FacultyListCreateView(APIView):
         except Branch.DoesNotExist:
             return Response({'success': False, 'message': 'Branch not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        base_username = d['email'].split('@')[0][:90]
+        username = base_username
+        counter = 1
+        while User.objects.filter(username=username).exists():
+            username = f"{base_username}{counter}"
+            counter += 1
+
         try:
             user = User.objects.create_user(
-                username=d['email'].split('@')[0],
+                username=username,
                 email=d['email'],
                 password='changeme123',
                 name=d['full_name'],
