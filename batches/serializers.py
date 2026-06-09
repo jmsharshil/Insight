@@ -174,29 +174,17 @@ class BatchStudentReadSerializer(serializers.ModelSerializer):
         model = BatchStudent
         fields = ['id', 'student_id', 'admission_number', 'student_name', 'student_email', 'enrolled_at']
 
-    def _get_student_profile(self, obj):
-        if not hasattr(obj, "_student_profile"):
-            obj._student_profile = Student.objects.filter(
-                user_id=obj.student_id
-            ).first()
-
-        return obj._student_profile
-
     def get_student_id(self, obj):
-        profile = self._get_student_profile(obj)
-        return str(profile.id) if profile else None
+        return str(obj.student.id) if obj.student else None
 
     def get_admission_number(self, obj):
-        profile = self._get_student_profile(obj)
-        return profile.admission_number if profile else None
+        return obj.student.admission_number if obj.student else None
 
     def get_student_name(self, obj):
-        profile = self._get_student_profile(obj)
-        return profile.full_name if profile else obj.student.full_name
+        return obj.student.full_name if obj.student else None
 
     def get_student_email(self, obj):
-        profile = self._get_student_profile(obj)
-        return profile.email if profile else obj.student.email
+        return obj.student.email if obj.student else None
 
 class AssignStudentsSerializer(serializers.Serializer):
     student_ids = serializers.ListField(
@@ -229,29 +217,14 @@ class BatchFacultyReadSerializer(serializers.ModelSerializer):
             'assigned_at',
         ]
 
-    def _get_faculty_profile(self, obj):
-        if not hasattr(obj, '_faculty_profile'):
-            obj._faculty_profile = FacultyProfile.objects.filter(
-                user_id=obj.faculty_id
-            ).first()
-
-        return obj._faculty_profile
-
     def get_faculty_id(self, obj):
-        profile = self._get_faculty_profile(obj)
-        return str(profile.id) if profile else None
+        return str(obj.faculty.id) if obj.faculty else None
 
     def get_employee_id(self, obj):
-        profile = self._get_faculty_profile(obj)
-        return profile.employee_id if profile else None
+        return obj.faculty.employee_id if obj.faculty else None
 
     def get_faculty_name(self, obj):
-        profile = self._get_faculty_profile(obj)
-
-        if profile:
-            return profile.user.name
-
-        return obj.faculty.name
+        return obj.faculty.user.name if obj.faculty and obj.faculty.user else ''
 
 class AssignFacultySerializer(serializers.Serializer):
     faculty_id = serializers.UUIDField()

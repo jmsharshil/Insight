@@ -6,6 +6,8 @@ from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHour
 
 class FacultyListSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     batch_count = serializers.IntegerField(read_only=True, default=0)
@@ -15,13 +17,19 @@ class FacultyListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FacultyProfile
         fields = [
-            'id', 'employee_id', 'full_name', 'photo_url', 'branch', 'branch_name',
+            'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url', 'branch', 'branch_name',
             'level', 'employment_type', 'specialization', 'subject_expertise',
             'joining_date', 'is_active', 'batch_count', 'created_at',
          'level_display', 'employment_type_display']
 
     def get_full_name(self, obj):
         return obj.user.name if obj.user else ''
+
+    def get_email(self, obj):
+        return obj.user.email if obj.user else ''
+
+    def get_phone(self, obj):
+        return getattr(obj.user, 'phone', '') if obj.user else ''
 
     def get_branch_name(self, obj):
         return obj.branch.name if obj.branch else ''
