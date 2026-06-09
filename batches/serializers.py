@@ -251,7 +251,7 @@ class BatchFacultyReadSerializer(serializers.ModelSerializer):
         if profile:
             return profile.user.name
 
-        return obj.faculty.name
+        return obj.faculty.user.name
 
 class AssignFacultySerializer(serializers.Serializer):
     faculty_id = serializers.UUIDField()
