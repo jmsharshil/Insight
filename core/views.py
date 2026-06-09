@@ -8,7 +8,13 @@ from batches.models import Course, Subject, Batch, Classroom
 from faculty.models import FacultyProfile
 from students.models import Student
 from exams.models import Exam
-from leave.models import LeavePolicy
+from leave.models import LeavePolicy, LEAVE_STATUS_CHOICES
+from fees.models import FeeStructure, FEE_STATUS_CHOICES, PAYMENT_MODE_CHOICES, INSTALLMENT_PLAN_STATUS_CHOICES
+from payroll.models import LateEntryPolicy, PAYROLL_STATUS_CHOICES
+from students.models import STUDENT_STATUS_CHOICES, GENDER_CHOICES, INVENTORY_ITEM_CHOICES, BLOOD_GROUP_CHOICES, RELATIONSHIP_CHOICES
+from faculty.models import LEVEL_CHOICES, EMPLOYMENT_TYPE_CHOICES, SCAN_TYPE_CHOICES, SESSION_STATUS_CHOICES
+from batches.models import COURSE_TYPE_CHOICES, DAY_CHOICES, SESSION_CHOICES
+from exams.models import EXAM_TYPE_CHOICES, EXAM_STATUS_CHOICES
 
 class PublicDropdownsView(APIView):
     """
@@ -55,6 +61,8 @@ class AuthenticatedDropdownsView(APIView):
         classrooms_qs = Classroom.objects.all()
         exams_qs = Exam.objects.filter(is_deleted=False)
         leave_policies_qs = LeavePolicy.objects.filter(is_active=True)
+        fee_structures_qs = FeeStructure.objects.filter(is_active=True)
+        late_policies_qs = LateEntryPolicy.objects.filter(is_active=True)
 
         if org_id:
             users_qs = users_qs.filter(organization_id=org_id)
@@ -67,6 +75,8 @@ class AuthenticatedDropdownsView(APIView):
             classrooms_qs = classrooms_qs.filter(organization_id=org_id)
             exams_qs = exams_qs.filter(branch__organization_id=org_id)
             leave_policies_qs = leave_policies_qs.filter(branch__organization_id=org_id)
+            fee_structures_qs = fee_structures_qs.filter(course__organization_id=org_id)
+            late_policies_qs = late_policies_qs.filter(branch__organization_id=org_id)
 
         # Build responses
         users = list(users_qs.values('id', 'name', 'email', 'role', 'branch_id'))
@@ -88,6 +98,8 @@ class AuthenticatedDropdownsView(APIView):
         classrooms = list(classrooms_qs.values('id', 'name', 'capacity', 'organization_id'))
         exams = list(exams_qs.values('id', 'title', 'exam_type', 'status', 'branch_id'))
         leave_policies = list(leave_policies_qs.values('id', 'leave_type', 'annual_quota', 'branch_id'))
+        fee_structures = list(fee_structures_qs.values('id', 'name', 'course_id', 'total_amount'))
+        late_policies = list(late_policies_qs.values('id', 'branch_id', 'grace_period_minutes'))
 
         return Response({
             "success": True,
@@ -103,5 +115,28 @@ class AuthenticatedDropdownsView(APIView):
                 "classrooms": classrooms,
                 "exams": exams,
                 "leave_policies": leave_policies,
+                "fee_structures": fee_structures,
+                "late_policies": late_policies,
+                "choices": {
+                    "student_status": [{"value": r[0], "label": r[1]} for r in STUDENT_STATUS_CHOICES],
+                    "gender": [{"value": r[0], "label": r[1]} for r in GENDER_CHOICES],
+                    "inventory_item": [{"value": r[0], "label": r[1]} for r in INVENTORY_ITEM_CHOICES],
+                    "blood_group": [{"value": r[0], "label": r[1]} for r in BLOOD_GROUP_CHOICES],
+                    "relationship": [{"value": r[0], "label": r[1]} for r in RELATIONSHIP_CHOICES],
+                    "faculty_level": [{"value": r[0], "label": r[1]} for r in LEVEL_CHOICES],
+                    "employment_type": [{"value": r[0], "label": r[1]} for r in EMPLOYMENT_TYPE_CHOICES],
+                    "scan_type": [{"value": r[0], "label": r[1]} for r in SCAN_TYPE_CHOICES],
+                    "session_status": [{"value": r[0], "label": r[1]} for r in SESSION_STATUS_CHOICES],
+                    "course_type": [{"value": r[0], "label": r[1]} for r in COURSE_TYPE_CHOICES],
+                    "day": [{"value": r[0], "label": r[1]} for r in DAY_CHOICES],
+                    "batch_session": [{"value": r[0], "label": r[1]} for r in SESSION_CHOICES],
+                    "fee_status": [{"value": r[0], "label": r[1]} for r in FEE_STATUS_CHOICES],
+                    "payment_mode": [{"value": r[0], "label": r[1]} for r in PAYMENT_MODE_CHOICES],
+                    "installment_status": [{"value": r[0], "label": r[1]} for r in INSTALLMENT_PLAN_STATUS_CHOICES],
+                    "payroll_status": [{"value": r[0], "label": r[1]} for r in PAYROLL_STATUS_CHOICES],
+                    "leave_status": [{"value": r[0], "label": r[1]} for r in LEAVE_STATUS_CHOICES],
+                    "exam_type": [{"value": r[0], "label": r[1]} for r in EXAM_TYPE_CHOICES],
+                    "exam_status": [{"value": r[0], "label": r[1]} for r in EXAM_STATUS_CHOICES],
+                }
             }
         })

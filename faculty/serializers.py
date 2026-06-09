@@ -109,6 +109,12 @@ class FacultyCreateSerializer(serializers.Serializer):
 
 class FacultyUpdateSerializer(serializers.ModelSerializer):
     photo = serializers.ImageField(required=False, allow_null=True)
+    full_name = serializers.CharField(max_length=150, required=False)
+    name = serializers.CharField(max_length=150, required=False, write_only=True)
+    email = serializers.EmailField(required=False)
+    phone = serializers.CharField(max_length=20, required=False)
+    branch_id = serializers.UUIDField(required=False, write_only=True)
+    branch = serializers.UUIDField(required=False, write_only=True)
 
     class Meta:
         model = FacultyProfile
@@ -116,7 +122,38 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
             'qualification', 'specialization', 'subject_expertise',
             'level', 'employment_type', 'salary', 'hourly_rate',
             'bank_account', 'ifsc_code', 'pan_number', 'is_active', 'photo',
+            'full_name', 'name', 'email', 'phone', 'branch_id', 'branch',
         ]
+
+    def update(self, instance, validated_data):
+        user_data_keys = ['full_name', 'name', 'email', 'phone']
+        user_updates = {}
+        for key in user_data_keys:
+            if key in validated_data:
+                user_updates[key] = validated_data.pop(key)
+
+        branch_val = validated_data.pop('branch_id', None) or validated_data.pop('branch', None)
+        if branch_val:
+            from branch.models import Branch
+            try:
+                branch_obj = Branch.objects.get(id=branch_val)
+                instance.branch = branch_obj
+            except Branch.DoesNotExist:
+                pass
+
+        if user_updates and instance.user:
+            user = instance.user
+            full_name_val = user_updates.get('full_name') or user_updates.get('name')
+            if full_name_val:
+                user.name = full_name_val
+            if 'email' in user_updates:
+                # Need to update username if email changes? Optional, let's just update email
+                user.email = user_updates['email']
+            if 'phone' in user_updates:
+                user.phone = user_updates['phone']
+            user.save()
+
+        return super().update(instance, validated_data)
 
 
 # ═══ Subject Hourly Rate ═════════════════════════════════════════════════════

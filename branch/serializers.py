@@ -6,7 +6,7 @@ from .models import Branch
 class BranchListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
-        fields = ["id","name","city","is_active","created_at",]
+        fields = ["id", "name", "city", "logo", "is_active", "created_at"]
 
 class BranchDetailSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)
