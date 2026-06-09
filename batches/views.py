@@ -370,6 +370,12 @@ class BatchAssignStudentsView(APIView):
                 batch=batch,
                 student_id=student_id
             )
+            Student.objects.filter(
+                id=student_id
+            ).update(
+                batch=batch,
+                current_batch_name=batch.name 
+            )
             created.append(enrollment)
 
         return Response(
@@ -420,6 +426,17 @@ class BatchRemoveStudentView(APIView):
             )
 
         enrollment.delete()
+        
+         # Clear student's current batch
+        student.batch = None
+        student.current_batch_name = ''
+        student.save(
+            update_fields=[
+                'batch',
+                'current_batch_name',
+                'updated_at'
+            ]
+        )
 
         return Response(
             {
