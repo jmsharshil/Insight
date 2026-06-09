@@ -141,8 +141,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # 10. Create PaySlip
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
-        faculty=faculty_profile.user,
-        faculty_profile=faculty_profile,
+        faculty=faculty_profile,
         basic_salary=faculty_profile.salary,
         total_session_hours=total_hours,
         hour_based_amount=hour_based_amount,

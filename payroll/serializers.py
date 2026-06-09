@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import LateEntryPolicy, PayrollRun, PaySlip, SessionLatePenaltyLog
+from branch.models import Branch
 
 
 class LateEntryPolicySerializer(serializers.ModelSerializer):
@@ -47,10 +48,10 @@ class PaySlipSerializer(serializers.ModelSerializer):
         ]
 
     def get_faculty_name(self, obj):
-        return obj.faculty.name if obj.faculty else ''
+        return obj.faculty.user.name if obj.faculty else ''
 
     def get_employee_id(self, obj):
-        return obj.faculty_profile.employee_id if obj.faculty_profile else ''
+        return obj.faculty.employee_id if obj.faculty else ''
 
 
 class PayrollRunListSerializer(serializers.ModelSerializer):
@@ -100,7 +101,7 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
 
 
 class PayrollGenerateSerializer(serializers.Serializer):
-    branch_id = serializers.UUIDField()
+    branch_id = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.all())
     month = serializers.IntegerField(min_value=1, max_value=12)
     year = serializers.IntegerField(min_value=2020)
 

@@ -384,6 +384,42 @@ class MessageListCreateView(APIView):
             file_size=int(file_size) if file_size else None,
         )
 
+        # ── Broadcast to WebSocket so other participants see it in real-time ──
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            avatar_url = ""
+            if hasattr(request.user, "profile_pic") and request.user.profile_pic:
+                try:
+                    avatar_url = request.user.profile_pic.url
+                except Exception:
+                    avatar_url = ""
+
+            async_to_sync(channel_layer.group_send)(
+                f"room_{room_id}",
+                {
+                    "type": "chat.new_message",
+                    "message": {
+                        "id":         str(message.id),
+                        "room_id":    str(room_id),
+                        "sender": {
+                            "id":        str(request.user.id),
+                            "full_name": getattr(request.user, "name", ""),
+                            "avatar_url": avatar_url,
+                        },
+                        "content":    message.content,
+                        "file_url":   message.file_url or "",
+                        "file_name":  message.file_name or "",
+                        "file_size":  message.file_size,
+                        "created_at": message.created_at.isoformat(),
+                        "delivered_at": None,
+                        "read_at":      None,
+                    },
+                },
+            )
+
         serializer = MessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 

@@ -19,7 +19,7 @@ class FeeStructureAdmin(admin.ModelAdmin):
 class StudentFeeAdmin(admin.ModelAdmin):
     list_display = ['student', 'fee_structure', 'total_amount', 'discount', 'amount_paid', 'status', 'due_date', 'created_at']
     list_filter = ['status', 'due_date']
-    search_fields = ['student__name', 'student__email', 'fee_structure__name']
+    search_fields = ['student__first_name', 'student__surname', 'student__email', 'fee_structure__name']
     ordering = ['-created_at']
     date_hierarchy = 'due_date'
     list_editable = ['status']
@@ -29,7 +29,7 @@ class StudentFeeAdmin(admin.ModelAdmin):
 class InstallmentPlanAdmin(admin.ModelAdmin):
     list_display = ['student_fee', 'status', 'approved_by', 'approved_at', 'created_at']
     list_filter = ['status']
-    search_fields = ['student_fee__student__name', 'student_fee__fee_structure__name']
+    search_fields = ['student_fee__student__first_name', 'student_fee__student__surname', 'student_fee__fee_structure__name']
     ordering = ['-created_at']
     date_hierarchy = 'created_at'
 
@@ -38,7 +38,7 @@ class InstallmentPlanAdmin(admin.ModelAdmin):
 class InstallmentItemAdmin(admin.ModelAdmin):
     list_display = ['plan', 'amount', 'due_date', 'is_paid', 'paid_at']
     list_filter = ['is_paid', 'due_date']
-    search_fields = ['plan__student_fee__student__name']
+    search_fields = ['plan__student_fee__student__first_name', 'plan__student_fee__student__surname']
     ordering = ['due_date']
     date_hierarchy = 'due_date'
     list_editable = ['is_paid']
@@ -48,7 +48,7 @@ class InstallmentItemAdmin(admin.ModelAdmin):
 class PaymentAdmin(admin.ModelAdmin):
     list_display = ['receipt_number', 'student', 'student_fee', 'amount', 'payment_mode', 'status', 'payment_date', 'verified_at']
     list_filter = ['status', 'payment_mode', 'payment_date']
-    search_fields = ['receipt_number', 'student__name', 'student__email', 'transaction_ref']
+    search_fields = ['receipt_number', 'student__first_name', 'student__surname', 'student__email', 'transaction_ref']
     ordering = ['-created_at']
     date_hierarchy = 'payment_date'
     readonly_fields = ['receipt_number', 'created_at', 'updated_at']
@@ -59,7 +59,7 @@ class PaymentAdmin(admin.ModelAdmin):
 class RefundAdmin(admin.ModelAdmin):
     list_display = ['payment', 'amount', 'reason', 'status', 'processed_by', 'created_at']
     list_filter = ['status']
-    search_fields = ['payment__receipt_number', 'payment__student__name', 'reason']
+    search_fields = ['payment__receipt_number', 'payment__student__first_name', 'payment__student__surname', 'reason']
     ordering = ['-created_at']
     date_hierarchy = 'created_at'
     list_editable = ['status']

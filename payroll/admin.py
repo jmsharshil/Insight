@@ -17,7 +17,7 @@ class PayrollRunAdmin(admin.ModelAdmin):
 
 @admin.register(PaySlip)
 class PaySlipAdmin(admin.ModelAdmin):
-    list_display = ['faculty', 'faculty_profile', 'net_salary', 'absence_deductions', 'is_disbursed']
+    list_display = ['faculty', 'net_salary', 'absence_deductions', 'is_disbursed']
     list_filter = ['is_disbursed']
 
 

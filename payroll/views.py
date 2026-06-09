@@ -93,16 +93,16 @@ class PayrollListCreateView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         d = ser.validated_data
-        if PayrollRun.objects.filter(branch_id=d['branch_id'], month=d['month'], year=d['year']).exists():
+        if PayrollRun.objects.filter(branch=d['branch_id'], month=d['month'], year=d['year']).exists():
             return Response({'success': False, 'message': 'Payroll already exists for this month.'}, status=status.HTTP_409_CONFLICT)
 
         from faculty.models import FacultyProfile
         payroll_run = PayrollRun.objects.create(
-            branch_id=d['branch_id'], month=d['month'], year=d['year'],
+            branch=d['branch_id'], month=d['month'], year=d['year'],
             generated_by=request.user,
         )
 
-        faculty_list = FacultyProfile.objects.filter(branch_id=d['branch_id'], is_active=True)
+        faculty_list = FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True)
         total = Decimal(0)
         for fp in faculty_list:
             ps = compute_payslip_for_faculty(fp, d['month'], d['year'], payroll_run)
@@ -196,7 +196,7 @@ class PayrollPayslipsView(APIView):
         role = _user_role(request.user)
         if role not in PAYROLL_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-        slips = PaySlip.objects.filter(payroll_run_id=payroll_id).select_related('faculty', 'faculty_profile').prefetch_related('late_logs')
+        slips = PaySlip.objects.filter(payroll_run_id=payroll_id).select_related('faculty__user').prefetch_related('late_logs')
         if getattr(request.user, 'organization', None):
             slips = slips.filter(payroll_run__branch__organization=request.user.organization)
         return Response({'success': True, 'count': slips.count(), 'data': PaySlipSerializer(slips, many=True).data})
@@ -338,7 +338,7 @@ class PayrollDisburseView(APIView):
         if pr.status != 'approved':
             return Response({'success': False, 'message': 'Payroll must be approved first.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        payslips = pr.payslips.select_related('faculty')
+        payslips = pr.payslips.select_related('faculty__user')
         payslips.update(is_disbursed=True)
         pr.status = 'disbursed'
         pr.disbursed_at = timezone.now()
@@ -347,7 +347,7 @@ class PayrollDisburseView(APIView):
         # FRD §4.8.4: send IN-APP notification to each faculty with payslip data
         for ps in payslips:
             notify(
-                recipient_user_id=str(ps.faculty.id),
+                recipient_user_id=str(ps.faculty.user.id),
                 title=f"Your payslip for {pr.month}/{pr.year} is ready",
                 body=f"Net salary: {ps.net_salary}. Sessions: {ps.sessions_conducted}.",
                 metadata={
@@ -377,7 +377,7 @@ class FacultyPayslipsView(APIView):
     # permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['payroll_run__year', 'payroll_run__month']
-    search_fields = ['faculty_profile__user__name']
+    search_fields = ['faculty__user__name']
     ordering_fields = '__all__'
 
     def get(self, request, faculty_id):
@@ -396,7 +396,7 @@ class FacultyPayslipsView(APIView):
         if role not in ['faculty', 'accountant', 'branch_manager', 'super_admin']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = PaySlip.objects.filter(faculty_profile=fp).select_related('payroll_run').prefetch_related('late_logs')
+        qs = PaySlip.objects.filter(faculty=fp).select_related('payroll_run').prefetch_related('late_logs')
         year = request.GET.get('year')
         month = request.GET.get('month')
         if year:

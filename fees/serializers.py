@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from students.models import Student
 from .models import (
     FeeStructure, StudentFee,
     InstallmentPlan, InstallmentItem,
@@ -44,7 +45,7 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
 
 class StudentFeeListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    student_name = serializers.CharField(source='student.name', read_only=True)
+    student_name = serializers.SerializerMethodField()
     fee_name = serializers.CharField(source='fee_structure.name', read_only=True)
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
@@ -52,6 +53,9 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     course_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
+
+    def get_student_name(self, obj):
+        return obj.student.full_name if obj.student else ''
 
     def get_course_name(self, obj):
         fs_course = obj.fee_structure.course
@@ -73,7 +77,7 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
 
 
 class StudentFeeDetailSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.name', read_only=True)
+    student_name = serializers.SerializerMethodField()
     student_email = serializers.CharField(source='student.email', read_only=True)
     fee_name = serializers.CharField(source='fee_structure.name', read_only=True)
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
@@ -82,6 +86,9 @@ class StudentFeeDetailSerializer(serializers.ModelSerializer):
 
 
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    def get_student_name(self, obj):
+        return obj.student.full_name if obj.student else ''
 
     class Meta:
         model = StudentFee
@@ -132,7 +139,12 @@ class InstallmentItemSerializer(serializers.ModelSerializer):
 class InstallmentPlanListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     items = InstallmentItemSerializer(many=True, read_only=True)
-    student_name = serializers.CharField(source='student_fee.student.name', read_only=True)
+    student_name = serializers.SerializerMethodField()
+
+    def get_student_name(self, obj):
+        if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'student', None):
+            return obj.student_fee.student.full_name
+        return ''
 
     class Meta:
         model = InstallmentPlan
@@ -168,11 +180,14 @@ class InstallmentPlanApproveSerializer(serializers.Serializer):
 
 class PaymentListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    student_name = serializers.CharField(source='student.name', read_only=True)
+    student_name = serializers.SerializerMethodField()
 
     course_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
+
+    def get_student_name(self, obj):
+        return obj.student.full_name if obj.student else ''
 
     def get_course_name(self, obj):
         if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
@@ -197,12 +212,15 @@ class PaymentListSerializer(serializers.ModelSerializer):
 
 
 class PaymentDetailSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.name', read_only=True)
+    student_name = serializers.SerializerMethodField()
     student_email = serializers.CharField(source='student.email', read_only=True)
     refunds = serializers.SerializerMethodField()
 
 
     payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
+
+    def get_student_name(self, obj):
+        return obj.student.full_name if obj.student else ''
 
     class Meta:
         model = Payment

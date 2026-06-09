@@ -28,7 +28,7 @@ def get_payroll_report(user, params):
     run_ids = list(runs.values_list('id', flat=True))
 
     slips = PaySlip.objects.filter(payroll_run_id__in=run_ids).select_related(
-        'faculty', 'faculty_profile'
+        'faculty__user'
     )
 
     agg = slips.aggregate(
@@ -40,9 +40,9 @@ def get_payroll_report(user, params):
     # Payroll summary
     payroll_summary = [
         {
-            'faculty_id': ps.faculty_id,
-            'faculty_name': ps.faculty.name if ps.faculty else '',
-            'employee_id': ps.faculty_profile.employee_id if ps.faculty_profile else '',
+            'faculty_id': str(ps.faculty.id),
+            'faculty_name': ps.faculty.user.name if ps.faculty else '',
+            'employee_id': ps.faculty.employee_id if ps.faculty else '',
             'basic_salary': ps.basic_salary,
             'hour_based_amount': ps.hour_based_amount,
             'late_penalty': ps.late_penalty,
@@ -58,8 +58,8 @@ def get_payroll_report(user, params):
     # Hours taught
     hours_taught = [
         {
-            'faculty_id': ps.faculty_id,
-            'faculty_name': ps.faculty.name if ps.faculty else '',
+            'faculty_id': str(ps.faculty.id),
+            'faculty_name': ps.faculty.user.name if ps.faculty else '',
             'total_hours': float(ps.total_session_hours),
             'sessions_conducted': ps.sessions_conducted,
         }
@@ -69,16 +69,16 @@ def get_payroll_report(user, params):
     # Penalties
     penalties = list(
         SessionLatePenaltyLog.objects.filter(payslip__payroll_run_id__in=run_ids)
-        .select_related('payslip__faculty', 'session_report')
+        .select_related('payslip__faculty__user', 'session_report')
         .values(
-            'payslip__faculty__name',
+            'payslip__faculty__user__name',
             'late_minutes', 'penalty_amount',
             'session_report__session_date',
         )[:100]
     )
     penalty_rows = [
         {
-            'faculty_name': p['payslip__faculty__name'] or '',
+            'faculty_name': p['payslip__faculty__user__name'] or '',
             'late_minutes': p['late_minutes'],
             'penalty_amount': p['penalty_amount'],
             'session_date': p['session_report__session_date'],

@@ -135,7 +135,7 @@ class StudentFeeListView(APIView):
         # Optimized: prefetch_related for reverse relations
         queryset = StudentFee.objects.select_related('student', 'fee_structure').prefetch_related('payments', 'installment_plans').all()
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(student__organization=request.user.organization)
+            queryset = queryset.filter(student__user__organization=request.user.organization)
 
         student_id = request.GET.get('student_id')
         status_filter = request.GET.get('status')
@@ -173,7 +173,7 @@ class StudentFeeDetailView(APIView):
         try:
             queryset = StudentFee.objects.select_related('student', 'fee_structure').all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(student__organization=request.user.organization)
+                queryset = queryset.filter(student__user__organization=request.user.organization)
             return queryset.get(pk=pk)
         except StudentFee.DoesNotExist:
             return None
@@ -208,13 +208,13 @@ class StudentFeeByStudentView(APIView):
     """GET /api/v1/fees/student/<student_id>/ — full fee overview for a student."""
 
     def get(self, request, student_id):
-        from auth_user.models import User
+        from students.models import Student
         try:
-            queryset = User.objects.filter(role='student')
+            queryset = Student.objects.all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(organization=request.user.organization)
+                queryset = queryset.filter(user__organization=request.user.organization)
             student = queryset.get(id=student_id)
-        except User.DoesNotExist:
+        except Student.DoesNotExist:
             return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         student_fees = StudentFee.objects.select_related(
@@ -237,7 +237,7 @@ class StudentFeeByStudentView(APIView):
             'success': True,
             'data': {
                 'student_id': str(student.id),
-                'student_name': student.name,
+                'student_name': student.full_name,
                 'summary': {
                     'total_billed': total_billed,
                     'total_discount': total_discount,
@@ -264,7 +264,7 @@ class InstallmentPlanListView(APIView):
             'student_fee__student', 'student_fee__fee_structure'
         ).prefetch_related('items').all()
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(student_fee__student__organization=request.user.organization)
+            queryset = queryset.filter(student_fee__student__user__organization=request.user.organization)
 
         student_fee_id = request.GET.get('student_fee_id')
         plan_status = request.GET.get('status')
@@ -331,7 +331,7 @@ class InstallmentPlanApproveView(APIView):
         try:
             queryset = InstallmentPlan.objects.all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(student_fee__student__organization=request.user.organization)
+                queryset = queryset.filter(student_fee__student__user__organization=request.user.organization)
             plan = queryset.get(pk=pk)
         except InstallmentPlan.DoesNotExist:
             return Response({'success': False, 'message': 'Installment plan not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -376,7 +376,7 @@ class PaymentListView(APIView):
         # Optimized: select_related for foreign keys
         queryset = Payment.objects.select_related('student', 'student_fee').prefetch_related('refunds').all()
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(student__organization=request.user.organization)
+            queryset = queryset.filter(student__user__organization=request.user.organization)
 
         student_id = request.GET.get('student_id')
         payment_status = request.GET.get('status')
@@ -434,7 +434,7 @@ class PaymentDetailView(APIView):
         try:
             queryset = Payment.objects.select_related('student', 'student_fee').all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(student__organization=request.user.organization)
+                queryset = queryset.filter(student__user__organization=request.user.organization)
             return queryset.get(pk=pk)
         except Payment.DoesNotExist:
             return None
@@ -452,7 +452,7 @@ class PaymentVerifyView(APIView):
         try:
             queryset = Payment.objects.all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(student__organization=request.user.organization)
+                queryset = queryset.filter(student__user__organization=request.user.organization)
             payment = queryset.get(pk=pk)
         except Payment.DoesNotExist:
             return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -504,7 +504,7 @@ class RefundListView(APIView):
     def get(self, request):
         queryset = Refund.objects.select_related('payment').all()
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(payment__student__organization=request.user.organization)
+            queryset = queryset.filter(payment__student__user__organization=request.user.organization)
         refund_status = request.GET.get('status')
         if refund_status:
             queryset = queryset.filter(status=refund_status)
@@ -546,7 +546,7 @@ class RefundUpdateView(APIView):
         try:
             queryset = Refund.objects.all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(payment__student__organization=request.user.organization)
+                queryset = queryset.filter(payment__student__user__organization=request.user.organization)
             refund = queryset.get(pk=pk)
         except Refund.DoesNotExist:
             return Response({'success': False, 'message': 'Refund not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -651,7 +651,7 @@ class FeeReportView(APIView):
         # Base queryset — student fees
         sf_qs = StudentFee.objects.all()
         if getattr(request.user, 'organization', None):
-            sf_qs = sf_qs.filter(student__organization=request.user.organization)
+            sf_qs = sf_qs.filter(student__user__organization=request.user.organization)
 
         if course_id:
             sf_qs = sf_qs.filter(fee_structure__course_id=course_id)
@@ -675,7 +675,7 @@ class FeeReportView(APIView):
         # Collection by payment mode
         payment_qs = Payment.objects.filter(status='verified')
         if getattr(request.user, 'organization', None):
-            payment_qs = payment_qs.filter(student__organization=request.user.organization)
+            payment_qs = payment_qs.filter(student__user__organization=request.user.organization)
         if month:
             payment_qs = payment_qs.filter(payment_date__month=int(month.split('-')[1]),
                                             payment_date__year=int(month.split('-')[0]))
@@ -719,7 +719,7 @@ class StudentFeeSummaryView(APIView):
     def get(self, request):
         qs = StudentFee.objects.all()
         if getattr(request.user, 'organization', None):
-            qs = qs.filter(student__organization=request.user.organization)
+            qs = qs.filter(student__user__organization=request.user.organization)
 
         course_id = request.GET.get('course_id')
         batch_id = request.GET.get('batch_id')

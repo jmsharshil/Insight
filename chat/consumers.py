@@ -139,57 +139,80 @@ class ChatConsumer(AsyncWebsocketConsumer):
         file_url  = data.get("file_url")
         file_name = data.get("file_name")
         file_size = data.get("file_size")
+        # If the REST API already created the message, the frontend can pass
+        # the message_id to avoid a duplicate DB insert.
+        existing_message_id = data.get("message_id")
 
         if not content and not file_url:
             await self._send_error("EMPTY_MESSAGE", "Message must contain content or a file attachment.")
             return
 
-        try:
-            message = await self._save_message(
-                room_id=self.room_id,
-                sender=self.user,
-                content=content,
-                file_url=file_url,
-                file_name=file_name,
-                file_size=file_size,
-            )
-        except Exception as exc:
-            logger.exception("Failed to save message in room %s", self.room_id)
-            await self._send_error("DB_ERROR", f"Could not save message: {exc}")
-            return
+        if existing_message_id:
+            # Message was already saved via REST POST — just broadcast, don't save again.
+            message_data = {
+                "id":         str(existing_message_id),
+                "room_id":    self.room_id,
+                "sender": {
+                    "id":        str(self.user.id),
+                    "full_name": getattr(self.user, "name", ""),
+                    "avatar_url": getattr(self.user, "avatar_url", None) or "",
+                },
+                "content":    content,
+                "file_url":   file_url or "",
+                "file_name":  file_name or "",
+                "file_size":  file_size,
+                "created_at": data.get("created_at", timezone.now().isoformat()),
+                "delivered_at": None,
+                "read_at":      None,
+            }
+        else:
+            # No existing message — save to DB first, then broadcast.
+            try:
+                message = await self._save_message(
+                    room_id=self.room_id,
+                    sender=self.user,
+                    content=content,
+                    file_url=file_url,
+                    file_name=file_name,
+                    file_size=file_size,
+                )
+            except Exception as exc:
+                logger.exception("Failed to save message in room %s", self.room_id)
+                await self._send_error("DB_ERROR", f"Could not save message: {exc}")
+                return
+
+            message_data = {
+                "id":         str(message.id),
+                "room_id":    self.room_id,
+                "sender": {
+                    "id":        str(self.user.id),
+                    "full_name": getattr(self.user, "name", ""),
+                    "avatar_url": getattr(self.user, "avatar_url", None) or "",
+                },
+                "content":    message.content,
+                "file_url":   message.file_url or "",
+                "file_name":  message.file_name or "",
+                "file_size":  message.file_size,
+                "created_at": message.created_at.isoformat(),
+                "delivered_at": None,
+                "read_at":      None,
+            }
 
         await self.channel_layer.group_send(
             self.room_group_name,
             {
                 "type": "chat.new_message",
-                "message": {
-                    "id":         str(message.id),
-                    "room_id":    self.room_id,
-                    "sender": {
-                        "id":        str(self.user.id),
-                        "full_name": getattr(self.user, "name", ""),
-                        "avatar_url": getattr(self.user, "avatar_url", None) or "",
-                    },
-                    "content":    message.content,
-                    "file_url":   message.file_url or "",
-                    "file_name":  message.file_name or "",
-                    "file_size":  message.file_size,
-                    "created_at": message.created_at.isoformat(),
-                    # tick states
-                    "delivered_at": None,   # will update via delivered_receipt
-                    "read_at":      None,   # will update via read_receipt
-                },
+                "message": message_data,
             },
         )
 
         # Fire push notifications to offline participants
         room_participant_ids = await self._get_room_participant_ids(self.room_id)
-        # Exclude the sender from notifications
         recipient_ids = [uid for uid in room_participant_ids if str(uid) != str(self.user.id)]
         if recipient_ids:
             notify_new_message(
                 room_id=self.room_id,
-                message_id=str(message.id),
+                message_id=message_data["id"],
                 sender_name=getattr(self.user, "name", "Someone"),
                 content=content or "📎 Attachment",
                 participant_ids=recipient_ids,
@@ -311,9 +334,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
     # ------------------------------------------------------------------
 
     async def chat_new_message(self, event):
+        # Skip echoing the message back to the sender to prevent duplicates
+        # on the frontend (the sender already adds the message locally).
+        msg = event["message"]
+        if self.user and str(self.user.id) == msg.get("sender", {}).get("id"):
+            return
         await self.send(text_data=json.dumps({
             "type":    "new_message",
-            "message": event["message"],
+            "message": msg,
         }))
 
     async def chat_typing(self, event):

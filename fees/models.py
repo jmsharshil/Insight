@@ -86,9 +86,8 @@ class StudentFee(models.Model):
     """Links a student to a fee structure with computed amounts."""
     id             = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     student        = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        'students.Student', on_delete=models.CASCADE,
         related_name='student_fees',
-        limit_choices_to={'role': 'student'},
     )
     fee_structure  = models.ForeignKey(
         FeeStructure, on_delete=models.CASCADE,
@@ -113,7 +112,7 @@ class StudentFee(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.student.name} — {self.fee_structure.name} — {self.status}"
+        return f"{self.student.full_name} — {self.fee_structure.name} — {self.status}"
 
     @property
     def amount_due(self):
@@ -206,9 +205,8 @@ def generate_receipt_number():
 class Payment(models.Model):
     id                = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     student           = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        'students.Student', on_delete=models.CASCADE,
         related_name='payments',
-        limit_choices_to={'role': 'student'},
     )
     student_fee       = models.ForeignKey(
         StudentFee, on_delete=models.CASCADE,
@@ -256,7 +254,7 @@ class Payment(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.receipt_number} — {self.student.name} — ₹{self.amount}"
+        return f"{self.receipt_number} — {self.student.full_name} — ₹{self.amount}"
 
     def save(self, *args, **kwargs):
         is_new = self._state.adding

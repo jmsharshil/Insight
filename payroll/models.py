@@ -68,8 +68,7 @@ class PayrollRun(models.Model):
 class PaySlip(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     payroll_run = models.ForeignKey(PayrollRun, on_delete=models.CASCADE, related_name='payslips')
-    faculty = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payslips')
-    faculty_profile = models.ForeignKey('faculty.FacultyProfile', on_delete=models.CASCADE, related_name='payslips')
+    faculty = models.ForeignKey('faculty.FacultyProfile', on_delete=models.CASCADE, related_name='payslips')
     basic_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total_session_hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     # sum of SessionReport.duration_minutes / 60 + QR hours
@@ -92,7 +91,7 @@ class PaySlip(models.Model):
         db_table = 'payroll_payslips'
 
     def __str__(self):
-        return f"{self.faculty.name} — {self.payroll_run}"
+        return f"{self.faculty.user.name} — {self.payroll_run}"
 
 
 class SessionLatePenaltyLog(models.Model):
