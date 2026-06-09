@@ -224,10 +224,10 @@ class BatchFacultyReadSerializer(serializers.ModelSerializer):
         return obj.faculty.employee_id if obj.faculty else None
 
     def get_faculty_name(self, obj):
-        profile = self._get_faculty_profile(obj)
+        # profile = self._get_faculty_profile(obj)
 
-        if profile:
-            return profile.user.name
+        # if profile:
+        #     return profile.user.name
 
         return obj.faculty.user.name
 
