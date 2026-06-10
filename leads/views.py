@@ -334,9 +334,7 @@ class LeadStatusUpdateView(APIView):
 
         elif new_stage == "follow_up":
             lead.followup_set_at = today
-            lead.followup_date = serializer.validated_data.get(
-                "followup_date"
-            )
+            lead.followup_date = serializer.validated_data.get("followup_date")
 
         elif new_stage == "converted":
             lead.converted_at = today
@@ -344,9 +342,9 @@ class LeadStatusUpdateView(APIView):
         elif new_stage == "lost":
             lead.lost_at = today
 
-        if serializer.validated_data.get("visit_date"):
-            lead.visit_date = serializer.validated_data["visit_date"]
+        elif new_stage == "visit":
             lead.visit_set_at = today
+            lead.visit_date = serializer.validated_data.get("visit_date")
 
         if "is_visited" in serializer.validated_data:
             lead.is_visited = serializer.validated_data["is_visited"]
