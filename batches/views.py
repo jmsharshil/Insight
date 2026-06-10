@@ -195,7 +195,7 @@ class SubjectDetailView(APIView):
 
 class BatchListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['course', 'is_active']
+    filterset_fields = ['course', 'is_active', 'branch']
     search_fields = ['name', 'batch_code']
     ordering_fields = '__all__'
 
@@ -206,11 +206,14 @@ class BatchListView(APIView):
 
         course_id = request.GET.get('course_id')
         is_active = request.GET.get('is_active')
+        branch_id = request.GET.get('branch_id') or request.GET.get('branch')
 
         if course_id:
             queryset = queryset.filter(course_id=course_id)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        if branch_id:
+            queryset = queryset.filter(branch_id=branch_id)
 
         # Annotate enrolled student count
         queryset = queryset.annotate(

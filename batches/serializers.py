@@ -98,10 +98,11 @@ class BatchListSerializer(serializers.ModelSerializer):
     enrolled_count = serializers.IntegerField(read_only=True, default=0)
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
 
     class Meta:
         model = Batch
-        fields = ['id', 'course', 'course_name', 'name', 'batch_code',
+        fields = ['id', 'course', 'course_name', 'branch', 'branch_name', 'name', 'batch_code',
                   'group_module', 'batch_attempt', 'location',
                   'start_date', 'end_date', 'max_students', 'enrolled_count',
                   'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display']
@@ -113,6 +114,7 @@ class BatchDetailSerializer(serializers.ModelSerializer):
     assigned_faculty = serializers.SerializerMethodField()
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
 
     class Meta:
         model = Batch
@@ -132,7 +134,7 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
         model = Batch
         fields = ['course', 'name', 'batch_code', 'group_module',
                   'batch_attempt', 'location', 'start_date', 'end_date',
-                  'max_students', 'timing', 'is_active', 'organization']
+                  'max_students', 'timing', 'is_active', 'organization', 'branch']
 
     def validate(self, data):
         start = data.get('start_date')

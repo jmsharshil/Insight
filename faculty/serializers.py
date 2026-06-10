@@ -105,6 +105,7 @@ class FacultyCreateSerializer(serializers.Serializer):
     bank_account = serializers.CharField(max_length=30, required=False, default='')
     ifsc_code = serializers.CharField(max_length=15, required=False, default='')
     pan_number = serializers.CharField(max_length=15, required=False, default='')
+    branch = serializers.UUIDField(required=False, allow_null=True)
 
 
 class FacultyUpdateSerializer(serializers.ModelSerializer):
