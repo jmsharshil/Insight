@@ -2,7 +2,7 @@
 
 from django.db import models
 from django.conf import settings
-
+from auth_user.models import User
 
 FORM_TYPE_CHOICES = [
     ('contact', 'Contact Us'),
@@ -90,6 +90,18 @@ class Lead(models.Model):
     note          = models.TextField(blank=True, help_text="Latest note added during status update.")
     created_at    = models.DateTimeField(auto_now_add=True)
     updated_at    = models.DateTimeField(auto_now=True)
+
+    # ── lead stage tracking ───────────────────────────────────────────────────────────────
+    contacted_at = models.DateField(null=True, blank=True)
+    interested_at = models.DateField(null=True, blank=True)
+    followup_set_at = models.DateField(null=True, blank=True)
+    converted_at = models.DateField(null=True, blank=True)
+    visit_set_at = models.DateField(null=True, blank=True)
+    lost_at = models.DateField(null=True, blank=True)
+    followup_date = models.DateField(null=True, blank=True)
+    visit_date = models.DateField(null=True, blank=True)
+    is_visited = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True)
 
     # ── Section 2: Personal Info (Inquiry only) ───────────────────────────────
     surname      = models.CharField(max_length=100, blank=True)

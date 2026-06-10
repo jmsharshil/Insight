@@ -219,6 +219,7 @@ class LeadListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'branch', 'branch_name', 'form_type', 'form_type_display', 'first_name', 'surname', 'email',
             'phone_student', 'course', 'current_stage', 'current_stage_display', 'location', 'note', 'created_at',
+            'contacted_at', 'interested_at', 'followup_set_at', 'converted_at', 'lost_at', 'followup_date', 'visit_date', 'is_visited','visit_set_at',
             'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'stage_display']
         
           
