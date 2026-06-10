@@ -109,12 +109,15 @@ class AttendanceListCreateView(APIView):
         #     if bids and batch_id not in bids:
         #         return Response({'success': False, 'message': 'Not your assigned batch.'}, status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            from django.apps import apps
-            batch_obj = apps.get_model('batches', 'Batch').objects.get(id=batch_id)
-            branch_id = batch_obj.branch_id
-        except Exception:
-            branch_id = _user_branch_id(user)
+        # try:
+        #     from django.apps import apps
+        #     batch_obj = apps.get_model('batches', 'Batch').objects.get(id=batch_id)
+        #     branch_id = batch_obj.branch_id
+        # except Exception:
+        #     branch_id = _user_branch_id(user)
+        branch_id = data.get('branch_id')
+        if not branch_id:
+            return Response({'success': False, 'message': 'Branch ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         print("Branch id : ", branch_id)
 
