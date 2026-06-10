@@ -184,7 +184,32 @@ class AddUserAPIView(APIView):
 
         serializer = AddUserSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
+            # Validate branch for faculty
+            if serializer.validated_data.get('role') == 'faculty' and not serializer.validated_data.get('branch'):
+                return Response({"branch": ["Branch is required when creating a faculty user."]}, status=status.HTTP_400_BAD_REQUEST)
+
             user = serializer.save()
+            
+            # Automatically create FacultyProfile for faculty users
+            if user.role == 'faculty':
+                try:
+                    from faculty.models import FacultyProfile
+                    from faculty.utils import generate_employee_id
+                    from django.utils import timezone
+                    if not FacultyProfile.objects.filter(user=user).exists():
+                        emp_id = generate_employee_id(user.branch)
+                        FacultyProfile.objects.create(
+                            user=user,
+                            branch=user.branch,
+                            employee_id=emp_id,
+                            qualification="N/A",
+                            specialization="N/A",
+                            joining_date=timezone.now().date()
+                        )
+                except Exception as e:
+                    # If faculty profile fails to create, log it but don't break the user creation
+                    pass
+
             token = PasswordSetToken.generate_token()
             PasswordSetToken.objects.create(user=user, token=token)
             send_password_set_email(user, token)

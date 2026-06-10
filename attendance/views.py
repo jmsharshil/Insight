@@ -46,8 +46,8 @@ def _user_branch_id(user):
 
 
 def _user_batch_ids(user):
-    if hasattr(user, 'assigned_batches'):
-        return list(user.assigned_batches.values_list('id', flat=True))
+    if hasattr(user, 'faculty_profile'):
+        return list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True))
     return []
 
 

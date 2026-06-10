@@ -142,6 +142,13 @@ class FacultyListCreateView(APIView):
                 phone=d.get('phone', ''),
                 role='faculty',
             )
+            # Link the user to the correct organization and branch
+            if hasattr(user, 'organization'):
+                user.organization = branch.organization
+            if hasattr(user, 'branch_id'):
+                user.branch_id = branch.id
+            user.save()
+            
             emp_id = generate_employee_id(branch)
             qr_file = generate_faculty_qr_code(emp_id)
 
