@@ -69,6 +69,7 @@ class StudentRecordInputSerializer(serializers.Serializer):
 class BatchAttendanceCreateSerializer(serializers.Serializer):
     """POST /api/v1/attendance/ — bulk mark attendance for a batch."""
     batch_id = serializers.UUIDField()
+    branch_id = serializers.UUIDField()
     date = serializers.DateField()
     session = serializers.ChoiceField(choices=SESSION_CHOICES)
     records = StudentRecordInputSerializer(many=True)
