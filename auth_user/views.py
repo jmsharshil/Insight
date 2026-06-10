@@ -412,7 +412,8 @@ class DeleteUserAPIView(APIView):
     def delete(self, request, user_id):
         user = get_object_or_404(User, id=user_id, organization=request.user.organization)
 
-        user.delete()
+        user.is_active = False
+        user.save(update_fields=['is_active'])
 
         return Response({
             "success": True,
