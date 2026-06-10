@@ -104,10 +104,10 @@ class AttendanceListCreateView(APIView):
         data = ser.validated_data
         batch_id, att_date, session, records = data['batch_id'], data['date'], data['session'], data['records']
 
-        if role == 'faculty':
-            bids = _user_batch_ids(user)
-            if bids and batch_id not in bids:
-                return Response({'success': False, 'message': 'Not your assigned batch.'}, status=status.HTTP_403_FORBIDDEN)
+        # if role == 'faculty':
+        #     bids = _user_batch_ids(user)
+        #     if bids and batch_id not in bids:
+        #         return Response({'success': False, 'message': 'Not your assigned batch.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             from django.apps import apps
@@ -115,6 +115,8 @@ class AttendanceListCreateView(APIView):
             branch_id = batch_obj.branch_id
         except Exception:
             branch_id = _user_branch_id(user)
+
+        print("Branch id : ", branch_id)
 
         if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date, session=session).exists():
             return Response({'success': False, 'message': 'Already marked. Use PATCH to correct.'}, status=status.HTTP_409_CONFLICT)
