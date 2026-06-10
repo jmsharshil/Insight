@@ -308,6 +308,21 @@ class LeadDetailSerializer(serializers.ModelSerializer):
 
 
 class LeadUpdateSerializer(serializers.ModelSerializer):
+
+    followup_date = FlexibleDateTimeField(
+        required=False,
+        allow_null=True
+    )
+
+    visit_date = FlexibleDateTimeField(
+        required=False,
+        allow_null=True
+    )
+
+    is_visited = serializers.BooleanField(
+        required=False
+    )
+    
     class Meta:
         model = Lead
         exclude = ['created_at', 'updated_at']
