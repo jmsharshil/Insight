@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from .views import RegisterAPIView,VerifyOTPAPIView,LoginAPIView,ForgotPasswordAPIView,ResetPasswordAPIView,ParentStudentProfileAPIView,UpdateUserAPIView,DeleteUserAPIView,UserListAPIView,UserProfileAPIView,PasswordSetAPIView,AddUserAPIView,OrganizationCreateAPIView,OrganizationDetailAPIView,ChangePasswordAPIView,RegisterFCMTokenView
+from .views import (RegisterAPIView,VerifyOTPAPIView,LoginAPIView,ForgotPasswordAPIView,ResetPasswordAPIView,ParentStudentProfileAPIView,UpdateUserAPIView,DeleteUserAPIView,UserListAPIView,UserProfileAPIView,PasswordSetAPIView,AddUserAPIView,OrganizationCreateAPIView,OrganizationDetailAPIView,ChangePasswordAPIView,RegisterFCMTokenView,ToggleUserStatusAPIView
+)
 
 urlpatterns = [
     path('register/',RegisterAPIView.as_view(),name='register'),
@@ -13,6 +14,7 @@ urlpatterns = [
     # path('parent/student-profile/', ParentStudentProfileAPIView.as_view(), name='parent-student-profile'),
     path('users/<uuid:user_id>/',UpdateUserAPIView.as_view(),name='update-user'),
     path('users/<uuid:user_id>/delete/',DeleteUserAPIView.as_view(),name='delete-user'),
+    path('users/<uuid:user_id>/toggle-status/', ToggleUserStatusAPIView.as_view(), name='toggle-user-status'),
     path('users/', UserListAPIView.as_view(), name='users-list'),
     path('me/', UserProfileAPIView.as_view(), name='user-profile'),
     path('set-password/', PasswordSetAPIView.as_view(), name='set-password'),

@@ -412,8 +412,10 @@ class DeleteUserAPIView(APIView):
     def delete(self, request, user_id):
         user = get_object_or_404(User, id=user_id, organization=request.user.organization)
 
-        user.is_active = False
-        user.save(update_fields=['is_active'])
+        # user.is_active = False
+        # user.save(update_fields=['is_active'])
+
+        user.delete()
 
         return Response({
             "success": True,
@@ -534,3 +536,35 @@ class RegisterFCMTokenView(APIView):
         request.user.fcm_token = ""
         request.user.save(update_fields=["fcm_token"])
         return Response({"detail": "FCM token cleared."}, status=status.HTTP_200_OK)
+
+class ToggleUserStatusAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id):
+        user = get_object_or_404(User, id=user_id, organization=request.user.organization)
+        is_active = request.data.get('is_active')
+        
+        if is_active is None:
+            return Response(
+                {"success": False, "message": "is_active field is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        if not isinstance(is_active, bool):
+            return Response(
+                {"success": False, "message": "is_active must be a boolean value."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        user.is_active = is_active
+        user.save(update_fields=['is_active'])
+        
+        action_str = "activated" if is_active else "deactivated"
+        return Response({
+            "success": True,
+            "message": f"User {action_str} successfully",
+            "data": {
+                "user_id": str(user.id),
+                "is_active": user.is_active
+            }
+        }, status=status.HTTP_200_OK)
