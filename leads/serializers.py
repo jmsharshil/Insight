@@ -197,8 +197,31 @@ def get_lead_serializer(form_type: str, data, files=None):
 
 class LeadStageUpdateSerializer(serializers.Serializer):
     stage = serializers.ChoiceField(choices=STAGE_CHOICES)
-    note  = serializers.CharField(required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True)
 
+    followup_date = serializers.DateField(
+        required=False,
+        allow_null=True
+    )
+
+    visit_date = serializers.DateField(
+        required=False,
+        allow_null=True
+    )
+
+    is_visited = serializers.BooleanField(
+        required=False
+    )
+
+    def validate(self, attrs):
+        stage = attrs.get("stage")
+
+        if stage == "follow_up" and not attrs.get("followup_date"):
+            raise serializers.ValidationError({
+                "followup_date": "Follow-up date is required for follow-up stage."
+            })
+
+        return attrs
 
 class LeadListSerializer(serializers.ModelSerializer):
     current_stage_display = serializers.CharField(source='get_current_stage_display', read_only=True)

@@ -18,6 +18,7 @@ from .models import Lead, LeadStage, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TY
 from django.db.models import Q
 import re
 from rest_framework.permissions import AllowAny
+from django.utils import timezone
 
 FORM_TYPE_DISPLAY = dict(FORM_TYPE_CHOICES)
 STAGE_DISPLAY = dict(STAGE_CHOICES)
@@ -323,7 +324,36 @@ class LeadStatusUpdateView(APIView):
         # Update lead current stage and note
         lead.current_stage = new_stage
         lead.note = note
-        lead.save(update_fields=["current_stage", "note", "updated_at"])
+        today = timezone.now().date()
+
+        if new_stage == "contacted":
+            lead.contacted_at = today
+
+        elif new_stage == "interested":
+            lead.interested_at = today
+
+        elif new_stage == "follow_up":
+            lead.followup_set_at = today
+            lead.followup_date = serializer.validated_data.get(
+                "followup_date"
+            )
+
+        elif new_stage == "converted":
+            lead.converted_at = today
+
+        elif new_stage == "lost":
+            lead.lost_at = today
+
+        if serializer.validated_data.get("visit_date"):
+            lead.visit_date = serializer.validated_data["visit_date"]
+            lead.visit_set_at = today
+
+        if "is_visited" in serializer.validated_data:
+            lead.is_visited = serializer.validated_data["is_visited"]
+
+        lead.updated_by = request.user
+
+        lead.save()
 
         # Create stage history
         LeadStage.objects.create(
