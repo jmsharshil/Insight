@@ -2,7 +2,8 @@
 
 from rest_framework import serializers
 from .models import (Lead,FORM_TYPE_CHOICES,COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,STAGE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
-
+from dateutil import parser
+from django.utils import timezone
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,38 @@ VALID_COMBINATIONS = {
     },
 }
 
+class FlexibleDateTimeField(serializers.DateTimeField):
+    """
+    Accepts multiple datetime formats automatically.
+    """
+
+    def to_internal_value(self, value):
+        if value in (None, ''):
+            return None
+
+        try:
+            # Unix timestamp support
+            if isinstance(value, (int, float)):
+                dt = timezone.datetime.fromtimestamp(value)
+
+            elif str(value).isdigit():
+                dt = timezone.datetime.fromtimestamp(int(value))
+
+            else:
+                dt = parser.parse(str(value))
+
+            if timezone.is_naive(dt):
+                dt = timezone.make_aware(
+                    dt,
+                    timezone.get_current_timezone()
+                )
+
+            return dt
+
+        except Exception:
+            raise serializers.ValidationError(
+                "Invalid datetime format."
+            )
 
 # ── Contact Serializer ────────────────────────────────────────────────────────
 
@@ -199,12 +232,12 @@ class LeadStageUpdateSerializer(serializers.Serializer):
     stage = serializers.ChoiceField(choices=STAGE_CHOICES)
     note = serializers.CharField(required=False, allow_blank=True)
 
-    followup_date = serializers.DateField(
+    followup_date = FlexibleDateTimeField(
         required=False,
         allow_null=True
     )
 
-    visit_date = serializers.DateField(
+    visit_date = FlexibleDateTimeField(
         required=False,
         allow_null=True
     )
