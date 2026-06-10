@@ -326,6 +326,8 @@ class LeadStatusUpdateView(APIView):
         lead.note = note
         today = timezone.now().date()
 
+        print(serializer.validated_data)
+        
         if new_stage == "contacted":
             lead.contacted_at = today
 

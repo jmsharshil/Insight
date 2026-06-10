@@ -250,10 +250,17 @@ class LeadStageUpdateSerializer(serializers.Serializer):
         stage = attrs.get("stage")
 
         if stage == "follow_up" and not attrs.get("followup_date"):
+            print("followup validation error raised.")
             raise serializers.ValidationError({
                 "followup_date": "Follow-up date is required for follow-up stage."
             })
 
+        if stage == "visit" and not attrs.get("visit_date"):
+            print("visit validation error raised.")
+            raise serializers.ValidationError({
+                "visit_date": "Visit date is required for visit stage."
+            })
+        
         return attrs
 
 class LeadListSerializer(serializers.ModelSerializer):
