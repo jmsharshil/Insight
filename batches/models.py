@@ -107,6 +107,7 @@ class Subject(models.Model):
 class Batch(models.Model):
     id             = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization   = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='batches', null=True, blank=True)
+    branch         = models.ForeignKey('branch.Branch', null=True, blank=True, on_delete=models.SET_NULL, related_name='batches')
     course         = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='batches')
     name           = models.CharField(max_length=200)
     batch_code     = models.CharField(max_length=30, unique=True, blank=True)
