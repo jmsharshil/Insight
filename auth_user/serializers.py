@@ -211,34 +211,37 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
-    profile_pic = serializers.SerializerMethodField()
-
-
+    profile_pic = serializers.ImageField(required=False, allow_null=True)
     role_display = serializers.CharField(source="get_role_display", read_only=True)
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'linked_student', 'organization', 'organization_name', 'profile_pic', 'role_display']
         read_only_fields = ['id', 'username', 'role', 'branch', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
-    
-    def get_profile_pic(self, obj):
-        if obj.profile_pic:
-            file_url = obj.profile_pic.url
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.profile_pic:
+            file_url = instance.profile_pic.url
             # If Azure storage is enabled and URL is relative, build absolute URL
             if settings.USE_AZURE_MEDIA:
                 if not file_url.startswith(('http://', 'https://')):
-                    # Relative URL with Azure - shouldn't happen but handle it
-                    return f"{settings.MEDIA_URL.rstrip('/')}/{file_url.lstrip('/')}"
-                return file_url
+                    data['profile_pic'] = f"{settings.MEDIA_URL.rstrip('/')}/{file_url.lstrip('/')}"
+                else:
+                    data['profile_pic'] = file_url
             else:
                 # Local storage - build absolute URI if relative
                 if file_url.startswith(('http://', 'https://')):
-                    return file_url
-                request = self.context.get('request')
-                if request is not None:
-                    return request.build_absolute_uri(file_url)
-                return file_url
-        return None
+                    data['profile_pic'] = file_url
+                else:
+                    request = self.context.get('request')
+                    if request is not None:
+                        data['profile_pic'] = request.build_absolute_uri(file_url)
+                    else:
+                        data['profile_pic'] = file_url
+        else:
+            data['profile_pic'] = None
+        return data
 
     def validate_email(self, value):
         # Ensure email is unique across users, excluding the current user
