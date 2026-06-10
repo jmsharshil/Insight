@@ -34,6 +34,7 @@ STAGE_CHOICES = [
     ('new', 'New'),
     ('contacted', 'Contacted'),
     ('interested', 'Interested'),
+    ('visit', 'Visit'),
     ('follow_up', 'Follow-up'),
     ('converted', 'Converted'),
     ('lost', 'Lost'),
@@ -98,8 +99,8 @@ class Lead(models.Model):
     converted_at = models.DateField(null=True, blank=True)
     visit_set_at = models.DateField(null=True, blank=True)
     lost_at = models.DateField(null=True, blank=True)
-    followup_date = models.DateField(null=True, blank=True)
-    visit_date = models.DateField(null=True, blank=True)
+    followup_date = models.DateTimeField(null=True, blank=True)
+    visit_date = models.DateTimeField(null=True, blank=True)
     is_visited = models.BooleanField(default=False)
     updated_by = models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True)
 

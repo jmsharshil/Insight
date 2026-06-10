@@ -40,8 +40,10 @@ class LeadService:
             }
 
             # ── Step 2: Remove form_type from data — already in validated_data ─
-            # current_stage is never sent from form, always set here as 'new'
-            validated_data['current_stage'] = STAGE_NEW
+            # Set initial stage based on form type
+            form_type = validated_data.get('form_type')
+            initial_stage = 'interested' if form_type == 'inquiry' else STAGE_NEW
+            validated_data['current_stage'] = initial_stage
 
             # ── Step 3: Create the Lead ───────────────────────────────────────
             lead = Lead.objects.create(**validated_data)
@@ -53,7 +55,7 @@ class LeadService:
             # ── Step 5: Create initial stage history entry ────────────────────
             LeadStage.objects.create(
                 lead=lead,
-                stage=STAGE_NEW,
+                stage=initial_stage,
                 changed_by=user,        # None = form submission, User = staff manual entry
                 note=f"Lead created via {lead.form_type} form."
             )

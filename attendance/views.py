@@ -138,14 +138,16 @@ class AttendanceListCreateView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class QRScanView(APIView):
-    """QR scan: check_in, check_out, exam_entry."""
+    """QR scan: check_in, check_out, exam_entry based on Class/Batch QR."""
     # permission_classes = [IsAuthenticated]
 
     def post(self, request):
         user = request.user
         role = _user_role(user)
-        if role not in QR_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # In a Class-wise QR system, only the student scans the Class QR from their own app.
+        if role != 'student':
+            return Response({'success': False, 'message': 'Only students can scan the Class QR code to mark attendance.'}, status=status.HTTP_403_FORBIDDEN)
 
         ser = QRScanInputSerializer(data=request.data)
         if not ser.is_valid():
@@ -155,63 +157,72 @@ class QRScanView(APIView):
         scan_type = ser.validated_data['scan_type']
         device_id = ser.validated_data['device_id']
 
-        student = resolve_qr_data(qr_data)
-        if not student:
-            return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # 1. Resolve Class/Batch from QR data
+        from batches.models import Batch
+        from uuid import UUID
+        
+        batch = None
+        try:
+            UUID(str(qr_data))
+            batch = Batch.objects.filter(id=qr_data).first()
+        except ValueError:
+            pass
+            
+        if not batch:
+            batch = Batch.objects.filter(batch_code=qr_data).first()
 
-        # Students can only scan their own QR
-        if role == 'student':
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                own = SP.objects.get(user=user)
-                if own.id != student.id:
-                    return Response({'success': False, 'message': 'You can only scan your own QR.'}, status=status.HTTP_403_FORBIDDEN)
-            except Exception:
-                return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not batch:
+            return Response({'success': False, 'message': 'Invalid Class/Batch QR code.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 2. Identify the student from the authenticated user
+        try:
+            from django.apps import apps
+            SP = apps.get_model('students', 'Student')
+            student = SP.objects.get(user=user)
+        except Exception:
+            return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 3. Verify if the student is actually in the scanned class/batch
+        student_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
+        from batches.models import BatchStudent
+        is_enrolled = BatchStudent.objects.filter(student=student, batch=batch).exists()
+        
+        if str(student_batch_id) != str(batch.id) and not is_enrolled:
+            return Response({'success': False, 'message': 'You are not enrolled in this class/batch.'}, status=status.HTTP_403_FORBIDDEN)
 
         # Check QR block (3+ violations)
         if should_block_qr(student.id):
             return Response({'success': False, 'message': 'QR blocked due to unresolved violations. Contact admin.'}, status=status.HTTP_403_FORBIDDEN)
 
-        student_branch_id = getattr(student, 'branch_id', None) or _user_branch_id(user)
-
-        # Branch validation for supervisor/admin
-        if role in ('exam_supervisor', 'admin_executive'):
-            ub = _user_branch_id(user)
-            if ub and student_branch_id and str(ub) != str(student_branch_id):
-                QRScanLog.objects.create(student=student, branch_id=student_branch_id, scan_type=scan_type,
-                                         device_id=device_id, scanned_by=user, is_valid=False, invalid_reason='Branch mismatch.')
-                return Response({'success': False, 'message': 'Branch mismatch.', 'is_valid': False}, status=status.HTTP_400_BAD_REQUEST)
+        student_branch_id = getattr(student, 'branch_id', None) or getattr(batch, 'branch_id', None) or _user_branch_id(user)
 
         # Geofencing check for students (if lat/long provided and branch has coords)
-        if role == 'student':
-            student_lat = ser.validated_data.get('latitude')
-            student_lon = ser.validated_data.get('longitude')
-            if student_lat is not None and student_lon is not None:
-                from django.apps import apps
-                Branch = apps.get_model('branch', 'Branch')
-                try:
-                    branch = Branch.objects.get(id=student_branch_id)
-                    if branch.latitude is not None and branch.longitude is not None:
-                        distance = haversine_distance(
-                            student_lat, student_lon, 
-                            float(branch.latitude), float(branch.longitude)
-                        )
-                        if distance > 100:
-                            QRScanLog.objects.create(student=student, branch_id=student_branch_id, scan_type=scan_type,
-                                         device_id=device_id, scanned_by=user, is_valid=False, invalid_reason=f'Geofence failed: {int(distance)}m away.')
-                            return Response({
-                                'success': False, 
-                                'message': f'You must be within 100m of the institute to scan attendance. You are {int(distance)}m away.',
-                                'is_valid': False
-                            }, status=status.HTTP_403_FORBIDDEN)
-                except Branch.DoesNotExist:
-                    pass
+        student_lat = ser.validated_data.get('latitude')
+        student_lon = ser.validated_data.get('longitude')
+        if student_lat is not None and student_lon is not None:
+            from django.apps import apps
+            Branch = apps.get_model('branch', 'Branch')
+            try:
+                branch_obj = Branch.objects.get(id=student_branch_id)
+                if branch_obj.latitude is not None and branch_obj.longitude is not None:
+                    distance = haversine_distance(
+                        student_lat, student_lon, 
+                        float(branch_obj.latitude), float(branch_obj.longitude)
+                    )
+                    if distance > 100:
+                        QRScanLog.objects.create(student=student, branch_id=student_branch_id, scan_type=scan_type,
+                                     device_id=device_id, scanned_by=None, is_valid=False, invalid_reason=f'Geofence failed: {int(distance)}m away.')
+                        return Response({
+                            'success': False, 
+                            'message': f'You must be within 100m of the institute to scan attendance. You are {int(distance)}m away.',
+                            'is_valid': False
+                        }, status=status.HTTP_403_FORBIDDEN)
+            except Branch.DoesNotExist:
+                pass
 
         scan_log = QRScanLog.objects.create(
             student=student, branch_id=student_branch_id, scan_type=scan_type,
-            device_id=device_id, scanned_by=user if role != 'student' else None, is_valid=True,
+            device_id=device_id, scanned_by=None, is_valid=True,
         )
 
         now = timezone.now()
@@ -222,11 +233,10 @@ class QRScanView(APIView):
         # Determine session from time
         hour = now.hour
         session = 'morning' if hour < 12 else ('afternoon' if hour < 17 else 'evening')
-        student_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
 
-        if scan_type == 'check_in' and student_batch_id:
+        if scan_type == 'check_in':
             record, created = AttendanceRecord.objects.get_or_create(
-                student=student, batch_id=student_batch_id, date=now.date(), session=session,
+                student=student, batch_id=batch.id, date=now.date(), session=session,
                 defaults={'branch_id': student_branch_id, 'status': 'present', 'marked_by': user, 'checked_in_at': now},
             )
             if not created and not record.checked_in_at:
@@ -240,10 +250,10 @@ class QRScanView(APIView):
             # Stub: notify parent "✓ <Name> checked in at <time>"
             # from notifications.utils import send_notification(...)
 
-        elif scan_type == 'check_out' and student_batch_id:
+        elif scan_type == 'check_out':
             try:
                 record = AttendanceRecord.objects.get(
-                    student=student, batch_id=student_batch_id, date=now.date(), session=session,
+                    student=student, batch_id=batch.id, date=now.date(), session=session,
                 )
                 record.checked_out_at = now
                 record.save(update_fields=['checked_out_at'])
@@ -284,7 +294,7 @@ class QRScanView(APIView):
             'device_id': device_id, 'is_valid': True,
             'attendance_status': attendance_status,
             'checked_in_at': checked_in_at, 'checked_out_at': checked_out_at,
-            'message': f'QR {scan_type} recorded.',
+            'message': f'Class QR {scan_type} recorded successfully.',
         }, status=status.HTTP_201_CREATED)
 
 
