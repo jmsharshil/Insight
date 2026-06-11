@@ -68,7 +68,7 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 class CourseCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Course
-        fields = ['name', 'code', 'description', 'is_active', 'organization']
+        fields = ['name', 'description', 'is_active', 'organization']
 
     def validate_code(self, value):
         if not value:
@@ -131,12 +131,12 @@ class SubjectListSerializer(serializers.ModelSerializer):
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
-        fields = ['level', 'name', 'code', 'total_hours', 'is_active', 'organization']
+        fields = ['level', 'name', 'total_hours', 'is_active', 'organization']
 
-    def validate_code(self, value):
-        if not value:
-            return ''
-        return value.upper().strip()
+    # def validate_code(self, value):
+    #     if not value:
+    #         return ''
+    #     return value.upper().strip()
 
     def create(self, validated_data):
         if 'organization' not in validated_data or validated_data['organization'] is None:
