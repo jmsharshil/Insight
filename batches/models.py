@@ -21,6 +21,22 @@ SESSION_CHOICES = [
     ('evening',   'Evening'),
 ]
 
+# E4 ─ Session type choices for TimetableSlot
+SESSION_TYPE_CHOICES = [
+    ('regular',    'Regular'),
+    ('class_test', 'Class Test'),
+    ('prelim',     'Prelim'),
+    ('practice',   'Practice'),
+    ('custom',     'Custom'),
+]
+
+SLOT_CODE_CHOICES = [
+    ('P1', 'P1 08:00–10:00'),
+    ('P2', 'P2 10:15–12:15'),
+    ('P3', 'P3 12:45–14:45'),
+    ('P4', 'P4 15:00–17:00'),
+]
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Course & Subject
@@ -67,7 +83,7 @@ class Course(models.Model):
 class Subject(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
-    course      = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='subjects')
+    level       = models.ForeignKey('batches.CourseLevel', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     name        = models.CharField(max_length=200)
     code        = models.CharField(max_length=30, blank=True)
     total_hours = models.PositiveIntegerField(default=0)
@@ -77,9 +93,9 @@ class Subject(models.Model):
     class Meta:
         db_table  = 'subjects'
         ordering  = ['name']
-        unique_together = ('course', 'code')
+        unique_together = ('level', 'code')
         indexes = [
-            models.Index(fields=['course', 'is_active']),
+            models.Index(fields=['level', 'is_active']),
             models.Index(fields=['-created_at']),
         ]
 
@@ -119,6 +135,10 @@ class Batch(models.Model):
     max_students   = models.PositiveIntegerField(default=30)
     timing         = models.CharField(max_length=100, blank=True)
     is_active      = models.BooleanField(default=True)
+    # E1 ─ auto batch fields
+    attempt_year    = models.PositiveSmallIntegerField(null=True, blank=True)
+    auto_sequence   = models.PositiveIntegerField(null=True, blank=True)
+    is_auto_created = models.BooleanField(default=False)
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
 
@@ -173,6 +193,21 @@ class BatchStudent(models.Model):
 
 from faculty.models import FacultyProfile
 
+# E1 ─ Sequence counter for auto batch naming
+class BatchSequenceCounter(models.Model):
+    id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    course_type   = models.CharField(max_length=20)   # 'cseet' / 'cs_executive' / 'cs_professional'
+    batch_attempt = models.CharField(max_length=10)   # 'june' / 'oct' / 'feb' / 'dec'
+    attempt_year  = models.PositiveSmallIntegerField()
+    last_sequence = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        db_table = 'batch_sequence_counters'
+        unique_together = ('course_type', 'batch_attempt', 'attempt_year')
+
+    def __str__(self):
+        return f"{self.course_type}_{self.batch_attempt}_{self.attempt_year}: seq={self.last_sequence}"
+
 class BatchFaculty(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     batch = models.ForeignKey(Batch,on_delete=models.CASCADE, related_name='batch_faculty')
@@ -214,6 +249,60 @@ class Classroom(models.Model):
         return self.name
 
 
+# E2 ─ Course Levels
+class CourseLevel(models.Model):
+    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='course_levels')
+    course       = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='levels')
+    name         = models.CharField(max_length=100)
+    order        = models.PositiveSmallIntegerField()
+    description  = models.TextField(blank=True)
+    is_active    = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'course_levels'
+        unique_together = ('course', 'order')
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.course.code} | Level {self.order}: {self.name}"
+
+
+# E2 ─ Subject Chapters
+class Chapter(models.Model):
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    subject     = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters')
+    name        = models.CharField(max_length=200)
+    order       = models.PositiveSmallIntegerField()
+    description = models.TextField(blank=True)
+    is_active   = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'subject_chapters'
+        unique_together = ('subject', 'order')
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.subject.code} | Ch {self.order}: {self.name}"
+
+
+# E4 ─ Timetable Exam Type
+class TimetableExamType(models.Model):
+    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='timetable_exam_types')
+    name         = models.CharField(max_length=100, unique=True)
+    description  = models.TextField(blank=True)
+    is_active    = models.BooleanField(default=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'timetable_exam_types'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Timetable Slot
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -230,13 +319,22 @@ class TimetableSlot(models.Model):
         related_name='timetable_slots',
     )
     classroom     = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
-    day_of_week   = models.IntegerField(choices=DAY_CHOICES)
-    start_time    = models.TimeField()
-    end_time      = models.TimeField()
+    # E4: made nullable — special sessions use session_date instead
+    day_of_week   = models.IntegerField(choices=DAY_CHOICES, null=True, blank=True)
+    start_time    = models.TimeField(null=True, blank=True)
+    end_time      = models.TimeField(null=True, blank=True)
     session       = models.CharField(max_length=20, choices=SESSION_CHOICES, default='morning')
     is_recurring  = models.BooleanField(default=True)
     effective_from = models.DateField(null=True, blank=True)
     effective_to   = models.DateField(null=True, blank=True)
+    # E4: new fields
+    session_type        = models.CharField(max_length=20, choices=SESSION_TYPE_CHOICES, default='regular')
+    slot_code           = models.CharField(max_length=2, choices=SLOT_CODE_CHOICES, null=True, blank=True)
+    session_date        = models.DateField(null=True, blank=True)
+    chapter             = models.ForeignKey('batches.Chapter', on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
+    examiner            = models.ForeignKey(FacultyProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='examiner_slots')
+    paper_checker       = models.ForeignKey(FacultyProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='checker_slots')
+    timetable_exam_type = models.ForeignKey(TimetableExamType, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     created_by    = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -254,7 +352,9 @@ class TimetableSlot(models.Model):
             models.Index(fields=['faculty', 'day_of_week']),
             models.Index(fields=['classroom', 'day_of_week']),
             models.Index(fields=['batch', '-created_at']),
+            models.Index(fields=['session_type']),
+            models.Index(fields=['session_date']),
         ]
 
     def __str__(self):
-        return f"{self.batch.batch_code} | Day {self.day_of_week} | {self.start_time}-{self.end_time}"
+        return f"{self.batch.batch_code} | {self.session_type} | Day {self.day_of_week} | {self.start_time}-{self.end_time}"

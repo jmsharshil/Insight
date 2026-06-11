@@ -10,7 +10,7 @@ from datetime import date, time, timedelta
 from decimal import Decimal, InvalidOperation
 import json
 
-from batches.models import Course, Subject, Batch, BatchStudent, BatchFaculty, Classroom, TimetableSlot
+from batches.models import CourseLevel, Course, Subject, Batch, BatchStudent, BatchFaculty, Classroom, TimetableSlot
 from batches.validators import check_faculty_clash, check_classroom_clash
 from fees.models import (
     FeeStructure, StudentFee, InstallmentPlan, InstallmentItem,
@@ -89,22 +89,22 @@ class SubjectEdgeCaseTest(TestCase):
 
     def test_subject_unique_together_course_code(self):
         """Test that subject code is unique per course but not globally."""
-        Subject.objects.create(course=self.course, name='Subject 1', code='SUB01')
+        Subject.objects.create(level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0], name='Subject 1', code='SUB01')
         
         # Should fail - same course, same code (wrap in atomic to allow queries after IntegrityError)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                Subject.objects.create(course=self.course, name='Subject 2', code='SUB01')
+                Subject.objects.create(level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0], name='Subject 2', code='SUB01')
         
         # Should succeed - different course, same code
         course2 = Course.objects.create(name='Course 2', code='TST02', course_type='cseet')
-        subject2 = Subject.objects.create(course=course2, name='Subject 3', code='SUB01')
+        subject2 = Subject.objects.create(level=CourseLevel.objects.get_or_create(course=course2, order=1, defaults={'name':'L1'})[0], name='Subject 3', code='SUB01')
         self.assertEqual(subject2.code, 'SUB01')
 
     def test_subject_zero_hours(self):
         """Test subject with zero hours."""
         subject = Subject.objects.create(
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             name='No Hours',
             code='NOHRS',
             total_hours=0,
@@ -113,7 +113,7 @@ class SubjectEdgeCaseTest(TestCase):
 
     def test_subject_delete_cascade(self):
         """Test that deleting course cascades to subjects."""
-        subject = Subject.objects.create(course=self.course, name='Will Delete', code='DEL01')
+        subject = Subject.objects.create(level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0], name='Will Delete', code='DEL01')
         subject_id = subject.id
         
         self.course.delete()
@@ -214,7 +214,7 @@ class TimetableEdgeCaseTest(TestCase):
             course=self.course, name='Batch', batch_code='B01',
             start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
         )
-        self.subject = Subject.objects.create(course=self.course, name='Sub', code='S01')
+        self.subject = Subject.objects.create(level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0], name='Sub', code='S01')
         self.faculty = User.objects.create_user('fac', 'fac@test.com', 'pass', role='faculty')
         self.classroom = Classroom.objects.create(name='Room 1', capacity=30)
 

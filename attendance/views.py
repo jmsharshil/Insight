@@ -21,6 +21,7 @@ from .utils import (
     compute_attendance_percentage, get_batch_attendance_sheet,
     resolve_qr_data, should_block_qr, get_active_violations_count,
     compute_avg_times, get_violations_breakdown, haversine_distance,
+    validate_qr_scan,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,30 +225,46 @@ class QRScanView(APIView):
         # Geofencing check for students (if lat/long provided and branch has coords)
         student_lat = ser.validated_data.get('latitude')
         student_lon = ser.validated_data.get('longitude')
-        if student_lat is not None and student_lon is not None:
-            from django.apps import apps
-            Branch = apps.get_model('branch', 'Branch')
-            try:
-                branch_obj = Branch.objects.get(id=student_branch_id)
-                if branch_obj.latitude is not None and branch_obj.longitude is not None:
-                    distance = haversine_distance(
-                        student_lat, student_lon, 
-                        float(branch_obj.latitude), float(branch_obj.longitude)
-                    )
-                    if distance > 100:
-                        QRScanLog.objects.create(student=student, branch_id=student_branch_id, scan_type=scan_type,
-                                     device_id=device_id, scanned_by=None, is_valid=False, invalid_reason=f'Geofence failed: {int(distance)}m away.')
-                        return Response({
-                            'success': False, 
-                            'message': f'You must be within 100m of the institute to scan attendance. You are {int(distance)}m away.',
-                            'is_valid': False
-                        }, status=status.HTTP_403_FORBIDDEN)
-            except Branch.DoesNotExist:
-                pass
+        timetable_slot_id = ser.validated_data.get('timetable_slot')
+
+        # Resolve timetable slot (optional)
+        timetable_slot_obj = None
+        if timetable_slot_id:
+            from batches.models import TimetableSlot
+            timetable_slot_obj = TimetableSlot.objects.filter(id=timetable_slot_id).first()
+
+        # Resolve branch object for validation
+        branch_obj_for_validation = None
+        from django.apps import apps
+        BranchModel = apps.get_model('branch', 'Branch')
+        try:
+            branch_obj_for_validation = BranchModel.objects.get(id=student_branch_id)
+        except BranchModel.DoesNotExist:
+            pass
+
+        # E3: run validate_qr_scan — never block on failure, just log results
+        scan_now = timezone.now()
+        validation_result = validate_qr_scan(
+            scan_lat=student_lat,
+            scan_lng=student_lon,
+            branch=branch_obj_for_validation,
+            timetable_slot=timetable_slot_obj,
+            scan_time=scan_now,
+        )
 
         scan_log = QRScanLog.objects.create(
-            student=student, branch_id=student_branch_id, scan_type=scan_type,
-            device_id=device_id, scanned_by=None, is_valid=True,
+            student=student,
+            branch_id=student_branch_id,
+            scan_type=scan_type,
+            device_id=device_id,
+            scanned_by=None,
+            is_valid=True,
+            latitude=student_lat,
+            longitude=student_lon,
+            location_verified=validation_result['location_verified'],
+            time_verified=validation_result['time_verified'],
+            validation_reason=validation_result['reason'][:255],
+            timetable_slot=timetable_slot_obj,
         )
 
         now = timezone.now()
@@ -319,6 +336,9 @@ class QRScanView(APIView):
             'device_id': device_id, 'is_valid': True,
             'attendance_status': attendance_status,
             'checked_in_at': checked_in_at, 'checked_out_at': checked_out_at,
+            'location_verified': validation_result['location_verified'],
+            'time_verified': validation_result['time_verified'],
+            'validation_reason': validation_result['reason'],
             'message': f'Class QR {scan_type} recorded successfully.',
         }, status=status.HTTP_201_CREATED)
 

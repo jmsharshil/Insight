@@ -74,7 +74,9 @@ class AdmissionSerializer(serializers.Serializer):
     course        = serializers.ChoiceField(choices=COURSE_TYPE_CHOICES)
     group_module  = serializers.ChoiceField(choices=GROUP_MODULE_CHOICES)
     batch_attempt = serializers.ChoiceField(choices=ATTEMPT_TYPE_CHOICES)
+    attempt_year  = serializers.IntegerField(min_value=2000, max_value=2100)
     location      = serializers.CharField(max_length=100)
+    fee_structure = serializers.ChoiceField(choices=[('lumpsum', 'Lumpsum'), ('installment', 'Installment')])
 
     # ── Qualification & Reference ─────────────────────────────────────────────
     qualification = serializers.ChoiceField(choices=QUALIFICATION_TYPE_CHOICES)
@@ -259,14 +261,15 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
 
     class Meta:
         model = Admission
         fields = [
             'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
-            'course', 'batch_attempt', 'status', 'status_display', 'location',
+            'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
-         'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display']
+         'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display']
 
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
@@ -283,6 +286,7 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
 
     class Meta:
         model = Admission

@@ -1,33 +1,28 @@
 from django.contrib import admin
-from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday
-
+from leave.models import *
 
 @admin.register(PublicHoliday)
 class PublicHolidayAdmin(admin.ModelAdmin):
-    list_display = ['name', 'date', 'branch', 'year']
-    list_filter = ['year', 'branch']
-    search_fields = ['name']
-
+    list_display = ('id', 'branch', 'date', 'name', 'year', 'created_by', 'created_at',)
+    search_fields = ('name',)
+    list_filter = ('created_by', 'date', 'created_at', 'branch',)
 
 @admin.register(LeavePolicy)
 class LeavePolicyAdmin(admin.ModelAdmin):
-    list_display = ['branch', 'leave_type', 'annual_quota', 'sandwich_rule', 'is_active']
-    list_filter = ['leave_type', 'is_active']
-
+    list_display = ('id', 'branch', 'leave_type', 'annual_quota', 'max_club_days', 'carry_forward', 'max_carry_days', 'min_advance_days', 'allow_half_day', 'sandwich_rule',)
+    list_filter = ('leave_type', 'branch', 'sandwich_rule', 'allow_half_day', 'carry_forward', 'is_active',)
 
 @admin.register(LeaveBalance)
 class LeaveBalanceAdmin(admin.ModelAdmin):
-    list_display = ['user', 'leave_type', 'year', 'total_days', 'used_days']
-    list_filter = ['leave_type', 'year']
-
+    list_display = ('id', 'user', 'leave_type', 'year', 'total_days', 'used_days', 'carried_forward',)
+    list_filter = ('leave_type', 'user',)
 
 @admin.register(LeaveApplication)
 class LeaveApplicationAdmin(admin.ModelAdmin):
-    list_display = ['applied_by', 'leave_type', 'from_date', 'to_date', 'total_days', 'status', 'is_auto_generated']
-    list_filter = ['status', 'leave_type', 'is_auto_generated']
-
+    list_display = ('id', 'applied_by', 'branch', 'leave_type', 'from_date', 'to_date', 'is_half_day', 'half_day_session', 'total_days', 'reason',)
+    list_filter = ('second_approver', 'first_approved_at', 'second_approved_at', 'status', 'leave_type', 'branch', 'from_date', 'reviewed_at',)
 
 @admin.register(LateEntryRecord)
 class LateEntryRecordAdmin(admin.ModelAdmin):
-    list_display = ['user', 'date', 'late_minutes', 'is_penalized', 'penalty_type', 'auto_deduction_triggered']
-    list_filter = ['is_penalized', 'auto_deduction_triggered']
+    list_display = ('id', 'user', 'branch', 'date', 'expected_time', 'actual_time', 'late_minutes', 'grace_minutes', 'is_penalized', 'penalty_type',)
+    list_filter = ('auto_deduction_triggered', 'branch', 'recorded_by', 'is_penalized', 'penalty_type', 'date', 'created_at', 'user',)

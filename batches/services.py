@@ -1,0 +1,118 @@
+"""
+batches/services.py
+Auto batch creation and assignment logic (E1).
+"""
+import logging
+from django.db import transaction
+from django.core.exceptions import ValidationError
+
+logger = logging.getLogger(__name__)
+
+
+@transaction.atomic
+def auto_assign_batch(student):
+    """
+    Finds or creates an appropriate Batch for `student` and creates a BatchStudent.
+    Also updates Student.batch FK and creates a BatchHistory entry.
+
+    Returns the created BatchStudent instance.
+    Raises ValueError if admission is misconfigured.
+    """
+    from batches.models import (
+        Batch, BatchStudent, BatchSequenceCounter, Course,
+    )
+    from students.models import BatchHistory
+
+    admission = student.admission
+
+    # Validate required fields
+    if not admission.attempt_year:
+        raise ValueError(
+            f"Admission {admission.id} has no attempt_year — cannot auto-assign batch."
+        )
+    if not admission.batch_attempt:
+        raise ValueError(
+            f"Admission {admission.id} has no batch_attempt — cannot auto-assign batch."
+        )
+
+    course_type   = admission.course          # e.g. 'cseet'
+    batch_attempt = admission.batch_attempt   # e.g. 'oct'
+    attempt_year  = admission.attempt_year    # e.g. 2026
+
+    # ── Step 1: find an existing batch with room ──────────────────────────────
+    existing_batches = (
+        Batch.objects
+        .filter(
+            course__course_type=course_type,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            is_active=True,
+        )
+        .order_by('created_at')
+    )
+
+    batch = None
+    for candidate in existing_batches:
+        enrolled_count = candidate.batch_students.count()
+        if enrolled_count < candidate.max_students:
+            batch = candidate
+            break
+
+    # ── Step 2: create a new batch if none available ──────────────────────────
+    if batch is None:
+        # Resolve Course object from course_type
+        course_obj = Course.objects.filter(course_type=course_type).first()
+        if course_obj is None:
+            raise ValueError(
+                f"No Course found with course_type='{course_type}'. "
+                "Please create one before enrolling students."
+            )
+
+        # Atomically increment the sequence counter
+        counter, _ = BatchSequenceCounter.objects.select_for_update().get_or_create(
+            course_type=course_type,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            defaults={'last_sequence': 100},
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+
+        sequence = counter.last_sequence
+        # e.g. cseet_oct_26_101
+        year_suffix = str(attempt_year)[-2:]
+        batch_name = f"{course_type}_{batch_attempt}_{year_suffix}_{sequence}"
+
+        from django.utils import timezone
+        today = timezone.now().date()
+        batch = Batch.objects.create(
+            course=course_obj,
+            name=batch_name,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            auto_sequence=sequence,
+            is_auto_created=True,
+            is_active=True,
+            # Placeholder dates — admin can update after creation
+            start_date=today,
+            end_date=today,
+        )
+
+    # ── Step 3: enrol student ─────────────────────────────────────────────────
+    batch_student, _ = BatchStudent.objects.get_or_create(
+        batch=batch,
+        student=student,
+    )
+
+    # ── Step 4: update Student.batch FK ──────────────────────────────────────
+    from students.models import Student as StudentModel
+    StudentModel.objects.filter(pk=student.pk).update(batch=batch)
+
+    # ── Step 5: log batch history ─────────────────────────────────────────────
+    BatchHistory.objects.create(
+        student=student,
+        batch_name=batch.name,
+        reason='Auto-assigned on enrollment',
+    )
+
+    return batch_student

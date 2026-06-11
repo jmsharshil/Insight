@@ -1,31 +1,18 @@
 from django.contrib import admin
-
-from .models import ChatRoom, Message, MessageReadReceipt
-
+from chat.models import *
 
 @admin.register(ChatRoom)
 class ChatRoomAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "room_type", "created_at")
-    list_filter = ("room_type",)
-    search_fields = ("name", "id")
-    readonly_fields = ("id", "direct_hash", "created_at")
-
+    list_display = ('id', 'name', 'avatar', 'room_type', 'direct_hash', 'is_active', 'created_at',)
+    search_fields = ('name',)
+    list_filter = ('created_at', 'room_type', 'is_active',)
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("id", "room", "sender", "short_content", "created_at")
-    list_filter = ("created_at",)
-    search_fields = ("content", "id")
-    readonly_fields = ("id", "created_at", "updated_at")
-
-    @admin.display(description="Content")
-    def short_content(self, obj):
-        if obj.content:
-            return obj.content[:80]
-        return obj.file_name or "(empty)"
-
+    list_display = ('id', 'room', 'sender', 'content', 'file_url', 'file_name', 'file_size', 'is_deleted', 'delivered_at', 'created_at',)
+    list_filter = ('delivered_at', 'is_deleted', 'room', 'updated_at', 'sender', 'created_at',)
 
 @admin.register(MessageReadReceipt)
 class MessageReadReceiptAdmin(admin.ModelAdmin):
-    list_display = ("id", "message", "user", "read_at")
-    readonly_fields = ("read_at",)
+    list_display = ('id', 'message', 'user', 'read_at',)
+    list_filter = ('message', 'read_at', 'user',)

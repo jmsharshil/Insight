@@ -27,8 +27,8 @@ class FilterSearchTestCase(TestCase):
         self.student1_user = User.objects.create_user(username='stu1', email='stu1@test.com', password='password123', name='Alice', role='student')
         self.student2_user = User.objects.create_user(username='stu2', email='stu2@test.com', password='password123', name='Bob', role='student')
 
-        self.admission1 = Admission.objects.create(first_name='Alice', email='stu1@test.com', branch=self.branch, course=self.course, dob="2010-01-01", status="enrolled", phone_student="1234567890", tenth_percentage=90)
-        self.admission2 = Admission.objects.create(first_name='Bob', email='stu2@test.com', branch=self.branch, course=self.course, dob="2010-02-02", status="enrolled", phone_student="0987654321", tenth_percentage=85)
+        self.admission1 = Admission.objects.create(first_name='Alice', email='stu1@test.com', branch=self.branch, course=self.course, dob="2010-01-01", status="enrolled", phone_student="1234567890", tenth_percentage=90, tenth_percentile=90, twelfth_percentage=90, twelfth_percentile=90, attempt_year=2024, fee_structure='lumpsum')
+        self.admission2 = Admission.objects.create(first_name='Bob', email='stu2@test.com', branch=self.branch, course=self.course, dob="2010-02-02", status="enrolled", phone_student="0987654321", tenth_percentage=85, tenth_percentile=85, twelfth_percentage=85, twelfth_percentile=85, attempt_year=2024, fee_structure='lumpsum')
 
         self.student1 = Student.objects.create(user=self.student1_user, branch=self.branch, batch=self.batch, admission_number="A001", dob="2010-01-01", admission=self.admission1)
         self.student2 = Student.objects.create(user=self.student2_user, branch=self.branch, batch=self.batch, admission_number="A002", dob="2010-02-02", admission=self.admission2)

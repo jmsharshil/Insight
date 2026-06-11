@@ -172,6 +172,19 @@ class QRScanLog(models.Model):
     is_valid = models.BooleanField(default=True)
     invalid_reason = models.CharField(max_length=255, blank=True)
 
+    # E3 — Location & timing validation fields
+    latitude          = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude         = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    location_verified = models.BooleanField(null=True, blank=True)
+    time_verified     = models.BooleanField(null=True, blank=True)
+    validation_reason = models.CharField(max_length=255, blank=True)
+    timetable_slot    = models.ForeignKey(
+        'batches.TimetableSlot',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='qr_scans',
+    )
+
     class Meta:
         db_table = 'qr_scan_logs'
         ordering = ['-scanned_at']

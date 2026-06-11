@@ -127,6 +127,8 @@ class QRScanInputSerializer(serializers.Serializer):
     )
     latitude = serializers.FloatField(required=False, allow_null=True)
     longitude = serializers.FloatField(required=False, allow_null=True)
+    timetable_slot = serializers.UUIDField(required=False, allow_null=True,
+                                         help_text='Optional TimetableSlot UUID for timing validation.')
 
 
 class QRScanResponseSerializer(serializers.Serializer):

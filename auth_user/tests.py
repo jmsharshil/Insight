@@ -35,7 +35,7 @@ class AuthUserAPITestCase(TestCase):
         self.assertFalse(user.is_active)
 
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn('Set your Insight ERP password', mail.outbox[0].subject)
+        self.assertIn('Set your Test Org password', mail.outbox[0].subject)
         self.assertIn(user.email, mail.outbox[0].to)
 
         token = PasswordSetToken.objects.filter(user=user, is_used=False).last()

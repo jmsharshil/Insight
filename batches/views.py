@@ -14,6 +14,7 @@ from django.db import models
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot,
+    CourseLevel, Chapter, TimetableExamType,
 )
 from .serializers import (
     CourseListSerializer, CourseDetailSerializer, CourseCreateUpdateSerializer,
@@ -24,6 +25,7 @@ from .serializers import (
     ClassroomListSerializer, ClassroomCreateUpdateSerializer,
     TimetableSlotListSerializer, TimetableSlotCreateUpdateSerializer,
     FacultyTimetableSerializer, StudentTimetableSerializer,
+    CourseLevelSerializer, ChapterSerializer, TimetableExamTypeSerializer,
 )
 from .validators import check_faculty_clash, check_classroom_clash
 
@@ -113,23 +115,90 @@ class CourseDetailView(APIView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  CourseLevel Views (E2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CourseLevelListView(APIView):
+    def get(self, request, course_id):
+        levels = CourseLevel.objects.filter(course_id=course_id)
+        if getattr(request.user, 'organization', None):
+            levels = levels.filter(organization=request.user.organization)
+        levels = levels.order_by('order')
+        return Response({'success': True, 'data': CourseLevelSerializer(levels, many=True).data})
+
+    def post(self, request, course_id):
+        # Ensure course belongs to user's org
+        try:
+            qs = Course.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(organization=request.user.organization)
+            course = qs.get(pk=course_id)
+        except Course.DoesNotExist:
+            return Response({'success': False, 'message': 'Course not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = CourseLevelSerializer(data=request.data, context={'course': course})
+        if not serializer.is_valid():
+            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        
+        level = serializer.save(course=course, organization=getattr(request.user, 'organization', None))
+        return Response({'success': True, 'message': 'Course level created.', 'data': CourseLevelSerializer(level).data}, status=status.HTTP_201_CREATED)
+
+
+class CourseLevelDetailView(APIView):
+    def _get_level(self, course_id, level_id):
+        try:
+            qs = CourseLevel.objects.filter(course_id=course_id)
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=level_id)
+        except CourseLevel.DoesNotExist:
+            return None
+
+    def get(self, request, course_id, level_id):
+        level = self._get_level(course_id, level_id)
+        if not level:
+            return Response({'success': False, 'message': 'Course level not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': True, 'data': CourseLevelSerializer(level).data})
+
+    def patch(self, request, course_id, level_id):
+        level = self._get_level(course_id, level_id)
+        if not level:
+            return Response({'success': False, 'message': 'Course level not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = CourseLevelSerializer(level, data=request.data, partial=True, context={'course': level.course})
+        if not serializer.is_valid():
+            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response({'success': True, 'message': 'Course level updated.', 'data': CourseLevelSerializer(level).data})
+
+    def delete(self, request, course_id, level_id):
+        level = self._get_level(course_id, level_id)
+        if not level:
+            return Response({'success': False, 'message': 'Course level not found.'}, status=status.HTTP_404_NOT_FOUND)
+        level.delete()
+        return Response({'success': True, 'message': 'Course level deleted.'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Subject Views
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SubjectListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['course', 'is_active']
+    filterset_fields = ['level', 'level__course', 'is_active']
     search_fields = ['name', 'code']
     ordering_fields = '__all__'
 
     def get(self, request):
-        queryset = Subject.objects.select_related('course').all()
+        queryset = Subject.objects.select_related('level', 'level__course').all()
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(organization=request.user.organization)
 
+        level_id = request.GET.get('level_id')
         course_id = request.GET.get('course_id')
+        if level_id:
+            queryset = queryset.filter(level_id=level_id)
         if course_id:
-            queryset = queryset.filter(course_id=course_id)
+            queryset = queryset.filter(level__course_id=course_id)
 
         is_active = request.GET.get('is_active')
         if is_active is not None:
@@ -188,6 +257,67 @@ class SubjectDetailView(APIView):
         subject.delete()
         return Response({'success': True, 'message': 'Subject deleted.'})
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Chapter Views (E2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ChapterListView(APIView):
+    def get(self, request, subject_id):
+        chapters = Chapter.objects.filter(subject_id=subject_id).order_by('order')
+        if getattr(request.user, 'organization', None):
+            chapters = chapters.filter(subject__organization=request.user.organization)
+        return Response({'success': True, 'data': ChapterSerializer(chapters, many=True).data})
+
+    def post(self, request, subject_id):
+        try:
+            qs = Subject.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(organization=request.user.organization)
+            subject = qs.get(pk=subject_id)
+        except Subject.DoesNotExist:
+            return Response({'success': False, 'message': 'Subject not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ChapterSerializer(data=request.data, context={'subject': subject})
+        if not serializer.is_valid():
+            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        
+        chapter = serializer.save(subject=subject)
+        return Response({'success': True, 'message': 'Chapter created.', 'data': ChapterSerializer(chapter).data}, status=status.HTTP_201_CREATED)
+
+
+class ChapterDetailView(APIView):
+    def _get_chapter(self, subject_id, chapter_id):
+        try:
+            qs = Chapter.objects.filter(subject_id=subject_id)
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(subject__organization=self.request.user.organization)
+            return qs.get(pk=chapter_id)
+        except Chapter.DoesNotExist:
+            return None
+
+    def get(self, request, subject_id, chapter_id):
+        chapter = self._get_chapter(subject_id, chapter_id)
+        if not chapter:
+            return Response({'success': False, 'message': 'Chapter not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': True, 'data': ChapterSerializer(chapter).data})
+
+    def patch(self, request, subject_id, chapter_id):
+        chapter = self._get_chapter(subject_id, chapter_id)
+        if not chapter:
+            return Response({'success': False, 'message': 'Chapter not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = ChapterSerializer(chapter, data=request.data, partial=True, context={'subject': chapter.subject})
+        if not serializer.is_valid():
+            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response({'success': True, 'message': 'Chapter updated.', 'data': ChapterSerializer(chapter).data})
+
+    def delete(self, request, subject_id, chapter_id):
+        chapter = self._get_chapter(subject_id, chapter_id)
+        if not chapter:
+            return Response({'success': False, 'message': 'Chapter not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chapter.delete()
+        return Response({'success': True, 'message': 'Chapter deleted.'})
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Batch Views
@@ -638,12 +768,59 @@ class ClassroomDetailView(APIView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  TimetableExamType Views (E4)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TimetableExamTypeListView(APIView):
+    def get(self, request):
+        queryset = TimetableExamType.objects.all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
+        return Response({'success': True, 'data': TimetableExamTypeSerializer(queryset, many=True).data})
+
+    def post(self, request):
+        serializer = TimetableExamTypeSerializer(data=request.data, context={'request': request})
+        if not serializer.is_valid():
+            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        exam_type = serializer.save()
+        return Response({'success': True, 'message': 'Exam type created.', 'data': TimetableExamTypeSerializer(exam_type).data}, status=status.HTTP_201_CREATED)
+
+
+class TimetableExamTypeDetailView(APIView):
+    def _get_obj(self, pk):
+        try:
+            qs = TimetableExamType.objects.all()
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
+        except TimetableExamType.DoesNotExist:
+            return None
+
+    def patch(self, request, pk):
+        obj = self._get_obj(pk)
+        if not obj:
+            return Response({'success': False, 'message': 'Exam type not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = TimetableExamTypeSerializer(obj, data=request.data, partial=True, context={'request': request})
+        if not serializer.is_valid():
+            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response({'success': True, 'message': 'Exam type updated.', 'data': TimetableExamTypeSerializer(obj).data})
+
+    def delete(self, request, pk):
+        obj = self._get_obj(pk)
+        if not obj:
+            return Response({'success': False, 'message': 'Exam type not found.'}, status=status.HTTP_404_NOT_FOUND)
+        obj.delete()
+        return Response({'success': True, 'message': 'Exam type deleted.'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Timetable Views
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TimetableListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject', 'batch__course']
+    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject', 'batch__course', 'session_type']
     search_fields = []
     ordering_fields = '__all__'
 
@@ -659,9 +836,12 @@ class TimetableListView(APIView):
         faculty_id = request.GET.get('faculty_id')
         subject_id = request.GET.get('subject_id')
         course_id = request.GET.get('course_id')
+        session_type = request.GET.get('session_type')
 
         if batch_id:
-            queryset = queryset.filter(batch_id=batch_id)
+            # allow comma-separated batch IDs for E4 filter
+            batch_ids = [b.strip() for b in batch_id.split(',')]
+            queryset = queryset.filter(batch_id__in=batch_ids)
         if day_of_week is not None:
             queryset = queryset.filter(day_of_week=int(day_of_week))
         if faculty_id:
@@ -670,6 +850,8 @@ class TimetableListView(APIView):
             queryset = queryset.filter(subject_id=subject_id)
         if course_id:
             queryset = queryset.filter(batch__course_id=course_id)
+        if session_type:
+            queryset = queryset.filter(session_type=session_type)
 
         queryset = apply_filters(self, request, queryset)
 
