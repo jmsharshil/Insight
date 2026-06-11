@@ -374,66 +374,66 @@ class AttendanceCorrectionView(APIView):
             return err
         return Response({'success': True, 'data': AttendanceRecordListSerializer(record).data})
 
-    def patch(self, request, record_id):
-        role = _user_role(request.user)
-        if role not in CORRECTION_ROLES:
-            return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
-        record, err = self._get_record(request, record_id)
-        if err:
-            return err
-
-        ser = AttendanceCorrectionSerializer(data=request.data)
-        if not ser.is_valid():
-            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        if 'status' in ser.validated_data:
-            record.status = ser.validated_data['status']
-        if 'checked_in_at' in ser.validated_data:
-            record.checked_in_at = ser.validated_data['checked_in_at']
-        if 'checked_out_at' in ser.validated_data:
-            record.checked_out_at = ser.validated_data['checked_out_at']
-
-        record.is_corrected = True
-        record.corrected_by = request.user
-        record.correction_note = ser.validated_data.get('correction_note', '')
-        record.save()
-
-        return Response({'success': True, 'message': 'Corrected.', 'data': AttendanceRecordListSerializer(record).data})
-
-    def put(self, request, record_id):
-        """PUT /api/v1/attendance/{id}/ — full update of an attendance record."""
-        role = _user_role(request.user)
-        if role not in CORRECTION_ROLES:
-            return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
-        record, err = self._get_record(request, record_id)
-        if err:
-            return err
-
-        ser = AttendanceCorrectionSerializer(data=request.data)
-        if not ser.is_valid():
-            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        record.status = ser.validated_data.get('status', record.status)
-        record.checked_in_at = ser.validated_data.get('checked_in_at')
-        record.checked_out_at = ser.validated_data.get('checked_out_at')
-        record.is_corrected = True
-        record.corrected_by = request.user
-        record.correction_note = ser.validated_data.get('correction_note', '')
-        record.save()
-
-        return Response({'success': True, 'message': 'Record fully updated.', 'data': AttendanceRecordListSerializer(record).data})
-
-    def delete(self, request, record_id):
-        """DELETE /api/v1/attendance/{id}/ — remove an attendance record."""
-        role = _user_role(request.user)
-        if role not in CORRECTION_ROLES:
-            return Response({'success': False, 'message': 'Only ASE or BM can delete.'}, status=status.HTTP_403_FORBIDDEN)
-        record, err = self._get_record(request, record_id)
-        if err:
-            return err
-
-        record.delete()
-        return Response({'success': True, 'message': 'Attendance record deleted.'}, status=status.HTTP_200_OK)
+    # def patch(self, request, record_id):
+    #     role = _user_role(request.user)
+    #     if role not in CORRECTION_ROLES:
+    #         return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
+    #     record, err = self._get_record(request, record_id)
+    #     if err:
+    #         return err
+    # 
+    #     ser = AttendanceCorrectionSerializer(data=request.data)
+    #     if not ser.is_valid():
+    #         return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+    # 
+    #     if 'status' in ser.validated_data:
+    #         record.status = ser.validated_data['status']
+    #     if 'checked_in_at' in ser.validated_data:
+    #         record.checked_in_at = ser.validated_data['checked_in_at']
+    #     if 'checked_out_at' in ser.validated_data:
+    #         record.checked_out_at = ser.validated_data['checked_out_at']
+    # 
+    #         record.is_corrected = True
+    #         record.corrected_by = request.user
+    #         record.correction_note = ser.validated_data.get('correction_note', '')
+    #         record.save()
+    # 
+    #         return Response({'success': True, 'message': 'Corrected.', 'data': AttendanceRecordListSerializer(record).data})
+    # 
+    # def put(self, request, record_id):
+    #     """PUT /api/v1/attendance/{id}/ — full update of an attendance record."""
+    #     role = _user_role(request.user)
+    #     if role not in CORRECTION_ROLES:
+    #         return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
+    #     record, err = self._get_record(request, record_id)
+    #     if err:
+    #         return err
+    # 
+    #     ser = AttendanceCorrectionSerializer(data=request.data)
+    #     if not ser.is_valid():
+    #         return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+    # 
+    #     record.status = ser.validated_data.get('status', record.status)
+    #     record.checked_in_at = ser.validated_data.get('checked_in_at')
+    #     record.checked_out_at = ser.validated_data.get('checked_out_at')
+    #     record.is_corrected = True
+    #     record.corrected_by = request.user
+    #     record.correction_note = ser.validated_data.get('correction_note', '')
+    #     record.save()
+    # 
+    #     return Response({'success': True, 'message': 'Record fully updated.', 'data': AttendanceRecordListSerializer(record).data})
+    # 
+    # def delete(self, request, record_id):
+    #     """DELETE /api/v1/attendance/{id}/ — remove an attendance record."""
+    #     role = _user_role(request.user)
+    #     if role not in CORRECTION_ROLES:
+    #         return Response({'success': False, 'message': 'Only ASE or BM can delete.'}, status=status.HTTP_403_FORBIDDEN)
+    #     record, err = self._get_record(request, record_id)
+    #     if err:
+    #         return err
+    # 
+    #     record.delete()
+    #     return Response({'success': True, 'message': 'Attendance record deleted.'}, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -683,134 +683,134 @@ class AttendanceAlertView(APIView):
 #    v3: added POST for manual admin violation logging (FRD §4.4.3)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ViolationListCreateView(APIView):
-    """List violations + manually create violations (FRD §4.4.3)."""
-    # permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['student_id', 'date', 'violation_type', 'is_resolved', 'logged_by_admin']
-    search_fields = ['student__first_name', 'student__surname', 'description']
-    ordering_fields = '__all__'
-
-    def get(self, request):
-        role = _user_role(request.user)
-        if role not in VIOLATION_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
-        qs = ViolationRecord.objects.select_related('student', 'resolved_by', 'created_by').all()
-
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(student__branch__organization=request.user.organization)
-
-        for param, field in [('student_id','student_id'), ('date','date'), ('violation_type','violation_type')]:
-            val = request.GET.get(param)
-            if val:
-                qs = qs.filter(**{field: val})
-
-        is_resolved = request.GET.get('is_resolved')
-        if is_resolved is not None:
-            qs = qs.filter(is_resolved=is_resolved.lower() == 'true')
-
-        logged_by_admin = request.GET.get('logged_by_admin')
-        if logged_by_admin is not None:
-            qs = qs.filter(logged_by_admin=logged_by_admin.lower() == 'true')
-
-        qs = apply_filters(self, request, qs)
-
-        return Response({'success': True, 'count': qs.count(), 'data': ViolationRecordSerializer(qs, many=True).data})
-
-    def post(self, request):
-        """POST /api/v1/attendance/violations/ — admin manual violation (FRD §4.4.3)."""
-        role = _user_role(request.user)
-        if role not in VIOLATION_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
-        ser = ViolationCreateSerializer(data=request.data)
-        if not ser.is_valid():
-            return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        d = ser.validated_data
-        v = ViolationRecord.objects.create(
-            student_id=d['student_id'],
-            violation_type=d['violation_type'],
-            date=d['date'],
-            description=d.get('description', ''),
-            logged_by_admin=True,
-            created_by=request.user,
-        )
-
-        # Check violation threshold — block QR if >= 3
-        count = get_active_violations_count(d['student_id'])
-        if count >= 3:
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                SP.objects.filter(id=d['student_id']).update(qr_blocked=True)
-            except Exception:
-                pass
-            AlertLog.objects.create(
-                student_id=d['student_id'], alert_type='violation',
-                message=f'{count} active violations. QR access blocked.',
-                notified_admin=True,
-            )
-
-        return Response({'success': True, 'message': 'Violation logged.', 'data': ViolationRecordSerializer(v).data}, status=status.HTTP_201_CREATED)
-
-
-class ViolationResolveView(APIView):
-    """Resolve or delete a violation."""
-    # permission_classes = [IsAuthenticated]
-
-    def _get_violation(self, request, violation_id):
-        role = _user_role(request.user)
-        if role not in VIOLATION_ROLES:
-            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-        try:
-            v = ViolationRecord.objects.get(id=violation_id)
-        except ViolationRecord.DoesNotExist:
-            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return v, None
-
-    def patch(self, request, violation_id):
-        v, err = self._get_violation(request, violation_id)
-        if err:
-            return err
-
-        ser = ViolationResolveSerializer(data=request.data)
-        if not ser.is_valid():
-            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        v.is_resolved = ser.validated_data['is_resolved']
-        v.resolved_by = request.user
-        v.resolved_at = timezone.now()
-        v.save()
-
-        # Re-enable QR if violations drop below 3
-        if not should_block_qr(v.student_id):
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                SP.objects.filter(id=v.student_id).update(qr_blocked=False)
-            except Exception:
-                pass
-
-        return Response({'success': True, 'message': 'Violation resolved.', 'data': ViolationRecordSerializer(v).data})
-
-    def delete(self, request, violation_id):
-        """DELETE /api/v1/attendance/violations/{id}/ — remove a violation record."""
-        v, err = self._get_violation(request, violation_id)
-        if err:
-            return err
-
-        student_id = v.student_id
-        v.delete()
-
-        # Re-enable QR if violations drop below 3 after deletion
-        if not should_block_qr(student_id):
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                SP.objects.filter(id=student_id).update(qr_blocked=False)
-            except Exception:
-                pass
-
-        return Response({'success': True, 'message': 'Violation deleted.'}, status=status.HTTP_200_OK)
+# class ViolationListCreateView(APIView):
+#     """List violations + manually create violations (FRD §4.4.3)."""
+#     # permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+#     filterset_fields = ['student_id', 'date', 'violation_type', 'is_resolved', 'logged_by_admin']
+#     search_fields = ['student__first_name', 'student__surname', 'description']
+#     ordering_fields = '__all__'
+# 
+#     def get(self, request):
+#         role = _user_role(request.user)
+#         if role not in VIOLATION_ROLES:
+#             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+# 
+#         qs = ViolationRecord.objects.select_related('student', 'resolved_by', 'created_by').all()
+# 
+#         if getattr(request.user, 'organization', None):
+#             qs = qs.filter(student__branch__organization=request.user.organization)
+# 
+#         for param, field in [('student_id','student_id'), ('date','date'), ('violation_type','violation_type')]:
+#             val = request.GET.get(param)
+#             if val:
+#                 qs = qs.filter(**{field: val})
+# 
+#         is_resolved = request.GET.get('is_resolved')
+#         if is_resolved is not None:
+#             qs = qs.filter(is_resolved=is_resolved.lower() == 'true')
+# 
+#         logged_by_admin = request.GET.get('logged_by_admin')
+#         if logged_by_admin is not None:
+#             qs = qs.filter(logged_by_admin=logged_by_admin.lower() == 'true')
+# 
+#         qs = apply_filters(self, request, qs)
+# 
+#         return Response({'success': True, 'count': qs.count(), 'data': ViolationRecordSerializer(qs, many=True).data})
+# 
+#     def post(self, request):
+#         """POST /api/v1/attendance/violations/ — admin manual violation (FRD §4.4.3)."""
+#         role = _user_role(request.user)
+#         if role not in VIOLATION_ROLES:
+#             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+# 
+#         ser = ViolationCreateSerializer(data=request.data)
+#         if not ser.is_valid():
+#             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+# 
+#         d = ser.validated_data
+#         v = ViolationRecord.objects.create(
+#             student_id=d['student_id'],
+#             violation_type=d['violation_type'],
+#             date=d['date'],
+#             description=d.get('description', ''),
+#             logged_by_admin=True,
+#             created_by=request.user,
+#         )
+# 
+#         # Check violation threshold — block QR if >= 3
+#         count = get_active_violations_count(d['student_id'])
+#         if count >= 3:
+#             try:
+#                 from django.apps import apps
+#                 SP = apps.get_model('students', 'Student')
+#                 SP.objects.filter(id=d['student_id']).update(qr_blocked=True)
+#             except Exception:
+#                 pass
+#             AlertLog.objects.create(
+#                 student_id=d['student_id'], alert_type='violation',
+#                 message=f'{count} active violations. QR access blocked.',
+#                 notified_admin=True,
+#             )
+# 
+#         return Response({'success': True, 'message': 'Violation logged.', 'data': ViolationRecordSerializer(v).data}, status=status.HTTP_201_CREATED)
+# 
+# 
+# class ViolationResolveView(APIView):
+#     """Resolve or delete a violation."""
+#     # permission_classes = [IsAuthenticated]
+# 
+#     def _get_violation(self, request, violation_id):
+#         role = _user_role(request.user)
+#         if role not in VIOLATION_ROLES:
+#             return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+#         try:
+#             v = ViolationRecord.objects.get(id=violation_id)
+#         except ViolationRecord.DoesNotExist:
+#             return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+#         return v, None
+# 
+#     def patch(self, request, violation_id):
+#         v, err = self._get_violation(request, violation_id)
+#         if err:
+#             return err
+# 
+#         ser = ViolationResolveSerializer(data=request.data)
+#         if not ser.is_valid():
+#             return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+# 
+#         v.is_resolved = ser.validated_data['is_resolved']
+#         v.resolved_by = request.user
+#         v.resolved_at = timezone.now()
+#         v.save()
+# 
+#         # Re-enable QR if violations drop below 3
+#         if not should_block_qr(v.student_id):
+#             try:
+#                 from django.apps import apps
+#                 SP = apps.get_model('students', 'Student')
+#                 SP.objects.filter(id=v.student_id).update(qr_blocked=False)
+#             except Exception:
+#                 pass
+# 
+#         return Response({'success': True, 'message': 'Violation resolved.', 'data': ViolationRecordSerializer(v).data})
+# 
+#     def delete(self, request, violation_id):
+#         """DELETE /api/v1/attendance/violations/{id}/ — remove a violation record."""
+#         v, err = self._get_violation(request, violation_id)
+#         if err:
+#             return err
+# 
+#         student_id = v.student_id
+#         v.delete()
+# 
+#         # Re-enable QR if violations drop below 3 after deletion
+#         if not should_block_qr(student_id):
+#             try:
+#                 from django.apps import apps
+#                 SP = apps.get_model('students', 'Student')
+#                 SP.objects.filter(id=student_id).update(qr_blocked=False)
+#             except Exception:
+#                 pass
+# 
+#         return Response({'success': True, 'message': 'Violation deleted.'}, status=status.HTTP_200_OK)

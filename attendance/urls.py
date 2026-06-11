@@ -3,7 +3,12 @@ from .views import (
     AttendanceListCreateView, QRScanView, AttendanceCorrectionView,
     StudentAttendanceView, BatchAttendanceSheetView,
     AttendanceReportView, AttendanceAlertView,
-    ViolationListCreateView, ViolationResolveView,
+)
+from .analytics_views import (
+    DashboardSummaryAPIView, StudentAttendanceListAPIView, StudentAttendanceDetailAPIView,
+    AttendanceHistoryAPIView, BatchAttendanceRegisterAPIView, FacultyAttendanceAPIView,
+    FacultyAttendanceDetailAPIView, AttendanceAnalyticsAPIView, DefaulterStudentsAPIView,
+    ViolationsAPIView, ViolationDetailAPIView, AttendanceExportAPIView, AttendanceAuditAPIView,
 )
 
 urlpatterns = [
@@ -28,7 +33,19 @@ urlpatterns = [
     # G. Trigger low-attendance alerts
     path('attendance/alert/', AttendanceAlertView.as_view(), name='attendance-alert'),
 
-    # H. Violations — GET list, POST manual create (FRD §4.4.3), PATCH resolve
-    path('attendance/violations/', ViolationListCreateView.as_view(), name='violation-list-create'),
-    path('attendance/violations/<uuid:violation_id>/', ViolationResolveView.as_view(), name='violation-resolve'),
+    # H. New Role-Based Reporting and Analytics APIs
+    path('attendance/dashboard/', DashboardSummaryAPIView.as_view(), name='attendance-dashboard'),
+    path('attendance/students/', StudentAttendanceListAPIView.as_view(), name='attendance-students-list'),
+    path('attendance/students/<uuid:student_id>/', StudentAttendanceDetailAPIView.as_view(), name='attendance-students-detail'),
+    path('attendance/history/', AttendanceHistoryAPIView.as_view(), name='attendance-history'),
+    path('attendance/batches/<uuid:batch_id>/register/', BatchAttendanceRegisterAPIView.as_view(), name='attendance-batch-register'),
+    path('attendance/faculty/', FacultyAttendanceAPIView.as_view(), name='attendance-faculty-list'),
+    path('attendance/faculty/<uuid:faculty_id>/', FacultyAttendanceDetailAPIView.as_view(), name='attendance-faculty-detail'),
+    path('attendance/analytics/', AttendanceAnalyticsAPIView.as_view(), name='attendance-analytics'),
+    path('attendance/defaulters/', DefaulterStudentsAPIView.as_view(), name='attendance-defaulters'),
+    path('attendance/violations/', ViolationsAPIView.as_view(), name='attendance-violations'),
+    path('attendance/violations/<uuid:violation_id>/', ViolationDetailAPIView.as_view(), name='attendance-violations-detail'),
+    path('attendance/export/', AttendanceExportAPIView.as_view(), name='attendance-export'),
+    path('attendance/audit-logs/', AttendanceAuditAPIView.as_view(), name='attendance-audit-logs'),
 ]
+

@@ -58,7 +58,7 @@ class CourseDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def get_subjects(self, obj):
-        qs = obj.subjects.filter(is_active=True)
+        qs = Subject.objects.filter(level__course=obj, is_active=True)
         return SubjectListSerializer(qs, many=True).data
 
     def get_levels(self, obj):
