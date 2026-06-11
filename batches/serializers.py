@@ -18,11 +18,16 @@ from django.conf import settings
 class CourseLevelSerializer(serializers.ModelSerializer):
     """Read/write serializer for CourseLevel (E2)."""
     course_type_display = serializers.CharField(source="get_course_type_display", read_only=True)
+    subjects = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseLevel
-        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'order', 'description', 'is_active']
+        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'order', 'description', 'is_active', 'subjects']
         read_only_fields = ['id', 'course']
+
+    def get_subjects(self, obj):
+        qs = Subject.objects.filter(level=obj, is_active=True)
+        return SubjectListSerializer(qs, many=True).data
 
     def validate(self, data):
         # Duplicate order check (create only)
@@ -41,10 +46,15 @@ class CourseLevelSerializer(serializers.ModelSerializer):
 
 class CourseListSerializer(serializers.ModelSerializer):
     subject_count = serializers.IntegerField(read_only=True, default=0)
+    levels = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
-        fields = ['id', 'name', 'code', 'is_active', 'subject_count', 'created_at']
+        fields = ['id', 'name', 'code', 'is_active', 'subject_count', 'created_at', 'levels']
+
+    def get_levels(self, obj):
+        qs = obj.levels.filter(is_active=True)
+        return CourseLevelSerializer(qs, many=True).data
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
