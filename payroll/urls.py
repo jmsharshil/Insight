@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     PayrollListCreateView, PayrollDetailView, PayrollPayslipsView,
     PayrollApproveView, PayrollDisburseView, FacultyPayslipsView,
-    LatePolicyView, LatePolicyDetailView, PayslipAdjustView,
+    LatePolicyView, LatePolicyDetailView, PayslipAdjustView, FacultySalaryPreviewView
 )
 
 urlpatterns = [
@@ -15,5 +15,6 @@ urlpatterns = [
     path('payroll/late-policy/', LatePolicyView.as_view(), name='payroll-late-policy'),
     path('payroll/late-policy/<uuid:policy_id>/', LatePolicyDetailView.as_view(), name='payroll-late-policy-detail'),
     path('faculty/<uuid:faculty_id>/payslips/', FacultyPayslipsView.as_view(), name='faculty-payslips'),
+    path('faculty/<uuid:faculty_id>/salary-preview/', FacultySalaryPreviewView.as_view(), name='faculty-salary-preview'),
 ]
 
