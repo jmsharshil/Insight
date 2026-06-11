@@ -455,7 +455,18 @@ class UserListAPIView(APIView):
     ordering_fields = '__all__'
 
     def get(self, request):
-        users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=401)
+            
+        from django.db.models import Q
+        if request.user.is_superuser:
+            users = User.objects.all().order_by('-created_at')
+        elif request.user.role == 'super_admin':
+            users = User.objects.filter(
+                Q(organization=request.user.organization) | Q(is_superuser=True)
+            ).order_by('-created_at')
+        else:
+            users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
         role = self.request.query_params.get('role')
         is_active = self.request.query_params.get('is_active')
 
