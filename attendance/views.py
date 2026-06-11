@@ -353,10 +353,12 @@ class AttendanceCorrectionView(APIView):
     def _get_record(self, request, record_id):
         user = request.user
         role = _user_role(user)
-        if role not in CORRECTION_ROLES:
-            return None, Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
+        if role not in CORRECTION_ROLES + ADMIN_ROLES + ['faculty', 'student']:
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            record = AttendanceRecord.objects.get(id=record_id)
+            record = AttendanceRecord.objects.select_related(
+                'student', 'batch', 'branch', 'marked_by', 'corrected_by'
+            ).get(id=record_id)
         except AttendanceRecord.DoesNotExist:
             return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if role == 'branch_manager':
@@ -365,7 +367,17 @@ class AttendanceCorrectionView(APIView):
                 return None, Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
         return record, None
 
+    def get(self, request, record_id):
+        """GET /api/v1/attendance/{id}/ — fetch a single attendance record by ID."""
+        record, err = self._get_record(request, record_id)
+        if err:
+            return err
+        return Response({'success': True, 'data': AttendanceRecordListSerializer(record).data})
+
     def patch(self, request, record_id):
+        role = _user_role(request.user)
+        if role not in CORRECTION_ROLES:
+            return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
         record, err = self._get_record(request, record_id)
         if err:
             return err
@@ -390,6 +402,9 @@ class AttendanceCorrectionView(APIView):
 
     def put(self, request, record_id):
         """PUT /api/v1/attendance/{id}/ — full update of an attendance record."""
+        role = _user_role(request.user)
+        if role not in CORRECTION_ROLES:
+            return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
         record, err = self._get_record(request, record_id)
         if err:
             return err
@@ -410,6 +425,9 @@ class AttendanceCorrectionView(APIView):
 
     def delete(self, request, record_id):
         """DELETE /api/v1/attendance/{id}/ — remove an attendance record."""
+        role = _user_role(request.user)
+        if role not in CORRECTION_ROLES:
+            return Response({'success': False, 'message': 'Only ASE or BM can delete.'}, status=status.HTTP_403_FORBIDDEN)
         record, err = self._get_record(request, record_id)
         if err:
             return err

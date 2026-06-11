@@ -67,12 +67,70 @@ class PayrollListCreateView(APIView):
         if role not in PAYROLL_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
+        # ── Default to current month/year if not provided ──
+        now = timezone.now()
+        year = request.GET.get('year', str(now.year))
+        month = request.GET.get('month', str(now.month))
+        req_branch_id = request.GET.get('branch_id')
+        bid = _user_branch_id(request.user)
+
+        target_branch_id = bid if (role != 'super_admin' and bid) else req_branch_id
+
+        # ── Auto-generate payroll on GET ──
+        try:
+            y_int = int(year)
+            m_int = int(month)
+            from faculty.models import FacultyProfile
+
+            # Determine which branches to auto-generate for
+            if target_branch_id:
+                branch_ids = [target_branch_id]
+            else:
+                # super_admin with no branch filter → auto-generate for all branches that have active faculty
+                fp_qs = FacultyProfile.objects.filter(is_active=True)
+                if getattr(request.user, 'organization', None):
+                    fp_qs = fp_qs.filter(branch__organization=request.user.organization)
+                branch_ids = list(fp_qs.values_list('branch_id', flat=True).distinct())
+
+            for br_id in branch_ids:
+                # Check if active faculty exist in this branch
+                faculty_list = FacultyProfile.objects.filter(branch_id=br_id, is_active=True)
+                if not faculty_list.exists():
+                    continue
+
+                pr, created = PayrollRun.objects.get_or_create(
+                    branch_id=br_id, month=m_int, year=y_int,
+                    defaults={'generated_by': request.user}
+                )
+
+                if created:
+                    # First time → generate all payslips
+                    total = Decimal(0)
+                    for fp in faculty_list:
+                        ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
+                        total += ps.net_salary
+                    pr.total_amount = total
+                    pr.save(update_fields=['total_amount'])
+
+                elif pr.status == 'draft':
+                    # Already exists as draft → regenerate payslips so edited salary/rate is reflected
+                    pr.payslips.all().delete()
+                    total = Decimal(0)
+                    for fp in faculty_list:
+                        ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
+                        total += ps.net_salary
+                    pr.total_amount = total
+                    pr.save(update_fields=['total_amount'])
+
+        except (ValueError, TypeError):
+            pass
+
+        # ── Return payroll list ──
         qs = PayrollRun.objects.select_related('branch').all()
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
-        bid = _user_branch_id(request.user)
-        if role != 'super_admin' and bid:
-            qs = qs.filter(branch_id=bid)
+        if target_branch_id:
+            qs = qs.filter(branch_id=target_branch_id)
 
         for param, field in [('year', 'year'), ('month', 'month'), ('status', 'status')]:
             val = request.GET.get(param)
@@ -407,6 +465,57 @@ class FacultyPayslipsView(APIView):
         qs = apply_filters(self, request, qs)
 
         return Response({'success': True, 'count': qs.count(), 'data': PaySlipSerializer(qs, many=True).data})
+
+
+class FacultySalaryPreviewView(APIView):
+    """GET /api/v1/faculty/{id}/salary-preview/?month=X&year=Y"""
+    # permission_classes = [IsAuthenticated]
+
+    def get(self, request, faculty_id):
+        role = _user_role(request.user)
+        from faculty.models import FacultyProfile
+        try:
+            fp_qs = FacultyProfile.objects.all()
+            if getattr(request.user, 'organization', None):
+                fp_qs = fp_qs.filter(branch__organization=request.user.organization)
+            fp = fp_qs.get(id=faculty_id)
+        except FacultyProfile.DoesNotExist:
+            return Response({'success': False, 'message': 'Faculty not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role == 'faculty' and fp.user != request.user:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        if role not in ['faculty', 'accountant', 'branch_manager', 'super_admin']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        month_str = request.GET.get('month')
+        year_str = request.GET.get('year')
+
+        if not month_str or not year_str:
+            from django.utils import timezone
+            now = timezone.now()
+            month = now.month
+            year = now.year
+        else:
+            try:
+                month = int(month_str)
+                year = int(year_str)
+            except ValueError:
+                return Response({'success': False, 'message': 'Invalid month or year.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .utils import preview_payslip_for_faculty
+        preview_data = preview_payslip_for_faculty(fp, month, year)
+        
+        return Response({
+            'success': True,
+            'message': 'Salary preview calculated successfully.',
+            'data': {
+                'faculty_id': faculty_id,
+                'month': month,
+                'year': year,
+                'payslip_preview': preview_data
+            }
+        })
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
