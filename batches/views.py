@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 class CourseListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['course_type', 'is_active']
+    filterset_fields = ['is_active']
     search_fields = ['name', 'code']
     ordering_fields = '__all__'
 
@@ -48,11 +48,7 @@ class CourseListView(APIView):
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(organization=request.user.organization)
 
-        course_type = request.GET.get('course_type')
         is_active = request.GET.get('is_active')
-
-        if course_type:
-            queryset = queryset.filter(course_type=course_type)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
 
@@ -795,6 +791,12 @@ class TimetableExamTypeDetailView(APIView):
             return qs.get(pk=pk)
         except TimetableExamType.DoesNotExist:
             return None
+
+    def get(self, request, pk):
+        obj = self._get_obj(pk)
+        if not obj:
+            return Response({'success': False, 'message': 'Exam type not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': True, 'data': TimetableExamTypeSerializer(obj).data})
 
     def patch(self, request, pk):
         obj = self._get_obj(pk)

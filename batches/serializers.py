@@ -17,10 +17,11 @@ from django.conf import settings
 # E2 — forward declare so CourseDetailSerializer can reference it
 class CourseLevelSerializer(serializers.ModelSerializer):
     """Read/write serializer for CourseLevel (E2)."""
+    course_type_display = serializers.CharField(source="get_course_type_display", read_only=True)
 
     class Meta:
         model = CourseLevel
-        fields = ['id', 'course', 'name', 'order', 'description', 'is_active']
+        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'order', 'description', 'is_active']
         read_only_fields = ['id', 'course']
 
     def validate(self, data):
@@ -40,24 +41,22 @@ class CourseLevelSerializer(serializers.ModelSerializer):
 
 class CourseListSerializer(serializers.ModelSerializer):
     subject_count = serializers.IntegerField(read_only=True, default=0)
-    course_type_display = serializers.CharField(source="get_course_type_display", read_only=True)
 
     class Meta:
         model = Course
-        fields = ['id', 'name', 'code', 'course_type', 'duration_months',
-                  'fee_amount', 'is_active', 'subject_count', 'created_at', 'course_type_display']
+        fields = ['id', 'name', 'code', 'is_active', 'subject_count', 'created_at']
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
     subjects = serializers.SerializerMethodField()
     levels   = serializers.SerializerMethodField()
-    course_type_display = serializers.CharField(source="get_course_type_display", read_only=True)
 
     class Meta:
         model = Course
         fields = '__all__'
 
     def get_subjects(self, obj):
+        from batches.models import Subject
         qs = Subject.objects.filter(level__course=obj, is_active=True)
         return SubjectListSerializer(qs, many=True).data
 
@@ -69,8 +68,7 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 class CourseCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Course
-        fields = ['name', 'code', 'course_type', 'duration_months',
-                  'fee_amount', 'description', 'is_active', 'organization']
+        fields = ['name', 'code', 'description', 'is_active', 'organization']
 
     def validate_code(self, value):
         if not value:
@@ -165,7 +163,7 @@ class BatchListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Batch
         fields = ['id', 'course', 'course_name', 'branch', 'branch_name', 'name', 'batch_code',
-                  'group_module', 'batch_attempt', 'location',
+                  'group_module', 'batch_attempt',
                   'start_date', 'end_date', 'max_students', 'enrolled_count',
                   'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display']
 
@@ -195,7 +193,7 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Batch
         fields = ['course', 'name', 'batch_code', 'group_module',
-                  'batch_attempt', 'location', 'start_date', 'end_date',
+                  'batch_attempt', 'start_date', 'end_date',
                   'max_students', 'timing', 'is_active', 'organization', 'branch']
 
     def validate(self, data):
@@ -356,7 +354,6 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
     classroom_name = serializers.CharField(source='classroom.name', read_only=True, default=None)
     day_label = serializers.SerializerMethodField()
     day_of_week_display = serializers.SerializerMethodField()
-    session_display = serializers.CharField(source="get_session_display", read_only=True)
     session_type_display = serializers.CharField(source="get_session_type_display", read_only=True)
     course = serializers.UUIDField(source='batch.course.id', read_only=True, default=None)
     course_name = serializers.CharField(source='batch.course.name', read_only=True, default=None)
@@ -373,8 +370,8 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
                   'subject', 'subject_name', 'faculty_employee_id',
                   'faculty', 'faculty_name', 'classroom', 'classroom_name',
                   'day_of_week', 'day_label', 'start_time', 'end_time',
-                  'session', 'is_recurring', 'effective_from', 'effective_to',
-                  'day_of_week_display', 'session_display',
+                  'is_recurring', 'effective_from', 'effective_to',
+                  'day_of_week_display',
                   # E4 fields
                   'session_type', 'session_type_display', 'slot_code',
                   'session_date', 'chapter', 'chapter_name',
@@ -399,7 +396,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
         model = TimetableSlot
         fields = [
             'batch', 'subject', 'faculty', 'classroom',
-            'day_of_week', 'start_time', 'end_time', 'session',
+            'day_of_week', 'start_time', 'end_time',
             'is_recurring', 'effective_from', 'effective_to', 'organization',
             # E4 new fields
             'session_type', 'slot_code', 'session_date',
@@ -524,14 +521,14 @@ class FacultyTimetableSerializer(serializers.ModelSerializer):
     classroom_name = serializers.CharField(source='classroom.name', read_only=True, default=None)
     day_label = serializers.SerializerMethodField()
     day_of_week_display = serializers.SerializerMethodField()
-    session_display = serializers.CharField(source="get_session_display", read_only=True)
+
 
     class Meta:
         model = TimetableSlot
         fields = ['id', 'batch', 'batch_name', 'batch_code',
                   'subject', 'subject_name', 'classroom', 'classroom_name',
-                  'day_of_week', 'day_label', 'start_time', 'end_time', 'session',
-                  'day_of_week_display', 'session_display',
+                  'day_of_week', 'day_label', 'start_time', 'end_time',
+                  'day_of_week_display',
                   'session_type', 'session_date', 'slot_code']
 
     def get_day_label(self, obj):
@@ -552,14 +549,14 @@ class StudentTimetableSerializer(serializers.ModelSerializer):
     classroom_name = serializers.CharField(source='classroom.name', read_only=True, default=None)
     day_label = serializers.SerializerMethodField()
     day_of_week_display = serializers.SerializerMethodField()
-    session_display = serializers.CharField(source="get_session_display", read_only=True)
+
 
     class Meta:
         model = TimetableSlot
         fields = ['id', 'subject', 'subject_name', 'faculty', 'faculty_name',
                   'classroom', 'classroom_name', 'faculty_employee_id',
-                  'day_of_week', 'day_label', 'start_time', 'end_time', 'session',
-                  'day_of_week_display', 'session_display',
+                  'day_of_week', 'day_label', 'start_time', 'end_time',
+                  'day_of_week_display',
                   'session_type', 'session_date', 'slot_code']
 
     def get_day_label(self, obj):

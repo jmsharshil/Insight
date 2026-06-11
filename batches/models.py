@@ -47,9 +47,6 @@ class Course(models.Model):
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='courses', null=True, blank=True)
     name             = models.CharField(max_length=200)
     code             = models.CharField(max_length=30, unique=True, blank=True)
-    course_type      = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES)
-    duration_months  = models.PositiveIntegerField(default=0)
-    fee_amount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     description      = models.TextField(blank=True)
     is_active        = models.BooleanField(default=True)
     created_at       = models.DateTimeField(auto_now_add=True)
@@ -59,7 +56,7 @@ class Course(models.Model):
         db_table  = 'courses'
         ordering  = ['name']
         indexes = [
-            models.Index(fields=['course_type', 'is_active']),
+            models.Index(fields=['is_active']),
             models.Index(fields=['-created_at']),
         ]
 
@@ -129,7 +126,6 @@ class Batch(models.Model):
     batch_code     = models.CharField(max_length=30, unique=True, blank=True)
     group_module   = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES, blank=True)
     batch_attempt  = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True)
-    location       = models.CharField(max_length=100, blank=True)
     start_date     = models.DateField()
     end_date       = models.DateField()
     max_students   = models.PositiveIntegerField(default=30)
@@ -255,6 +251,9 @@ class CourseLevel(models.Model):
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='course_levels')
     course       = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='levels')
     name         = models.CharField(max_length=100)
+    course_type  = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES, default='standard')
+    duration_months  = models.PositiveIntegerField(default=0)
+    fee_amount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     order        = models.PositiveSmallIntegerField()
     description  = models.TextField(blank=True)
     is_active    = models.BooleanField(default=True)
@@ -323,7 +322,6 @@ class TimetableSlot(models.Model):
     day_of_week   = models.IntegerField(choices=DAY_CHOICES, null=True, blank=True)
     start_time    = models.TimeField(null=True, blank=True)
     end_time      = models.TimeField(null=True, blank=True)
-    session       = models.CharField(max_length=20, choices=SESSION_CHOICES, default='morning')
     is_recurring  = models.BooleanField(default=True)
     effective_from = models.DateField(null=True, blank=True)
     effective_to   = models.DateField(null=True, blank=True)

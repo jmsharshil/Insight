@@ -92,8 +92,8 @@ class AuthenticatedDropdownsView(APIView):
         for f in faculty:
             f['name'] = f.pop('user__name')
 
-        courses = list(courses_qs.values('id', 'name', 'organization_id', 'duration_months'))
-        subjects = list(subjects_qs.values('id', 'name', 'course_id', 'code'))
+        courses = list(courses_qs.values('id', 'name', 'organization_id'))
+        subjects = list(subjects_qs.values('id', 'name', 'level__course_id', 'code'))
         batches = list(batches_qs.values('id', 'name', 'course_id', 'organization_id'))
         classrooms = list(classrooms_qs.values('id', 'name', 'capacity', 'organization_id'))
         exams = list(exams_qs.values('id', 'title', 'exam_type', 'status', 'branch_id'))

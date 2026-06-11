@@ -59,7 +59,7 @@ def _user_batch_ids(user):
 class AttendanceListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['date', 'batch_id', 'student_id', 'status', 'session']
+    filterset_fields = ['date', 'batch_id', 'student_id', 'status']
     search_fields = ['student__first_name', 'student__surname']
     ordering_fields = '__all__'
 
@@ -83,7 +83,7 @@ class AttendanceListCreateView(APIView):
             bids = _user_batch_ids(user)
             qs = qs.filter(batch_id__in=bids) if bids else qs.none()
 
-        for param, field in [('date','date'), ('batch_id','batch_id'), ('student_id','student_id'), ('status','status'), ('session','session')]:
+        for param, field in [('date','date'), ('batch_id','batch_id'), ('student_id','student_id'), ('status','status')]:
             val = request.GET.get(param)
             if val:
                 qs = qs.filter(**{field: val})
@@ -103,7 +103,7 @@ class AttendanceListCreateView(APIView):
             return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         data = ser.validated_data
-        batch_id, att_date, session, records = data['batch_id'], data['date'], data['session'], data['records']
+        batch_id, att_date, records = data['batch_id'], data['date'], data['records']
 
         # if role == 'faculty':
         #     bids = _user_batch_ids(user)
@@ -128,7 +128,7 @@ class AttendanceListCreateView(APIView):
         if not Batch.objects.filter(id=batch_id).exists():
             return Response({'success': False, 'message': 'Invalid Batch ID.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date, session=session).exists():
+        if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date).exists():
             return Response({'success': False, 'message': 'Already marked. Use PATCH to correct.'}, status=status.HTTP_409_CONFLICT)
 
         created, errors = [], []
@@ -150,7 +150,7 @@ class AttendanceListCreateView(APIView):
 
                 r = AttendanceRecord.objects.create(
                     student_id=sid, batch_id=batch_id, branch_id=branch_id,
-                    date=att_date, session=session, status=entry['status'], marked_by=user,
+                    date=att_date, status=entry['status'], marked_by=user,
                 )
                 created.append(str(r.id))
             except Exception as e:
@@ -272,13 +272,10 @@ class QRScanView(APIView):
         checked_in_at = None
         checked_out_at = None
 
-        # Determine session from time
-        hour = now.hour
-        session = 'morning' if hour < 12 else ('afternoon' if hour < 17 else 'evening')
 
         if scan_type == 'check_in':
             record, created = AttendanceRecord.objects.get_or_create(
-                student=student, batch_id=batch.id, date=now.date(), session=session,
+                student=student, batch_id=batch.id, date=now.date(),
                 defaults={'branch_id': student_branch_id, 'status': 'present', 'marked_by': user, 'checked_in_at': now},
             )
             if not created and not record.checked_in_at:
@@ -295,7 +292,7 @@ class QRScanView(APIView):
         elif scan_type == 'check_out':
             try:
                 record = AttendanceRecord.objects.get(
-                    student=student, batch_id=batch.id, date=now.date(), session=session,
+                    student=student, batch_id=batch.id, date=now.date(),
                 )
                 record.checked_out_at = now
                 record.save(update_fields=['checked_out_at'])
@@ -473,7 +470,7 @@ class StudentAttendanceView(APIView):
         elif role not in ADMIN_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = AttendanceRecord.objects.filter(student_id=student_id).select_related('marked_by').order_by('-date', 'session')
+        qs = AttendanceRecord.objects.filter(student_id=student_id).select_related('marked_by').order_by('-date')
         
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
@@ -490,7 +487,7 @@ class StudentAttendanceView(APIView):
             qs = qs.filter(batch_id=batch_id)
 
         records_data = [{
-            'date': r.date, 'session': r.session, 'status': r.status,
+            'date': r.date, 'status': r.status,
             'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
             'marked_by_name': r.marked_by.name if r.marked_by else None,
         } for r in qs]
@@ -549,7 +546,7 @@ class BatchAttendanceSheetView(APIView):
                 except Exception:
                     name, roll = str(r.student_id), ''
                 data.append({'student_id': str(r.student_id), 'name': name, 'roll_number': roll,
-                             'session': r.session, 'status': r.status,
+                             'status': r.status,
                              'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at})
             return Response({'success': True, 'date': date_filter, 'data': data})
 
