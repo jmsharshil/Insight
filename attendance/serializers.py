@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     AttendanceRecord, QRScanLog, AlertLog, ViolationRecord,
-    SESSION_CHOICES, ATTENDANCE_STATUS_CHOICES, SCAN_TYPE_CHOICES,
+    ATTENDANCE_STATUS_CHOICES, SCAN_TYPE_CHOICES,
     VIOLATION_TYPE_CHOICES,
 )
 from django.utils import timezone
@@ -20,19 +20,17 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     marked_by_name = serializers.SerializerMethodField()
     corrected_by_name = serializers.SerializerMethodField()
-    session_display = serializers.CharField(source="get_session_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = AttendanceRecord
         fields = [
             'id', 'student', 'student_name', 'roll_number',
-            'batch', 'batch_name', 'branch', 'branch_name', 'date', 'session',
+            'batch', 'batch_name', 'branch', 'branch_name', 'date',
             'status', 'status_display', 'checked_in_at', 'checked_out_at',
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'corrected_by_name',
-            'correction_note',
-         'session_display', 'status_display']
+            'correction_note']
 
     def get_student_name(self, obj):
         try:
@@ -78,7 +76,6 @@ class BatchAttendanceCreateSerializer(serializers.Serializer):
     batch_id = serializers.UUIDField()
     branch_id = serializers.UUIDField()
     date = serializers.DateField()
-    session = serializers.ChoiceField(choices=SESSION_CHOICES)
     records = StudentRecordInputSerializer(many=True)
 
     def validate_date(self, value):

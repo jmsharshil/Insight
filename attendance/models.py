@@ -7,13 +7,6 @@ from django.conf import settings
 # CHOICES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SESSION_CHOICES = [
-    ('morning', 'Morning'),
-    ('afternoon', 'Afternoon'),
-    ('evening', 'Evening'),
-    ('full_day', 'Full Day'),
-]
-
 ATTENDANCE_STATUS_CHOICES = [
     ('present', 'Present'),
     ('absent', 'Absent'),
@@ -58,7 +51,7 @@ VIOLATION_TYPE_CHOICES = [
 
 class AttendanceRecord(models.Model):
     """
-    One record per student per date per session.
+    One record per student per date.
     Tracks presence STATUS + raw check-in / check-out timestamps.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -83,7 +76,7 @@ class AttendanceRecord(models.Model):
 
     # ── Attendance data ───────────────────────────────────────────────────────
     date = models.DateField()
-    session = models.CharField(max_length=20, choices=SESSION_CHOICES)
+
     status = models.CharField(
         max_length=20,
         choices=ATTENDANCE_STATUS_CHOICES,
@@ -117,8 +110,8 @@ class AttendanceRecord(models.Model):
 
     class Meta:
         db_table = 'attendance_records'
-        unique_together = ('student', 'date', 'session', 'batch')
-        ordering = ['-date', 'session']
+        unique_together = ('student', 'date', 'batch')
+        ordering = ['-date']
         indexes = [
             models.Index(fields=['date', 'branch']),
             models.Index(fields=['student', 'date']),
@@ -127,7 +120,7 @@ class AttendanceRecord(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.student} | {self.date} | {self.session} → {self.status}"
+        return f"{self.student} | {self.date} → {self.status}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

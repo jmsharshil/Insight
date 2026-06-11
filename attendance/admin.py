@@ -3,8 +3,8 @@ from attendance.models import *
 
 @admin.register(AttendanceRecord)
 class AttendanceRecordAdmin(admin.ModelAdmin):
-    list_display = ('id', 'student', 'batch', 'branch', 'date', 'session', 'status', 'checked_in_at', 'checked_out_at', 'marked_by',)
-    list_filter = ('marked_at', 'is_corrected', 'session', 'status', 'branch', 'checked_out_at', 'checked_in_at', 'marked_by',)
+    list_display = ('id', 'student', 'batch', 'branch', 'date', 'status', 'checked_in_at', 'checked_out_at', 'marked_by',)
+    list_filter = ('marked_at', 'is_corrected', 'status', 'branch', 'checked_out_at', 'checked_in_at', 'marked_by',)
 
 @admin.register(QRScanLog)
 class QRScanLogAdmin(admin.ModelAdmin):
