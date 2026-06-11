@@ -119,16 +119,36 @@ class AttendanceListCreateView(APIView):
         if not branch_id:
             return Response({'success': False, 'message': 'Branch ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        print("Branch id : ", branch_id)
+        from branch.models import Branch
+        if not Branch.objects.filter(id=branch_id).exists():
+            return Response({'success': False, 'message': 'Invalid Branch ID.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from batches.models import Batch
+        if not Batch.objects.filter(id=batch_id).exists():
+            return Response({'success': False, 'message': 'Invalid Batch ID.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date, session=session).exists():
             return Response({'success': False, 'message': 'Already marked. Use PATCH to correct.'}, status=status.HTTP_409_CONFLICT)
 
         created, errors = [], []
+        from students.models import Student
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
         for entry in records:
             try:
+                sid = entry['student_id']
+                # Check if it's a valid Student ID
+                if not Student.objects.filter(id=sid).exists():
+                    # Fallback: check if the frontend accidentally sent a User ID instead
+                    student_profile = Student.objects.filter(user_id=sid).first()
+                    if student_profile:
+                        sid = student_profile.id
+                    else:
+                        raise Exception("Student ID does not exist in the database.")
+
                 r = AttendanceRecord.objects.create(
-                    student_id=entry['student_id'], batch_id=batch_id, branch_id=branch_id,
+                    student_id=sid, batch_id=batch_id, branch_id=branch_id,
                     date=att_date, session=session, status=entry['status'], marked_by=user,
                 )
                 created.append(str(r.id))
