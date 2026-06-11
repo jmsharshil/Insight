@@ -13,14 +13,51 @@ from .models import AttendanceRecord, ViolationRecord, QRScanLog
 from .serializers import ViolationRecordSerializer, ViolationCreateSerializer, ViolationResolveSerializer
 from .utils import get_batch_attendance_sheet, get_active_violations_count, should_block_qr
 
+from django.core.exceptions import ValidationError
+
 logger = logging.getLogger(__name__)
+
+
+class SafeAPIView(APIView):
+    def handle_exception(self, exc):
+        response = None
+        if isinstance(exc, ValidationError):
+            msg = exc.message_dict if hasattr(exc, 'message_dict') else (exc.messages if hasattr(exc, 'messages') else str(exc))
+            if isinstance(msg, list) and len(msg) == 1:
+                msg = msg[0]
+            response = Response({
+                'success': False,
+                'message': 'Validation error.',
+                'errors': msg
+            }, status=status.HTTP_400_BAD_REQUEST)
+        elif isinstance(exc, ValueError):
+            response = Response({
+                'success': False,
+                'message': 'Invalid parameter value.',
+                'errors': str(exc)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            response = super().handle_exception(exc)
+
+        # Explicitly negotiate and assign renderer to prevent AssertionError
+        if response and isinstance(response, Response):
+            if not getattr(response, 'accepted_renderer', None):
+                try:
+                    renderers = self.get_renderers()
+                    response.accepted_renderer = renderers[0]
+                    response.accepted_media_type = renderers[0].media_type
+                    response.renderer_context = self.get_renderer_context()
+                except Exception:
+                    pass
+
+        return response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GET /api/attendance/dashboard/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class DashboardSummaryAPIView(APIView):
+class DashboardSummaryAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -153,7 +190,7 @@ class DashboardSummaryAPIView(APIView):
 # 2. GET /api/attendance/students/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class StudentAttendanceListAPIView(APIView):
+class StudentAttendanceListAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -303,7 +340,7 @@ class StudentAttendanceListAPIView(APIView):
 # 3. GET /api/attendance/students/{student_id}/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class StudentAttendanceDetailAPIView(APIView):
+class StudentAttendanceDetailAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, student_id):
@@ -395,34 +432,69 @@ class StudentAttendanceDetailAPIView(APIView):
                 'percentage': m_pct
             })
 
-        # Subject-wise attendance
+        # Subject-wise & Session-wise attendance
         subject_stats = {}
+        session_stats = {}
+        
         if s.batch:
-            slots = TimetableSlot.objects.filter(batch=s.batch).select_related('subject')
-            single_map = {}
-            recurring_map = {}
-            for slot in slots:
-                if slot.subject:
-                    if slot.is_recurring:
-                        recurring_map[(slot.day_of_week, slot.session)] = slot.subject
-                    else:
-                        single_map[(slot.session_date, slot.session)] = slot.subject
-
+            slots = list(TimetableSlot.objects.filter(batch=s.batch).select_related('subject'))
+            
             for r in records.exclude(status='on_leave'):
-                subj = single_map.get((r.date, r.session)) or recurring_map.get((r.date.weekday(), r.session))
-                subj_name = subj.name if subj else "General / Other"
-                subj_id = str(subj.id) if subj else "general"
-
-                if subj_id not in subject_stats:
-                    subject_stats[subj_id] = {
-                        'subject_id': subj_id,
-                        'subject_name': subj_name,
-                        'total': 0,
-                        'present': 0
-                    }
-                subject_stats[subj_id]['total'] += 1
-                if r.status in ['present', 'late', 'half_day']:
-                    subject_stats[subj_id]['present'] += 1
+                day_slots = []
+                for slot in slots:
+                    if slot.is_recurring:
+                        if slot.day_of_week == r.date.weekday():
+                            if (not slot.effective_from or slot.effective_from <= r.date) and \
+                               (not slot.effective_to or slot.effective_to >= r.date):
+                                day_slots.append(slot)
+                    else:
+                        if slot.session_date == r.date:
+                            day_slots.append(slot)
+                            
+                is_present = r.status in ['present', 'late', 'half_day']
+                
+                # If no scheduled slots are found for that day, we still want to count the day's record
+                if not day_slots:
+                    subj_id = "general"
+                    subj_name = "General / Other"
+                    if subj_id not in subject_stats:
+                        subject_stats[subj_id] = {'subject_id': subj_id, 'subject_name': subj_name, 'total': 0, 'present': 0}
+                    subject_stats[subj_id]['total'] += 1
+                    if is_present:
+                        subject_stats[subj_id]['present'] += 1
+                        
+                    sess = "General"
+                    if sess not in session_stats:
+                        session_stats[sess] = {'total': 0, 'present': 0}
+                    session_stats[sess]['total'] += 1
+                    if is_present:
+                        session_stats[sess]['present'] += 1
+                else:
+                    for slot in day_slots:
+                        subj = slot.subject
+                        subj_id = str(subj.id) if subj else "general"
+                        subj_name = subj.name if subj else "General / Other"
+                        
+                        if subj_id not in subject_stats:
+                            subject_stats[subj_id] = {
+                                'subject_id': subj_id,
+                                'subject_name': subj_name,
+                                'total': 0,
+                                'present': 0
+                            }
+                        subject_stats[subj_id]['total'] += 1
+                        if is_present:
+                            subject_stats[subj_id]['present'] += 1
+                            
+                        sess = slot.slot_code or "General"
+                        if sess not in session_stats:
+                            session_stats[sess] = {
+                                'total': 0,
+                                'present': 0
+                            }
+                        session_stats[sess]['total'] += 1
+                        if is_present:
+                            session_stats[sess]['present'] += 1
 
         subject_wise = []
         for sid, stats in subject_stats.items():
@@ -431,16 +503,6 @@ class StudentAttendanceDetailAPIView(APIView):
                 'subject_name': stats['subject_name'],
                 'percentage': round((stats['present'] / stats['total']) * 100, 2) if stats['total'] > 0 else 0.0
             })
-
-        # Session-wise attendance
-        session_stats = {}
-        for r in records.exclude(status='on_leave'):
-            sess = r.session
-            if sess not in session_stats:
-                session_stats[sess] = {'total': 0, 'present': 0}
-            session_stats[sess]['total'] += 1
-            if r.status in ['present', 'late', 'half_day']:
-                session_stats[sess]['present'] += 1
 
         session_wise = []
         for sess, stats in session_stats.items():
@@ -480,7 +542,7 @@ class StudentAttendanceDetailAPIView(APIView):
 # 4. GET /api/attendance/history/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AttendanceHistoryAPIView(APIView):
+class AttendanceHistoryAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -516,7 +578,7 @@ class AttendanceHistoryAPIView(APIView):
         date_from = request.GET.get('date_from')
         date_to = request.GET.get('date_to')
         status_filter = request.GET.get('attendance_status')
-        session = request.GET.get('session')
+        session_filter = request.GET.get('session')
         subject_filter = request.GET.get('subject')
 
         if student_id and role not in ['student', 'parents']:
@@ -535,35 +597,56 @@ class AttendanceHistoryAPIView(APIView):
             qs = qs.filter(date__lte=date_to)
         if status_filter:
             qs = qs.filter(status=status_filter)
-        if session:
-            qs = qs.filter(session=session)
 
         # Order by date
-        qs = qs.order_by('-date', 'session')
+        qs = qs.order_by('-date')
 
         # Map to response list
         history_list = []
         for r in qs:
-            slots = TimetableSlot.objects.filter(batch=r.batch).select_related('subject')
-            subj_name = "General / Other"
-            for slot in slots:
-                if slot.session == r.session:
-                    if slot.is_recurring and slot.day_of_week == r.date.weekday():
-                        subj_name = slot.subject.name if slot.subject else subj_name
-                        break
-                    elif not slot.is_recurring and slot.session_date == r.date:
-                        subj_name = slot.subject.name if slot.subject else subj_name
-                        break
-
-            if subject_filter and subject_filter.lower() not in subj_name.lower():
-                continue
-
             scan_log = QRScanLog.objects.filter(
                 student=r.student,
                 scan_type='check_in',
                 scanned_at__date=r.date
-            ).first()
-            device = scan_log.device_id if scan_log else "N/A"
+            ).select_related('timetable_slot', 'timetable_slot__subject').first()
+
+            subj_name = None
+            sess_name = None
+            device = "N/A"
+
+            if scan_log:
+                device = scan_log.device_id or "N/A"
+                if scan_log.timetable_slot:
+                    sess_name = scan_log.timetable_slot.slot_code
+                    if scan_log.timetable_slot.subject:
+                        subj_name = scan_log.timetable_slot.subject.name
+
+            if not subj_name or not sess_name:
+                day_slots = []
+                if r.batch:
+                    slots = TimetableSlot.objects.filter(batch=r.batch).select_related('subject')
+                    for slot in slots:
+                        if slot.is_recurring:
+                            if slot.day_of_week == r.date.weekday():
+                                if (not slot.effective_from or slot.effective_from <= r.date) and \
+                                   (not slot.effective_to or slot.effective_to >= r.date):
+                                    day_slots.append(slot)
+                        else:
+                            if slot.session_date == r.date:
+                                day_slots.append(slot)
+
+                if day_slots:
+                    first_slot = day_slots[0]
+                    subj_name = first_slot.subject.name if first_slot.subject else "General / Other"
+                    sess_name = first_slot.slot_code or "General"
+                else:
+                    subj_name = "General / Other"
+                    sess_name = "General"
+
+            if session_filter and session_filter.lower() not in sess_name.lower():
+                continue
+            if subject_filter and subject_filter.lower() not in subj_name.lower():
+                continue
 
             history_list.append({
                 'date': r.date,
@@ -571,7 +654,7 @@ class AttendanceHistoryAPIView(APIView):
                 'check_out_time': r.checked_out_at,
                 'status': r.status,
                 'late_status': 'late' if r.status == 'late' else 'normal',
-                'session': r.session,
+                'session': sess_name,
                 'subject': subj_name,
                 'scanner_device': device
             })
@@ -603,7 +686,7 @@ class AttendanceHistoryAPIView(APIView):
 # 5. GET /api/attendance/batches/{batch_id}/register/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class BatchAttendanceRegisterAPIView(APIView):
+class BatchAttendanceRegisterAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, batch_id):
@@ -644,7 +727,7 @@ class BatchAttendanceRegisterAPIView(APIView):
 # 6. GET /api/attendance/faculty/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class FacultyAttendanceAPIView(APIView):
+class FacultyAttendanceAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -781,7 +864,7 @@ class FacultyAttendanceAPIView(APIView):
 # 7. GET /api/attendance/faculty/{faculty_id}/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class FacultyAttendanceDetailAPIView(APIView):
+class FacultyAttendanceDetailAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, faculty_id):
@@ -934,7 +1017,7 @@ class FacultyAttendanceDetailAPIView(APIView):
 # 8. GET /api/attendance/analytics/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AttendanceAnalyticsAPIView(APIView):
+class AttendanceAnalyticsAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1085,7 +1168,7 @@ class AttendanceAnalyticsAPIView(APIView):
 # 9. GET /api/attendance/defaulters/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class DefaulterStudentsAPIView(APIView):
+class DefaulterStudentsAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1156,7 +1239,7 @@ class DefaulterStudentsAPIView(APIView):
 # 10. GET & POST /api/attendance/violations/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ViolationsAPIView(APIView):
+class ViolationsAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1253,7 +1336,7 @@ class ViolationsAPIView(APIView):
 # 11. PATCH & DELETE /api/attendance/violations/{violation_id}/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ViolationDetailAPIView(APIView):
+class ViolationDetailAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def _get_violation(self, request, violation_id):
@@ -1315,7 +1398,7 @@ class ViolationDetailAPIView(APIView):
 # 12. GET /api/attendance/export/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AttendanceExportAPIView(APIView):
+class AttendanceExportAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1356,6 +1439,39 @@ class AttendanceExportAPIView(APIView):
         if date_to:
             records = records.filter(date__lte=date_to)
 
+        # Optimize queries using pre-fetched maps
+        student_ids = list(records.values_list('student_id', flat=True).distinct())
+        scan_logs = QRScanLog.objects.filter(
+            student_id__in=student_ids,
+            scan_type='check_in'
+        ).select_related('timetable_slot')
+        
+        scan_map = {}
+        for s_log in scan_logs:
+            scan_map[(s_log.student_id, s_log.scanned_at.date())] = s_log.timetable_slot.slot_code if s_log.timetable_slot else None
+
+        batch_ids = list(records.values_list('batch_id', flat=True).distinct())
+        slots = TimetableSlot.objects.filter(batch_id__in=batch_ids)
+        batch_slots = {}
+        for slot in slots:
+            batch_slots.setdefault(slot.batch_id, []).append(slot)
+
+        def get_record_session(r):
+            sess_code = scan_map.get((r.student_id, r.date))
+            if sess_code:
+                return sess_code
+            if r.batch_id and r.batch_id in batch_slots:
+                for slot in batch_slots[r.batch_id]:
+                    if slot.is_recurring:
+                        if slot.day_of_week == r.date.weekday():
+                            if (not slot.effective_from or slot.effective_from <= r.date) and \
+                               (not slot.effective_to or slot.effective_to >= r.date):
+                                return slot.slot_code or "General"
+                    else:
+                        if slot.session_date == r.date:
+                            return slot.slot_code or "General"
+            return "General"
+
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="attendance_report.csv"'
 
@@ -1369,7 +1485,7 @@ class AttendanceExportAPIView(APIView):
                 r.branch.name if r.branch else 'N/A',
                 r.batch.name if r.batch else 'N/A',
                 r.date.strftime('%Y-%m-%d'),
-                r.session,
+                get_record_session(r),
                 r.status,
                 r.checked_in_at.strftime('%Y-%m-%d %H:%M') if r.checked_in_at else '',
                 r.checked_out_at.strftime('%Y-%m-%d %H:%M') if r.checked_out_at else ''
@@ -1382,7 +1498,7 @@ class AttendanceExportAPIView(APIView):
 # 13. GET /api/attendance/audit-logs/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AttendanceAuditAPIView(APIView):
+class AttendanceAuditAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1401,6 +1517,39 @@ class AttendanceAuditAPIView(APIView):
             batch_ids = list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)) if hasattr(user, 'faculty_profile') else []
             records = records.filter(batch_id__in=batch_ids)
 
+        # Optimize queries using pre-fetched maps
+        student_ids = list(records.values_list('student_id', flat=True).distinct())
+        scan_logs = QRScanLog.objects.filter(
+            student_id__in=student_ids,
+            scan_type='check_in'
+        ).select_related('timetable_slot')
+        
+        scan_map = {}
+        for s_log in scan_logs:
+            scan_map[(s_log.student_id, s_log.scanned_at.date())] = s_log.timetable_slot.slot_code if s_log.timetable_slot else None
+
+        batch_ids = list(records.values_list('batch_id', flat=True).distinct())
+        slots = TimetableSlot.objects.filter(batch_id__in=batch_ids)
+        batch_slots = {}
+        for slot in slots:
+            batch_slots.setdefault(slot.batch_id, []).append(slot)
+
+        def get_record_session(r):
+            sess_code = scan_map.get((r.student_id, r.date))
+            if sess_code:
+                return sess_code
+            if r.batch_id and r.batch_id in batch_slots:
+                for slot in batch_slots[r.batch_id]:
+                    if slot.is_recurring:
+                        if slot.day_of_week == r.date.weekday():
+                            if (not slot.effective_from or slot.effective_from <= r.date) and \
+                               (not slot.effective_to or slot.effective_to >= r.date):
+                                return slot.slot_code or "General"
+                    else:
+                        if slot.session_date == r.date:
+                            return slot.slot_code or "General"
+            return "General"
+
         audit_logs = []
         for r in records.order_by('-marked_at'):
             audit_logs.append({
@@ -1409,7 +1558,7 @@ class AttendanceAuditAPIView(APIView):
                     'date': r.date,
                     'student_name': f"{r.student.first_name} {r.student.surname}",
                     'roll_number': r.student.roll_number,
-                    'session': r.session
+                    'session': get_record_session(r)
                 },
                 'old_value': 'absent', 
                 'new_value': r.status,
