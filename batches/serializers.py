@@ -368,8 +368,8 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
     course = serializers.UUIDField(source='batch.course.id', read_only=True, default=None)
     course_name = serializers.CharField(source='batch.course.name', read_only=True, default=None)
     course_code = serializers.CharField(source='batch.course.code', read_only=True, default=None)
-    examiner_name = serializers.CharField(source='examiner.user.name', read_only=True, default=None)
-    paper_checker_name = serializers.CharField(source='paper_checker.user.name', read_only=True, default=None)
+    examiner_name = serializers.CharField(source='examiner.name', read_only=True, default=None)
+    paper_checker_name = serializers.CharField(source='paper_checker.name', read_only=True, default=None)
     chapter_name = serializers.CharField(source='chapter.name', read_only=True, default=None)
     exam_type_name = serializers.CharField(source='timetable_exam_type.name', read_only=True, default=None)
 

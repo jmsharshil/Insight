@@ -330,8 +330,8 @@ class TimetableSlot(models.Model):
     slot_code           = models.CharField(max_length=2, choices=SLOT_CODE_CHOICES, null=True, blank=True)
     session_date        = models.DateField(null=True, blank=True)
     chapter             = models.ForeignKey('batches.Chapter', on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
-    examiner            = models.ForeignKey(FacultyProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='examiner_slots')
-    paper_checker       = models.ForeignKey(FacultyProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name='checker_slots')
+    examiner            = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='examiner_slots')
+    paper_checker       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='checker_slots')
     timetable_exam_type = models.ForeignKey(TimetableExamType, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     created_by    = models.ForeignKey(
         settings.AUTH_USER_MODEL,

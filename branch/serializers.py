@@ -21,7 +21,10 @@ class BranchCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
         fields = ["name","address","city","state","pincode","phone","email","principal_name","logo","is_active",]
-        
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['name'].required = False
 
 
 class BranchSummarySerializer(serializers.Serializer):

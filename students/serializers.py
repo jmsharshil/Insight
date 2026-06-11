@@ -128,6 +128,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     status_history = StudentStatusHistorySerializer(many=True, read_only=True)
     photo_url = serializers.SerializerMethodField()
     id_card_ready = serializers.BooleanField(read_only=True)
+    branch_name = serializers.CharField(source='branch.name', default=None)
 
 
     gender_display = serializers.CharField(source="get_gender_display", read_only=True)
