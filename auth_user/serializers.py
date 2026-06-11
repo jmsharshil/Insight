@@ -248,3 +248,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
         if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
             raise serializers.ValidationError("This email is already in use.")
         return value
+
+from .models import NotificationHistory
+
+class NotificationHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationHistory
+        fields = ['id', 'title', 'body', 'data', 'is_read', 'created_at']

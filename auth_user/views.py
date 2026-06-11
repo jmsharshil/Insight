@@ -551,6 +551,20 @@ class RegisterFCMTokenView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        """
+        GET /api/auth/fcm-token/
+        Return the currently registered FCM token for the user.
+        """
+        fcm_token = getattr(request.user, 'fcm_token', '')
+        return Response({
+            "success": True,
+            "data": {
+                "fcm_token": fcm_token,
+                "is_registered": bool(fcm_token)
+            }
+        }, status=status.HTTP_200_OK)
+
     def post(self, request):
         fcm_token = request.data.get("fcm_token", "").strip()
         if not fcm_token:
@@ -603,4 +617,96 @@ class ToggleUserStatusAPIView(APIView):
                 "user_id": str(user.id),
                 "is_active": user.is_active
             }
+        }, status=status.HTTP_200_OK)
+
+
+class TestNotificationAPIView(APIView):
+    """
+    POST /api/auth/test-notification/
+    
+    Trigger a manual push notification for testing.
+    Payload:
+    {
+      "title": "Test Title",
+      "body": "Test Message",
+      "user_id": "optional-uuid" // defaults to self
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        title = request.data.get("title", "Test Notification")
+        body = request.data.get("body", "This is a test message from the API!")
+        user_id = request.data.get("user_id")
+
+        if user_id:
+            target_user = get_object_or_404(User, id=user_id)
+        else:
+            target_user = request.user
+
+        # Ensure we have the absolute latest data from DB
+        target_user.refresh_from_db()
+
+        actual_token = getattr(target_user, 'fcm_token', '')
+        if not actual_token or not actual_token.strip():
+            return Response(
+                {"success": False, "message": f"User {target_user.email} does not have an FCM token registered."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Import the helper we already have
+        from chat.notifications import send_fcm_notification
+        import threading
+        
+        def _send():
+            send_fcm_notification(
+                token=actual_token,
+                title=title,
+                body=body,
+                data={"type": "test_notification"},
+                user_id=target_user.id
+            )
+            
+        # Send asynchronously so the API responds instantly
+        threading.Thread(target=_send, daemon=True).start()
+
+        return Response({
+            "success": True, 
+            "message": f"Push notification triggered for {target_user.email}."
+        }, status=status.HTTP_200_OK)
+
+
+from .serializers import NotificationHistorySerializer
+from .models import NotificationHistory
+from core.pagination import paginate_queryset
+
+from django.utils import timezone
+from datetime import timedelta
+
+class NotificationHistoryAPIView(APIView):
+    """
+    GET /api/auth/notifications/
+    Fetch notification history for the authenticated user.
+    Automatically deletes history older than 60 days.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # ── 60-Day Retention Policy: Delete older records first ──
+        cutoff_date = timezone.now() - timedelta(days=60)
+        NotificationHistory.objects.filter(user=request.user, created_at__lt=cutoff_date).delete()
+
+        # ── Fetch the remaining valid history ──
+        qs = NotificationHistory.objects.filter(user=request.user)
+        return paginate_queryset(qs, request, NotificationHistorySerializer)
+
+    def patch(self, request):
+        """
+        PATCH /api/auth/notifications/
+        Mark all unread notifications as read.
+        """
+        updated = NotificationHistory.objects.filter(user=request.user, is_read=False).update(is_read=True)
+        return Response({
+            "success": True,
+            "message": f"Marked {updated} notifications as read."
         }, status=status.HTTP_200_OK)

@@ -43,7 +43,7 @@ def _get_access_token() -> str | None:
         if not sa_path:
             base_dir = getattr(settings, 'BASE_DIR', None)
             if base_dir:
-                auto_path = os.path.join(str(base_dir), 'insights-1f7f5-firebase-adminsdk-fbsvc-ffc580c7b5.json')
+                auto_path = os.path.join(str(base_dir), 'insightServicesSdk.json')
                 if os.path.exists(auto_path):
                     sa_path = auto_path
 
@@ -74,7 +74,7 @@ def _get_project_id() -> str | None:
     if not sa_path:
         base_dir = getattr(settings, 'BASE_DIR', None)
         if base_dir:
-            auto_path = os.path.join(str(base_dir), 'insights-1f7f5-firebase-adminsdk-fbsvc-ffc580c7b5.json')
+            auto_path = os.path.join(str(base_dir), 'insightServicesSdk.json')
             if os.path.exists(auto_path):
                 sa_path = auto_path
 
@@ -88,10 +88,23 @@ def _get_project_id() -> str | None:
     return None
 
 
-def send_fcm_notification(*, token: str, title: str, body: str, data: dict = None):
+def send_fcm_notification(*, token: str, title: str, body: str, data: dict = None, user_id=None):
     """
     Send a push notification to a single FCM device token using the HTTP v1 API.
+    Also saves a record in NotificationHistory.
     """
+    if user_id:
+        try:
+            from auth_user.models import NotificationHistory
+            NotificationHistory.objects.create(
+                user_id=user_id,
+                title=title,
+                body=body,
+                data=data or {}
+            )
+        except Exception as e:
+            logger.error("FCM: Failed to save notification history: %s", e)
+
     if not token:
         return
 
@@ -171,6 +184,7 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
                     "room_id": str(room_id),
                     "message_id": str(message_id),
                 },
+                user_id=user['id']
             )
 
     thread = threading.Thread(target=_send, daemon=True)
