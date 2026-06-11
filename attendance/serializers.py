@@ -17,6 +17,7 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
+    branch_name = serializers.SerializerMethodField()
     marked_by_name = serializers.SerializerMethodField()
     corrected_by_name = serializers.SerializerMethodField()
     session_display = serializers.CharField(source="get_session_display", read_only=True)
@@ -26,7 +27,7 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
         model = AttendanceRecord
         fields = [
             'id', 'student', 'student_name', 'roll_number',
-            'batch', 'batch_name', 'branch', 'date', 'session',
+            'batch', 'batch_name', 'branch', 'branch_name', 'date', 'session',
             'status', 'status_display', 'checked_in_at', 'checked_out_at',
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'corrected_by_name',
@@ -50,6 +51,12 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
             return obj.batch.name if obj.batch else None
         except Exception:
             return str(obj.batch_id)
+
+    def get_branch_name(self,obj):
+        try:
+            return obj.branch.name if obj.branch else None
+        except Exception:
+            return str(obj.branch_id)
 
     def get_marked_by_name(self, obj):
         return obj.marked_by.name if obj.marked_by else None
