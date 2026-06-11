@@ -276,3 +276,129 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.asin(math.sqrt(a)) 
     r = 6371 # Radius of earth in kilometers
     return c * r * 1000 # Convert to meters
+
+
+# E3 ── Location & timing validation ────────────────────────────────────────────
+
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Pure-Python haversine formula. Returns distance in metres.
+    Uses R = 6,371,000 m (mean Earth radius).
+    """
+    R = 6_371_000  # metres
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = (math.sin(dphi / 2) ** 2
+         + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2)
+    c = 2 * math.asin(math.sqrt(a))
+    return R * c
+
+
+def validate_qr_scan(scan_lat, scan_lng, branch, timetable_slot, scan_time) -> dict:
+    """
+    Validate a QR scan against branch location and timetable slot window.
+
+    Args:
+        scan_lat:      float | None  — student device latitude
+        scan_lng:      float | None  — student device longitude
+        branch:        branch.Branch instance (must have latitude/longitude/allowed_radius_meters)
+        timetable_slot: batches.TimetableSlot | None
+        scan_time:     datetime (timezone-aware recommended)
+
+    Returns:
+        dict with keys:
+            'location_verified': bool | None  (None if coordinates missing)
+            'time_verified':     bool | None  (None if slot missing)
+            'reason':            str
+
+    Never raises — always returns a dict.
+    """
+    from datetime import datetime, timedelta
+    import pytz
+
+    reasons = []
+    location_verified = None
+    time_verified = None
+
+    # ─ Location check ─────────────────────────────────────────────────
+    if scan_lat is not None and scan_lng is not None:
+        branch_lat = branch.latitude
+        branch_lng = branch.longitude
+        if branch_lat is not None and branch_lng is not None:
+            try:
+                distance = haversine_distance_meters(
+                    float(scan_lat), float(scan_lng),
+                    float(branch_lat), float(branch_lng),
+                )
+                radius = branch.allowed_radius_meters or 100
+                if distance <= radius:
+                    location_verified = True
+                    reasons.append(f"Within {int(distance)}m of branch (radius={radius}m).")
+                else:
+                    location_verified = False
+                    reasons.append(
+                        f"Outside radius: {int(distance)}m away (allowed={radius}m)."
+                    )
+            except Exception as exc:
+                reasons.append(f"Location check error: {exc}")
+        else:
+            reasons.append("Branch has no coordinates configured.")
+    else:
+        reasons.append("No GPS coordinates provided.")
+
+    # ─ Time check ───────────────────────────────────────────────────
+    if timetable_slot is not None:
+        try:
+            slot_start = timetable_slot.start_time
+            slot_end   = timetable_slot.end_time
+            if slot_start is not None and slot_end is not None:
+                BUFFER = timedelta(minutes=10)
+
+                # Combine scan_time date with slot times
+                scan_date = scan_time.date()
+                tz = getattr(scan_time, 'tzinfo', None)
+
+                def _combine(t):
+                    """Combine date + time(naive), then apply tz if needed."""
+                    dt = datetime.combine(scan_date, t)
+                    if tz is not None:
+                        try:
+                            dt = dt.replace(tzinfo=tz)
+                        except Exception:
+                            pass
+                    return dt
+
+                window_start = _combine(slot_start) - BUFFER
+                window_end   = _combine(slot_end) + BUFFER
+
+                # Make scan_time offset-naive for comparison if needed
+                cmp_scan = scan_time
+                if tz is None and hasattr(cmp_scan, 'replace'):
+                    cmp_scan = cmp_scan.replace(tzinfo=None)
+
+                if window_start <= cmp_scan <= window_end:
+                    time_verified = True
+                    reasons.append(
+                        f"Scan within window ({slot_start}⊢10min – {slot_end}+10min)."
+                    )
+                else:
+                    time_verified = False
+                    reasons.append(
+                        f"Outside slot window: scan={scan_time}, "
+                        f"window=[{window_start}, {window_end}]."
+                    )
+            else:
+                reasons.append("Slot has no start/end time.")
+        except Exception as exc:
+            reasons.append(f"Time check error: {exc}")
+    else:
+        reasons.append("No timetable slot provided.")
+
+    return {
+        'location_verified': location_verified,
+        'time_verified':     time_verified,
+        'reason':            ' | '.join(reasons),
+    }

@@ -39,7 +39,7 @@ def _not_found():
 # ── GET  /api/admissions/   — list all admissions (with optional filters)
 class AdmissionListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'course']
+    filterset_fields = ['status', 'course', 'attempt_year']
     search_fields = ['first_name', 'surname', 'email', 'phone_student']
     ordering_fields = '__all__'
 

@@ -1,28 +1,22 @@
 from django.contrib import admin
-from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHourlyRate
-
+from faculty.models import *
 
 @admin.register(FacultyProfile)
 class FacultyProfileAdmin(admin.ModelAdmin):
-    list_display = ['employee_id', 'user', 'branch', 'level', 'employment_type', 'is_active']
-    list_filter = ['level', 'employment_type', 'is_active']
-    search_fields = ['employee_id', 'user__name', 'specialization']
-
+    list_display = ('id', 'user', 'branch', 'employee_id', 'photo', 'qualification', 'specialization', 'subject_expertise', 'level', 'employment_type',)
+    list_filter = ('is_active', 'employment_type', 'branch', 'created_at', 'level', 'user', 'joining_date',)
 
 @admin.register(SubjectHourlyRate)
 class SubjectHourlyRateAdmin(admin.ModelAdmin):
-    list_display = ['faculty', 'subject', 'hourly_rate', 'effective_from']
-    list_filter = ['effective_from']
-
+    list_display = ('id', 'faculty', 'subject', 'hourly_rate', 'effective_from', 'created_by', 'created_at',)
+    list_filter = ('effective_from', 'subject', 'created_by', 'created_at', 'faculty',)
 
 @admin.register(FacultyQRScanLog)
 class FacultyQRScanLogAdmin(admin.ModelAdmin):
-    list_display = ['faculty', 'scan_type', 'scanned_at', 'is_late', 'late_minutes']
-    list_filter = ['scan_type', 'is_late']
-
+    list_display = ('id', 'faculty', 'branch', 'scanned_at', 'latitude', 'longitude', 'scan_type', 'is_late', 'late_minutes',)
+    list_filter = ('scan_type', 'scanned_at', 'branch', 'is_late', 'faculty',)
 
 @admin.register(SessionReport)
 class SessionReportAdmin(admin.ModelAdmin):
-    list_display = ['faculty', 'batch', 'subject', 'session_date', 'status', 'completion_percentage', 'duration_minutes']
-    list_filter = ['status', 'session_date']
-    search_fields = ['chapter_covered']
+    list_display = ('id', 'faculty', 'branch', 'batch', 'subject', 'timetable_slot', 'session_date', 'chapter_covered', 'topics_covered', 'completion_percentage',)
+    list_filter = ('session_date', 'status', 'branch', 'subject', 'updated_at', 'timetable_slot', 'batch', 'created_at',)

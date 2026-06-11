@@ -8,16 +8,23 @@ from .views import (
     ClassroomListView, ClassroomDetailView,
     TimetableListView, TimetableDetailView,
     FacultyTimetableView, StudentTimetableView,
+    CourseLevelListView, CourseLevelDetailView,
+    ChapterListView, ChapterDetailView,
+    TimetableExamTypeListView, TimetableExamTypeDetailView,
 )
 
 urlpatterns = [
     # ── Courses ─────────────────────────────────────────────────────────────
     path('courses/', CourseListView.as_view(), name='course-list'),
     path('courses/<uuid:pk>/', CourseDetailView.as_view(), name='course-detail'),
+    path('courses/<uuid:course_id>/levels/', CourseLevelListView.as_view(), name='course-level-list'),
+    path('courses/<uuid:course_id>/levels/<uuid:level_id>/', CourseLevelDetailView.as_view(), name='course-level-detail'),
 
     # ── Subjects ────────────────────────────────────────────────────────────
     path('subjects/', SubjectListView.as_view(), name='subject-list'),
     path('subjects/<uuid:pk>/', SubjectDetailView.as_view(), name='subject-detail'),
+    path('subjects/<uuid:subject_id>/chapters/', ChapterListView.as_view(), name='chapter-list'),
+    path('subjects/<uuid:subject_id>/chapters/<uuid:chapter_id>/', ChapterDetailView.as_view(), name='chapter-detail'),
 
     # ── Batches ─────────────────────────────────────────────────────────────
     path('batches/', BatchListView.as_view(), name='batch-list'),
@@ -36,4 +43,6 @@ urlpatterns = [
     path('timetable/<uuid:pk>/', TimetableDetailView.as_view(), name='timetable-detail'),
     path('timetable/faculty/<uuid:faculty_id>/', FacultyTimetableView.as_view(), name='faculty-timetable'),
     path('timetable/student/<uuid:student_id>/', StudentTimetableView.as_view(), name='student-timetable'),
+    path('timetable/exam-types/', TimetableExamTypeListView.as_view(), name='timetable-exam-type-list'),
+    path('timetable/exam-types/<uuid:pk>/', TimetableExamTypeDetailView.as_view(), name='timetable-exam-type-detail'),
 ]

@@ -164,6 +164,15 @@ class Admission(models.Model):
     # ── Counsellor Assignment ─────────────────────────────────────────────────
     assigned_counsellor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL,related_name='assigned_admissions',limit_choices_to={'role': 'counsellor'},help_text="Counsellor assigned to review this admission.",)
 
+    # ── Batch Attempt Year (for auto batch assignment) ───────────────────────
+    attempt_year  = models.PositiveSmallIntegerField(null=True, blank=True)
+    fee_structure = models.ForeignKey(
+        'fees.FeeStructure',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='admissions',
+    )
+
     # ── Status & Timestamps ───────────────────────────────────────────────────
     status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='approval_pending')
     note         = models.TextField(blank=True, help_text="Latest note added during status update.")
