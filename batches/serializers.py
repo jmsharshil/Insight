@@ -388,7 +388,10 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
                   'examiners', 'examiners_names',
                   'paper_checkers', 'paper_checkers_names',
                   'timetable_exam_type', 'exam_type_name',
+                  'exam',
                   ]
+
+    exam = serializers.UUIDField(source='exam.id', read_only=True, default=None)
 
     def get_chapters_names(self, obj):
         return [c.name for c in obj.chapters.all()]
@@ -410,6 +413,16 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
 
 
+class ExamDataSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=200, required=False)
+    exam_type = serializers.CharField(max_length=20, default='offline')
+    total_marks = serializers.IntegerField(required=True)
+    pass_marks = serializers.IntegerField(required=True)
+    duration_minutes = serializers.IntegerField(required=False)
+    instructions = serializers.CharField(required=False, allow_blank=True)
+    result_release_mode = serializers.CharField(max_length=20, default='instant')
+
+
 class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TimetableSlot
@@ -420,13 +433,24 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             # E4 new fields
             'session_type', 'slot_code', 'session_date',
             'chapters', 'examiners', 'paper_checkers', 'timetable_exam_type',
+            'chapters', 'examiners', 'paper_checkers', 'timetable_exam_type',
+            'exam_data',
         ]
+
+    exam_data = ExamDataSerializer(write_only=True, required=False, allow_null=True)
 
     def validate(self, data):  # noqa: C901  (long but intentionally complete)
         from batches.constants import FIXED_SLOTS, SESSION_DURATIONS
         from datetime import datetime, time as dt_time
 
         session_type = data.get('session_type', 'regular')
+
+        if session_type in ['class_test', 'prelim']:
+            if not data.get('exam_data'):
+                raise serializers.ValidationError({'exam_data': f'exam_data is required for {session_type} session.'})
+        elif session_type in ['regular', 'practice']:
+            if data.get('exam_data'):
+                raise serializers.ValidationError({'exam_data': f'exam_data must be blank for {session_type} session.'})
 
         def _require(field, label=None):
             label = label or field
@@ -522,15 +546,75 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
 
         return data
 
+    def _handle_exam(self, slot, exam_data):
+        if not exam_data:
+            return
+            
+        from datetime import datetime, date, timedelta
+        start = slot.start_time
+        end = slot.end_time
+        duration = exam_data.get('duration_minutes')
+        if not duration and start and end:
+            s = datetime.combine(date.today(), start)
+            e = datetime.combine(date.today(), end)
+            if e < s:
+                e += timedelta(days=1)
+            duration = int((e - s).total_seconds() / 60)
+            
+        title = exam_data.get('title')
+        if not title:
+            subject_name = slot.subject.name if slot.subject else 'Custom'
+            title = f"{subject_name} - {slot.get_session_type_display()} ({slot.session_date})"
+            
+        if not slot.exam:
+            from exams.models import Exam
+            exam = Exam.objects.create(
+                branch=slot.batch.branch if slot.batch else None,
+                batch=slot.batch,
+                subject=slot.subject,
+                title=title,
+                exam_type=exam_data.get('exam_type', 'offline'),
+                total_marks=exam_data.get('total_marks', 100),
+                pass_marks=exam_data.get('pass_marks', 35),
+                duration_minutes=duration or 60,
+                scheduled_date=slot.session_date,
+                start_time=slot.start_time,
+                end_time=slot.end_time,
+                instructions=exam_data.get('instructions', ''),
+                result_release_mode=exam_data.get('result_release_mode', 'instant'),
+                created_by=slot.created_by,
+            )
+            slot.exam = exam
+            slot.save(update_fields=['exam'])
+        else:
+            exam = slot.exam
+            exam.title = title
+            exam.exam_type = exam_data.get('exam_type', exam.exam_type)
+            exam.total_marks = exam_data.get('total_marks', exam.total_marks)
+            exam.pass_marks = exam_data.get('pass_marks', exam.pass_marks)
+            exam.duration_minutes = duration or exam.duration_minutes
+            exam.instructions = exam_data.get('instructions', exam.instructions)
+            exam.result_release_mode = exam_data.get('result_release_mode', exam.result_release_mode)
+            exam.scheduled_date = slot.session_date
+            exam.start_time = slot.start_time
+            exam.end_time = slot.end_time
+            exam.save()
+
     def create(self, validated_data):
+        exam_data = validated_data.pop('exam_data', None)
         if 'organization' not in validated_data or validated_data['organization'] is None:
             validated_data['organization'] = self.context['request'].user.organization
-        return super().create(validated_data)
+        slot = super().create(validated_data)
+        self._handle_exam(slot, exam_data)
+        return slot
 
     def update(self, instance, validated_data):
+        exam_data = validated_data.pop('exam_data', None)
         if 'organization' not in validated_data or validated_data['organization'] is None:
             validated_data['organization'] = instance.organization or self.context['request'].user.organization
-        return super().update(instance, validated_data)
+        slot = super().update(instance, validated_data)
+        self._handle_exam(slot, exam_data)
+        return slot
 
 
 # ── Faculty / Student personal timetable views ────────────────────────────────

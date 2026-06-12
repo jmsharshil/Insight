@@ -367,6 +367,7 @@ class TimetableSlot(models.Model):
     examiners           = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='examiner_slots')
     paper_checkers      = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='checker_slots')
     timetable_exam_type = models.ForeignKey(TimetableExamType, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
+    exam                = models.OneToOneField('exams.Exam', on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slot')
     created_by    = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
