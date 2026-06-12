@@ -78,6 +78,6 @@ class TimetableExamTypeAdmin(admin.ModelAdmin):
 @admin.register(TimetableSlot)
 class TimetableSlotAdmin(admin.ModelAdmin):
     list_display = ('id', 'organization', 'batch', 'subject', 'faculty', 'classroom', 'day_of_week', 'start_time', 'end_time',)
-    list_filter = ('organization', 'subject', 'session_type', 'is_recurring', 'classroom', 'chapter', 'faculty',)
+    list_filter = ('organization', 'subject', 'session_type', 'is_recurring', 'classroom', 'chapters', 'faculty',)
     search_fields = ('batch__batch_code', 'subject__name',)
     ordering = ['day_of_week', 'start_time']

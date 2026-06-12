@@ -368,9 +368,9 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
     course = serializers.UUIDField(source='batch.course.id', read_only=True, default=None)
     course_name = serializers.CharField(source='batch.course.name', read_only=True, default=None)
     course_code = serializers.CharField(source='batch.course.code', read_only=True, default=None)
-    examiner_name = serializers.CharField(source='examiner.name', read_only=True, default=None)
-    paper_checker_name = serializers.CharField(source='paper_checker.name', read_only=True, default=None)
-    chapter_name = serializers.CharField(source='chapter.name', read_only=True, default=None)
+    examiners_names = serializers.SerializerMethodField()
+    paper_checkers_names = serializers.SerializerMethodField()
+    chapters_names = serializers.SerializerMethodField()
     exam_type_name = serializers.CharField(source='timetable_exam_type.name', read_only=True, default=None)
 
     class Meta:
@@ -384,11 +384,20 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
                   'day_of_week_display',
                   # E4 fields
                   'session_type', 'session_type_display', 'slot_code',
-                  'session_date', 'chapter', 'chapter_name',
-                  'examiner', 'examiner_name',
-                  'paper_checker', 'paper_checker_name',
+                  'session_date', 'chapters', 'chapters_names',
+                  'examiners', 'examiners_names',
+                  'paper_checkers', 'paper_checkers_names',
                   'timetable_exam_type', 'exam_type_name',
                   ]
+
+    def get_chapters_names(self, obj):
+        return [c.name for c in obj.chapters.all()]
+
+    def get_examiners_names(self, obj):
+        return [e.name for e in obj.examiners.all()]
+
+    def get_paper_checkers_names(self, obj):
+        return [pc.name for pc in obj.paper_checkers.all()]
 
     def get_day_label(self, obj):
         if obj.day_of_week is None:
@@ -410,7 +419,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             'is_recurring', 'effective_from', 'effective_to', 'organization',
             # E4 new fields
             'session_type', 'slot_code', 'session_date',
-            'chapter', 'examiner', 'paper_checker', 'timetable_exam_type',
+            'chapters', 'examiners', 'paper_checkers', 'timetable_exam_type',
         ]
 
     def validate(self, data):  # noqa: C901  (long but intentionally complete)
@@ -437,8 +446,8 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _require('slot_code')
             _require('day_of_week')
             _require('faculty')
-            _forbid('examiner')
-            _forbid('paper_checker')
+            _forbid('examiners')
+            _forbid('paper_checkers')
             _forbid('timetable_exam_type')
             # Auto-fill times from FIXED_SLOTS
             slot_code = data.get('slot_code')
@@ -451,36 +460,38 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _forbid('slot_code')
             _require('session_date')
             _require('start_time')
-            _require('chapter')
+            _require('chapters')
             _require('faculty')
-            _require('examiner')
-            _require('paper_checker')
+            _require('examiners')
+            _require('paper_checkers')
             _require('timetable_exam_type')
             # Auto-set end time
             start = data.get('start_time')
             if start:
                 data['end_time'] = _add_minutes(start, SESSION_DURATIONS['class_test'])
             # Chapter cross-validation
-            chapter = data.get('chapter')
+            chapters = data.get('chapters', [])
             subject = data.get('subject')
-            if chapter:
-                if subject and chapter.subject_id != subject.pk:
-                    raise serializers.ValidationError(
-                        {'chapter': 'Chapter must belong to the selected subject.'}
-                    )
-                if chapter.order > 2:
-                    raise serializers.ValidationError(
-                        {'chapter': 'class_test allows only chapters with order ≤ 2.'}
-                    )
+            if chapters:
+                for chapter in chapters:
+                    if subject and chapter.subject_id != subject.pk:
+                        raise serializers.ValidationError(
+                            {'chapters': 'All chapters must belong to the selected subject.'}
+                        )
+                    if chapter.order > 2:
+                        raise serializers.ValidationError(
+                            {'chapters': 'class_test allows only chapters with order ≤ 2.'}
+                        )
 
         elif session_type == 'prelim':
             _forbid('slot_code')
             _require('session_date')
             _require('start_time')
             _require('end_time')
-            _forbid('faculty')
-            _require('examiner')
-            _forbid('paper_checker')
+            _require('chapters')
+            _require('faculty')
+            _require('examiners')
+            _require('paper_checkers')
             _require('timetable_exam_type')
             start = data.get('start_time')
             end = data.get('end_time')
@@ -492,8 +503,8 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _require('session_date')
             _require('start_time')
             _require('faculty')
-            _forbid('examiner')
-            _forbid('paper_checker')
+            _require('examiners')
+            _forbid('paper_checkers')
             _forbid('timetable_exam_type')
             start = data.get('start_time')
             if start:

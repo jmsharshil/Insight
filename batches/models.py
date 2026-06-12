@@ -165,6 +165,40 @@ class Batch(models.Model):
             else:
                 seq = 1
             self.batch_code = f"{prefix}{seq:04d}"
+        # Ensure name is auto-generated in format {course_type}_{batch_attempt}_{year}_{sequence}
+        if not self.name:
+            from django.utils import timezone
+            year = self.attempt_year or (self.start_date.year if self.start_date else timezone.now().year)
+
+            # determine course_type: prefer explicit attribute, else fallback to first active level
+            course_type = getattr(self.course, 'course_type', None) if self.course else None
+            if not course_type and self.course:
+                first_level = self.course.levels.filter(is_active=True).first()
+                if first_level:
+                    course_type = first_level.course_type
+            if not course_type:
+                course_type = 'standard'
+
+            attempt = self.batch_attempt or 'unknown'
+
+            # Use BatchSequenceCounter to maintain sequence per (course_type, batch_attempt, year)
+            try:
+                counter, created = BatchSequenceCounter.objects.get_or_create(
+                    course_type=course_type,
+                    batch_attempt=attempt,
+                    attempt_year=year,
+                    defaults={'last_sequence': 100},
+                )
+                counter.last_sequence = (counter.last_sequence or 100) + 1
+                counter.save(update_fields=['last_sequence'])
+                seq = counter.last_sequence
+            except Exception:
+                # Fallback: compute sequence by counting existing similar names
+                seq = (Batch.objects.filter(name__startswith=f"{course_type}_{attempt}_{year}_").count() + 1)
+
+            self.name = f"{course_type}_{attempt}_{year}_{seq:04d}"
+            self.is_auto_created = True
+
         super().save(*args, **kwargs)
 
 
@@ -329,9 +363,9 @@ class TimetableSlot(models.Model):
     session_type        = models.CharField(max_length=20, choices=SESSION_TYPE_CHOICES, default='regular')
     slot_code           = models.CharField(max_length=2, choices=SLOT_CODE_CHOICES, null=True, blank=True)
     session_date        = models.DateField(null=True, blank=True)
-    chapter             = models.ForeignKey('batches.Chapter', on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
-    examiner            = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='examiner_slots')
-    paper_checker       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='checker_slots')
+    chapters            = models.ManyToManyField('batches.Chapter', blank=True, related_name='timetable_slots')
+    examiners           = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='examiner_slots')
+    paper_checkers      = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='checker_slots')
     timetable_exam_type = models.ForeignKey(TimetableExamType, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     created_by    = models.ForeignKey(
         settings.AUTH_USER_MODEL,
