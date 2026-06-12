@@ -4,8 +4,111 @@ This guide provides the exact API endpoints, request bodies, and expected respon
 
 ---
 
+## Architecture & Workflow Diagram
+
+The following diagram illustrates the API validation logic, automated calculations, and how the `Exam` generation module is triggered depending on the selected `session_type`.
+
+```text
+                                  +--------------------------------------+
+                                  |    Client Submits TimetableSlot      |
+                                  +--------------------------------------+
+                                                    |
+                                                    v
+                                         +--------------------+
+                                         |    Session Type?   |
+                                         +--------------------+
+                                                    |
+         +--------------------+---------------------+---------------------+--------------------+
+         |                    |                     |                     |                    |
+         v                    v                     v                     v                    v
+    [regular]            [class_test]           [prelim]             [practice]            [custom]
+         |                    |                     |                     |                    |
+         v                    v                     v                     v                    v
++------------------+ +------------------+ +------------------+ +------------------+ +------------------+
+|Validate slot_code| |Validate chapters,| |Validate chapters,| |Validate multiple | | Validate custom  |
+|& day_of_week     | |examiners, paper_ | |examiners, paper_ | |examiners         | | start_time and   |
+|                  | |checkers          | |checkers          | |                  | | end_time         |
++------------------+ +------------------+ +------------------+ +------------------+ +------------------+
+         |                    |                     |                     |                    |
+         v                    v                     v                     v                    v
++------------------+ +------------------+ +------------------+ +------------------+ +------------------+
+|Auto-compute      | | exam_data        | | exam_data        | |Auto-compute      | | exam_data        |
+|start/end times   | | provided?        | | provided?        | |end_time          | | provided?        |
++------------------+ +------------------+ +------------------+ +------------------+ +------------------+
+         |               |          |          |         |            |               |          |
+         |              Yes         No        Yes        No           |              Yes         No
+         |               |          |          |         |            |               |          |
+         |               v          v          v         v            |               v          |
+         |      +------------+ +--------+ +---------+ +--------+      |      +------------+      |
+         |      |Calc length & | |Return 400| |Calc length| |Return 400|      |      |Calc length & |      |
+         |      |Create Exam | |Bad Req | |Create Exam| |Bad Req |      |      |Create Exam |      |
+         |      +------------+ +--------+ +---------+ +--------+      |      +------------+      |
+         |               |                     |                      |               |          |
+         v               v                     v                      v               v          v
++----------------------------------------------------------------------------------------------------+
+|                                    Create TimetableSlot Record                                     |
++----------------------------------------------------------------------------------------------------+
+                                                    |
+                                                    v
+                                  +--------------------------------------+
+                                  | Return 201 Created & slot/exam UUIDs |
+                                  +--------------------------------------+
+```
+
+---
+
+## Appendix A: System Choice Mappings & Reference Data
+
+Before scheduling, refer to the following system-defined choices and their display values.
+
+### A.1 Session Types (`session_type`)
+| Value | Display Name |
+| :--- | :--- |
+| `regular` | Regular |
+| `class_test` | Class Test |
+| `prelim` | Prelim |
+| `practice` | Practice |
+| `custom` | Custom |
+
+### A.2 Day of Week (`day_of_week`)
+| Value (Integer) | Display Name |
+| :--- | :--- |
+| `0` | Monday |
+| `1` | Tuesday |
+| `2` | Wednesday |
+| `3` | Thursday |
+| `4` | Friday |
+| `5` | Saturday |
+| `6` | Sunday |
+
+### A.3 Slot Codes (`slot_code`)
+*(Used only for `regular` sessions to determine automated timing)*
+| Value | Display Name |
+| :--- | :--- |
+| `P1` | P1 08:00–10:00 |
+| `P2` | P2 10:15–12:15 |
+| `P3` | P3 12:45–14:45 |
+| `P4` | P4 15:00–17:00 |
+
+### A.4 Exam Mode (`exam_type`)
+| Value | Display Name |
+| :--- | :--- |
+| `offline` | Offline |
+| `online` | Online |
+
+### A.5 Result Release Mode (`result_release_mode`)
+| Value | Display Name |
+| :--- | :--- |
+| `instant` | Instant |
+| `manual` | Manual |
+
+---
+
 ## Step 1: Schedule a Regular Session
 **Purpose:** Daily or weekly recurring lectures.
+*   **Required Fields:** `slot_code` (must be P1-P4), `day_of_week` (0-6), `faculty`.
+*   **Forbidden Fields:** `exam_data`, `chapters`, `examiners`, `paper_checkers`, `timetable_exam_type`.
+*   **Note:** Start and end times are strictly derived from the selected `slot_code`.
 **Endpoint:** `POST /api/v1/timetable/`
 **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
 
@@ -50,6 +153,9 @@ This guide provides the exact API endpoints, request bodies, and expected respon
 
 ## Step 2: Schedule a Class Test (Automated Exam Creation)
 **Purpose:** Routine chapter-specific assessments. Automatically generates an `Exam` record.
+*   **Required Fields:** `session_date`, `start_time`, `chapters` (list of UUIDs), `faculty`, `examiners` (list of UUIDs), `paper_checkers` (list of UUIDs), `timetable_exam_type`, `exam_data`.
+*   **Forbidden Fields:** `slot_code`.
+*   **Note:** The system strictly validates that chapters are mapped to the correct subject and belong to introductory levels (Order ≤ 2).
 **Endpoint:** `POST /api/v1/timetable/`
 **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
 
@@ -101,6 +207,8 @@ This guide provides the exact API endpoints, request bodies, and expected respon
 
 ## Step 3: Schedule a Prelim Exam
 **Purpose:** High-stakes preparatory exams. Automatically generates an `Exam` record.
+*   **Required Fields:** `session_date`, `start_time`, `end_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `timetable_exam_type`, `exam_data`.
+*   **Forbidden Fields:** `slot_code`.
 **Endpoint:** `POST /api/v1/timetable/`
 **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
 
@@ -150,6 +258,9 @@ This guide provides the exact API endpoints, request bodies, and expected respon
 
 ## Step 4: Schedule a Practice Session
 **Purpose:** Mock tests or practicals. Permits multiple examiners.
+*   **Required Fields:** `session_date`, `start_time`, `faculty`, `examiners` (array).
+*   **Forbidden Fields:** `slot_code`, `paper_checkers`, `timetable_exam_type`, `exam_data`.
+*   **Note:** The system automatically calculates `end_time` based on practice configurations.
 **Endpoint:** `POST /api/v1/timetable/`
 **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
 
@@ -190,6 +301,10 @@ This guide provides the exact API endpoints, request bodies, and expected respon
 
 ## Step 5: Schedule a Custom Session
 **Purpose:** Flexible, ad-hoc scheduling. Can optionally include an exam.
+*   **Required Fields:** `session_date`, `start_time`, `end_time`.
+*   **Forbidden Fields:** `slot_code`.
+*   **Optional Fields:** `faculty`, `chapters`, `examiners`, `paper_checkers`, `timetable_exam_type`, `exam_data`.
+*   **Note:** Full flexibility. Passing `exam_data` dynamically links an exam to the slot.
 **Endpoint:** `POST /api/v1/timetable/`
 **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
 
