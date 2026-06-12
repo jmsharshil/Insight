@@ -13,6 +13,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
     batch_count = serializers.IntegerField(read_only=True, default=0)
     level_display = serializers.CharField(source="get_level_display", read_only=True)
     employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
+    batch_name = serializers.SerializerMethodField()
 
     class Meta:
         model = FacultyProfile
@@ -20,7 +21,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url', 'branch', 'branch_name',
             'level', 'employment_type', 'specialization', 'subject_expertise',
             'joining_date', 'is_active', 'batch_count', 'created_at',
-         'level_display', 'employment_type_display']
+            'level_display', 'employment_type_display', 'batch_name']
 
     def get_full_name(self, obj):
         return obj.user.name if obj.user else ''
@@ -42,6 +43,15 @@ class FacultyListSerializer(serializers.ModelSerializer):
             return obj.photo.url
         return None
 
+    def get_batch_name(self, obj):
+        assignments = obj.batch_assignments.all()
+        names = [a.batch.name for a in assignments if a.batch]
+        unique_names = []
+        for name in names:
+            if name not in unique_names:
+                unique_names.append(name)
+        return ", ".join(unique_names)
+
 
 class FacultyDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -51,6 +61,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
     qr_code_url = serializers.SerializerMethodField()
     level_display = serializers.CharField(source="get_level_display", read_only=True)
     employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
+    batch_name = serializers.SerializerMethodField()
 
     class Meta:
         model = FacultyProfile
@@ -60,7 +71,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             'level', 'employment_type', 'joining_date',
             'salary', 'hourly_rate', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
-         'level_display', 'employment_type_display']
+            'level_display', 'employment_type_display', 'batch_name']
 
     def get_full_name(self, obj):
         return obj.user.name if obj.user else ''
@@ -86,6 +97,15 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.qr_code.url)
             return obj.qr_code.url
         return None
+
+    def get_batch_name(self, obj):
+        assignments = obj.batch_assignments.all()
+        names = [a.batch.name for a in assignments if a.batch]
+        unique_names = []
+        for name in names:
+            if name not in unique_names:
+                unique_names.append(name)
+        return ", ".join(unique_names)
 
 
 class FacultyCreateSerializer(serializers.Serializer):

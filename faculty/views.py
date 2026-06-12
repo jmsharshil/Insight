@@ -79,7 +79,7 @@ class FacultyListCreateView(APIView):
         if role not in FACULTY_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = FacultyProfile.objects.select_related('user', 'branch').annotate(
+        qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related('batch_assignments__batch').annotate(
             batch_count=Count('session_reports__batch', distinct=True)
         )
         if getattr(request.user, 'organization', None):
@@ -195,7 +195,7 @@ class FacultyDetailView(APIView):
 
     def _get_faculty(self, request, faculty_id):
         try:
-            qs = FacultyProfile.objects.select_related('user', 'branch').all()
+            qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related('batch_assignments__batch').all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             return qs.get(id=faculty_id)
