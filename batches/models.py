@@ -194,9 +194,17 @@ class Batch(models.Model):
                 seq = counter.last_sequence
             except Exception:
                 # Fallback: compute sequence by counting existing similar names
-                seq = (Batch.objects.filter(name__startswith=f"{course_type}_{attempt}_{year}_").count() + 1)
+                # Count for old format and new format just in case
+                seq = (Batch.objects.filter(name__icontains=course_type).count() + 101)
 
-            self.name = f"{course_type}_{attempt}_{year}_{seq:04d}"
+            ct_upper = str(course_type).upper() if course_type else ""
+            attempt_upper = str(attempt).upper() if attempt and attempt != 'unknown' else ""
+            year_str = str(year)[-2:] if year else ""
+            
+            if attempt_upper:
+                self.name = f"{ct_upper} {attempt_upper}'{year_str} {seq}"
+            else:
+                self.name = f"{ct_upper} '{year_str} {seq}"
             self.is_auto_created = True
 
         super().save(*args, **kwargs)
