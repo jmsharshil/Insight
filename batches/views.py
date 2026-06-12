@@ -1028,3 +1028,42 @@ class StudentTimetableView(APIView):
             grouped.setdefault(day, []).append(s)
 
         return Response({'success': True, 'data': grouped})
+
+
+from branch.models import Branch
+
+class AcademicDropdownsView(APIView):
+    """
+    GET /api/v1/batches/dropdowns/
+    Returns minimal dropdown data for course, level, batch, subject, branch, and classroom.
+    """
+    def get(self, request):
+        user = request.user
+        org_id = user.organization_id if hasattr(user, 'organization_id') and user.organization_id else None
+
+        courses_qs = Course.objects.all()
+        levels_qs = CourseLevel.objects.all()
+        batches_qs = Batch.objects.all()
+        subjects_qs = Subject.objects.all()
+        branches_qs = Branch.objects.all()
+        classrooms_qs = Classroom.objects.all()
+
+        if org_id:
+            courses_qs = courses_qs.filter(organization_id=org_id)
+            levels_qs = levels_qs.filter(organization_id=org_id)
+            batches_qs = batches_qs.filter(organization_id=org_id)
+            subjects_qs = subjects_qs.filter(organization_id=org_id)
+            branches_qs = branches_qs.filter(organization_id=org_id)
+            classrooms_qs = classrooms_qs.filter(organization_id=org_id)
+
+        return Response({
+            "success": True,
+            "data": {
+                "courses": list(courses_qs.values('id', 'name')),
+                "levels": list(levels_qs.values('id', 'name', 'course_id')),
+                "batches": list(batches_qs.values('id', 'name', 'course_id')),
+                "subjects": list(subjects_qs.values('id', 'name', 'level_id')),
+                "branches": list(branches_qs.values('id', 'name', 'city')),
+                "classrooms": list(classrooms_qs.values('id', 'name', 'capacity')),
+            }
+        })

@@ -11,9 +11,13 @@ from .views import (
     CourseLevelListView, CourseLevelDetailView,
     ChapterListView, ChapterDetailView,
     TimetableExamTypeListView, TimetableExamTypeDetailView,
+    AcademicDropdownsView,
 )
 
 urlpatterns = [
+    # ── Dropdowns ───────────────────────────────────────────────────────────
+    path('dropdowns/', AcademicDropdownsView.as_view(), name='academic-dropdowns'),
+
     # ── Courses ─────────────────────────────────────────────────────────────
     path('courses/', CourseListView.as_view(), name='course-list'),
     path('courses/<uuid:pk>/', CourseDetailView.as_view(), name='course-detail'),
