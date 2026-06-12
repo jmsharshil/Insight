@@ -16,7 +16,7 @@ from .views import (
 
 urlpatterns = [
     # ── Dropdowns ───────────────────────────────────────────────────────────
-    path('dropdowns/', AcademicDropdownsView.as_view(), name='academic-dropdowns'),
+    path('batches/dropdowns/', AcademicDropdownsView.as_view(), name='academic-dropdowns'),
 
     # ── Courses ─────────────────────────────────────────────────────────────
     path('courses/', CourseListView.as_view(), name='course-list'),
