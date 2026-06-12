@@ -80,7 +80,7 @@ class FacultyListCreateView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related('batch_assignments__batch').annotate(
-            batch_count=Count('session_reports__batch', distinct=True)
+            batch_count=Count('batch_assignments', distinct=True)
         )
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
