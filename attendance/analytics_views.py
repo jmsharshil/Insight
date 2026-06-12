@@ -1451,6 +1451,7 @@ class AttendanceExportAPIView(SafeAPIView):
             scan_map[(s_log.student_id, s_log.scanned_at.date())] = s_log.timetable_slot.slot_code if s_log.timetable_slot else None
 
         batch_ids = list(records.values_list('batch_id', flat=True).distinct())
+        from batches.models import TimetableSlot
         slots = TimetableSlot.objects.filter(batch_id__in=batch_ids)
         batch_slots = {}
         for slot in slots:
@@ -1529,6 +1530,7 @@ class AttendanceAuditAPIView(SafeAPIView):
             scan_map[(s_log.student_id, s_log.scanned_at.date())] = s_log.timetable_slot.slot_code if s_log.timetable_slot else None
 
         batch_ids = list(records.values_list('batch_id', flat=True).distinct())
+        from batches.models import TimetableSlot
         slots = TimetableSlot.objects.filter(batch_id__in=batch_ids)
         batch_slots = {}
         for slot in slots:
