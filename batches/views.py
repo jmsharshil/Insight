@@ -669,14 +669,14 @@ class BatchRemoveFacultyView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        try:
-            qs = BatchFaculty.objects.all()
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(batch__organization=request.user.organization)
-            if subject_id:
-                qs = qs.filter(subject=subject_id)
-            assignment = qs.get(batch_id=pk, faculty_id=faculty.id)
-        except BatchFaculty.DoesNotExist:
+        qs = BatchFaculty.objects.filter(batch_id=pk, faculty_id=faculty.id)
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(batch__organization=request.user.organization)
+        
+        if subject_id:
+            qs = qs.filter(subject_id=subject_id)
+
+        if not qs.exists():
             return Response(
                 {
                     'success': False,
@@ -685,7 +685,7 @@ class BatchRemoveFacultyView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        assignment.delete()
+        qs.delete()
 
         return Response(
             {
@@ -1047,6 +1047,7 @@ class AcademicDropdownsView(APIView):
         subjects_qs = Subject.objects.all()
         branches_qs = Branch.objects.all()
         classrooms_qs = Classroom.objects.all()
+        chapters_qs = Chapter.objects.all()
 
         if org_id:
             courses_qs = courses_qs.filter(organization_id=org_id)
@@ -1055,6 +1056,24 @@ class AcademicDropdownsView(APIView):
             subjects_qs = subjects_qs.filter(organization_id=org_id)
             branches_qs = branches_qs.filter(organization_id=org_id)
             classrooms_qs = classrooms_qs.filter(organization_id=org_id)
+            chapters_qs = chapters_qs.filter(subject__organization_id=org_id)
+
+        subjects = list(subjects_qs.values('id', 'name', 'level_id'))
+        chapters = list(chapters_qs.values('id', 'name', 'subject_id', 'order'))
+
+        chapters_by_subject = {}
+        for chapter in chapters:
+            subj_id = chapter['subject_id']
+            if subj_id not in chapters_by_subject:
+                chapters_by_subject[subj_id] = []
+            chapters_by_subject[subj_id].append({
+                'id': chapter['id'],
+                'name': chapter['name'],
+                'order': chapter['order']
+            })
+        
+        for subject in subjects:
+            subject['chapters'] = chapters_by_subject.get(subject['id'], [])
 
         return Response({
             "success": True,
@@ -1062,7 +1081,7 @@ class AcademicDropdownsView(APIView):
                 "courses": list(courses_qs.values('id', 'name')),
                 "levels": list(levels_qs.values('id', 'name', 'course_id')),
                 "batches": list(batches_qs.values('id', 'name', 'course_id')),
-                "subjects": list(subjects_qs.values('id', 'name', 'level_id')),
+                "subjects": subjects,
                 "branches": list(branches_qs.values('id', 'name', 'city')),
                 "classrooms": list(classrooms_qs.values('id', 'name', 'capacity')),
             }
