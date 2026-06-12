@@ -453,12 +453,14 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
 
         def _require(field, label=None):
             label = label or field
-            if not data.get(field):
+            val = data.get(field)
+            if val is None or val == '':
                 raise serializers.ValidationError({field: f'{label} is required for {session_type} session.'})
 
         def _forbid(field, label=None):
             label = label or field
-            if data.get(field):
+            val = data.get(field)
+            if val is not None and val != '' and val != []:
                 raise serializers.ValidationError({field: f'{label} must be blank for {session_type} session.'})
 
         def _add_minutes(t, minutes):
