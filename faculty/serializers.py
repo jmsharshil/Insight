@@ -55,7 +55,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
                 unique_names.append(name)
         return ", ".join(unique_names)
 
-    def get_subjects_assigned(self, obj):
+    def get_subjects(self, obj):
         return list(set(str(a.subject.id) for a in obj.batch_assignments.all() if a.subject))
 
     def get_subject_name(self, obj):
@@ -86,9 +86,9 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             'salary', 'hourly_rate', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
             'level_display', 'employment_type_display', 'batch_name',
-            'subjects_assigned', 'subject_name']
+            'subjects', 'subject_name']
 
-    subjects_assigned = serializers.SerializerMethodField()
+    subjects = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
 
     def get_full_name(self, obj):
@@ -125,7 +125,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
                 unique_names.append(name)
         return ", ".join(unique_names)
 
-    def get_subjects_assigned(self, obj):
+    def get_subjects(self, obj):
         return list(set(str(a.subject.id) for a in obj.batch_assignments.all() if a.subject))
 
     def get_subject_name(self, obj):
