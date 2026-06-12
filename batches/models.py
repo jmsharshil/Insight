@@ -361,6 +361,7 @@ class TimetableSlot(models.Model):
     effective_to   = models.DateField(null=True, blank=True)
     # E4: new fields
     session_type        = models.CharField(max_length=20, choices=SESSION_TYPE_CHOICES, default='regular')
+    session_name        = models.CharField(max_length=200, blank=True)
     slot_code           = models.CharField(max_length=2, choices=SLOT_CODE_CHOICES, null=True, blank=True)
     session_date        = models.DateField(null=True, blank=True)
     chapters            = models.ManyToManyField('batches.Chapter', blank=True, related_name='timetable_slots')

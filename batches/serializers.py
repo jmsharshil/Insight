@@ -383,7 +383,7 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
                   'is_recurring', 'effective_from', 'effective_to',
                   'day_of_week_display',
                   # E4 fields
-                  'session_type', 'session_type_display', 'slot_code',
+                  'session_type', 'session_type_display', 'session_name', 'slot_code',
                   'session_date', 'chapters', 'chapters_names',
                   'examiners', 'examiners_names',
                   'paper_checkers', 'paper_checkers_names',
@@ -431,8 +431,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             'day_of_week', 'start_time', 'end_time',
             'is_recurring', 'effective_from', 'effective_to', 'organization',
             # E4 new fields
-            'session_type', 'slot_code', 'session_date',
-            'chapters', 'examiners', 'paper_checkers', 'timetable_exam_type',
+            'session_type', 'session_name', 'slot_code', 'session_date',
             'chapters', 'examiners', 'paper_checkers', 'timetable_exam_type',
             'exam_data',
         ]
