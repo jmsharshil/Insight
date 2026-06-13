@@ -870,11 +870,16 @@ class TimetableListView(APIView):
 
         data = serializer.validated_data
 
+        day_of_week = data.get('day_of_week')
+        session_date = data.get('session_date')
+        if day_of_week is None and session_date:
+            day_of_week = session_date.weekday()
+
         # Clash detection — faculty
         if data.get('faculty'):
             faculty_clashes = check_faculty_clash(
                 faculty_id=data['faculty'].id,
-                day_of_week=data['day_of_week'],
+                day_of_week=day_of_week,
                 start_time=data['start_time'],
                 end_time=data['end_time'],
             )
@@ -889,7 +894,7 @@ class TimetableListView(APIView):
         if data.get('classroom'):
             classroom_clashes = check_classroom_clash(
                 classroom_id=data['classroom'].id,
-                day_of_week=data['day_of_week'],
+                day_of_week=day_of_week,
                 start_time=data['start_time'],
                 end_time=data['end_time'],
             )
@@ -940,6 +945,9 @@ class TimetableDetailView(APIView):
         faculty = data.get('faculty', slot.faculty)
         classroom = data.get('classroom', slot.classroom)
         day = data.get('day_of_week', slot.day_of_week)
+        session_date = data.get('session_date', slot.session_date)
+        if day is None and session_date:
+            day = session_date.weekday()
         start = data.get('start_time', slot.start_time)
         end = data.get('end_time', slot.end_time)
 

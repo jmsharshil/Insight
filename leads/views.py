@@ -12,9 +12,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 from core.email import send_email
 
-from .serializers import get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer, LeadDetailSerializer, LeadUpdateSerializer
+from .serializers import (
+    get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer,
+    LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
+)
 from .utils import LeadService
-from .models import Lead, LeadStage, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
+from .models import Lead, LeadStage, LeadAssignmentLog, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
 from django.db.models import Q
 import re
 from rest_framework.permissions import AllowAny
@@ -27,6 +30,40 @@ GROUP_MODULE_DISPLAY = dict(GROUP_MODULE_CHOICES)
 ATTEMPT_DISPLAY = dict(ATTEMPT_TYPE_CHOICES)
 
 logger = logging.getLogger(__name__)
+
+# ── Roles ────────────────────────────────────────────────────────────────────────
+
+# Roles that can only see leads explicitly assigned to them
+RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}
+
+# Roles that can see all leads and reassign them
+SENIOR_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
+
+
+def get_lead_queryset(request):
+    """
+    Returns a Lead queryset scoped to the requesting user's role.
+
+    - Counsellor / Tele Caller / Sales Executive  → only their assigned leads.
+    - All other authenticated roles (Senior / Manager / Admin / Front Desk)
+      → all leads within their organisation.
+    - Unauthenticated (AllowAny endpoints)  → all leads (no personal data risk
+      here since POST is public form submission and GET requires authentication).
+    """
+    queryset = Lead.objects.all().order_by("-created_at")
+
+    # Scope by organisation when available
+    if getattr(request.user, 'organization', None):
+        queryset = queryset.filter(branch__organization=request.user.organization)
+
+    user = request.user
+    if user.is_authenticated:
+        role = getattr(user, 'role', None)
+        if role in RESTRICTED_ROLES:
+            # These roles can ONLY see leads assigned to them
+            queryset = queryset.filter(assigned_to=user)
+
+    return queryset
 
 
 class LeadListView(APIView):
@@ -115,7 +152,10 @@ class LeadListView(APIView):
         ).first()
 
         try:
-            lead = LeadService.create_lead(validated_data=validated_data, user=None)
+            lead = LeadService.create_lead(
+                validated_data=validated_data,
+                user=request.user if request.user.is_authenticated else None,
+            )
         except Exception as e:
             logger.error(f"Lead creation error — {str(e)}")
             return Response(
@@ -153,10 +193,7 @@ class LeadListView(APIView):
 
     def get(self, request):
 
-        queryset = Lead.objects.all().order_by("-created_at")
-        
-        if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(branch__organization=request.user.organization)
+        queryset = get_lead_queryset(request)
 
         # Optional filters
         stage = request.GET.get("stage")
@@ -261,18 +298,24 @@ class LeadStatusUpdateView(APIView):
                         'grad_last_sem':    lead.grad_last_sem or '',
                     }
 
-                    # Auto-assign counsellor via round-robin
-                    assigned_counsellor = AdmissionService.get_next_counsellor()
+                    # ── AUTO-ASSIGN COUNSELLOR VIA ROUND-ROBIN (commented out: now manual) ──
+                    # The block below previously auto-assigned a counsellor to the Admission
+                    # record when a lead was converted. This has been replaced by manual
+                    # assignment on the Lead itself (Lead.assigned_to). The Admission is now
+                    # created with assigned_counsellor=None and must be set manually.
+                    #
+                    # assigned_counsellor = AdmissionService.get_next_counsellor()
+                    assigned_counsellor = None
 
-                    # Create Admission with status='approval_pending' (no credentials yet)
+                    # Create Admission with status='form_pending' (no credentials yet)
                     counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
-                    auto_note = f'Auto-created from converted lead #{lead.id}. Assigned to {counsellor_name} for review.'
+                    auto_note = f'Auto-created from converted lead #{lead.id}. Waiting for student to submit the admission form.'
                     
                     admission = Admission(
                         id=lead.id,
                         lead=lead,
                         branch=lead.branch,
-                        status='approval_pending',
+                        status='form_pending',
                         note=auto_note,
                         assigned_counsellor=assigned_counsellor,
                         **{k: v for k, v in admission_data.items() if k != 'lead_id'},
@@ -282,7 +325,7 @@ class LeadStatusUpdateView(APIView):
                     from onboarding.models import AdmissionStatusHistory
                     AdmissionStatusHistory.objects.create(
                         admission=admission,
-                        status='approval_pending',
+                        status='form_pending',
                         changed_by=request.user if request.user.is_authenticated else None,
                         note=auto_note,
                     )
@@ -408,10 +451,7 @@ class LeadDetailView(APIView):
 
     def _get_lead(self, request, lead_id):
         try:
-            queryset = Lead.objects.all()
-            if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(branch__organization=request.user.organization)
-            return queryset.get(id=lead_id)
+            return get_lead_queryset(request).get(id=lead_id)
         except Lead.DoesNotExist:
             return None
 
@@ -482,4 +522,247 @@ class LeadDetailView(APIView):
         return Response(
             {"success": True, "message": f"Lead {lead_id} deleted successfully."},
             status=status.HTTP_200_OK
+        )
+
+
+# ── Lead Reassign View ──────────────────────────────────────────────────────
+
+class LeadReassignView(APIView):
+    """
+    PATCH /leads/<lead_id>/reassign/
+
+    Manually reassign a lead to a different Counsellor / Sales Executive.
+    Restricted to: Sales Senior Executive, Branch Manager, Super Admin.
+
+    Request body:
+        {
+            "assigned_to": "<user-uuid>",   # required; pass null to unassign
+            "note": "Reason for reassignment"  # optional
+        }
+    """
+    permission_classes = [AllowAny]
+
+    # Roles permitted to reassign leads
+    ALLOWED_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
+
+    def patch(self, request, lead_id):
+        # ── Role check (soft — returns 403 without changing permission_classes) ──
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"success": False, "message": "Authentication required to reassign leads."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        user_role = getattr(user, 'role', None)
+        if user_role not in self.ALLOWED_ROLES:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Only Sales Senior Executives, Branch Managers, and "
+                        "Super Admins can reassign leads."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Fetch lead (all leads visible to senior roles) ──────────────────
+        try:
+            queryset = Lead.objects.all()
+            if getattr(user, 'organization', None):
+                queryset = queryset.filter(branch__organization=user.organization)
+            lead = queryset.get(id=lead_id)
+        except Lead.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Lead not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── Validate input ─────────────────────────────────────────────
+        serializer = LeadReassignSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_assignee = serializer.validated_data['assigned_to']  # User instance or None
+        note = serializer.validated_data.get('note', '')
+
+        # ── Audit log ──────────────────────────────────────────────────
+        previous_assignee = lead.assigned_to  # capture before update
+
+        LeadAssignmentLog.objects.create(
+            lead=lead,
+            assigned_from=previous_assignee,
+            assigned_to=new_assignee,
+            changed_by=user,
+            note=note or (
+                f"Reassigned from "
+                f"{'Unassigned' if not previous_assignee else previous_assignee.name} "
+                f"to "
+                f"{'Unassigned' if not new_assignee else new_assignee.name} "
+                f"by {user.name}."
+            ),
+        )
+
+        # ── Apply reassignment ───────────────────────────────────────────
+        lead.assigned_to = new_assignee
+        lead.updated_by = user
+        lead.save(update_fields=['assigned_to', 'updated_by', 'updated_at'])
+
+        logger.info(
+            f"Lead {lead.id} reassigned: "
+            f"{previous_assignee} → {new_assignee} by {user}"
+        )
+
+        # ── Response ───────────────────────────────────────────────────
+        return Response(
+            {
+                "success": True,
+                "message": "Lead reassigned successfully.",
+                "data": {
+                    "lead_id":            lead.id,
+                    "assigned_from_id":   str(previous_assignee.id)   if previous_assignee else None,
+                    "assigned_from_name": previous_assignee.name       if previous_assignee else None,
+                    "assigned_to_id":     str(new_assignee.id)         if new_assignee       else None,
+                    "assigned_to_name":   new_assignee.name            if new_assignee       else None,
+                    "reassigned_by":      user.name,
+                    "note":               note,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ── Lead Assign View ────────────────────────────────────────────────────────
+
+class LeadAssignView(APIView):
+    """
+    PATCH /leads/<lead_id>/assign/
+
+    Assign an UNASSIGNED lead to a Counsellor / Sales Executive.
+    Use this when a lead was created without an assignee and you want to
+    assign it for the first time.
+
+    Allowed roles: front_desk, sales_senior_executive, branch_manager, super_admin.
+
+    To CHANGE an existing assignment use /leads/<id>/reassign/ instead
+    (restricted to senior roles only).
+
+    Request body:
+        {
+            "assigned_to": "<user-uuid>",       # required — cannot be null
+            "note": "Assigning to Jane Smith"   # optional
+        }
+    """
+    permission_classes = [AllowAny]
+
+    # Roles permitted to do the initial assignment
+    ALLOWED_ROLES = {'front_desk', 'sales_senior_executive', 'branch_manager', 'super_admin'}
+
+    def patch(self, request, lead_id):
+        # ── Auth + role check ────────────────────────────────────────────────
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"success": False, "message": "Authentication required to assign leads."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        user_role = getattr(user, 'role', None)
+        if user_role not in self.ALLOWED_ROLES:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Only Front Desk Executives, Sales Senior Executives, "
+                        "Branch Managers, and Super Admins can assign leads."
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Fetch lead ───────────────────────────────────────────────────────
+        try:
+            queryset = Lead.objects.all()
+            if getattr(user, 'organization', None):
+                queryset = queryset.filter(branch__organization=user.organization)
+            lead = queryset.get(id=lead_id)
+        except Lead.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Lead not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── Guard: already assigned — use /reassign/ instead ─────────────────
+        if lead.assigned_to is not None:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        f"This lead is already assigned to {lead.assigned_to.name}. "
+                        "Use PATCH /leads/{id}/reassign/ to change the assignment "
+                        "(requires Senior Executive / Manager role)."
+                    ),
+                    "current_assignee_id":   str(lead.assigned_to.id),
+                    "current_assignee_name": lead.assigned_to.name,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # ── Validate input ───────────────────────────────────────────────────
+        # Re-use LeadReassignSerializer but override assigned_to to be non-nullable
+        serializer = LeadReassignSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_assignee = serializer.validated_data['assigned_to']  # User instance
+        note = serializer.validated_data.get('note', '')
+
+        if new_assignee is None:
+            return Response(
+                {
+                    "success": False,
+                    "message": "assigned_to cannot be null for initial assignment. "
+                               "Provide a valid user UUID.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Audit log ────────────────────────────────────────────────────────
+        LeadAssignmentLog.objects.create(
+            lead=lead,
+            assigned_from=None,   # was unassigned
+            assigned_to=new_assignee,
+            changed_by=user,
+            note=note or f"Assigned to {new_assignee.name} by {user.name}.",
+        )
+
+        # ── Apply assignment ─────────────────────────────────────────────────
+        lead.assigned_to = new_assignee
+        lead.updated_by = user
+        lead.save(update_fields=['assigned_to', 'updated_by', 'updated_at'])
+
+        logger.info(
+            f"Lead {lead.id} assigned to {new_assignee} by {user}"
+        )
+
+        # ── Response ─────────────────────────────────────────────────────────
+        return Response(
+            {
+                "success": True,
+                "message": f"Lead successfully assigned to {new_assignee.name}.",
+                "data": {
+                    "lead_id":          lead.id,
+                    "assigned_to_id":   str(new_assignee.id),
+                    "assigned_to_name": new_assignee.name,
+                    "assigned_by":      user.name,
+                    "note":             note,
+                },
+            },
+            status=status.HTTP_200_OK,
         )

@@ -4,10 +4,12 @@ from branch.models import Branch
 
 
 class LateEntryPolicySerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+
     class Meta:
         model = LateEntryPolicy
         fields = [
-            'id', 'branch', 'grace_period_minutes', 'deduction_per_minute',
+            'id', 'branch', 'branch_name', 'grace_period_minutes', 'deduction_per_minute',
             'max_deduction_per_session', 'absence_deduction_per_day',
             'late_entry_threshold', 'auto_halfday_deduction',
             'is_active', 'updated_at',
@@ -81,14 +83,14 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
     payslips = PaySlipSerializer(many=True, read_only=True)
     generated_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
-
+    branch_name = serializers.SerializerMethodField()
 
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = PayrollRun
         fields = [
-            'id', 'branch', 'month', 'year', 'status', 'status_display', 'total_amount',
+            'id', 'branch', 'branch_name', 'month', 'year', 'status', 'status_display', 'total_amount',
             'generated_by', 'generated_by_name', 'approved_by', 'approved_by_name',
             'generated_at', 'approved_at', 'disbursed_at', 'notes', 'payslips',
          'status_display']
@@ -98,6 +100,9 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
 
     def get_approved_by_name(self, obj):
         return obj.approved_by.name if obj.approved_by else ''
+
+    def get_branch_name(self, obj):
+        return obj.branch.name if obj.branch else ''
 
 
 class PayrollGenerateSerializer(serializers.Serializer):

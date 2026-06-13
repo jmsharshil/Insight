@@ -503,10 +503,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError(
                             {'chapters': 'All chapters must belong to the selected subject.'}
                         )
-                    if chapter.order > 2:
-                        raise serializers.ValidationError(
-                            {'chapters': 'class_test allows only chapters with order ≤ 2.'}
-                        )
+
 
         elif session_type == 'prelim':
             _forbid('slot_code')
