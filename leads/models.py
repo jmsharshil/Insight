@@ -104,6 +104,17 @@ class Lead(models.Model):
     is_visited = models.BooleanField(default=False)
     updated_by = models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True)
 
+    # ── Assignment (manual only — no auto-assignment) ──────────────────────────
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_leads',
+        help_text="Counsellor / Sales Executive manually assigned to this lead. "
+                  "Leave null if unassigned — only senior roles can then view it.",
+    )
+
     # ── Section 2: Personal Info (Inquiry only) ───────────────────────────────
     surname      = models.CharField(max_length=100, blank=True)
     father_name  = models.CharField(max_length=100, blank=True)
@@ -150,6 +161,38 @@ class Lead(models.Model):
         return f"{self.first_name} {self.surname} | {self.form_type} | {self.current_stage}"
 
 
+class LeadAssignmentLog(models.Model):
+    """
+    Audit trail for every manual lead assignment / reassignment action.
+    Created whenever assigned_to changes on a Lead.
+    """
+    lead          = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='assignment_logs')
+    assigned_from = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text="Previous assignee (null if unassigned before)."
+    )
+    assigned_to   = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text="New assignee (null means unassigned)."
+    )
+    changed_by    = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', help_text="Staff member who made the assignment change."
+    )
+    note       = models.TextField(blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'lead_assignment_logs'
+        ordering = ['-changed_at']
+
+    def __str__(self):
+        frm = self.assigned_from.name if self.assigned_from else 'Unassigned'
+        to  = self.assigned_to.name   if self.assigned_to   else 'Unassigned'
+        by  = self.changed_by.name    if self.changed_by    else 'System'
+        return f"Lead #{self.lead_id}: {frm} → {to} by {by}"
+
+
 class LeadStage(models.Model):
     lead       = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='stage_history')
     stage      = models.CharField(max_length=20, choices=STAGE_CHOICES)
@@ -164,5 +207,5 @@ class LeadStage(models.Model):
         ordering = ['changed_at']
 
     def __str__(self):
-        changed_by = self.changed_by.get_full_name() if self.changed_by else 'System'
+        changed_by = self.changed_by.get_username() if self.changed_by else 'System'
         return f"{self.lead} → {self.stage} by {changed_by}"

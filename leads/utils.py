@@ -2,7 +2,7 @@ import logging
 
 from django.db import transaction
 
-from .models import Lead, LeadStage, STAGE_NEW
+from .models import Lead, LeadStage, LeadAssignmentLog, STAGE_NEW
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,15 @@ class LeadService:
             initial_stage = 'interested' if form_type == 'inquiry' else STAGE_NEW
             validated_data['current_stage'] = initial_stage
 
+            # ── Step 2b: Extract assigned_to before creating the Lead ──────────
+            # It is already resolved to a User instance (or None) by the serializer.
+            # Only honour it when a real user initiated the request (not a public form).
+            assigned_to_user = validated_data.pop('assigned_to', None)
+            if user is not None and assigned_to_user is not None:
+                # Store on the lead (field exists on model)
+                validated_data['assigned_to'] = assigned_to_user
+            # If user is None (public form submission) we silently ignore assigned_to.
+
             # ── Step 3: Create the Lead ───────────────────────────────────────
             lead = Lead.objects.create(**validated_data)
 
@@ -59,6 +68,19 @@ class LeadService:
                 changed_by=user,        # None = form submission, User = staff manual entry
                 note=f"Lead created via {lead.form_type} form."
             )
+
+            # ── Step 6: Log initial assignment if one was set at creation ───────
+            if lead.assigned_to is not None:
+                LeadAssignmentLog.objects.create(
+                    lead=lead,
+                    assigned_from=None,
+                    assigned_to=lead.assigned_to,
+                    changed_by=user,
+                    note=f"Initial assignment at lead creation by {user}."
+                )
+                logger.info(
+                    f"Lead {lead.id} assigned to {lead.assigned_to} at creation."
+                )
 
             logger.info(f"Lead created successfully — ID: {lead.id} | Form: {lead.form_type}")
 

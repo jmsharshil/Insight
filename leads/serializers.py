@@ -1,7 +1,10 @@
 # leads/serializers.py
 
 from rest_framework import serializers
-from .models import (Lead,FORM_TYPE_CHOICES,COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,STAGE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
+from .models import (Lead, LeadAssignmentLog, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+                     ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
+                     BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
+from auth_user.models import User
 from dateutil import parser
 from django.utils import timezone
 
@@ -81,6 +84,12 @@ class ContactSerializer(serializers.Serializer):
     course        = serializers.ChoiceField(choices=COURSE_TYPE_CHOICES)
     consent       = serializers.BooleanField()
 
+    # ── Manual assignment (optional at creation; only honoured for authenticated users) ─
+    assigned_to   = serializers.UUIDField(
+        required=False, allow_null=True,
+        help_text="UUID of the User (Counsellor/Sales Executive) to assign this lead to."
+    )
+
     def validate_branch(self, value):
         if value:
             from branch.models import Branch
@@ -89,6 +98,15 @@ class ContactSerializer(serializers.Serializer):
             except Branch.DoesNotExist:
                 raise serializers.ValidationError("Branch not found.")
         return value
+
+    def validate_assigned_to(self, value):
+        """Resolve UUID → User instance, or return None."""
+        if value is None:
+            return None
+        try:
+            return User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found for the given assigned_to UUID.")
 
     def validate_phone_student(self, value):
         return validate_phone(value)
@@ -276,17 +294,19 @@ class LeadListSerializer(serializers.ModelSerializer):
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
     stage_display = serializers.CharField(source="get_stage_display", read_only=True)
+    # ── Assignment display ───────────────────────────────────────────────
+    assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, allow_null=True)
 
     class Meta:
         model = Lead
         fields = [
             'id', 'branch', 'branch_name', 'form_type', 'form_type_display', 'first_name', 'surname', 'email',
             'phone_student', 'course', 'current_stage', 'current_stage_display', 'location', 'note', 'created_at',
-            'contacted_at', 'interested_at', 'followup_set_at', 'converted_at', 'lost_at', 'followup_date', 'visit_date', 'is_visited','visit_set_at',
-            'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'stage_display']
-        
-          
-         
+            'contacted_at', 'interested_at', 'followup_set_at', 'converted_at', 'lost_at', 'followup_date', 'visit_date', 'is_visited', 'visit_set_at',
+            'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'stage_display',
+            'assigned_to_id', 'assigned_to_name',
+        ]
 
 
 class LeadDetailSerializer(serializers.ModelSerializer):
@@ -301,6 +321,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
     stage_display = serializers.CharField(source="get_stage_display", read_only=True)
+    # ── Assignment display ───────────────────────────────────────────────
+    assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, allow_null=True)
 
     class Meta:
         model = Lead
@@ -332,3 +355,27 @@ class LeadUpdateSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.required = False
+
+
+# ── Reassign Serializer (for PATCH /leads/<id>/reassign/) ──────────────────
+
+class LeadReassignSerializer(serializers.Serializer):
+    """
+    Accepts a new assignee UUID and an optional reassignment note.
+    Restricted to Sales Senior Executive / Branch Manager / Super Admin.
+    """
+    assigned_to = serializers.UUIDField(
+        required=True,
+        allow_null=True,
+        help_text="UUID of the new assignee. Pass null to unassign the lead."
+    )
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_assigned_to(self, value):
+        """Resolve UUID → User instance, or return None (unassign)."""
+        if value is None:
+            return None
+        try:
+            return User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found for the given assigned_to UUID.")
