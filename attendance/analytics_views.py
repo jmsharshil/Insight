@@ -373,6 +373,20 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
 
         # Attendance data
         records = AttendanceRecord.objects.filter(student=s)
+        
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        date_filter = request.GET.get('date')
+        status_filter = request.GET.get('status')
+        
+        if start_date:
+            records = records.filter(date__gte=start_date)
+        if end_date:
+            records = records.filter(date__lte=end_date)
+        if date_filter:
+            records = records.filter(date=date_filter)
+        if status_filter:
+            records = records.filter(status=status_filter)
 
         total_days = records.exclude(status='on_leave').count()
         present_count = records.filter(status__in=['present', 'late', 'half_day']).count()
@@ -383,7 +397,12 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         # Check-in and check-out logs
         check_in_history = []
         check_out_history = []
+        day_wise_attendance = []
         for r in records.order_by('-date'):
+            day_wise_attendance.append({
+                'date': r.date,
+                'status': r.status
+            })
             if r.checked_in_at:
                 check_in_history.append({
                     'date': r.date,
@@ -398,6 +417,12 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
 
         # Violations
         violations = ViolationRecord.objects.filter(student=s).order_by('-date')
+        if start_date:
+            violations = violations.filter(date__gte=start_date)
+        if end_date:
+            violations = violations.filter(date__lte=end_date)
+        if date_filter:
+            violations = violations.filter(date=date_filter)
         violations_data = [{
             'id': str(v.id),
             'violation_type': v.violation_type,
@@ -528,6 +553,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                     'absent_count': absent_count,
                     'late_count': late_count,
                 },
+                'day_wise_attendance': day_wise_attendance,
                 'check_in_history': check_in_history,
                 'check_out_history': check_out_history,
                 'violations': violations_data,
