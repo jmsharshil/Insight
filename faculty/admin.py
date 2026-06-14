@@ -5,6 +5,8 @@ from faculty.models import *
 class FacultyProfileAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'branch', 'employee_id', 'photo', 'qualification', 'specialization', 'subject_expertise', 'level', 'employment_type',)
     list_filter = ('is_active', 'employment_type', 'branch', 'created_at', 'level', 'user', 'joining_date',)
+    search_fields = ['employee_id', 'user__name', 'specialization']
+
 
 @admin.register(SubjectHourlyRate)
 class SubjectHourlyRateAdmin(admin.ModelAdmin):
@@ -20,3 +22,4 @@ class FacultyQRScanLogAdmin(admin.ModelAdmin):
 class SessionReportAdmin(admin.ModelAdmin):
     list_display = ('id', 'faculty', 'branch', 'batch', 'subject', 'timetable_slot', 'session_date', 'chapter_covered', 'topics_covered', 'completion_percentage',)
     list_filter = ('session_date', 'status', 'branch', 'subject', 'updated_at', 'timetable_slot', 'batch', 'created_at',)
+    search_fields = ['chapter_covered']

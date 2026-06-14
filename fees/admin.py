@@ -14,6 +14,10 @@ class FeeStructureAdmin(admin.ModelAdmin):
 class StudentFeeAdmin(admin.ModelAdmin):
     list_display = ('id', 'student', 'fee_structure', 'total_amount', 'discount', 'discount_reason', 'amount_paid', 'status', 'due_date', 'created_at',)
     list_filter = ('due_date', 'status', 'updated_at', 'fee_structure', 'created_at', 'student',)
+    search_fields = ['student__first_name', 'student__surname', 'student__email', 'fee_structure__name']
+    ordering = ['-created_at']
+    date_hierarchy = 'due_date'
+    list_editable = ('total_amount', 'discount', 'discount_reason', 'amount_paid', 'status', 'due_date',)
 
 @admin.register(InstallmentPlan)
 class InstallmentPlanAdmin(admin.ModelAdmin):
