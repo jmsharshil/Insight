@@ -6,7 +6,7 @@ class ChatRoomAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'avatar', 'room_type', 'direct_hash', 'is_active', 'created_at',)
     search_fields = ('name',)
     list_filter = ('created_at', 'room_type', 'is_active',)
-    readonly_fields = ('id','created_at', 'updated_at','direct_hash')
+    readonly_fields = ('id','created_at', 'direct_hash')
     ordering = ['-created_at']
 
 @admin.register(Message)
