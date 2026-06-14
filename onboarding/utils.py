@@ -62,7 +62,7 @@ class AdmissionService:
     @transaction.atomic
     def create_admission(validated_data: dict, user=None) -> Admission:
         """
-        Creates an Admission record with status='approval_pending'.
+        Creates an Admission record with status='form_pending'.
         Auto-assigns a counsellor via round-robin if none is provided.
         No login credentials are created at this stage —
         credentials are only issued when the counsellor sets status to 'enrolled'.

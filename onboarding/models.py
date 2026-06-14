@@ -17,12 +17,13 @@ from leads.models import (
 )
 
 ADMISSION_STATUS_CHOICES = [
-    ('approval_pending', 'Approval Pending'),
-    ('approved',          'Approved'),
+    ('form_pending',      'Form Pending'),
     ('payment_pending',   'Payment Pending'),
     ('payment_submitted', 'Payment Submitted'),
     ('rejected',          'Rejected'),
     ('enrolled',          'Enrolled'),
+    ('approval_pending',  'Approval Pending'),
+    ('approved',          'Approved'),
 ]
 
 # ── 5 Bank Accounts (round-robin assignment) ─────────────────────────────────
@@ -174,7 +175,7 @@ class Admission(models.Model):
     )
 
     # ── Status & Timestamps ───────────────────────────────────────────────────
-    status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='approval_pending')
+    status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='form_pending')
     note         = models.TextField(blank=True, help_text="Latest note added during status update.")
     submitted_at = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)

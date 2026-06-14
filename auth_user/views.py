@@ -450,7 +450,7 @@ class DeleteUserAPIView(APIView):
 class UserListAPIView(APIView):
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['role', 'is_active']
+    filterset_fields = ['is_active']
     search_fields = ['name', 'email', 'phone']
     ordering_fields = '__all__'
 
@@ -467,11 +467,15 @@ class UserListAPIView(APIView):
             ).order_by('-created_at')
         else:
             users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
-        role = self.request.query_params.get('role')
+        roles = self.request.query_params.getlist('role')
         is_active = self.request.query_params.get('is_active')
 
-        if role:
-            users = users.filter(role=role)
+        if roles:
+            # Handle comma-separated list if passed as ?role=admin,student
+            if len(roles) == 1 and ',' in roles[0]:
+                roles = [r.strip() for r in roles[0].split(',')]
+            users = users.filter(role__in=roles)
+            
         if is_active:
             users = users.filter(is_active=is_active.lower() == 'true')
         

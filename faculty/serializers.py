@@ -277,6 +277,7 @@ class SessionReportSerializer(serializers.ModelSerializer):
 
 
 class SessionReportCreateSerializer(serializers.Serializer):
+    faculty_id = serializers.UUIDField(required=False, allow_null=True)
     batch_id = serializers.UUIDField()
     subject_id = serializers.UUIDField()
     timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)

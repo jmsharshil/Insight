@@ -530,7 +530,7 @@ class LatePolicyView(APIView):
         if role not in LATE_POLICY_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         bid = _user_branch_id(request.user)
-        qs = LateEntryPolicy.objects.all()
+        qs = LateEntryPolicy.objects.select_related('branch').all()
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
         if role != 'super_admin' and bid:

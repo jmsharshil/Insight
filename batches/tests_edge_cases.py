@@ -10,7 +10,7 @@ from datetime import date, time, timedelta
 from decimal import Decimal, InvalidOperation
 import json
 
-from batches.models import CourseLevel, Course, Subject, Batch, BatchStudent, BatchFaculty, Classroom, TimetableSlot
+from batches.models import Course, Subject, Batch, BatchStudent, BatchFaculty, Classroom, TimetableSlot
 from batches.validators import check_faculty_clash, check_classroom_clash
 from fees.models import (
     FeeStructure, StudentFee, InstallmentPlan, InstallmentItem,
@@ -18,6 +18,7 @@ from fees.models import (
 )
 from fees.utils import update_student_fee_status
 from auth_user.models import User
+from .models import CourseLevel
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -131,7 +132,7 @@ class BatchEdgeCaseTest(TestCase):
     def test_batch_end_date_before_start_date(self):
         """Test batch with end date before start date (should be allowed but invalid business logic)."""
         batch = Batch.objects.create(
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             name='Invalid Dates',
             batch_code='INV01',
             start_date=date(2025, 1, 1),
@@ -144,7 +145,7 @@ class BatchEdgeCaseTest(TestCase):
     def test_batch_same_start_and_end_date(self):
         """Test batch with same start and end date."""
         batch = Batch.objects.create(
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             name='One Day',
             batch_code='ONEDAY',
             start_date=date(2025, 1, 1),
@@ -156,7 +157,7 @@ class BatchEdgeCaseTest(TestCase):
     def test_batch_max_students_zero(self):
         """Test batch with zero max students."""
         batch = Batch.objects.create(
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             name='No Students',
             batch_code='NOSTU',
             start_date=date(2025, 1, 1),
@@ -168,7 +169,7 @@ class BatchEdgeCaseTest(TestCase):
     def test_batch_max_students_exceeded(self):
         """Test enrolling more students than max_students."""
         batch = Batch.objects.create(
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             name='Limited',
             batch_code='LIM01',
             start_date=date(2025, 1, 1),
@@ -190,7 +191,7 @@ class BatchEdgeCaseTest(TestCase):
     def test_batch_duplicate_student_enrollment(self):
         """Test enrolling same student twice in same batch."""
         batch = Batch.objects.create(
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             name='Test',
             batch_code='TST01',
             start_date=date(2025, 1, 1),
@@ -211,7 +212,7 @@ class TimetableEdgeCaseTest(TestCase):
     def setUp(self):
         self.course = Course.objects.create(name='Test', code='TST01', course_type='cseet')
         self.batch = Batch.objects.create(
-            course=self.course, name='Batch', batch_code='B01',
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0], name='Batch', batch_code='B01',
             start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
         )
         self.subject = Subject.objects.create(level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0], name='Sub', code='S01')
@@ -314,7 +315,7 @@ class FeeStructureEdgeCaseTest(TestCase):
         """Test fee structure with zero amount."""
         fee = FeeStructure.objects.create(
             name='Free Course',
-            course=self.course,
+            level=CourseLevel.objects.get_or_create(course=self.course, order=1, defaults={'name':'L1'})[0],
             total_amount=0,
         )
         self.assertEqual(fee.total_amount, 0)
