@@ -1650,23 +1650,38 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
             batches = batches.filter(id__in=faculty_batches)
 
         records_qs = AttendanceRecord.objects.all()
+        if getattr(user, 'organization', None):
+            records_qs = records_qs.filter(branch__organization=user.organization)
+        if branch_id:
+            records_qs = records_qs.filter(branch_id=branch_id)
+        if role == 'faculty':
+            faculty_batch_ids = list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)) if hasattr(user, 'faculty_profile') else []
+            records_qs = records_qs.filter(batch_id__in=faculty_batch_ids)
+
         if date_from:
             try:
                 date_from_parsed = timezone.datetime.strptime(date_from, '%Y-%m-%d').date()
                 records_qs = records_qs.filter(date__gte=date_from_parsed)
             except ValueError:
-                pass
+                date_from_parsed = None
+        else:
+            date_from_parsed = None
+
         if date_to:
             try:
                 date_to_parsed = timezone.datetime.strptime(date_to, '%Y-%m-%d').date()
                 records_qs = records_qs.filter(date__lte=date_to_parsed)
             except ValueError:
-                pass
-                
+                date_to_parsed = None
+        else:
+            date_to_parsed = None
+
         # If no date filter is provided, we default to today
         if not date_from and not date_to:
             target_date = timezone.now().date()
             records_qs = records_qs.filter(date=target_date)
+            date_from_parsed = target_date
+            date_to_parsed = target_date
 
         batch_wise_data = []
         for b in batches:
@@ -1678,6 +1693,26 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
 
             total_students = Student.objects.filter(batch=b, is_active=True).count()
 
+            daily_attendance = []
+            daily_records = b_records.values('date').annotate(
+                total_count=Count('id'),
+                present_count=Count('id', filter=Q(status__in=['present', 'late', 'half_day'])),
+                absent_count=Count('id', filter=Q(status='absent'))
+            ).order_by('date')
+
+            for dr in daily_records:
+                day_total = dr['total_count']
+                day_present = dr['present_count']
+                day_absent = dr['absent_count']
+                day_pct = round((day_present / day_total) * 100, 2) if day_total > 0 else 0.0
+                daily_attendance.append({
+                    'date': dr['date'].strftime('%Y-%m-%d'),
+                    'present_count': day_present,
+                    'absent_count': day_absent,
+                    'attendance_percentage': day_pct,
+                    'total_count': day_total,
+                })
+
             batch_wise_data.append({
                 'batch_id': str(b.id),
                 'batch_name': b.name,
@@ -1685,7 +1720,8 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
                 'total_students': total_students,
                 'present_count': present,
                 'absent_count': absent,
-                'attendance_percentage': pct
+                'attendance_percentage': pct,
+                'daily_attendance': daily_attendance
             })
 
         return Response({
