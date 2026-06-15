@@ -522,18 +522,26 @@ class SessionListCreateView(APIView):
 
     def post(self, request):
         role = _user_role(request.user)
-        if role != 'faculty':
-            return Response({'success': False, 'message': 'Faculty only.'}, status=status.HTTP_403_FORBIDDEN)
+        if role not in SESSION_VIEW_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         ser = SessionReportCreateSerializer(data=request.data)
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+        d = ser.validated_data
         try:
             qs = FacultyProfile.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            fp = qs.get(user=request.user)
+            
+            if role == 'faculty':
+                fp = qs.get(user=request.user)
+            else:
+                fac_id = d.get('faculty_id')
+                if not fac_id:
+                    return Response({'success': False, 'message': 'faculty_id is required for admins.'}, status=status.HTTP_400_BAD_REQUEST)
+                fp = qs.get(id=fac_id)
         except FacultyProfile.DoesNotExist:
             return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
