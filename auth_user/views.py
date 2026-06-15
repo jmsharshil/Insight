@@ -127,6 +127,18 @@ class LoginAPIView(APIView):
             if user.profile_pic and hasattr(user.profile_pic, 'url'):
                 profile_pic_url = request.build_absolute_uri(user.profile_pic.url)
 
+            # Determine the actual Student Profile ID (UUID)
+            from students.models import Student
+            actual_student_id = None
+            if user.role == 'student':
+                student_profile = Student.objects.filter(user=user).first()
+                if student_profile:
+                    actual_student_id = str(student_profile.id)
+            elif user.role in ['parent', 'parents'] and getattr(user, 'linked_student', None):
+                student_profile = Student.objects.filter(user=user.linked_student).first()
+                if student_profile:
+                    actual_student_id = str(student_profile.id)
+
             return Response({
                 "message": "Login successful",
                 "access": str(refresh.access_token),
@@ -142,11 +154,7 @@ class LoginAPIView(APIView):
                     "profile_pic": profile_pic_url,
                     "organization": str(user.organization.id) if user.organization else None,
                     "organization_name": user.organization.name if user.organization else None,
-                    "linked_student": {
-                        "id": str(user.linked_student.id),
-                        "name": user.linked_student.name,
-                        "email": user.linked_student.email,
-                    } if user.linked_student else None,
+                    "linked_student": actual_student_id,
                 }
             })
         return Response(
