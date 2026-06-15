@@ -9,6 +9,7 @@ from .analytics_views import (
     AttendanceHistoryAPIView, BatchAttendanceRegisterAPIView, FacultyAttendanceAPIView,
     FacultyAttendanceDetailAPIView, AttendanceAnalyticsAPIView, DefaulterStudentsAPIView,
     ViolationsAPIView, ViolationDetailAPIView, AttendanceExportAPIView, AttendanceAuditAPIView,
+    BatchWiseAttendanceAPIView,
 )
 
 urlpatterns = [
@@ -41,6 +42,7 @@ urlpatterns = [
     path('attendance/batches/<uuid:batch_id>/register/', BatchAttendanceRegisterAPIView.as_view(), name='attendance-batch-register'),
     path('attendance/faculty/', FacultyAttendanceAPIView.as_view(), name='attendance-faculty-list'),
     path('attendance/faculty/<uuid:faculty_id>/', FacultyAttendanceDetailAPIView.as_view(), name='attendance-faculty-detail'),
+    path('attendance/batch-wise/', BatchWiseAttendanceAPIView.as_view(), name='attendance-batch-wise'),
     path('attendance/analytics/', AttendanceAnalyticsAPIView.as_view(), name='attendance-analytics'),
     path('attendance/defaulters/', DefaulterStudentsAPIView.as_view(), name='attendance-defaulters'),
     path('attendance/violations/', ViolationsAPIView.as_view(), name='attendance-violations'),
