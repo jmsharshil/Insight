@@ -248,6 +248,64 @@ class AdmissionDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         serializer.save()
+
+        # Auto-assign bank and send payment email directly if form is submitted
+        if admission.status == 'form_pending' and admission.dob is not None:
+            try:
+                from .models import BANK_ACCOUNTS, AdmissionStatusHistory
+                bank_index = (admission.id - 1) % len(BANK_ACCOUNTS)
+                assigned_bank = BANK_ACCOUNTS[bank_index]
+
+                admission.assigned_bank_id = assigned_bank['id']
+                admission.status = 'payment_pending'
+                admission.note = 'Form submitted. Waiting for fee payment.'
+                admission.save(update_fields=['assigned_bank_id', 'status', 'note', 'updated_at'])
+
+                AdmissionStatusHistory.objects.create(
+                    admission=admission,
+                    status='payment_pending',
+                    changed_by=None,
+                    note='Form submitted. Waiting for fee payment.',
+                )
+
+                if admission.email:
+                    from core.email import send_email
+                    payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
+
+                    text_content = (
+                        f"Hello {admission.first_name},\n\n"
+                        f"Thank you for submitting your admission form. "
+                        f"Please complete your fee payment to proceed with your enrollment.\n\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"BANK DETAILS FOR FEE PAYMENT\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Bank Name       : {assigned_bank['bank_name']}\n"
+                        f"Account Holder  : {assigned_bank['account_holder']}\n"
+                        f"Account Number  : {assigned_bank['account_number']}\n"
+                        f"IFSC Code       : {assigned_bank['ifsc_code']}\n"
+                        f"Branch          : {assigned_bank['branch']}\n"
+                        f"Account Type    : {assigned_bank['account_type']}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"After making the payment, please click the link below to "
+                        f"upload your payment screenshot and transaction ID:\n\n"
+                        f"{payment_link}\n\n"
+                        f"If you have any questions, feel free to reach out to your counsellor.\n\n"
+                        f"Best Regards,\n"
+                        f"Insight Institute Team"
+                    )
+
+                    send_email(
+                        to=admission.email,
+                        subject="Complete Your Fee Payment",
+                        text=text_content,
+                        template=None,
+                        template_context={},
+                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                    )
+                    logger.info(f"Payment email sent directly to {admission.email}")
+            except Exception as e:
+                logger.error(f"Failed to process bank assignment and email: {e}")
+
         return Response(
             {'success': True, 'message': 'Admission updated successfully.',
              'data': AdmissionDetailSerializer(admission).data},
@@ -383,10 +441,10 @@ class AdmissionApproveView(APIView):
 
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # STEP 2: Second Approval (payment_submitted → enrolled)
+        # STEP 2: Second Approval (payment_submitted / approval_pending → enrolled)
         #   → Verify payment, create user accounts + student profile
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if admission.status == 'payment_submitted':
+        if admission.status in ['payment_submitted', 'approval_pending']:
             try:
                 AdmissionService.update_status(
                     admission  = admission,
@@ -542,7 +600,7 @@ class AdmissionPaymentSubmitView(APIView):
         admission.transaction_id       = serializer.validated_data['transaction_id']
         admission.payment_note         = serializer.validated_data.get('payment_note', '')
         admission.payment_submitted_at = timezone.now()
-        admission.status               = 'payment_submitted'
+        admission.status               = 'approval_pending'
         admission.save(update_fields=[
             'payment_screenshot', 'transaction_id', 'payment_note',
             'payment_submitted_at', 'status', 'updated_at',
@@ -551,7 +609,7 @@ class AdmissionPaymentSubmitView(APIView):
         from .models import AdmissionStatusHistory
         AdmissionStatusHistory.objects.create(
             admission=admission,
-            status='payment_submitted',
+            status='approval_pending',
             changed_by=None,
             note=f"Payment proof submitted by student. Transaction ID: {admission.transaction_id}",
         )
