@@ -42,14 +42,16 @@ def auto_assign_batch(student):
     course_type = admission.course or 'cseet'
 
     # ── Step 1: find an existing batch with room ──────────────────────────────
+    # Course has no course_type; filter via CourseLevel which does.
     existing_batches = (
         Batch.objects
         .filter(
-            course__course_type=course_type,
+            course__levels__course_type=course_type,
             batch_attempt=batch_attempt,
             attempt_year=attempt_year,
             is_active=True,
         )
+        .distinct()
         .order_by('created_at')
     )
 
@@ -62,12 +64,16 @@ def auto_assign_batch(student):
 
     # ── Step 2: create a new batch if none available ──────────────────────────
     if batch is None:
-        # Resolve Course object from course_type
-        course_obj = Course.objects.filter(course_type=course_type).first()
+        # Resolve Course via CourseLevel.course_type, then fall back to name match
+        course_obj = (
+            Course.objects.filter(levels__course_type=course_type, is_active=True).first()
+            or Course.objects.filter(name__icontains=course_type, is_active=True).first()
+            or Course.objects.filter(is_active=True).first()
+        )
         if course_obj is None:
             raise ValueError(
-                f"No Course found with course_type='{course_type}'. "
-                "Please create one before enrolling students."
+                f"No active Course found for course_type='{course_type}'. "
+                "Please create a Course with a matching CourseLevel before enrolling students."
             )
 
         # Atomically increment the sequence counter

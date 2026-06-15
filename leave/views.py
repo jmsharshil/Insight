@@ -113,8 +113,11 @@ class LeaveListCreateView(APIView):
         if d['leave_type'] != 'sick' and d['from_date'] < today:
             return Response({'success': False, 'message': 'Leave date cannot be in the past.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get policy
-        bid = _user_branch_id(request.user)
+        # Get branch and policy
+        bid = request.data.get('branch_id') or _user_branch_id(request.user)
+        if not bid:
+            return Response({'success': False, 'message': 'Branch required. Please specify branch_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        
         policy = LeavePolicy.objects.filter(branch_id=bid, leave_type=d['leave_type'], is_active=True).first()
 
         # Advance notice check (except sick leave)
