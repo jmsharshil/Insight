@@ -67,6 +67,8 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
     """
 
     def setUp(self):
+        from batches.models import Course
+        self.course = Course.objects.create(name='CSEET', code='CSEET')
         self.fee_structure = FeeStructure.objects.create(
             name='CSEET Fee 2026',
             total_amount=30000,
