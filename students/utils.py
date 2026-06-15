@@ -34,11 +34,12 @@ class StudentService:
         Creates the Student master profile, links it to the login user account,
         and generates the digital ID card if a photo is available.
         """
-        if hasattr(admission, 'student_profile'):
+        if Student.objects.filter(admission=admission).exists():
+            existing = Student.objects.get(admission=admission)
             logger.warning(
                 f"Attempted to create duplicate student for admission {admission.id}"
             )
-            return admission.student_profile
+            return existing
 
         student = Student(
             admission           = admission,
