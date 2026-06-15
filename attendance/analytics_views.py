@@ -1624,6 +1624,7 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
             return Response({'success': False, 'message': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         # Filters
+        date = request.GET.get('date')
         date_from = request.GET.get('date_from')
         date_to = request.GET.get('date_to')
         branch_id = request.GET.get('branch')
@@ -1658,30 +1659,40 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
             faculty_batch_ids = list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)) if hasattr(user, 'faculty_profile') else []
             records_qs = records_qs.filter(batch_id__in=faculty_batch_ids)
 
-        if date_from:
+        if date:
             try:
-                date_from_parsed = timezone.datetime.strptime(date_from, '%Y-%m-%d').date()
-                records_qs = records_qs.filter(date__gte=date_from_parsed)
+                date_parsed = timezone.datetime.strptime(date, '%Y-%m-%d').date()
+                records_qs = records_qs.filter(date=date_parsed)
+                date_from_parsed = date_parsed
+                date_to_parsed = date_parsed
             except ValueError:
                 date_from_parsed = None
-        else:
-            date_from_parsed = None
-
-        if date_to:
-            try:
-                date_to_parsed = timezone.datetime.strptime(date_to, '%Y-%m-%d').date()
-                records_qs = records_qs.filter(date__lte=date_to_parsed)
-            except ValueError:
                 date_to_parsed = None
         else:
-            date_to_parsed = None
+            if date_from:
+                try:
+                    date_from_parsed = timezone.datetime.strptime(date_from, '%Y-%m-%d').date()
+                    records_qs = records_qs.filter(date__gte=date_from_parsed)
+                except ValueError:
+                    date_from_parsed = None
+            else:
+                date_from_parsed = None
 
-        # If no date filter is provided, we default to today
-        if not date_from and not date_to:
-            target_date = timezone.now().date()
-            records_qs = records_qs.filter(date=target_date)
-            date_from_parsed = target_date
-            date_to_parsed = target_date
+            if date_to:
+                try:
+                    date_to_parsed = timezone.datetime.strptime(date_to, '%Y-%m-%d').date()
+                    records_qs = records_qs.filter(date__lte=date_to_parsed)
+                except ValueError:
+                    date_to_parsed = None
+            else:
+                date_to_parsed = None
+
+            # If no date filter is provided, default to today
+            if not date_from and not date_to:
+                target_date = timezone.now().date()
+                records_qs = records_qs.filter(date=target_date)
+                date_from_parsed = target_date
+                date_to_parsed = target_date
 
         batch_wise_data = []
         for b in batches:
@@ -1724,8 +1735,21 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
                 'daily_attendance': daily_attendance
             })
 
-        return Response({
+        response_data = {
             'success': True,
             'count': len(batch_wise_data),
             'data': batch_wise_data
-        })
+        }
+
+        if date_from_parsed and date_to_parsed:
+            if date_from_parsed == date_to_parsed:
+                response_data['date'] = date_from_parsed.strftime('%Y-%m-%d')
+            else:
+                response_data['date_from'] = date_from_parsed.strftime('%Y-%m-%d')
+                response_data['date_to'] = date_to_parsed.strftime('%Y-%m-%d')
+        elif date_from_parsed:
+            response_data['date_from'] = date_from_parsed.strftime('%Y-%m-%d')
+        elif date_to_parsed:
+            response_data['date_to'] = date_to_parsed.strftime('%Y-%m-%d')
+
+        return Response(response_data)
