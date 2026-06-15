@@ -42,9 +42,9 @@ def compute_attendance_percentage(student_id, month=None, batch_id=None):
     return present_count, total_count, percentage
 
 
-def get_batch_attendance_sheet(batch_id, month):
+def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
     """
-    Build an attendance pivot sheet for a batch.
+    Build an attendance pivot sheet for a batch, or all batches/branches.
     Each cell includes status, checked_in_at, and checked_out_at.
 
     Returns:
@@ -70,10 +70,16 @@ def get_batch_attendance_sheet(batch_id, month):
         return {}
 
     records = AttendanceRecord.objects.filter(
-        batch_id=batch_id,
         date__year=year,
         date__month=mon,
-    ).select_related('student').order_by('student', 'date')
+    ).select_related('student', 'student__user', 'student__branch', 'student__batch')
+
+    if batch_id:
+        records = records.filter(batch_id=batch_id)
+    if branch_id:
+        records = records.filter(branch_id=branch_id)
+
+    records = records.order_by('student', 'date')
 
     sheet = {}
 
@@ -83,15 +89,21 @@ def get_batch_attendance_sheet(batch_id, month):
         if sid not in sheet:
             # Safely extract student info
             try:
-                student_name = record.student.user.name if hasattr(record.student, 'user') else str(record.student)
+                student_name = record.student.user.name if hasattr(record.student, 'user') and record.student.user else str(record.student)
                 roll_number = record.student.roll_number if hasattr(record.student, 'roll_number') else ''
+                branch_name = record.student.branch.name if hasattr(record.student, 'branch') and record.student.branch else ''
+                batch_name = record.student.batch.name if hasattr(record.student, 'batch') and record.student.batch else ''
             except Exception:
                 student_name = str(record.student_id)
                 roll_number = ''
+                branch_name = ''
+                batch_name = ''
 
             sheet[sid] = {
                 'name': student_name,
                 'roll_number': roll_number,
+                'branch_name': branch_name,
+                'batch_name': batch_name,
                 'dates': {},
             }
 
