@@ -217,5 +217,5 @@ class AdmissionStatusHistory(models.Model):
         ordering = ['changed_at']
 
     def __str__(self):
-        changed_by = self.changed_by.get_full_name() if self.changed_by else 'System'
+        changed_by = self.changed_by.get_username() if self.changed_by else 'System'
         return f"{self.admission} → {self.status} by {changed_by}"

@@ -233,9 +233,10 @@ class AdmissionDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check if the student has already filled out the form. 
+        # Check if the student has already filled out the form.
         # (Auto-created admissions have dob=None until the student submits the form)
-        if request.method == 'POST' and admission.dob is not None:
+        is_student_form_submit = (request.method == 'POST')
+        if is_student_form_submit and admission.dob is not None:
             return Response(
                 {'success': False, 'message': 'You have already submitted this admission form.'},
                 status=status.HTTP_400_BAD_REQUEST,
