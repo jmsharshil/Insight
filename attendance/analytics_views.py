@@ -1600,3 +1600,89 @@ class AttendanceAuditAPIView(SafeAPIView):
             'count': len(audit_logs),
             'data': audit_logs
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 14. GET /api/attendance/batch-wise/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class BatchWiseAttendanceAPIView(SafeAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        role = getattr(user, 'role', None)
+
+        if role in ['student', 'parents']:
+            return Response({'success': False, 'message': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Filters
+        date_from = request.GET.get('date_from')
+        date_to = request.GET.get('date_to')
+        branch_id = request.GET.get('branch')
+        faculty_id = request.GET.get('faculty')
+
+        from batches.models import Batch
+        from students.models import Student
+        from faculty.models import FacultyProfile
+
+        batches = Batch.objects.all()
+
+        if getattr(user, 'organization', None):
+            batches = batches.filter(branch__organization=user.organization)
+
+        if role == 'faculty':
+            batch_ids = list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)) if hasattr(user, 'faculty_profile') else []
+            batches = batches.filter(id__in=batch_ids)
+
+        if branch_id:
+            batches = batches.filter(branch_id=branch_id)
+        
+        if faculty_id:
+            faculty_batches = list(FacultyProfile.objects.filter(id=faculty_id).values_list('batch_assignments__batch_id', flat=True))
+            batches = batches.filter(id__in=faculty_batches)
+
+        records_qs = AttendanceRecord.objects.all()
+        if date_from:
+            try:
+                date_from_parsed = timezone.datetime.strptime(date_from, '%Y-%m-%d').date()
+                records_qs = records_qs.filter(date__gte=date_from_parsed)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                date_to_parsed = timezone.datetime.strptime(date_to, '%Y-%m-%d').date()
+                records_qs = records_qs.filter(date__lte=date_to_parsed)
+            except ValueError:
+                pass
+                
+        # If no date filter is provided, we default to today
+        if not date_from and not date_to:
+            target_date = timezone.now().date()
+            records_qs = records_qs.filter(date=target_date)
+
+        batch_wise_data = []
+        for b in batches:
+            b_records = records_qs.filter(batch=b).exclude(status='on_leave')
+            total = b_records.count()
+            present = b_records.filter(status__in=['present', 'late', 'half_day']).count()
+            absent = b_records.filter(status='absent').count()
+            pct = round((present / total) * 100, 2) if total > 0 else 0.0
+
+            total_students = Student.objects.filter(batch=b, is_active=True).count()
+
+            batch_wise_data.append({
+                'batch_id': str(b.id),
+                'batch_name': b.name,
+                'batch_code': getattr(b, 'batch_code', None),
+                'total_students': total_students,
+                'present_count': present,
+                'absent_count': absent,
+                'attendance_percentage': pct
+            })
+
+        return Response({
+            'success': True,
+            'count': len(batch_wise_data),
+            'data': batch_wise_data
+        })
