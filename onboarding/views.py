@@ -233,9 +233,10 @@ class AdmissionDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check if the student has already filled out the form. 
+        # Check if the student has already filled out the form.
         # (Auto-created admissions have dob=None until the student submits the form)
-        if request.method == 'POST' and admission.dob is not None:
+        is_student_form_submit = (request.method == 'POST')
+        if is_student_form_submit and admission.dob is not None:
             return Response(
                 {'success': False, 'message': 'You have already submitted this admission form.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -248,6 +249,98 @@ class AdmissionDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         serializer.save()
+
+        # ── After student submits the form (POST only): assign bank & send fees email ──
+        if is_student_form_submit:
+            try:
+                from .models import BANK_ACCOUNTS, AdmissionStatusHistory
+
+                bank_index = (admission.id - 1) % len(BANK_ACCOUNTS)
+                assigned_bank = BANK_ACCOUNTS[bank_index]
+
+                admission.assigned_bank_id = assigned_bank['id']
+                admission.status = 'payment_pending'
+                admission.note = 'Form submitted. Waiting for fee payment.'
+                admission.save(update_fields=['assigned_bank_id', 'status', 'note', 'updated_at'])
+
+                AdmissionStatusHistory.objects.create(
+                    admission=admission,
+                    status='payment_pending',
+                    changed_by=None,
+                    note='Form submitted. Waiting for fee payment.',
+                )
+
+                if admission.email:
+                    try:
+                        from core.email import send_email
+                        payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
+
+                        text_content = (
+                            f"Hello {admission.first_name},\n\n"
+                            f"Thank you for submitting your admission form. "
+                            f"Please complete your fee payment to proceed with your enrollment.\n\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"BANK DETAILS FOR FEE PAYMENT\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"Bank Name       : {assigned_bank['bank_name']}\n"
+                            f"Account Holder  : {assigned_bank['account_holder']}\n"
+                            f"Account Number  : {assigned_bank['account_number']}\n"
+                            f"IFSC Code       : {assigned_bank['ifsc_code']}\n"
+                            f"Branch          : {assigned_bank['branch']}\n"
+                            f"Account Type    : {assigned_bank['account_type']}\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                            f"After making the payment, please click the link below to "
+                            f"upload your payment screenshot and transaction ID:\n\n"
+                            f"{payment_link}\n\n"
+                            f"If you have any questions, feel free to reach out to your counsellor.\n\n"
+                            f"Best Regards,\n"
+                            f"Insight Institute Team"
+                        )
+
+                        send_email(
+                            to=admission.email,
+                            subject="Complete Your Fee Payment",
+                            text=text_content,
+                            template=None,
+                            template_context={},
+                            organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                        )
+                        logger.info(
+                            f"Payment email sent to {admission.email} for admission {admission.id} "
+                            f"with bank: {assigned_bank['bank_name']}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send payment email to {admission.email}: {e}")
+
+            except Exception as e:
+                logger.error(f"Post-submission processing failed for admission {admission.id}: {e}")
+
+            counsellor_data = None
+            if admission.assigned_counsellor:
+                counsellor_data = {
+                    'id':    str(admission.assigned_counsellor.id),
+                    'name':  admission.assigned_counsellor.name,
+                    'email': admission.assigned_counsellor.email,
+                }
+
+            return Response(
+                {
+                    'success': True,
+                    'message': (
+                        'Your admission form has been submitted successfully. '
+                        'We have sent you an email with bank details for fee payment. '
+                        'Please check your inbox to complete the process.'
+                    ),
+                    'data': {
+                        'admission_id':        admission.id,
+                        'status':              admission.status,
+                        'name':                f"{admission.first_name} {admission.surname}".strip(),
+                        'assigned_counsellor': counsellor_data,
+                    },
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
         return Response(
             {'success': True, 'message': 'Admission updated successfully.',
              'data': AdmissionDetailSerializer(admission).data},
