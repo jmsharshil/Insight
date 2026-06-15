@@ -253,7 +253,7 @@ if USE_AZURE_MEDIA:
                 "account_key": AZURE_ACCOUNT_KEY,
                 "azure_container": AZURE_CONTAINER,
                 "overwrite_files": AZURE_OVERWRITE_FILES,
-                "querystring_auth": False,
+                "expiration_secs": None,
             }
         },
         "staticfiles": {
