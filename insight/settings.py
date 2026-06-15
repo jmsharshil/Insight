@@ -245,7 +245,6 @@ if USE_AZURE_MEDIA:
     AZURE_URL_EXPIRATION_SECS = int(os.environ.get("AZURE_URL_EXPIRATION_SECS", "3600"))
     AZURE_OVERWRITE_FILES = False
 
-    # ✅ New-style Django 4.2/5.x storage config with Azure credentials
     STORAGES = {
         "default": {
             "BACKEND": "storages.backends.azure_storage.AzureStorage",
@@ -254,6 +253,7 @@ if USE_AZURE_MEDIA:
                 "account_key": AZURE_ACCOUNT_KEY,
                 "azure_container": AZURE_CONTAINER,
                 "overwrite_files": AZURE_OVERWRITE_FILES,
+                "querystring_auth": False,
             }
         },
         "staticfiles": {
