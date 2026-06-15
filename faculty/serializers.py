@@ -205,20 +205,27 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
 
         instance = super().update(instance, validated_data)
 
-        # Update draft payslips if they exist to reflect the new salary/hourly rate
+        # Update ALL payslips (including disbursed ones per user's requirement) to reflect the new salary/hourly rate
         from payroll.models import PayrollRun, PaySlip
         from payroll.utils import compute_payslip_for_faculty
 
-        draft_payrolls = PayrollRun.objects.filter(
-            status='draft',
+        all_payrolls = PayrollRun.objects.filter(
             payslips__faculty=instance
         ).distinct()
 
-        for pr in draft_payrolls:
-            # Delete old payslip for this faculty
-            pr.payslips.filter(faculty=instance).delete()
-            # Generate new payslip with updated salary info
-            compute_payslip_for_faculty(instance, pr.month, pr.year, pr)
+        for pr in all_payrolls:
+            old_ps = pr.payslips.filter(faculty=instance).first()
+            if old_ps:
+                was_disbursed = old_ps.is_disbursed
+                old_ps.delete()
+                
+                # Generate new payslip with updated salary info
+                new_ps = compute_payslip_for_faculty(instance, pr.month, pr.year, pr)
+                
+                # Restore disbursed status if needed
+                if was_disbursed:
+                    new_ps.is_disbursed = True
+                    new_ps.save(update_fields=['is_disbursed'])
             
             # Recalculate payroll run total amount
             total = sum(ps.net_salary for ps in pr.payslips.all())
