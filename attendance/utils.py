@@ -73,7 +73,7 @@ def get_batch_attendance_sheet(batch_id, month):
         batch_id=batch_id,
         date__year=year,
         date__month=mon,
-    ).select_related('student').order_by('student', 'date', 'session')
+    ).select_related('student').order_by('student', 'date')
 
     sheet = {}
 
@@ -106,7 +106,7 @@ def get_batch_attendance_sheet(batch_id, month):
             if isinstance(existing, dict):
                 existing = [existing]
             existing.append({
-                'session': record.session,
+                'session': getattr(record, 'session', None),
                 'status': record.status,
                 'checked_in_at': checked_in,
                 'checked_out_at': checked_out,
@@ -114,7 +114,7 @@ def get_batch_attendance_sheet(batch_id, month):
             sheet[sid]['dates'][date_key] = existing
         else:
             sheet[sid]['dates'][date_key] = {
-                'session': record.session,
+                'session': getattr(record, 'session', None),
                 'status': record.status,
                 'checked_in_at': checked_in,
                 'checked_out_at': checked_out,
