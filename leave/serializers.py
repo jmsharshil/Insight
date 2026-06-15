@@ -42,7 +42,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
-
+    is_first_approval_done = serializers.SerializerMethodField()
 
     leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
     half_day_session_display = serializers.CharField(source="get_half_day_session_display", read_only=True)
@@ -54,8 +54,11 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             'id', 'applied_by', 'applied_by_name', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'total_days',
             'status', 'status_display', 'is_auto_generated', 'supporting_document_url', 'created_at',
-            'leave_type_display', 'half_day_session_display', 'status_display'
+            'leave_type_display', 'half_day_session_display', 'status_display', 'is_first_approval_done'
         ]
+
+    def get_is_first_approval_done(self, obj):
+        return obj.first_approver is not None
            
 
     def get_applied_by_name(self, obj):
