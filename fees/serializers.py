@@ -38,6 +38,43 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         model = FeeStructure
         fields = ['name', 'course', 'batch', 'total_amount', 'description', 'is_active']
 
+    def create(self, validated_data):
+        fee_structure = super().create(validated_data)
+        
+        # Auto-assign the fee to students in the batch/course
+        from students.models import Student
+        
+        students_to_assign = set()
+        
+        if fee_structure.batch:
+            students = Student.objects.filter(batch=fee_structure.batch, is_active=True)
+            for s in students:
+                students_to_assign.add(s)
+        elif fee_structure.course:
+            # Fallback to course if no specific batch
+            students = Student.objects.filter(batch__course=fee_structure.course, is_active=True)
+            for s in students:
+                students_to_assign.add(s)
+
+        # Create StudentFee for each student
+        student_fees_to_create = []
+        for student in students_to_assign:
+            student_fees_to_create.append(
+                StudentFee(
+                    student=student,
+                    fee_structure=fee_structure,
+                    total_amount=fee_structure.total_amount,
+                    discount=0,
+                    amount_paid=0,
+                    status='approval_pending'
+                )
+            )
+            
+        if student_fees_to_create:
+            StudentFee.objects.bulk_create(student_fees_to_create)
+
+        return fee_structure
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Student Fee
@@ -58,10 +95,9 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
         return obj.student.full_name if obj.student else ''
 
     def get_course_name(self, obj):
-        fs_course = obj.fee_structure.course
-        if fs_course and fs_course.course_type:
-            from leads.models import COURSE_TYPE_CHOICES
-            return dict(COURSE_TYPE_CHOICES).get(fs_course.course_type, fs_course.course_type)
+        fs_course = obj.fee_structure.course if getattr(obj, 'fee_structure', None) else None
+        if fs_course:
+            return fs_course.name
         return None
 
     def get_batch_name(self, obj):
