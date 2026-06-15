@@ -237,7 +237,40 @@ High-level summary of today's attendance for the organization or specific branch
 
 ---
 
-### 2.2 List Students (with Attendance Aggregates)
+### 2.2 Batch-wise Attendance Summary
+**Used by:** Admins, Branch Managers (Web App)  
+**`GET /api/v1/attendance/batch-wise/`**
+
+Summary of attendance aggregated by batch. Useful for plotting batch-wise attendance comparisons.
+
+#### Query Params (Optional)
+- `date_from=2026-06-01`
+- `date_to=2026-06-13`
+- `branch=uuid`
+- `faculty=uuid`
+
+#### Response (200 OK)
+```json
+{
+  "success": true,
+  "count": 2,
+  "data": [
+    {
+      "batch_id": "batch-uuid-001",
+      "batch_name": "CS Executive",
+      "batch_code": "CSE-001",
+      "total_students": 45,
+      "present_count": 40,
+      "absent_count": 5,
+      "attendance_percentage": 88.89
+    }
+  ]
+}
+```
+
+---
+
+### 2.3 List Students (with Attendance Aggregates)
 **Used by:** Admins, Branch Managers, Faculty (Web App)  
 **`GET /api/v1/attendance/students/`**
 
