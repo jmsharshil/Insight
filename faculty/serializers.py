@@ -203,7 +203,29 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
                 user.phone = user_updates['phone']
             user.save()
 
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+
+        # Update draft payslips if they exist to reflect the new salary/hourly rate
+        from payroll.models import PayrollRun, PaySlip
+        from payroll.utils import compute_payslip_for_faculty
+
+        draft_payrolls = PayrollRun.objects.filter(
+            status='draft',
+            payslips__faculty=instance
+        ).distinct()
+
+        for pr in draft_payrolls:
+            # Delete old payslip for this faculty
+            pr.payslips.filter(faculty=instance).delete()
+            # Generate new payslip with updated salary info
+            compute_payslip_for_faculty(instance, pr.month, pr.year, pr)
+            
+            # Recalculate payroll run total amount
+            total = sum(ps.net_salary for ps in pr.payslips.all())
+            pr.total_amount = total
+            pr.save(update_fields=['total_amount'])
+
+        return instance
 
 
 # ═══ Subject Hourly Rate ═════════════════════════════════════════════════════

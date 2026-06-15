@@ -69,25 +69,42 @@ def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
     except (ValueError, AttributeError):
         return {}
 
+    from students.models import Student
+
+    student_qs = Student.objects.filter(is_active=True)
+    if batch_id:
+        student_qs = student_qs.filter(batch_id=batch_id)
+    if branch_id:
+        student_qs = student_qs.filter(branch_id=branch_id)
+
+    sheet = {}
+    for st in student_qs:
+        sid = str(st.id)
+        sheet[sid] = {
+            'name': f"{st.first_name} {st.surname}",
+            'roll_number': st.roll_number or '',
+            'branch_name': st.branch.name if st.branch else '',
+            'batch_name': st.batch.name if st.batch else '',
+            'dates': {},
+        }
+
     records = AttendanceRecord.objects.filter(
         date__year=year,
         date__month=mon,
     ).select_related('student', 'student__user', 'student__branch', 'student__batch')
 
     if batch_id:
-        records = records.filter(batch_id=batch_id)
+        records = records.filter(student__batch_id=batch_id)
     if branch_id:
-        records = records.filter(branch_id=branch_id)
+        records = records.filter(student__branch_id=branch_id)
 
     records = records.order_by('student', 'date')
-
-    sheet = {}
 
     for record in records:
         sid = str(record.student_id)
 
+        # If student isn't in sheet (e.g., inactive but has records, or we didn't filter strictly above)
         if sid not in sheet:
-            # Safely extract student info
             try:
                 student_name = record.student.user.name if hasattr(record.student, 'user') and record.student.user else str(record.student)
                 roll_number = record.student.roll_number if hasattr(record.student, 'roll_number') else ''
@@ -114,7 +131,6 @@ def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
         # If multiple sessions on same day, combine them into a list
         existing = sheet[sid]['dates'].get(date_key)
         if existing:
-            # Convert single entry to list if needed
             if isinstance(existing, dict):
                 existing = [existing]
             existing.append({
