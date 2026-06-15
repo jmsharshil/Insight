@@ -239,7 +239,7 @@ class QuestionView(APIView):
 
         serializer = QuestionInputSerializer(data=request.data, many=True)
         if not serializer.is_valid():
-            return Response({'success': False, 'message': 'Validation failed'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         total_new_marks = sum(item['marks'] for item in serializer.validated_data)
         current_marks = sum(q.marks for q in Question.objects.filter(exam=exam))

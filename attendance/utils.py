@@ -42,9 +42,9 @@ def compute_attendance_percentage(student_id, month=None, batch_id=None):
     return present_count, total_count, percentage
 
 
-def get_batch_attendance_sheet(batch_id, month):
+def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
     """
-    Build an attendance pivot sheet for a batch.
+    Build an attendance pivot sheet for a batch, or all batches/branches.
     Each cell includes status, checked_in_at, and checked_out_at.
 
     Returns:
@@ -69,29 +69,58 @@ def get_batch_attendance_sheet(batch_id, month):
     except (ValueError, AttributeError):
         return {}
 
-    records = AttendanceRecord.objects.filter(
-        batch_id=batch_id,
-        date__year=year,
-        date__month=mon,
-    ).select_related('student').order_by('student', 'date')
+    from students.models import Student
+
+    student_qs = Student.objects.filter(is_active=True)
+    if batch_id:
+        student_qs = student_qs.filter(batch_id=batch_id)
+    if branch_id:
+        student_qs = student_qs.filter(branch_id=branch_id)
 
     sheet = {}
+    for st in student_qs:
+        sid = str(st.id)
+        sheet[sid] = {
+            'name': f"{st.first_name} {st.surname}",
+            'roll_number': st.roll_number or '',
+            'branch_name': st.branch.name if st.branch else '',
+            'batch_name': st.batch.name if st.batch else '',
+            'dates': {},
+        }
+
+    records = AttendanceRecord.objects.filter(
+        date__year=year,
+        date__month=mon,
+    ).select_related('student', 'student__user', 'student__branch', 'student__batch')
+
+    if batch_id:
+        records = records.filter(student__batch_id=batch_id)
+    if branch_id:
+        records = records.filter(student__branch_id=branch_id)
+
+    records = records.order_by('student', 'date')
 
     for record in records:
         sid = str(record.student_id)
 
+        # If student isn't in sheet (e.g., inactive but has records, or we didn't filter strictly above)
         if sid not in sheet:
-            # Safely extract student info
             try:
-                student_name = record.student.user.name if hasattr(record.student, 'user') else str(record.student)
+                student_name = record.student.user.name if hasattr(record.student, 'user') and record.student.user else str(record.student)
                 roll_number = record.student.roll_number if hasattr(record.student, 'roll_number') else ''
+                branch_name = record.student.branch.name if hasattr(record.student, 'branch') and record.student.branch else ''
+                batch_name = record.student.batch.name if hasattr(record.student, 'batch') and record.student.batch else ''
             except Exception:
                 student_name = str(record.student_id)
                 roll_number = ''
+                branch_name = ''
+                batch_name = ''
 
             sheet[sid] = {
                 'name': student_name,
                 'roll_number': roll_number,
+                'branch_name': branch_name,
+                'batch_name': batch_name,
                 'dates': {},
             }
 
@@ -102,7 +131,6 @@ def get_batch_attendance_sheet(batch_id, month):
         # If multiple sessions on same day, combine them into a list
         existing = sheet[sid]['dates'].get(date_key)
         if existing:
-            # Convert single entry to list if needed
             if isinstance(existing, dict):
                 existing = [existing]
             existing.append({

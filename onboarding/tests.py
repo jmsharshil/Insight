@@ -22,6 +22,7 @@ def _make_admission(fee_structure=None, **overrides):
         'father_name': 'Test Father',
         'mother_name': 'Test Mother',
         'category': 'gen',
+        'dob': '2000-01-01',
         'email': 'teststu@integration.com',
         'email_parent': 'parent@integration.com',
         'phone_student': '9876543210',
@@ -73,18 +74,25 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
         )
         self.admission = _make_admission(fee_structure=self.fee_structure)
 
+    def enroll_admission(self):
+        from onboarding.utils import AdmissionService
+        from students.utils import StudentService
+        from auth_user.models import User
+        AdmissionService.update_status(self.admission, 'enrolled')
+        student_user = User.objects.filter(email=self.admission.email, role='student').first()
+        if student_user:
+            StudentService.create_from_admission(self.admission, student_user, None)
+
     # ── Test 1: User + Student are created when admission is enrolled ──────────
 
     def test_enrollment_creates_user(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         user = User.objects.filter(email='teststu@integration.com', role='student').first()
         self.assertIsNotNone(user, "Expected a User to be created on enrollment.")
 
     def test_enrollment_creates_student_profile(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         student = Student.objects.filter(admission=self.admission).first()
         self.assertIsNotNone(student, "Expected a Student profile to be created on enrollment.")
@@ -92,8 +100,7 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
     # ── Test 2: StudentFee is auto-created for the new Student ────────────────
 
     def test_enrollment_creates_student_fee(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         student = Student.objects.filter(admission=self.admission).first()
         self.assertIsNotNone(student, "Student should exist before checking fee.")
@@ -102,8 +109,7 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
         self.assertIsNotNone(student_fee, "StudentFee was not auto-created on enrollment.")
 
     def test_student_fee_uses_admission_fee_structure(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         student = Student.objects.filter(admission=self.admission).first()
         student_fee = StudentFee.objects.filter(student=student).first()
@@ -115,8 +121,7 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
         )
 
     def test_student_fee_total_amount_matches(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         student = Student.objects.filter(admission=self.admission).first()
         student_fee = StudentFee.objects.filter(student=student).first()
@@ -128,8 +133,7 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
         )
 
     def test_student_fee_initial_status_is_approval_pending(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         student = Student.objects.filter(admission=self.admission).first()
         student_fee = StudentFee.objects.filter(student=student).first()
@@ -143,8 +147,7 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
     # ── Test 3: No duplicate StudentFee if re-enrolled ────────────────────────
 
     def test_no_duplicate_student_fee_on_re_save(self):
-        self.admission.status = 'enrolled'
-        self.admission.save()
+        self.enroll_admission()
 
         student = Student.objects.filter(admission=self.admission).first()
         initial_count = StudentFee.objects.filter(student=student).count()

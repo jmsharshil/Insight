@@ -25,19 +25,21 @@ def auto_assign_batch(student):
 
     admission = student.admission
 
-    # Validate required fields
-    if not admission.attempt_year:
-        raise ValueError(
-            f"Admission {admission.id} has no attempt_year — cannot auto-assign batch."
-        )
-    if not admission.batch_attempt:
-        raise ValueError(
-            f"Admission {admission.id} has no batch_attempt — cannot auto-assign batch."
-        )
+    from django.utils import timezone
 
-    course_type   = admission.course          # e.g. 'cseet'
-    batch_attempt = admission.batch_attempt   # e.g. 'oct'
-    attempt_year  = admission.attempt_year    # e.g. 2026
+    attempt_year = admission.attempt_year
+    if not attempt_year:
+        attempt_year = timezone.now().year
+        admission.attempt_year = attempt_year
+        admission.save(update_fields=['attempt_year'])
+
+    batch_attempt = admission.batch_attempt
+    if not batch_attempt:
+        batch_attempt = 'june'
+        admission.batch_attempt = batch_attempt
+        admission.save(update_fields=['batch_attempt'])
+
+    course_type = admission.course or 'cseet'
 
     # ── Step 1: find an existing batch with room ──────────────────────────────
     existing_batches = (
