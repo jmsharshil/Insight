@@ -566,8 +566,17 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             
         if not slot.exam:
             from exams.models import Exam
+            
+            branch_id = slot.batch.branch_id if slot.batch and slot.batch.branch_id else None
+            if not branch_id:
+                request = self.context.get('request')
+                if request and hasattr(request, 'user') and request.user:
+                    branch_id = getattr(request.user, 'branch_id', None)
+                    if not branch_id and hasattr(request.user, 'profile'):
+                        branch_id = getattr(request.user.profile, 'branch_id', None)
+
             exam = Exam.objects.create(
-                branch=slot.batch.branch if slot.batch else None,
+                branch_id=branch_id,
                 batch=slot.batch,
                 subject=slot.subject,
                 title=title,
