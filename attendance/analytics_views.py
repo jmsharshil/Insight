@@ -715,13 +715,18 @@ class AttendanceHistoryAPIView(SafeAPIView):
 class BatchAttendanceRegisterAPIView(SafeAPIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, batch_id):
+    def get(self, request, batch_id=None):
         # Filters
         month = request.GET.get('month')
         if not month:
             month = timezone.now().strftime('%Y-%m')
 
-        sheet = get_batch_attendance_sheet(batch_id, month)
+        query_batch_id = request.GET.get('batch_id')
+        branch_id = request.GET.get('branch_id')
+
+        active_batch_id = batch_id or query_batch_id
+
+        sheet = get_batch_attendance_sheet(batch_id=active_batch_id, month=month, branch_id=branch_id)
 
         from .utils import get_all_dates_in_month
         dates = get_all_dates_in_month(month)
@@ -732,6 +737,8 @@ class BatchAttendanceRegisterAPIView(SafeAPIView):
                 'student_id': sid,
                 'student_name': info['name'],
                 'roll_number': info['roll_number'],
+                'branch_name': info.get('branch_name', ''),
+                'batch_name': info.get('batch_name', ''),
                 'attendance': {}
             }
             for d in dates:

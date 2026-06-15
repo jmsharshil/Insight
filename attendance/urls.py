@@ -39,6 +39,7 @@ urlpatterns = [
     path('attendance/students/', StudentAttendanceListAPIView.as_view(), name='attendance-students-list'),
     path('attendance/students/<uuid:student_id>/', StudentAttendanceDetailAPIView.as_view(), name='attendance-students-detail'),
     path('attendance/history/', AttendanceHistoryAPIView.as_view(), name='attendance-history'),
+    path('attendance/batches/register/', BatchAttendanceRegisterAPIView.as_view(), name='attendance-all-register'),
     path('attendance/batches/<uuid:batch_id>/register/', BatchAttendanceRegisterAPIView.as_view(), name='attendance-batch-register'),
     path('attendance/faculty/', FacultyAttendanceAPIView.as_view(), name='attendance-faculty-list'),
     path('attendance/faculty/<uuid:faculty_id>/', FacultyAttendanceDetailAPIView.as_view(), name='attendance-faculty-detail'),
