@@ -97,7 +97,7 @@ class StudentListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'admission_number', 'full_name', 'email', 'phone_student',
             'course', 'group_module', 'batch_attempt',
-            'branch_name', 'batch_name',
+            'branch', 'branch_name', 'batch_name',
             'status', 'status_display', 'enrolled_at', 'photo_url',
             'gender_display', 'blood_group_display', 'emergency_contact_relationship_display']
         
