@@ -93,7 +93,7 @@ def admission_status_changed(sender, instance, created, **kwargs):
             qualification=instance.qualification or '',
             location=instance.location or '',
             category=instance.category or '',
-            note=instance.note or '',
+            notes=instance.note or '',
             photo=instance.doc_photo if getattr(instance, 'doc_photo', None) else None,
             doc_signature=instance.doc_signature if getattr(instance, 'doc_signature', None) else None,
             doc_dob_certificate=instance.doc_dob_certificate if getattr(instance, 'doc_dob_certificate', None) else None,
