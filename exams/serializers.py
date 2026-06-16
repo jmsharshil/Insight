@@ -148,6 +148,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'title', 'exam_type', 'batch', 'subject', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'instructions', 'geo_lat', 'geo_lon', 'geo_radius_meters',
+            'status',
             # v2 fields
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
@@ -156,8 +157,11 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, data):
-        if data.get('scheduled_date') and data['scheduled_date'] < timezone.now().date():
-            raise serializers.ValidationError({"scheduled_date": "Cannot schedule in the past."})
+        # Only check past dates if creating a new exam or changing the date
+        if data.get('scheduled_date'):
+            is_new_date = not self.instance or self.instance.scheduled_date != data['scheduled_date']
+            if is_new_date and data['scheduled_date'] < timezone.now().date():
+                raise serializers.ValidationError({"scheduled_date": "Cannot schedule in the past."})
         if data.get('pass_marks', 0) > data.get('total_marks', 0):
             raise serializers.ValidationError({"pass_marks": "Cannot exceed total marks."})
         if data.get('start_time') and data.get('end_time') and data['end_time'] <= data['start_time']:
