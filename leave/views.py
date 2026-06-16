@@ -426,15 +426,22 @@ class LeavePolicyView(APIView):
         if not bid:
             return Response({'success': False, 'message': 'Branch required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        policy, created = LeavePolicy.objects.update_or_create(
-            branch_id=bid, leave_type=ser.validated_data['leave_type'],
-            defaults=ser.validated_data,
-        )
-        return Response({
-            'success': True,
-            'message': 'Policy created.' if created else 'Policy updated.',
-            'data': LeavePolicySerializer(policy).data,
-        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        from branch.models import Branch
+        if not Branch.objects.filter(id=bid).exists():
+            return Response({'success': False, 'message': 'Invalid branch_id. Branch does not exist.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            policy, created = LeavePolicy.objects.update_or_create(
+                branch_id=bid, leave_type=ser.validated_data['leave_type'],
+                defaults=ser.validated_data,
+            )
+            return Response({
+                'success': True,
+                'message': 'Policy created.' if created else 'Policy updated.',
+                'data': LeavePolicySerializer(policy).data,
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'success': False, 'message': f'Database error: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class LeavePolicyDetailView(APIView):

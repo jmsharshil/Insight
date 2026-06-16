@@ -5,11 +5,12 @@ from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord
 class LeavePolicySerializer(serializers.ModelSerializer):
 
     leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
 
     class Meta:
         model = LeavePolicy
         fields = [
-            'id', 'branch', 'leave_type', 'annual_quota', 'max_club_days',
+            'id', 'branch', 'branch_name', 'leave_type', 'annual_quota', 'max_club_days',
             'carry_forward', 'max_carry_days', 'min_advance_days',
             'allow_half_day', 'sandwich_rule', 'is_active',
          'leave_type_display']
@@ -163,9 +164,11 @@ class LateEntryCreateSerializer(serializers.Serializer):
 
 
 class PublicHolidaySerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+
     class Meta:
         model = PublicHoliday
-        fields = ['id', 'branch', 'date', 'name', 'year', 'created_at']
+        fields = ['id', 'branch', 'branch_name', 'date', 'name', 'year', 'created_at']
         read_only_fields = ['id', 'year', 'created_at']
 
 
