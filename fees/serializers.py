@@ -56,9 +56,16 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
             for s in students:
                 students_to_assign.add(s)
 
-        # Create StudentFee for each student
+        # Create StudentFee for each student (skip students who already have one)
+        existing_student_ids = set(
+            StudentFee.objects.filter(
+                student__in=students_to_assign
+            ).values_list('student_id', flat=True)
+        )
         student_fees_to_create = []
         for student in students_to_assign:
+            if student.id in existing_student_ids:
+                continue  # student already has a fee record — skip
             student_fees_to_create.append(
                 StudentFee(
                     student=student,
@@ -69,7 +76,7 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
                     status='approval_pending'
                 )
             )
-            
+
         if student_fees_to_create:
             StudentFee.objects.bulk_create(student_fees_to_create)
 
@@ -148,17 +155,29 @@ class StudentFeeCreateUpdateSerializer(serializers.ModelSerializer):
     def validate(self, data):
         discount = data.get('discount', 0) or 0
         total = data.get('total_amount', 0) or 0
-        
+
         # For partial updates, use instance values if not in data
         if self.instance and not total:
             total = self.instance.total_amount
         if self.instance and 'discount' not in data:
             discount = self.instance.discount or 0
-        
+
         if discount > total:
             raise serializers.ValidationError(
                 {'discount': 'Discount cannot exceed total amount.'}
             )
+
+        # Enforce one StudentFee per student (skip check on update for same student)
+        student = data.get('student')
+        if student:
+            qs = StudentFee.objects.filter(student=student)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'student': 'A fee record already exists for this student. Each student can only have one fee.'}
+                )
+
         return data
 
 
