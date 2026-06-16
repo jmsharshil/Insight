@@ -222,6 +222,9 @@ class Payment(models.Model):
     payment_proof     = models.FileField(
         upload_to='payments/proofs/', null=True, blank=True,
     )
+    payment_document  = models.FileField(
+        upload_to='payments/documents/', null=True, blank=True,
+    )
     status            = models.CharField(
         max_length=20, choices=PAYMENT_STATUS_CHOICES, default='approval_pending',
     )
