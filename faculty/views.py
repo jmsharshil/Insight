@@ -85,7 +85,7 @@ class FacultyListCreateView(APIView):
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
         bid = _user_branch_id(request.user)
-        if role != 'super_admin' and bid:
+        if role not in ('super_admin', 'branch_manager') and bid:
             qs = qs.filter(branch_id=bid)
 
         for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type'), ('level', 'level')]:

@@ -50,10 +50,16 @@ def _user_role(user):
 
 
 def _user_branch_id(user):
-    if hasattr(user, 'branch_id'):
+    if hasattr(user, 'branch_id') and user.branch_id:
         return user.branch_id
     if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
         return user.profile.branch_id
+    try:
+        from faculty.models import FacultyProfile
+        fp = FacultyProfile.objects.only('branch_id').get(user=user)
+        return fp.branch_id
+    except Exception:
+        pass
     return None
 
 
@@ -90,7 +96,7 @@ class ExamListCreateView(APIView):
                 qs = qs.filter(branch_id=bid)
         elif role == 'paper_checker':
             qs = qs.filter(marksheets__paper_checker=user).distinct()
-        elif role not in ['super_admin']:
+        elif role not in ['super_admin', 'branch_manager']:
             bid = _user_branch_id(user)
             if bid:
                 qs = qs.filter(branch_id=bid)
