@@ -569,6 +569,15 @@ class LateEntryListCreateView(APIView):
         late_min = max(0, int((start_dt - expected_dt).total_seconds() / 60))
 
         bid = _user_branch_id(request.user) or request.data.get('branch_id')
+        if not bid:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            target_user = User.objects.filter(id=d['user_id']).first()
+            if target_user:
+                bid = _user_branch_id(target_user)
+        
+        if not bid:
+            return Response({'success': False, 'message': 'Branch ID could not be determined. Please provide branch_id.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get grace from policy
         from payroll.models import LateEntryPolicy
