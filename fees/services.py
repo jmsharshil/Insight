@@ -52,4 +52,23 @@ def create_student_fee(student):
         },
     )
 
+    # 4. Sync admission payment if present
+    if admission.payment_screenshot or admission.transaction_id:
+        from fees.models import Payment
+        from django.utils import timezone
+        
+        Payment.objects.get_or_create(
+            student=student,
+            student_fee=student_fee,
+            transaction_ref=admission.transaction_id,
+            defaults={
+                'amount': 0,  # Default to 0, admin can update it
+                'payment_mode': 'online',
+                'payment_proof': admission.payment_screenshot,
+                'status': 'verified',
+                'payment_date': timezone.now().date(),
+                'note': admission.payment_note
+            }
+        )
+
     return student_fee
