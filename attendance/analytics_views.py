@@ -305,6 +305,7 @@ class StudentAttendanceListAPIView(SafeAPIView):
                     'photo': s.photo.url if s.photo else None,
                     'branch_name': s.branch.name if s.branch else None,
                     'batch_name': s.batch.name if s.batch else None,
+                    'branch_id': str(s.branch.id) if s.branch else None,
                 },
                 'attendance_percentage': pct,
                 'present_count': present_count,
