@@ -440,6 +440,16 @@ class LeavePolicyView(APIView):
 class LeavePolicyDetailView(APIView):
     # permission_classes = [IsAuthenticated]
 
+    def get(self, request, policy_id):
+        try:
+            qs = LeavePolicy.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            policy = qs.get(id=policy_id)
+            return Response({'success': True, 'data': LeavePolicySerializer(policy).data})
+        except LeavePolicy.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
     def patch(self, request, policy_id):
         role = _user_role(request.user)
         if role not in POLICY_EDIT_ROLES:
@@ -602,20 +612,31 @@ class LateEntryListCreateView(APIView):
 
 
 class LateEntryDetailView(APIView):
-    """PATCH, DELETE /api/v1/leave/late-entries/{entry_id}/"""
+    """GET, PATCH, DELETE /api/v1/leave/late-entries/{entry_id}/"""
     # permission_classes = [IsAuthenticated]
 
-    def _get_entry(self, request, entry_id):
+    def _get_entry(self, request, entry_id, is_read=False):
+        qs = LateEntryRecord.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+            
         role = _user_role(request.user)
-        if role not in LATE_ENTRY_ADMIN + ['super_admin']:
+        if not is_read and role not in LATE_ENTRY_ADMIN + ['super_admin']:
             return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if is_read and role not in LATE_ENTRY_ADMIN + ['super_admin']:
+            qs = qs.filter(user=request.user)
+            
         try:
-            qs = LateEntryRecord.objects.all()
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(branch__organization=request.user.organization)
             return qs.get(id=entry_id), None
         except LateEntryRecord.DoesNotExist:
             return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    def get(self, request, entry_id):
+        record, err = self._get_entry(request, entry_id, is_read=True)
+        if err:
+            return err
+        return Response({'success': True, 'data': LateEntryRecordSerializer(record).data})
 
     def patch(self, request, entry_id):
         record, err = self._get_entry(request, entry_id)
@@ -701,6 +722,16 @@ class PublicHolidayListCreateView(APIView):
 
 class PublicHolidayDetailView(APIView):
     # permission_classes = [IsAuthenticated]
+
+    def get(self, request, holiday_id):
+        try:
+            qs = PublicHoliday.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            holiday = qs.get(id=holiday_id)
+            return Response({'success': True, 'data': PublicHolidaySerializer(holiday).data})
+        except PublicHoliday.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     def patch(self, request, holiday_id):
         """PATCH /api/v1/leave/public-holidays/{id}/ — update a public holiday."""
