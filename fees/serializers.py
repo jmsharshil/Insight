@@ -260,7 +260,8 @@ class PaymentListSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['id', 'student', 'student_name', 'student_fee',
                   'installment_item', 'amount', 'payment_mode',
-                  'transaction_ref', 'status', 'status_display', 'receipt_number',
+                  'transaction_ref', 'payment_proof', 'payment_document',
+                  'status', 'status_display', 'receipt_number',
                   'payment_date', 'created_at','payment_mode_display',
                   'course_name','batch_name']
                  
@@ -291,9 +292,18 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['student', 'student_fee', 'installment_item',
                   'amount', 'payment_mode', 'transaction_ref',
-                  'payment_proof', 'payment_date', 'note']
+                  'payment_proof', 'payment_document', 'payment_date', 'note']
 
     def validate_payment_proof(self, value):
+        if value:
+            max_size_mb = 5
+            if value.size > max_size_mb * 1024 * 1024:
+                raise serializers.ValidationError(
+                    f"File size must be under {max_size_mb}MB."
+                )
+        return value
+
+    def validate_payment_document(self, value):
         if value:
             max_size_mb = 5
             if value.size > max_size_mb * 1024 * 1024:
