@@ -659,26 +659,33 @@ class FeeReportView(APIView):
         total_billed = sf_qs.aggregate(total=Sum('total_amount'))['total'] or 0
         total_discount = sf_qs.aggregate(total=Sum('discount'))['total'] or 0
         total_paid = sf_qs.aggregate(total=Sum('amount_paid'))['total'] or 0
-        total_pending = total_billed - total_discount - total_paid
+        total_pending = max(0, total_billed - total_discount - total_paid)
+        
         total_overdue = sf_qs.filter(status='overdue').aggregate(
             total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
         )['total'] or 0
+        total_overdue = max(0, total_overdue)
 
         total_partial = sf_qs.filter(status='partial').aggregate(
             total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
         )['total'] or 0
+        total_partial = max(0, total_partial)
 
         total_approval_pending = sf_qs.filter(status='approval_pending').aggregate(
             total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
         )['total'] or 0
+        total_approval_pending = max(0, total_approval_pending)
 
         # Collection by payment mode
         payment_qs = Payment.objects.filter(status='verified')
         if getattr(request.user, 'organization', None):
             payment_qs = payment_qs.filter(student__branch__organization=request.user.organization)
         if month:
-            payment_qs = payment_qs.filter(payment_date__month=int(month.split('-')[1]),
-                                            payment_date__year=int(month.split('-')[0]))
+            parts = month.split('-')
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                payment_qs = payment_qs.filter(payment_date__year=int(parts[0]), payment_date__month=int(parts[1]))
+            elif month.isdigit():
+                payment_qs = payment_qs.filter(payment_date__month=int(month))
         if year:
             payment_qs = payment_qs.filter(payment_date__year=int(year))
 
@@ -742,7 +749,7 @@ class StudentFeeSummaryView(APIView):
             t_amount = item['total_amount'] or 0
             t_paid = item['total_paid'] or 0
             t_discount = item['total_discount'] or 0
-            amount_due = t_amount - t_discount - t_paid
+            amount_due = max(0, t_amount - t_discount - t_paid)
 
             results.append({
                 'status': item['status'],
