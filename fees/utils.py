@@ -47,11 +47,15 @@ def update_student_fee_status(student_fee_id):
 def mark_installment_paid(installment_item_id):
     """Mark an installment item as paid if its linked payment is verified."""
     from django.db.models import Sum
+    from decimal import Decimal
     item = InstallmentItem.objects.get(id=installment_item_id)
     paid = Payment.objects.filter(
         installment_item=item,
         status='verified',
     ).aggregate(total=Sum('amount'))['total'] or 0
+
+    # Ensure paid is a Decimal to avoid TypeError in SQLite
+    paid = Decimal(str(paid))
 
     if paid >= item.amount:
         item.is_paid = True

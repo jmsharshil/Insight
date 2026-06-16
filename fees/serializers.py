@@ -312,6 +312,32 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
                 )
         return value
 
+    def validate(self, data):
+        student_fee = data.get('student_fee')
+        amount = data.get('amount')
+
+        if student_fee and amount:
+            from django.db.models import Sum
+            from decimal import Decimal
+            from .models import Payment
+
+            # Calculate the sum of pending payments
+            pending_payments = Payment.objects.filter(
+                student_fee=student_fee, status='approval_pending'
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            
+            pending_payments = Decimal(str(pending_payments))
+
+            amount_due = student_fee.total_amount - student_fee.discount - student_fee.amount_paid
+            remaining_to_pay = amount_due - pending_payments
+
+            if amount > remaining_to_pay:
+                raise serializers.ValidationError({
+                    "amount": f"Payment amount (₹{amount}) exceeds the remaining fee due (₹{remaining_to_pay})."
+                })
+
+        return data
+
 
 class PaymentVerifySerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=['verified', 'rejected'])
