@@ -666,21 +666,28 @@ class PublicHolidayListCreateView(APIView):
         if not bid:
             return Response({'success': False, 'message': 'Branch required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        from branch.models import Branch
+        if not Branch.objects.filter(id=bid).exists():
+            return Response({'success': False, 'message': 'Invalid branch_id. Branch does not exist.'}, status=status.HTTP_400_BAD_REQUEST)
+
         d = ser.validated_data
         if PublicHoliday.objects.filter(branch_id=bid, date=d['date']).exists():
             return Response({'success': False, 'message': 'Holiday already exists for this date.'}, status=status.HTTP_409_CONFLICT)
 
-        holiday = PublicHoliday.objects.create(
-            branch_id=bid,
-            date=d['date'],
-            name=d['name'],
-            year=d['date'].year,
-            created_by=request.user,
-        )
-        return Response({
-            'success': True, 'message': 'Public holiday created.',
-            'data': PublicHolidaySerializer(holiday).data,
-        }, status=status.HTTP_201_CREATED)
+        try:
+            holiday = PublicHoliday.objects.create(
+                branch_id=bid,
+                date=d['date'],
+                name=d['name'],
+                year=d['date'].year,
+                created_by=request.user,
+            )
+            return Response({
+                'success': True, 'message': 'Public holiday created.',
+                'data': PublicHolidaySerializer(holiday).data,
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'success': False, 'message': f'Database error: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PublicHolidayDetailView(APIView):
