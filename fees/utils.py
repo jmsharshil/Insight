@@ -26,6 +26,33 @@ def update_student_fee_status(student_fee_id):
     net_paid = paid_sum - refund_sum
     student_fee.amount_paid = net_paid
 
+    # Auto-resolve installments based on net_paid
+    from .models import InstallmentPlan
+    for plan in InstallmentPlan.objects.filter(student_fee=student_fee, status__in=['approved', 'completed']):
+        remaining_payment = net_paid
+        for item in plan.items.all().order_by('due_date', 'id'):
+            if remaining_payment >= item.amount:
+                if not item.is_paid:
+                    item.is_paid = True
+                    from django.utils import timezone
+                    item.paid_at = timezone.now()
+                    item.save(update_fields=['is_paid', 'paid_at'])
+                remaining_payment -= item.amount
+            else:
+                if item.is_paid:
+                    item.is_paid = False
+                    item.paid_at = None
+                    item.save(update_fields=['is_paid', 'paid_at'])
+                # Consume remaining payment so we don't apply it further
+                remaining_payment = 0
+                
+        if not plan.items.filter(is_paid=False).exists():
+            plan.status = 'completed'
+            plan.save(update_fields=['status'])
+        else:
+            plan.status = 'approved'
+            plan.save(update_fields=['status'])
+
     # Determine status
     amount_due = student_fee.total_amount - student_fee.discount - net_paid
     if amount_due <= 0:
