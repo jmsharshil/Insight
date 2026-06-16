@@ -114,7 +114,12 @@ def auto_assign_batch(student):
 
     # ── Step 4: update Student.batch FK ──────────────────────────────────────
     from students.models import Student as StudentModel
-    StudentModel.objects.filter(pk=student.pk).update(batch=batch)
+    StudentModel.objects.filter(pk=student.pk).update(
+        batch=batch, 
+        current_batch_name=batch.name
+    )
+    student.batch = batch
+    student.current_batch_name = batch.name
 
     # ── Step 5: log batch history ─────────────────────────────────────────────
     BatchHistory.objects.create(
