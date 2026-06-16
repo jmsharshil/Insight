@@ -1065,7 +1065,12 @@ class AcademicDropdownsView(APIView):
             branches_qs = branches_qs.filter(organization_id=org_id)
             classrooms_qs = classrooms_qs.filter(organization_id=org_id)
             chapters_qs = chapters_qs.filter(subject__organization_id=org_id)
-
+        
+        branch_id = request.GET.get('branch_id')
+        if branch_id:
+            batches_qs = batches_qs.filter(branch_id=branch_id)
+            branches_qs = branches_qs.filter(id=branch_id)
+ 
         subjects = list(subjects_qs.values('id', 'name', 'level_id'))
         chapters = list(chapters_qs.values('id', 'name', 'subject_id', 'order'))
 

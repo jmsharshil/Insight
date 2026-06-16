@@ -169,13 +169,14 @@ class BatchListSerializer(serializers.ModelSerializer):
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
+    qr_image_url = serializers.ImageField(source='qr_image', read_only=True)
 
     class Meta:
         model = Batch
         fields = ['id', 'course', 'course_name', 'branch', 'branch_name', 'name', 'batch_code',
                   'group_module', 'batch_attempt',
                   'start_date', 'end_date', 'max_students', 'enrolled_count',
-                  'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display']
+                  'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display', 'qr_image_url']
 
 
 class BatchDetailSerializer(serializers.ModelSerializer):
@@ -185,6 +186,7 @@ class BatchDetailSerializer(serializers.ModelSerializer):
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
+    qr_image_url = serializers.ImageField(source='qr_image', read_only=True)
 
     class Meta:
         model = Batch
