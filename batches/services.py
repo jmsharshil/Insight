@@ -89,7 +89,7 @@ def auto_assign_batch(student):
         sequence = counter.last_sequence
         # e.g. cseet_oct_26_101
         year_suffix = str(attempt_year)[-2:]
-        batch_name = f"{course_type}_{batch_attempt}_{year_suffix}_{sequence}"
+        batch_name = f"{course_type}_{batch_attempt}_{year_suffix}_{sequence}".capitalize()
 
         from django.utils import timezone
         today = timezone.now().date()
