@@ -525,7 +525,10 @@ class StudentAttendanceView(APIView):
             'is_resolved': v.is_resolved, 'created_at': v.created_at,
         } for v in violations_qs]
 
-        return Response({
+        from core.pagination import StandardPagination
+        paginator = StandardPagination()
+
+        return paginator.get_paginated_response({
             'success': True, 'data': records_data,
             'summary': {'present': present, 'absent': qs.filter(status='absent').count(), 'total': total, 'percentage': pct},
             'violations': violations_data,
