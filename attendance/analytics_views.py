@@ -442,6 +442,10 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         today = timezone.now().date()
         creation_date = s.created_at.date()  # Assuming `created_at` is the field for creation date
 
+        # Fetch the first attendance record date for the student
+        first_attendance_record = AttendanceRecord.objects.filter(student=s).order_by('date').first()
+        first_attendance_date = first_attendance_record.date if first_attendance_record else None
+
         for i in range(5, -1, -1):
             m = today.month - i
             y = today.year
@@ -450,8 +454,8 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                 y -= 1
             month_str = f"{y}-{m:02d}"
 
-            # Only include months after the creation date
-            if timezone.datetime(year=y, month=m, day=1).date() < creation_date:
+            # Only include months after the creation date or if it's the first attendance month
+            if timezone.datetime(year=y, month=m, day=1).date() < creation_date and (first_attendance_date is None or first_attendance_date.month != m or first_attendance_date.year != y):
                 continue
 
             m_records = AttendanceRecord.objects.filter(student=s, date__year=y, date__month=m).exclude(status='on_leave')
