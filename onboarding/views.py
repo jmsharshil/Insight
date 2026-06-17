@@ -462,7 +462,7 @@ class AdmissionApproveView(APIView):
  
             from auth_user.models import User
             student_user = User.objects.filter(
-                email=admission.email, role='student'
+                email__iexact=admission.email, role='student'
             ).first()
  
             if not student_user:

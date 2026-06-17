@@ -158,6 +158,8 @@ class AdmissionService:
             name=student_name,
             role='student',
             linked_student=None,
+            organization=admission.branch.organization if admission.branch else None,
+            branch=admission.branch,
         )
 
         try:
@@ -180,6 +182,8 @@ class AdmissionService:
                     name=parent_name,
                     role='parents',
                     linked_student=student_user,
+                    organization=admission.branch.organization if admission.branch else None,
+                    branch=admission.branch,
                 )
 
                 try:
@@ -203,14 +207,14 @@ class AdmissionService:
         return username
 
     @staticmethod
-    def _create_or_update_user(*, email, phone, name, role, linked_student=None):
+    def _create_or_update_user(*, email, phone, name, role, linked_student=None, organization=None, branch=None):
         if not email:
             raise ValueError("Email is required to create login credentials.")
         if not phone:
             raise ValueError("Phone is required to create login credentials.")
 
         password = generate_temporary_password()
-        user = User.objects.filter(email=email).first()
+        user = User.objects.filter(email__iexact=email).first()
 
         if user:
             if not user.username:
@@ -220,6 +224,10 @@ class AdmissionService:
             user.role           = role
             user.is_active      = True
             user.linked_student = linked_student
+            if organization:
+                user.organization = organization
+            if branch:
+                user.branch = branch
             user.set_password(password)
             user.save()
         else:
@@ -232,6 +240,8 @@ class AdmissionService:
                 name=name,
                 is_active=True,
                 linked_student=linked_student,
+                organization=organization,
+                branch=branch,
             )
 
         return user, password
