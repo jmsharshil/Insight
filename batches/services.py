@@ -104,6 +104,8 @@ def auto_assign_batch(student):
             # Placeholder dates — admin can update after creation
             start_date=today,
             end_date=today,
+            organization=student.organization,
+            branch=student.branch,
         )
 
     # ── Step 3: enrol student ─────────────────────────────────────────────────
