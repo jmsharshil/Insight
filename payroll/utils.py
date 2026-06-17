@@ -159,14 +159,12 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         for s in sessions:
             grace = policy.grace_period_minutes
             # Compare start_time with batch session_start_time as scheduled time
-            from batches.models import Batch
+            from batches.models import TimetableSlot
             scheduled_time = s.start_time  # default fallback
-            try:
-                batch = Batch.objects.get(id=s.batch_id)
-                if batch.session_start_time:
-                    scheduled_time = batch.session_start_time
-            except Batch.DoesNotExist:
-                pass
+            dow = s.session_date.weekday()
+            slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
+            if slot and slot.start_time:
+                scheduled_time = slot.start_time
 
             sched_dt = datetime.combine(datetime.today(), scheduled_time)
             actual_dt = datetime.combine(datetime.today(), s.start_time)
@@ -327,14 +325,12 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     if policy:
         for s in sessions:
             grace = policy.grace_period_minutes
-            from batches.models import Batch
+            from batches.models import TimetableSlot
             scheduled_time = s.start_time
-            try:
-                batch = Batch.objects.get(id=s.batch_id)
-                if batch.session_start_time:
-                    scheduled_time = batch.session_start_time
-            except Batch.DoesNotExist:
-                pass
+            dow = s.session_date.weekday()
+            slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
+            if slot and slot.start_time:
+                scheduled_time = slot.start_time
 
             sched_dt = datetime.combine(datetime.today(), scheduled_time)
             actual_dt = datetime.combine(datetime.today(), s.start_time)

@@ -412,16 +412,16 @@ class FacultyQRCheckinView(APIView):
             grace = policy.grace_period_minutes if policy else 5
 
             # Try to find today's expected start from batch timetable
-            from batches.models import Batch
-            batches = Batch.objects.filter(
-                branch=fp.branch, is_active=True,
-                session_start_time__isnull=False,
+            from batches.models import TimetableSlot
+            dow = now.weekday()
+            slots = TimetableSlot.objects.filter(
+                faculty=fp, batch__branch=fp.branch, batch__is_active=True,
+                day_of_week=dow, start_time__isnull=False
             )
             expected_start = None
-            for b in batches:
-                if b.session_start_time:
-                    if expected_start is None or b.session_start_time < expected_start:
-                        expected_start = b.session_start_time
+            for slot in slots:
+                if expected_start is None or slot.start_time < expected_start:
+                    expected_start = slot.start_time
 
             if expected_start:
                 from datetime import datetime, timedelta
