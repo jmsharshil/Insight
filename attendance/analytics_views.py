@@ -463,25 +463,6 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                 'month': month_str,
                 'percentage': m_pct
             })
-        monthly_trend = []
-        today = timezone.now().date()
-        for i in range(5, -1, -1):
-            m = today.month - i
-            y = today.year
-            if m <= 0:
-                m += 12
-                y -= 1
-            month_str = f"{y}-{m:02d}"
-            
-            m_records = AttendanceRecord.objects.filter(student=s, date__year=y, date__month=m).exclude(status='on_leave')
-            m_total = m_records.count()
-            m_present = m_records.filter(status__in=['present', 'late', 'half_day']).count()
-            m_pct = round((m_present / m_total) * 100, 2) if m_total > 0 else 0.0
-
-            monthly_trend.append({
-                'month': month_str,
-                'percentage': m_pct
-            })
 
         # Subject-wise & Session-wise attendance
         subject_stats = {}
