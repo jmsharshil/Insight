@@ -50,10 +50,16 @@ def _user_role(user):
 
 
 def _user_branch_id(user):
-    if hasattr(user, 'branch_id'):
+    if hasattr(user, 'branch_id') and user.branch_id:
         return user.branch_id
     if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
         return user.profile.branch_id
+    try:
+        from faculty.models import FacultyProfile
+        fp = FacultyProfile.objects.only('branch_id').get(user=user)
+        return fp.branch_id
+    except Exception:
+        pass
     return None
 
 
@@ -90,7 +96,7 @@ class ExamListCreateView(APIView):
                 qs = qs.filter(branch_id=bid)
         elif role == 'paper_checker':
             qs = qs.filter(marksheets__paper_checker=user).distinct()
-        elif role not in ['super_admin']:
+        elif role not in ['super_admin', 'branch_manager']:
             bid = _user_branch_id(user)
             if bid:
                 qs = qs.filter(branch_id=bid)
@@ -406,10 +412,20 @@ class ExamStartView(APIView):
     def post(self, request, exam_id):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Only students can start exams.'}, status=status.HTTP_403_FORBIDDEN)
-        
-        fingerprint = request.headers.get('X-Device-Fingerprint', '')
+
+        # Validate full request body up front via ExamStartSerializer
+        ser = ExamStartSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'message': 'Invalid start data.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        lat = ser.validated_data.get('student_lat')
+        lon = ser.validated_data.get('student_lon')
+        # Prefer body fingerprint; fall back to X-Device-Fingerprint header
+        fingerprint = ser.validated_data.get('device_fingerprint') or request.headers.get('X-Device-Fingerprint', '')
         if not fingerprint:
             logger.warning(f"Exam start without device fingerprint — user={request.user.email}")
+        # Prefer body IP; fall back to REMOTE_ADDR
+        ip_address = ser.validated_data.get('ip_address') or request.META.get('REMOTE_ADDR')
 
         try:
             from students.models import Student
@@ -442,13 +458,8 @@ class ExamStartView(APIView):
             return Response({'success': False, 'message': 'Session already exists'}, status=status.HTTP_409_CONFLICT)
 
         if exam.geo_radius_meters > 0:
-            ser = ExamStartSerializer(data=request.data)
-            if not ser.is_valid():
-                return Response({'success': False, 'message': 'Location required'}, status=status.HTTP_400_BAD_REQUEST)
-            lat, lon = ser.validated_data.get('student_lat'), ser.validated_data.get('student_lon')
             if not lat or not lon:
                 return Response({'success': False, 'message': 'Location required for geo check'}, status=status.HTTP_400_BAD_REQUEST)
-            
             allowed, dist = check_geo_boundary(exam, lat, lon)
             if not allowed:
                 return Response({
@@ -458,8 +469,11 @@ class ExamStartView(APIView):
                 }, status=status.HTTP_403_FORBIDDEN)
 
         session = ExamSession.objects.create(
-            exam=exam, student=student, device_fingerprint=fingerprint,
-            student_lat=request.data.get('student_lat'), student_lon=request.data.get('student_lon'),
+            exam=exam, student=student,
+            device_fingerprint=fingerprint,
+            ip_address=ip_address,
+            student_lat=lat,
+            student_lon=lon,
             last_geo_check_at=timezone.now() if exam.geo_radius_meters > 0 else None,
         )
         

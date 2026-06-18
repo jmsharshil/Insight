@@ -305,7 +305,8 @@ class LeadStatusUpdateView(APIView):
                     # created with assigned_counsellor=None and must be set manually.
                     #
                     # assigned_counsellor = AdmissionService.get_next_counsellor()
-                    assigned_counsellor = None
+                    assigned_counsellor = lead.assigned_to
+ 
 
                     # Create Admission with status='form_pending' (no credentials yet)
                     counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
@@ -390,6 +391,9 @@ class LeadStatusUpdateView(APIView):
         elif new_stage == "visit":
             lead.visit_set_at = today
             lead.visit_date = serializer.validated_data.get("visit_date")
+
+        elif new_stage == "visited":
+            lead.is_visited = True
 
         if "is_visited" in serializer.validated_data:
             lead.is_visited = serializer.validated_data["is_visited"]

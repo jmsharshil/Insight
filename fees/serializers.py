@@ -17,16 +17,18 @@ from .models import (
 class FeeStructureListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True, default=None)
     batch_name = serializers.CharField(source='batch.name', read_only=True, default=None)
+    level_name = serializers.CharField(source='level.name', read_only=True, default=None)
 
     class Meta:
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
-                  'total_amount', 'is_active', 'created_at']
+                  'level', 'level_name', 'total_amount', 'is_active', 'created_at']
 
 
 class FeeStructureDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True, default=None)
     batch_name = serializers.CharField(source='batch.name', read_only=True, default=None)
+    level_name = serializers.CharField(source='level.name', read_only=True, default=None)
 
     class Meta:
         model = FeeStructure
@@ -36,7 +38,7 @@ class FeeStructureDetailSerializer(serializers.ModelSerializer):
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
-        fields = ['name', 'course', 'batch', 'total_amount', 'description', 'is_active']
+        fields = ['name', 'course', 'batch', 'level', 'total_amount', 'description', 'is_active']
 
     def create(self, validated_data):
         fee_structure = super().create(validated_data)
@@ -56,9 +58,16 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
             for s in students:
                 students_to_assign.add(s)
 
-        # Create StudentFee for each student
+        # Create StudentFee for each student (skip students who already have one)
+        existing_student_ids = set(
+            StudentFee.objects.filter(
+                student__in=students_to_assign
+            ).values_list('student_id', flat=True)
+        )
         student_fees_to_create = []
         for student in students_to_assign:
+            if student.id in existing_student_ids:
+                continue  # student already has a fee record — skip
             student_fees_to_create.append(
                 StudentFee(
                     student=student,
@@ -69,7 +78,7 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
                     status='approval_pending'
                 )
             )
-            
+
         if student_fees_to_create:
             StudentFee.objects.bulk_create(student_fees_to_create)
 
@@ -148,17 +157,29 @@ class StudentFeeCreateUpdateSerializer(serializers.ModelSerializer):
     def validate(self, data):
         discount = data.get('discount', 0) or 0
         total = data.get('total_amount', 0) or 0
-        
+
         # For partial updates, use instance values if not in data
         if self.instance and not total:
             total = self.instance.total_amount
         if self.instance and 'discount' not in data:
             discount = self.instance.discount or 0
-        
+
         if discount > total:
             raise serializers.ValidationError(
                 {'discount': 'Discount cannot exceed total amount.'}
             )
+
+        # Enforce one StudentFee per student (skip check on update for same student)
+        student = data.get('student')
+        if student:
+            qs = StudentFee.objects.filter(student=student)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'student': 'A fee record already exists for this student. Each student can only have one fee.'}
+                )
+
         return data
 
 
@@ -241,7 +262,8 @@ class PaymentListSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['id', 'student', 'student_name', 'student_fee',
                   'installment_item', 'amount', 'payment_mode',
-                  'transaction_ref', 'status', 'status_display', 'receipt_number',
+                  'transaction_ref', 'payment_proof', 'payment_document',
+                  'status', 'status_display', 'receipt_number',
                   'payment_date', 'created_at','payment_mode_display',
                   'course_name','batch_name']
                  
@@ -272,7 +294,7 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['student', 'student_fee', 'installment_item',
                   'amount', 'payment_mode', 'transaction_ref',
-                  'payment_proof', 'payment_date', 'note']
+                  'payment_proof', 'payment_document', 'payment_date', 'note']
 
     def validate_payment_proof(self, value):
         if value:
@@ -282,6 +304,41 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
                     f"File size must be under {max_size_mb}MB."
                 )
         return value
+
+    def validate_payment_document(self, value):
+        if value:
+            max_size_mb = 5
+            if value.size > max_size_mb * 1024 * 1024:
+                raise serializers.ValidationError(
+                    f"File size must be under {max_size_mb}MB."
+                )
+        return value
+
+    def validate(self, data):
+        student_fee = data.get('student_fee')
+        amount = data.get('amount')
+
+        if student_fee and amount:
+            from django.db.models import Sum
+            from decimal import Decimal
+            from .models import Payment
+
+            # Calculate the sum of pending payments
+            pending_payments = Payment.objects.filter(
+                student_fee=student_fee, status='approval_pending'
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            
+            pending_payments = Decimal(str(pending_payments))
+
+            amount_due = student_fee.total_amount - student_fee.discount - student_fee.amount_paid
+            remaining_to_pay = amount_due - pending_payments
+
+            if amount > remaining_to_pay:
+                raise serializers.ValidationError({
+                    "amount": f"Payment amount (₹{amount}) exceeds the remaining fee due (₹{remaining_to_pay})."
+                })
+
+        return data
 
 
 class PaymentVerifySerializer(serializers.Serializer):

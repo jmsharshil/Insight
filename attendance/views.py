@@ -39,10 +39,16 @@ def _user_role(user):
 
 
 def _user_branch_id(user):
-    if hasattr(user, 'branch_id'):
+    if hasattr(user, 'branch_id') and user.branch_id:
         return user.branch_id
     if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
         return user.profile.branch_id
+    try:
+        from faculty.models import FacultyProfile
+        fp = FacultyProfile.objects.only('branch_id').get(user=user)
+        return fp.branch_id
+    except Exception:
+        pass
     return None
 
 
@@ -242,14 +248,32 @@ class QRScanView(APIView):
         except BranchModel.DoesNotExist:
             pass
 
+        now = timezone.now()
+
+        # Check for multiple check-ins or missing check-ins before processing scan
+        existing_record = AttendanceRecord.objects.filter(
+            student=student, batch_id=batch.id, date=now.date()
+        ).first()
+
+        if scan_type == 'check_in':
+            if existing_record and existing_record.checked_in_at:
+                if not existing_record.checked_out_at:
+                    return Response({'success': False, 'message': 'You are already checked in. Please check out first.'}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({'success': False, 'message': 'You have already checked in and out for today.'}, status=status.HTTP_400_BAD_REQUEST)
+        elif scan_type == 'check_out':
+            if not existing_record or not existing_record.checked_in_at:
+                return Response({'success': False, 'message': 'You cannot check out without checking in first.'}, status=status.HTTP_400_BAD_REQUEST)
+            if existing_record.checked_out_at:
+                return Response({'success': False, 'message': 'You are already checked out for today.'}, status=status.HTTP_400_BAD_REQUEST)
+
         # E3: run validate_qr_scan — never block on failure, just log results
-        scan_now = timezone.now()
         validation_result = validate_qr_scan(
             scan_lat=student_lat,
             scan_lng=student_lon,
             branch=branch_obj_for_validation,
             timetable_slot=timetable_slot_obj,
-            scan_time=scan_now,
+            scan_time=now,
         )
 
         scan_log = QRScanLog.objects.create(
@@ -267,7 +291,6 @@ class QRScanView(APIView):
             timetable_slot=timetable_slot_obj,
         )
 
-        now = timezone.now()
         attendance_status = None
         checked_in_at = None
         checked_out_at = None
@@ -276,11 +299,11 @@ class QRScanView(APIView):
         if scan_type == 'check_in':
             record, created = AttendanceRecord.objects.get_or_create(
                 student=student, batch_id=batch.id, date=now.date(),
-                defaults={'branch_id': student_branch_id, 'status': 'present', 'marked_by': user, 'checked_in_at': now},
+                defaults={'branch_id': student_branch_id, 'status': 'checkout_pending', 'marked_by': user, 'checked_in_at': now},
             )
             if not created and not record.checked_in_at:
                 record.checked_in_at = now
-                record.status = 'present'
+                record.status = 'checkout_pending'
                 record.save(update_fields=['checked_in_at', 'status'])
             attendance_status = 'already_scanned' if (not created and record.checked_in_at and record.checked_in_at != now) else record.status
             checked_in_at = record.checked_in_at
@@ -295,7 +318,8 @@ class QRScanView(APIView):
                     student=student, batch_id=batch.id, date=now.date(),
                 )
                 record.checked_out_at = now
-                record.save(update_fields=['checked_out_at'])
+                record.status = 'present'
+                record.save(update_fields=['checked_out_at', 'status'])
                 attendance_status = record.status
                 checked_in_at = record.checked_in_at
                 checked_out_at = record.checked_out_at
@@ -486,12 +510,6 @@ class StudentAttendanceView(APIView):
         if batch_id:
             qs = qs.filter(batch_id=batch_id)
 
-        records_data = [{
-            'date': r.date, 'status': r.status,
-            'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
-            'marked_by_name': r.marked_by.name if r.marked_by else None,
-        } for r in qs]
-
         present, total, pct = compute_attendance_percentage(student_id, month=month, batch_id=batch_id)
 
         # v3 FRD §4.4.3: violations visible on student profile
@@ -502,9 +520,38 @@ class StudentAttendanceView(APIView):
             'is_resolved': v.is_resolved, 'created_at': v.created_at,
         } for v in violations_qs]
 
+        summary_data = {'present': present, 'absent': qs.filter(status='absent').count(), 'total': total, 'percentage': pct}
+
+        from core.pagination import StandardPagination
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+
+        if page is not None:
+            records_data = [{
+                'date': r.date, 'status': r.status,
+                'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
+                'marked_by_name': r.marked_by.name if r.marked_by else None,
+            } for r in page]
+            return Response({
+                'success': True, 
+                'count': paginator.page.paginator.count,
+                'next': paginator.get_next_link(),
+                'previous': paginator.get_previous_link(),
+                'page_size': paginator.get_page_size(request),
+                'data': records_data,
+                'summary': summary_data,
+                'violations': violations_data,
+            })
+
+        records_data = [{
+            'date': r.date, 'status': r.status,
+            'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
+            'marked_by_name': r.marked_by.name if r.marked_by else None,
+        } for r in qs]
+
         return Response({
             'success': True, 'data': records_data,
-            'summary': {'present': present, 'absent': qs.filter(status='absent').count(), 'total': total, 'percentage': pct},
+            'summary': summary_data,
             'violations': violations_data,
         })
 

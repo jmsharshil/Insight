@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot, DAY_CHOICES, SESSION_CHOICES,
-    CourseLevel, Chapter, TimetableExamType,
+    CourseLevel, Chapter,
     SESSION_TYPE_CHOICES, SLOT_CODE_CHOICES,
 )
 from django.conf import settings
@@ -169,13 +169,14 @@ class BatchListSerializer(serializers.ModelSerializer):
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
+    qr_image_url = serializers.ImageField(source='qr_image', read_only=True)
 
     class Meta:
         model = Batch
         fields = ['id', 'course', 'course_name', 'branch', 'branch_name', 'name', 'batch_code',
                   'group_module', 'batch_attempt',
                   'start_date', 'end_date', 'max_students', 'enrolled_count',
-                  'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display']
+                  'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display', 'qr_image_url']
 
 
 class BatchDetailSerializer(serializers.ModelSerializer):
@@ -185,6 +186,7 @@ class BatchDetailSerializer(serializers.ModelSerializer):
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
+    qr_image_url = serializers.ImageField(source='qr_image', read_only=True)
 
     class Meta:
         model = Batch
@@ -330,29 +332,6 @@ class ClassroomCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  TimetableExamType Serializer (E4)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TimetableExamTypeSerializer(serializers.ModelSerializer):
-    """Serializer for TimetableExamType CRUD (E4)."""
-
-    class Meta:
-        model = TimetableExamType
-        fields = ['id', 'organization', 'name', 'description', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at']
-
-    def create(self, validated_data):
-        if 'organization' not in validated_data or validated_data['organization'] is None:
-            validated_data['organization'] = self.context['request'].user.organization
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        if 'organization' not in validated_data or validated_data['organization'] is None:
-            validated_data['organization'] = instance.organization or self.context['request'].user.organization
-        return super().update(instance, validated_data)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  Timetable Slot Serializers (updated for E4)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -371,7 +350,6 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
     examiners_names = serializers.SerializerMethodField()
     paper_checkers_names = serializers.SerializerMethodField()
     chapters_names = serializers.SerializerMethodField()
-    exam_type_name = serializers.CharField(source='timetable_exam_type.name', read_only=True, default=None)
 
     class Meta:
         model = TimetableSlot
@@ -387,7 +365,6 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
                   'session_date', 'chapters', 'chapters_names',
                   'examiners', 'examiners_names',
                   'paper_checkers', 'paper_checkers_names',
-                  'timetable_exam_type', 'exam_type_name',
                   'exam',
                   ]
 
@@ -432,7 +409,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             'is_recurring', 'effective_from', 'effective_to', 'organization',
             # E4 new fields
             'session_type', 'session_name', 'slot_code', 'session_date',
-            'chapters', 'examiners', 'paper_checkers', 'timetable_exam_type',
+            'chapters', 'examiners', 'paper_checkers',
             'exam_data',
         ]
 
@@ -473,7 +450,6 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _require('faculty')
             _forbid('examiners')
             _forbid('paper_checkers')
-            _forbid('timetable_exam_type')
             # Auto-fill times from FIXED_SLOTS
             slot_code = data.get('slot_code')
             if slot_code and slot_code in FIXED_SLOTS:
@@ -489,7 +465,6 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _require('faculty')
             _require('examiners')
             _require('paper_checkers')
-            _require('timetable_exam_type')
             # Auto-set end time
             start = data.get('start_time')
             if start:
@@ -514,7 +489,6 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _require('faculty')
             _require('examiners')
             _require('paper_checkers')
-            _require('timetable_exam_type')
             start = data.get('start_time')
             end = data.get('end_time')
             if start and end and start >= end:
@@ -527,7 +501,6 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             _require('faculty')
             _require('examiners')
             _forbid('paper_checkers')
-            _forbid('timetable_exam_type')
             start = data.get('start_time')
             if start:
                 data['end_time'] = _add_minutes(start, SESSION_DURATIONS['practice'])

@@ -79,6 +79,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     screen_lock_action_display = serializers.CharField(source="get_screen_lock_action_display", read_only=True)
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
+    can_start_exam = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
@@ -92,7 +93,45 @@ class ExamListSerializer(serializers.ModelSerializer):
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
-         'exam_type_display', 'status_display', 'screen_lock_action_display', 'split_screen_action_display', 'result_release_mode_display']
+         'exam_type_display', 'status_display', 'screen_lock_action_display', 
+         'split_screen_action_display', 'result_release_mode_display', 'can_start_exam']
+
+    def get_can_start_exam(self, obj):
+        request = self.context.get('request')
+        if not request or getattr(request.user, 'role', None) != 'student':
+            return False
+
+        student = getattr(request, '_cached_student', None)
+        if student is None:
+            try:
+                from students.models import Student
+                student = Student.objects.get(user=request.user)
+                request._cached_student = student
+            except Exception:
+                request._cached_student = False
+                return False
+        elif student is False:
+            return False
+
+        if student.batch_id != obj.batch_id:
+            return False
+
+        if obj.status not in ['scheduled', 'ongoing']:
+            return False
+
+        from django.utils import timezone
+        now = timezone.now()
+        dt_start = timezone.make_aware(timezone.datetime.combine(obj.scheduled_date, obj.start_time))
+        dt_end = timezone.make_aware(timezone.datetime.combine(obj.scheduled_date, obj.end_time))
+
+        if not (dt_start <= now <= dt_end):
+            return False
+
+        from .models import ExamSession
+        if ExamSession.objects.filter(exam=obj, student=student).exists():
+            return False
+
+        return True
 
     def get_batch_name(self, obj):
         return obj.batch.name if obj.batch else None
@@ -117,6 +156,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'title', 'exam_type', 'batch', 'subject', 'faculty', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'instructions', 'geo_lat', 'geo_lon', 'geo_radius_meters',
+            'status',
             # v2 fields
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
@@ -125,8 +165,11 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, data):
-        if data.get('scheduled_date') and data['scheduled_date'] < timezone.now().date():
-            raise serializers.ValidationError({"scheduled_date": "Cannot schedule in the past."})
+        # Only check past dates if creating a new exam or changing the date
+        if data.get('scheduled_date'):
+            is_new_date = not self.instance or self.instance.scheduled_date != data['scheduled_date']
+            if is_new_date and data['scheduled_date'] < timezone.now().date():
+                raise serializers.ValidationError({"scheduled_date": "Cannot schedule in the past."})
         if data.get('pass_marks', 0) > data.get('total_marks', 0):
             raise serializers.ValidationError({"pass_marks": "Cannot exceed total marks."})
         if data.get('start_time') and data.get('end_time') and data['end_time'] <= data['start_time']:
@@ -140,8 +183,10 @@ class ExamCreateSerializer(serializers.ModelSerializer):
 # ═══ Session ══════════════════════════════════════════════════════════════════
 
 class ExamStartSerializer(serializers.Serializer):
-    student_lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
-    student_lon = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    student_lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    student_lon = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    device_fingerprint = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
+    ip_address = serializers.IPAddressField(required=False, allow_null=True, default=None)
 
 
 class AnswerInputSerializer(serializers.Serializer):

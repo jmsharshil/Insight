@@ -340,6 +340,13 @@ class PaymentSubmitSerializer(serializers.Serializer):
         required=True,
         help_text="UPI / Bank transaction reference number.",
     )
+    payment_amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2,
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text="Amount paid by the student.",
+    )
     payment_note = serializers.CharField(
         required=False,
         allow_blank=True,

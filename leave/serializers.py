@@ -5,11 +5,12 @@ from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord
 class LeavePolicySerializer(serializers.ModelSerializer):
 
     leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
 
     class Meta:
         model = LeavePolicy
         fields = [
-            'id', 'branch', 'leave_type', 'annual_quota', 'max_club_days',
+            'id', 'branch', 'branch_name', 'leave_type', 'annual_quota', 'max_club_days',
             'carry_forward', 'max_carry_days', 'min_advance_days',
             'allow_half_day', 'sandwich_rule', 'is_active',
          'leave_type_display']
@@ -42,7 +43,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
-
+    is_first_approval_done = serializers.SerializerMethodField()
 
     leave_type_display = serializers.CharField(source="get_leave_type_display", read_only=True)
     half_day_session_display = serializers.CharField(source="get_half_day_session_display", read_only=True)
@@ -54,8 +55,11 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             'id', 'applied_by', 'applied_by_name', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'total_days',
             'status', 'status_display', 'is_auto_generated', 'supporting_document_url', 'created_at',
-            'leave_type_display', 'half_day_session_display', 'status_display'
+            'leave_type_display', 'half_day_session_display', 'status_display', 'is_first_approval_done'
         ]
+
+    def get_is_first_approval_done(self, obj):
+        return obj.first_approver is not None
            
 
     def get_applied_by_name(self, obj):
@@ -160,9 +164,11 @@ class LateEntryCreateSerializer(serializers.Serializer):
 
 
 class PublicHolidaySerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+
     class Meta:
         model = PublicHoliday
-        fields = ['id', 'branch', 'date', 'name', 'year', 'created_at']
+        fields = ['id', 'branch', 'branch_name', 'date', 'name', 'year', 'created_at']
         read_only_fields = ['id', 'year', 'created_at']
 
 

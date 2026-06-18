@@ -31,8 +31,19 @@ class InstallmentItemAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = ('id', 'student', 'student_fee', 'installment_item', 'amount', 'payment_mode', 'transaction_ref', 'payment_proof', 'status', 'receipt_number',)
-    list_filter = ('verified_at', 'installment_item', 'verified_by', 'student_fee', 'status', 'updated_at', 'recorded_by', 'payment_date',)
+    list_display = (
+        'id', 'student', 'student_fee', 'amount', 'payment_mode',
+        'transaction_ref', 'status', 'receipt_number', 'payment_date',
+        'payment_proof', 'payment_document', 'verified_by', 'verified_at',
+        'recorded_by', 'note',
+    )
+    list_filter = (
+        'status', 'payment_mode', 'payment_date', 'verified_at',
+        'student_fee', 'recorded_by', 'verified_by',
+    )
+    search_fields = ('receipt_number', 'transaction_ref', 'student__first_name', 'student__surname', 'note')
+    ordering = ['-created_at']
+    date_hierarchy = 'payment_date'
 
 @admin.register(Refund)
 class RefundAdmin(admin.ModelAdmin):
@@ -41,6 +52,6 @@ class RefundAdmin(admin.ModelAdmin):
 
 @admin.register(BankAccount)
 class BankAccountAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'bank_name', 'account_number', 'ifsc_code', 'branch_name', 'is_active', 'created_at',)
+    list_display = ('id', 'name', 'bank_name', 'account_number', 'ifsc_code', 'branch_name', 'is_active', 'created_at', 'max_payment_amount')
     search_fields = ('name',)
     list_filter = ('created_at', 'is_active',)

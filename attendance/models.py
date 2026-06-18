@@ -13,6 +13,7 @@ ATTENDANCE_STATUS_CHOICES = [
     ('late', 'Late'),
     ('half_day', 'Half Day'),
     ('on_leave', 'On Leave'),
+    ('checkout_pending', 'Checkout Pending'),
 ]
 
 SCAN_TYPE_CHOICES = [

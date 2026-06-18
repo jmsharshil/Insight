@@ -211,13 +211,14 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     role_display = serializers.CharField(source="get_role_display", read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'linked_student', 'organization', 'organization_name', 'profile_pic', 'role_display']
-        read_only_fields = ['id', 'username', 'role', 'branch', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name', 'profile_pic', 'role_display']
+        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

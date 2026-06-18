@@ -89,7 +89,7 @@ def auto_assign_batch(student):
         sequence = counter.last_sequence
         # e.g. cseet_oct_26_101
         year_suffix = str(attempt_year)[-2:]
-        batch_name = f"{course_type}_{batch_attempt}_{year_suffix}_{sequence}"
+        batch_name = f"{course_type}_{batch_attempt}_{year_suffix}_{sequence}".capitalize()
 
         from django.utils import timezone
         today = timezone.now().date()
@@ -104,6 +104,8 @@ def auto_assign_batch(student):
             # Placeholder dates — admin can update after creation
             start_date=today,
             end_date=today,
+            organization=student.branch.organization if student.branch else student.organization,
+            branch=student.branch,
         )
 
     # ── Step 3: enrol student ─────────────────────────────────────────────────
@@ -114,7 +116,12 @@ def auto_assign_batch(student):
 
     # ── Step 4: update Student.batch FK ──────────────────────────────────────
     from students.models import Student as StudentModel
-    StudentModel.objects.filter(pk=student.pk).update(batch=batch)
+    StudentModel.objects.filter(pk=student.pk).update(
+        batch=batch, 
+        current_batch_name=batch.name
+    )
+    student.batch = batch
+    student.current_batch_name = batch.name
 
     # ── Step 5: log batch history ─────────────────────────────────────────────
     BatchHistory.objects.create(

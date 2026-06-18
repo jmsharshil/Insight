@@ -135,6 +135,7 @@ class Batch(models.Model):
     attempt_year    = models.PositiveSmallIntegerField(null=True, blank=True)
     auto_sequence   = models.PositiveIntegerField(null=True, blank=True)
     is_auto_created = models.BooleanField(default=False)
+    qr_image       = models.ImageField(upload_to='batches/qrcodes/', null=True, blank=True)
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
 
@@ -206,6 +207,25 @@ class Batch(models.Model):
             else:
                 self.name = f"{ct_upper} '{year_str} {seq}"
             self.is_auto_created = True
+
+        # Generate QR code for the batch using its ID (which is pre-assigned via uuid4 default)
+        if not self.qr_image:
+            import qrcode
+            import io
+            from django.core.files.base import ContentFile
+            
+            qr_payload = str(self.id)
+            qr = qrcode.QRCode(version=1, box_size=10, border=4)
+            qr.add_data(qr_payload)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
+            
+            buffer = io.BytesIO()
+            qr_img.save(buffer, format='PNG')
+            buffer.seek(0)
+            
+            file_name = f"{self.batch_code or qr_payload}_qr.png"
+            self.qr_image.save(file_name, ContentFile(buffer.read()), save=False)
 
         super().save(*args, **kwargs)
 
@@ -327,23 +347,6 @@ class Chapter(models.Model):
         return f"{self.subject.code} | Ch {self.order}: {self.name}"
 
 
-# E4 ─ Timetable Exam Type
-class TimetableExamType(models.Model):
-    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='timetable_exam_types')
-    name         = models.CharField(max_length=100, unique=True)
-    description  = models.TextField(blank=True)
-    is_active    = models.BooleanField(default=True)
-    created_at   = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = 'timetable_exam_types'
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Timetable Slot
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -375,7 +378,6 @@ class TimetableSlot(models.Model):
     chapters            = models.ManyToManyField('batches.Chapter', blank=True, related_name='timetable_slots')
     examiners           = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='examiner_slots')
     paper_checkers      = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='checker_slots')
-    timetable_exam_type = models.ForeignKey(TimetableExamType, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     exam                = models.OneToOneField('exams.Exam', on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slot')
     created_by    = models.ForeignKey(
         settings.AUTH_USER_MODEL,

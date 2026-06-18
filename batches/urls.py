@@ -10,7 +10,6 @@ from .views import (
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
     ChapterListView, ChapterDetailView,
-    TimetableExamTypeListView, TimetableExamTypeDetailView,
     AcademicDropdownsView,
 )
 
@@ -47,6 +46,4 @@ urlpatterns = [
     path('timetable/<uuid:pk>/', TimetableDetailView.as_view(), name='timetable-detail'),
     path('timetable/faculty/<uuid:faculty_id>/', FacultyTimetableView.as_view(), name='faculty-timetable'),
     path('timetable/student/<uuid:student_id>/', StudentTimetableView.as_view(), name='student-timetable'),
-    path('timetable/exam-types/', TimetableExamTypeListView.as_view(), name='timetable-exam-type-list'),
-    path('timetable/exam-types/<uuid:pk>/', TimetableExamTypeDetailView.as_view(), name='timetable-exam-type-detail'),
 ]

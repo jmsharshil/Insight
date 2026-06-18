@@ -69,11 +69,6 @@ class ChapterAdmin(admin.ModelAdmin):
     search_fields = ('name',)
     list_filter = ('subject', 'is_active',)
 
-@admin.register(TimetableExamType)
-class TimetableExamTypeAdmin(admin.ModelAdmin):
-    list_display = ('id', 'organization', 'name', 'description', 'is_active', 'created_at',)
-    search_fields = ('name',)
-    list_filter = ('created_at', 'organization', 'is_active',)
 
 @admin.register(TimetableSlot)
 class TimetableSlotAdmin(admin.ModelAdmin):

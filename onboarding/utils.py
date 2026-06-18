@@ -154,35 +154,45 @@ class AdmissionService:
 
         student_user, student_password = AdmissionService._create_or_update_user(
             email=admission.email,
-            phone=re.sub(r'\D', '', admission.phone_student),
+            phone=re.sub(r'\D', '', admission.phone_student or ''),
             name=student_name,
             role='student',
             linked_student=None,
-        )
-
-        parent_phone = re.sub(r'\D', '', admission.phone_father or admission.phone_father_2)
-        parent_name  = admission.father_name.strip() or f"Parent of {student_name}"
-
-        parent_user, parent_password = AdmissionService._create_or_update_user(
-            email=admission.email_parent,
-            phone=parent_phone,
-            name=parent_name,
-            role='parents',
-            linked_student=student_user,
+            organization=admission.branch.organization if admission.branch else None,
+            branch=admission.branch,
         )
 
         try:
             send_student_login_credentials(student_user, student_password)
-            send_parent_login_credentials(parent_user, student_user, parent_password)
-            logger.info(
-                f"Credentials sent for admission {admission.id} "
-                f"(student={student_user.email}, parent={parent_user.email})"
-            )
+            logger.info(f"Student credentials sent for admission {admission.id}")
         except Exception as e:
-            logger.error(
-                f"Email sending failed for admission {admission.id}: {e}"
-            )
-            # Don't raise — accounts are created even if email fails
+            logger.error(f"Student email sending failed for admission {admission.id}: {e}")
+
+        parent_phone = re.sub(r'\D', '', admission.phone_father or admission.phone_father_2 or '')
+        
+        if admission.email_parent and parent_phone:
+            if admission.email_parent.lower() == admission.email.lower():
+                logger.info(f"Skipping parent account creation for admission {admission.id}: Parent email is identical to student email.")
+            else:
+                parent_name  = admission.father_name.strip() or f"Parent of {student_name}"
+
+                parent_user, parent_password = AdmissionService._create_or_update_user(
+                    email=admission.email_parent,
+                    phone=parent_phone,
+                    name=parent_name,
+                    role='parents',
+                    linked_student=student_user,
+                    organization=admission.branch.organization if admission.branch else None,
+                    branch=admission.branch,
+                )
+
+                try:
+                    send_parent_login_credentials(parent_user, student_user, parent_password)
+                    logger.info(f"Parent credentials sent for admission {admission.id}")
+                except Exception as e:
+                    logger.error(f"Parent email sending failed for admission {admission.id}: {e}")
+        else:
+            logger.info(f"Skipping parent account creation for admission {admission.id} (missing email or phone).")
 
     # ── User Create / Update Helper ───────────────────────────────────────────
 
@@ -197,14 +207,14 @@ class AdmissionService:
         return username
 
     @staticmethod
-    def _create_or_update_user(*, email, phone, name, role, linked_student=None):
+    def _create_or_update_user(*, email, phone, name, role, linked_student=None, organization=None, branch=None):
         if not email:
             raise ValueError("Email is required to create login credentials.")
         if not phone:
             raise ValueError("Phone is required to create login credentials.")
 
         password = generate_temporary_password()
-        user = User.objects.filter(email=email).first()
+        user = User.objects.filter(email__iexact=email).first()
 
         if user:
             if not user.username:
@@ -214,6 +224,10 @@ class AdmissionService:
             user.role           = role
             user.is_active      = True
             user.linked_student = linked_student
+            if organization:
+                user.organization = organization
+            if branch:
+                user.branch = branch
             user.set_password(password)
             user.save()
         else:
@@ -226,6 +240,8 @@ class AdmissionService:
                 name=name,
                 is_active=True,
                 linked_student=linked_student,
+                organization=organization,
+                branch=branch,
             )
 
         return user, password

@@ -14,7 +14,7 @@ from django.db import models
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot,
-    CourseLevel, Chapter, TimetableExamType,
+    CourseLevel, Chapter,
 )
 from .serializers import (
     CourseListSerializer, CourseDetailSerializer, CourseCreateUpdateSerializer,
@@ -25,7 +25,7 @@ from .serializers import (
     ClassroomListSerializer, ClassroomCreateUpdateSerializer,
     TimetableSlotListSerializer, TimetableSlotCreateUpdateSerializer,
     FacultyTimetableSerializer, StudentTimetableSerializer,
-    CourseLevelSerializer, ChapterSerializer, TimetableExamTypeSerializer,
+    CourseLevelSerializer, ChapterSerializer,
 )
 from .validators import check_faculty_clash, check_classroom_clash
 
@@ -763,58 +763,6 @@ class ClassroomDetailView(APIView):
         return Response({'success': True, 'message': 'Classroom deleted.'})
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  TimetableExamType Views (E4)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TimetableExamTypeListView(APIView):
-    def get(self, request):
-        queryset = TimetableExamType.objects.all()
-        if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(organization=request.user.organization)
-        return Response({'success': True, 'data': TimetableExamTypeSerializer(queryset, many=True).data})
-
-    def post(self, request):
-        serializer = TimetableExamTypeSerializer(data=request.data, context={'request': request})
-        if not serializer.is_valid():
-            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-        exam_type = serializer.save()
-        return Response({'success': True, 'message': 'Exam type created.', 'data': TimetableExamTypeSerializer(exam_type).data}, status=status.HTTP_201_CREATED)
-
-
-class TimetableExamTypeDetailView(APIView):
-    def _get_obj(self, pk):
-        try:
-            qs = TimetableExamType.objects.all()
-            if getattr(self.request.user, 'organization', None):
-                qs = qs.filter(organization=self.request.user.organization)
-            return qs.get(pk=pk)
-        except TimetableExamType.DoesNotExist:
-            return None
-
-    def get(self, request, pk):
-        obj = self._get_obj(pk)
-        if not obj:
-            return Response({'success': False, 'message': 'Exam type not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({'success': True, 'data': TimetableExamTypeSerializer(obj).data})
-
-    def patch(self, request, pk):
-        obj = self._get_obj(pk)
-        if not obj:
-            return Response({'success': False, 'message': 'Exam type not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = TimetableExamTypeSerializer(obj, data=request.data, partial=True, context={'request': request})
-        if not serializer.is_valid():
-            return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-        serializer.save()
-        return Response({'success': True, 'message': 'Exam type updated.', 'data': TimetableExamTypeSerializer(obj).data})
-
-    def delete(self, request, pk):
-        obj = self._get_obj(pk)
-        if not obj:
-            return Response({'success': False, 'message': 'Exam type not found.'}, status=status.HTTP_404_NOT_FOUND)
-        obj.delete()
-        return Response({'success': True, 'message': 'Exam type deleted.'})
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Timetable Views
@@ -1065,7 +1013,12 @@ class AcademicDropdownsView(APIView):
             branches_qs = branches_qs.filter(organization_id=org_id)
             classrooms_qs = classrooms_qs.filter(organization_id=org_id)
             chapters_qs = chapters_qs.filter(subject__organization_id=org_id)
-
+        
+        branch_id = request.GET.get('branch_id')
+        if branch_id:
+            batches_qs = batches_qs.filter(branch_id=branch_id)
+            branches_qs = branches_qs.filter(id=branch_id)
+ 
         subjects = list(subjects_qs.values('id', 'name', 'level_id'))
         chapters = list(chapters_qs.values('id', 'name', 'subject_id', 'order'))
 

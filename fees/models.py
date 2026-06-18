@@ -56,6 +56,10 @@ class FeeStructure(models.Model):
         'batches.Batch', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
     )
+    level       = models.ForeignKey(
+        'batches.CourseLevel', on_delete=models.CASCADE,
+        related_name='fee_structures', null=True, blank=True,
+    )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
@@ -222,6 +226,9 @@ class Payment(models.Model):
     payment_proof     = models.FileField(
         upload_to='payments/proofs/', null=True, blank=True,
     )
+    payment_document  = models.FileField(
+        upload_to='payments/documents/', null=True, blank=True,
+    )
     status            = models.CharField(
         max_length=20, choices=PAYMENT_STATUS_CHOICES, default='approval_pending',
     )
@@ -321,6 +328,7 @@ class BankAccount(models.Model):
     ifsc_code   = models.CharField(max_length=15)
     branch_name = models.CharField(max_length=200, blank=True)
     is_active   = models.BooleanField(default=True)
+    max_payment_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -332,3 +340,9 @@ class BankAccount(models.Model):
 
     def __str__(self):
         return f"{self.name} — {self.bank_name} ({self.account_number})"
+
+    def is_under_threshold(self, amount):
+        """Return True if amount is less than or equal to max_payment_amount or if no threshold set."""
+        if self.max_payment_amount is None:
+            return True
+        return amount <= self.max_payment_amount

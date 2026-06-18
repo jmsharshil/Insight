@@ -26,10 +26,12 @@ def create_student_fee(student):
 
     # 2. Fallback: latest active FeeStructure for the course type
     if fs is None:
+        from django.db import models
         fs = (
             FeeStructure.objects
             .filter(
-                course__course_type=admission.course,
+                models.Q(level__course_type=admission.course) | 
+                models.Q(course__levels__course_type=admission.course),
                 is_active=True,
             )
             .order_by('-created_at')
@@ -51,5 +53,25 @@ def create_student_fee(student):
             'status': 'approval_pending',
         },
     )
+
+    # 4. Sync admission payment if present
+    payment_amount = getattr(admission, 'payment_amount', 0) or 0
+    if admission.payment_screenshot or admission.transaction_id or payment_amount:
+        from fees.models import Payment
+        from django.utils import timezone
+        
+        Payment.objects.get_or_create(
+            student=student,
+            student_fee=student_fee,
+            transaction_ref=admission.transaction_id or '',
+            defaults={
+                'amount': payment_amount,
+                'payment_mode': 'online',
+                'payment_proof': admission.payment_screenshot,
+                'status': 'verified',
+                'payment_date': timezone.now().date(),
+                'note': f"Auto-created from admission {admission.id}. Transaction ID: {admission.transaction_id or 'N/A'}"
+            }
+        )
 
     return student_fee
