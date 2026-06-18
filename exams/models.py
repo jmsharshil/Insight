@@ -24,6 +24,7 @@ class Exam(models.Model):
     branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='exams')
     batch = models.ForeignKey('batches.Batch', on_delete=models.SET_NULL, null=True, related_name='exams')
     subject = models.ForeignKey('batches.Subject', on_delete=models.SET_NULL, null=True, blank=True, related_name='exams')
+    faculty = models.ForeignKey('faculty.FacultyProfile', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_exams')
     title = models.CharField(max_length=200)
     exam_type = models.CharField(max_length=20, choices=EXAM_TYPE_CHOICES)
     total_marks = models.IntegerField()
