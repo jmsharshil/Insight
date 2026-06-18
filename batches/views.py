@@ -936,6 +936,128 @@ class TimetableDetailView(APIView):
         return Response({'success': True, 'message': 'Timetable slot deleted.'})
 
 
+class TimetableDuplicateSlotView(APIView):
+    """
+    POST /api/v1/timetable/<uuid:pk>/duplicate/
+    Duplicates a regular-session timetable slot to a new day + slot code.
+
+    Body: { "slot_code": "P2", "day_of_week": 3 }
+    """
+
+    def post(self, request, pk):
+        # 1. Fetch the source slot
+        try:
+            qs = TimetableSlot.objects.select_related(
+                'batch', 'subject', 'faculty', 'classroom'
+            ).all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(organization=request.user.organization)
+            source = qs.get(pk=pk)
+        except TimetableSlot.DoesNotExist:
+            return Response(
+                {'success': False, 'message': 'Source timetable slot not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # 2. Only regular sessions may be duplicated
+        if source.session_type != 'regular':
+            return Response(
+                {'success': False, 'message': 'Only regular sessions can be duplicated.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3. Validate inputs
+        slot_code = request.data.get('slot_code')
+        day_of_week = request.data.get('day_of_week')
+
+        from batches.constants import FIXED_SLOTS
+        from batches.models import SLOT_CODE_CHOICES, DAY_CHOICES
+
+        valid_codes = [c[0] for c in SLOT_CODE_CHOICES]
+        valid_days  = [d[0] for d in DAY_CHOICES]
+
+        if not slot_code or slot_code not in valid_codes:
+            return Response(
+                {'success': False, 'message': f"Invalid slot_code. Choose from {valid_codes}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if day_of_week is None:
+            return Response(
+                {'success': False, 'message': 'day_of_week is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            day_of_week = int(day_of_week)
+        except (ValueError, TypeError):
+            return Response(
+                {'success': False, 'message': 'day_of_week must be an integer.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if day_of_week not in valid_days:
+            return Response(
+                {'success': False, 'message': f"Invalid day_of_week. Choose from {valid_days}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4. Resolve start/end times from slot code
+        start_time, end_time = FIXED_SLOTS[slot_code]
+
+        # 5. Clash detection — faculty
+        if source.faculty_id:
+            faculty_clashes = check_faculty_clash(
+                faculty_id=source.faculty_id,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            if faculty_clashes:
+                return Response(
+                    {'success': False, 'message': 'Faculty has a scheduling conflict.',
+                     'clashing_slots': faculty_clashes},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # 6. Clash detection — classroom
+        if source.classroom_id:
+            classroom_clashes = check_classroom_clash(
+                classroom_id=source.classroom_id,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            if classroom_clashes:
+                return Response(
+                    {'success': False, 'message': 'Classroom has a scheduling conflict.',
+                     'clashing_slots': classroom_clashes},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # 7. Create the duplicate slot
+        new_slot = TimetableSlot.objects.create(
+            organization=source.organization,
+            batch=source.batch,
+            subject=source.subject,
+            faculty=source.faculty,
+            classroom=source.classroom,
+            day_of_week=day_of_week,
+            start_time=start_time,
+            end_time=end_time,
+            is_recurring=source.is_recurring,
+            effective_from=source.effective_from,
+            effective_to=source.effective_to,
+            session_type='regular',
+            session_name=source.session_name,
+            slot_code=slot_code,
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        return Response(
+            {'success': True, 'message': 'Timetable slot duplicated.',
+             'data': TimetableSlotListSerializer(new_slot).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
 # ── Personal Timetable Views ─────────────────────────────────────────────────
 
 class FacultyTimetableView(APIView):
