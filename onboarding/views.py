@@ -553,60 +553,60 @@ class AdmissionApproveView(APIView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
  
-            # ── Auto-create StudentFee + Payment from admission ────────────
-            try:
-                from fees.models import StudentFee, Payment, FeeStructure
-                from django.utils import timezone
-                from decimal import Decimal
+            # # ── Auto-create StudentFee + Payment from admission ────────────
+            # try:
+            #     from fees.models import StudentFee, Payment, FeeStructure
+            #     from django.utils import timezone
+            #     from decimal import Decimal
 
-                fee_structure = admission.fee_structure
-                payment_amount = admission.payment_amount or Decimal('0')
+            #     fee_structure = admission.fee_structure
+            #     payment_amount = admission.payment_amount or Decimal('0')
 
-                if fee_structure:
-                    # Create StudentFee record
-                    student_fee = StudentFee.objects.create(
-                        student=student,
-                        fee_structure=fee_structure,
-                        total_amount=fee_structure.total_amount,
-                        discount=Decimal('0'),
-                        amount_paid=Decimal('0'),
-                        status='approval_pending',
-                    )
+            #     if fee_structure:
+            #         # Create StudentFee record
+            #         student_fee = StudentFee.objects.create(
+            #             student=student,
+            #             fee_structure=fee_structure,
+            #             total_amount=fee_structure.total_amount,
+            #             discount=Decimal('0'),
+            #             amount_paid=Decimal('0'),
+            #             status='approval_pending',
+            #         )
 
-                    # Create Payment record if a payment amount was submitted
-                    if payment_amount > Decimal('0'):
-                        Payment.objects.create(
-                            student=student,
-                            student_fee=student_fee,
-                            amount=payment_amount,
-                            payment_mode='online',
-                            transaction_ref=admission.transaction_id or '',
-                            payment_proof=admission.payment_screenshot or None,
-                            status='verified',
-                            recorded_by=acting_user,
-                            verified_by=acting_user,
-                            verified_at=timezone.now(),
-                            payment_date=timezone.now().date(),
-                            note=f'Auto-created from admission {admission.id}. '
-                                 f'Transaction ID: {admission.transaction_id or "N/A"}',
-                        )
-                        # Payment.save() triggers update_student_fee_status automatically
+            #         # Create Payment record if a payment amount was submitted
+            #         if payment_amount > Decimal('0'):
+            #             Payment.objects.create(
+            #                 student=student,
+            #                 student_fee=student_fee,
+            #                 amount=payment_amount,
+            #                 payment_mode='online',
+            #                 transaction_ref=admission.transaction_id or '',
+            #                 payment_proof=admission.payment_screenshot or None,
+            #                 status='verified',
+            #                 recorded_by=acting_user,
+            #                 verified_by=acting_user,
+            #                 verified_at=timezone.now(),
+            #                 payment_date=timezone.now().date(),
+            #                 note=f'Auto-created from admission {admission.id}. '
+            #                      f'Transaction ID: {admission.transaction_id or "N/A"}',
+            #             )
+            #             # Payment.save() triggers update_student_fee_status automatically
 
-                    logger.info(
-                        f"StudentFee + Payment auto-created for student "
-                        f"{student.admission_number} from admission {admission.id}"
-                    )
-                else:
-                    logger.warning(
-                        f"No fee_structure on admission {admission.id}, "
-                        f"skipping auto StudentFee creation."
-                    )
-            except Exception as exc:
-                logger.error(
-                    f"Auto StudentFee/Payment creation failed for admission "
-                    f"{admission_id}: {exc}"
-                )
-                # Non-fatal: student is already created, fee can be added manually
+            #         logger.info(
+            #             f"StudentFee + Payment auto-created for student "
+            #             f"{student.admission_number} from admission {admission.id}"
+            #         )
+            #     else:
+            #         logger.warning(
+            #             f"No fee_structure on admission {admission.id}, "
+            #             f"skipping auto StudentFee creation."
+            #         )
+            # except Exception as exc:
+            #     logger.error(
+            #         f"Auto StudentFee/Payment creation failed for admission "
+            #         f"{admission_id}: {exc}"
+            #     )
+            #     # Non-fatal: student is already created, fee can be added manually
  
             return Response(
                 {
