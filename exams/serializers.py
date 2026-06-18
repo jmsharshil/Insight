@@ -71,6 +71,8 @@ class ExamListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
+    faculty_id = serializers.SerializerMethodField()
+    faculty_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     exam_type_display = serializers.CharField(source="get_exam_type_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
@@ -84,7 +86,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'id', 'title', 'exam_type', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'status', 'status_display', 'batch', 'batch_name', 'subject', 'subject_name',
-            'branch', 'created_by', 'created_by_name', 'created_at',
+            'faculty', 'faculty_id', 'faculty_name', 'branch', 'created_by', 'created_by_name', 'created_at',
             # v2 fields
             'geo_radius_meters', 'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
@@ -98,6 +100,12 @@ class ExamListSerializer(serializers.ModelSerializer):
     def get_subject_name(self, obj):
         return obj.subject.name if obj.subject else None
 
+    def get_faculty_id(self, obj):
+        return obj.faculty.id if obj.faculty else None
+
+    def get_faculty_name(self, obj):
+        return obj.faculty.user.name if obj.faculty and obj.faculty.user else None
+
     def get_created_by_name(self, obj):
         return obj.created_by.name if obj.created_by else None
 
@@ -106,7 +114,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exam
         fields = [
-            'title', 'exam_type', 'batch', 'subject', 'total_marks', 'pass_marks',
+            'title', 'exam_type', 'batch', 'subject', 'faculty', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'instructions', 'geo_lat', 'geo_lon', 'geo_radius_meters',
             # v2 fields

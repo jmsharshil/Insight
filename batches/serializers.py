@@ -579,6 +579,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
                 branch_id=branch_id,
                 batch=slot.batch,
                 subject=slot.subject,
+                faculty=slot.faculty,
                 title=title,
                 exam_type=exam_data.get('exam_type', 'offline'),
                 total_marks=exam_data.get('total_marks', 100),
@@ -596,6 +597,7 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
         else:
             exam = slot.exam
             exam.title = title
+            exam.faculty = slot.faculty
             exam.exam_type = exam_data.get('exam_type', exam.exam_type)
             exam.total_marks = exam_data.get('total_marks', exam.total_marks)
             exam.pass_marks = exam_data.get('pass_marks', exam.pass_marks)
