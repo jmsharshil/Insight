@@ -56,7 +56,8 @@ class FacultyListSerializer(serializers.ModelSerializer):
         return ", ".join(unique_names)
 
     def get_subjects(self, obj):
-        return list(set(str(a.subject.id) for a in obj.batch_assignments.all() if a.subject))
+        subjects = [a.subject for a in obj.batch_assignments.select_related('subject').all() if a.subject]
+        return [{'id': s.id, 'name': s.name, 'code': s.code} for s in subjects]
 
     def get_subject_name(self, obj):
         names = [a.subject.name for a in obj.batch_assignments.all() if a.subject]
