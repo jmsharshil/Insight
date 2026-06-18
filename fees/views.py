@@ -27,7 +27,7 @@ from .serializers import (
     BankAccountListSerializer, BankAccountCreateUpdateSerializer,
     FeeReportSerializer,
 )
-from .utils import update_student_fee_status, mark_installment_paid
+from .utils import update_student_fee_status, mark_installment_paid, get_installment_plan_status
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +298,21 @@ class InstallmentPlanCreateView(APIView):
         except StudentFee.DoesNotExist:
             return Response({'success': False, 'message': 'Student fee not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        # Determine initial status using utility (CSEET >2 or others >4 items → pending approval)
+        fee_structure = student_fee.fee_structure
+        course_type = None
+        if hasattr(fee_structure, 'level') and fee_structure.level:
+            course_type = getattr(fee_structure.level, 'course_type', None)
+
+        num_installments = len(items_data)
+        initial_status = get_installment_plan_status(course_type, num_installments)
+
+        approved_by = None
+        approved_at = None
+        if initial_status == 'approved':
+            # approved_by = request.user if request.user.is_authenticated else None
+            approved_at = timezone.now()
+
         # Validate total amounts match
         items_total = sum(float(item['amount']) for item in items_data)
         if abs(items_total - float(student_fee.amount_due)) > 0.01:
@@ -310,6 +325,9 @@ class InstallmentPlanCreateView(APIView):
         plan = InstallmentPlan.objects.create(
             student_fee=student_fee,
             created_by=request.user if request.user.is_authenticated else None,
+            status=initial_status,
+            approved_by=approved_by,
+            approved_at=approved_at,
         )
         for item in items_data:
             InstallmentItem.objects.create(
@@ -318,8 +336,13 @@ class InstallmentPlanCreateView(APIView):
                 due_date=item['due_date'],
             )
 
+        message = (
+            'Installment plan created and approved automatically.'
+            if initial_status == 'approved'
+            else 'Installment plan created (pending approval).'
+        )
         return Response(
-            {'success': True, 'message': 'Installment plan created (pending approval).',
+            {'success': True, 'message': message,
              'data': InstallmentPlanListSerializer(plan).data},
             status=status.HTTP_201_CREATED,
         )
@@ -450,16 +473,32 @@ class PaymentVerifyView(APIView):
 
     def post(self, request, pk):
         try:
-            queryset = Payment.objects.all()
+            queryset = Payment.objects.select_related(
+                'installment_item__plan', 'student_fee', 'student'
+            ).all()
             if getattr(request.user, 'organization', None):
                 queryset = queryset.filter(student__branch__organization=request.user.organization)
             payment = queryset.get(pk=pk)
         except Payment.DoesNotExist:
-            return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if payment.status != 'approval_pending':
             return Response(
                 {'success': False, 'message': f'Payment is already {payment.status}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Prevent approving/verifying payments linked to pending_approval installment plans.
+        # This enforces the conditional approval workflow from InstallmentPlanCreateView
+        # (status based on course_type and # of items; uses approved_by/approved_at).
+        if payment.installment_item and payment.installment_item.plan.status == 'pending_approval':
+            plan = payment.installment_item.plan
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Cannot approve/verify this payment before the associated InstallmentPlan is approved.',
+                    'errors': {'installment_plan': f'Plan {plan.id} is pending approval (approved_by not set).'}
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

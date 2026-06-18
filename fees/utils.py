@@ -2,6 +2,22 @@ from django.db import transaction
 from .models import StudentFee, Payment, InstallmentItem
 import random
 from django.db.models import Q
+from django.utils import timezone
+
+
+def get_installment_plan_status(course_type, num_installments):
+    """
+    Determine initial status for an InstallmentPlan based on course_type of the level
+    and number of installment items.
+    
+    Rules:
+    - If course_type is 'cseet' and >2 items → 'pending_approval'
+    - For other course_types if >4 items → 'pending_approval'
+    - Otherwise → 'approved' (no approval needed)
+    """
+    if course_type == 'cseet':
+        return 'pending_approval' if num_installments > 2 else 'approved'
+    return 'pending_approval' if num_installments > 4 else 'approved'
 
 def select_bank_accounts_for_payment(amount, limit=None):
     """Return a shuffled list of active BankAccount objects whose max_payment_amount
