@@ -17,16 +17,18 @@ from .models import (
 class FeeStructureListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True, default=None)
     batch_name = serializers.CharField(source='batch.name', read_only=True, default=None)
+    level_name = serializers.CharField(source='level.name', read_only=True, default=None)
 
     class Meta:
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
-                  'total_amount', 'is_active', 'created_at']
+                  'level', 'level_name', 'total_amount', 'is_active', 'created_at']
 
 
 class FeeStructureDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True, default=None)
     batch_name = serializers.CharField(source='batch.name', read_only=True, default=None)
+    level_name = serializers.CharField(source='level.name', read_only=True, default=None)
 
     class Meta:
         model = FeeStructure
@@ -36,7 +38,7 @@ class FeeStructureDetailSerializer(serializers.ModelSerializer):
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
-        fields = ['name', 'course', 'batch', 'total_amount', 'description', 'is_active']
+        fields = ['name', 'course', 'batch', 'level', 'total_amount', 'description', 'is_active']
 
     def create(self, validated_data):
         fee_structure = super().create(validated_data)

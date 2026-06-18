@@ -56,6 +56,10 @@ class FeeStructure(models.Model):
         'batches.Batch', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
     )
+    level       = models.ForeignKey(
+        'batches.CourseLevel', on_delete=models.CASCADE,
+        related_name='fee_structures', null=True, blank=True,
+    )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
