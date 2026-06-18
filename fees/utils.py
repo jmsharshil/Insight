@@ -1,5 +1,27 @@
 from django.db import transaction
 from .models import StudentFee, Payment, InstallmentItem
+import random
+from django.db.models import Q
+
+def select_bank_accounts_for_payment(amount, limit=None):
+    """Return a shuffled list of active BankAccount objects whose max_payment_amount
+    is either unset (None) or greater than or equal to the given amount.
+
+    Args:
+        amount (Decimal): The payment amount to compare against thresholds.
+        limit (int, optional): Maximum number of accounts to return. If None, returns all.
+    Returns:
+        list[BankAccount]: Shuffled list of eligible bank accounts.
+    """
+    from .models import BankAccount
+    eligible_qs = BankAccount.objects.filter(is_active=True).filter(
+        Q(max_payment_amount__isnull=True) | Q(max_payment_amount__gte=amount)
+    )
+    accounts = list(eligible_qs)
+    random.shuffle(accounts)
+    if limit is not None:
+        return accounts[:limit]
+    return accounts
 
 
 def update_student_fee_status(student_fee_id):

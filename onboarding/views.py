@@ -80,14 +80,27 @@ class AdmissionListView(APIView):
                 )
             serializer.save()
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # Auto-assign bank and send payment email directly (skip first approval)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            from .models import BANK_ACCOUNTS, AdmissionStatusHistory
-            bank_index = (admission.id - 1) % len(BANK_ACCOUNTS)
-            assigned_bank = BANK_ACCOUNTS[bank_index]
-
-            admission.assigned_bank_id = assigned_bank['id']
+            # Auto-assign bank based on payment amount and threshold
+            from fees.utils import select_bank_accounts_for_payment
+            from fees.models import BankAccount
+            # Determine payment amount: use fee_structure total_amount if available
+            payment_amount = None
+            if admission.fee_structure_id:
+                from fees.models import FeeStructure
+                fee_struct = FeeStructure.objects.filter(id=admission.fee_structure_id).first()
+                if fee_struct:
+                    payment_amount = fee_struct.total_amount
+            # Fallback amount if unknown
+            if payment_amount is None:
+                # Use a default high amount to get all banks
+                from decimal import Decimal
+                payment_amount = Decimal('0')
+            eligible_banks = select_bank_accounts_for_payment(payment_amount)
+            if not eligible_banks:
+                # Fallback to any active bank
+                eligible_banks = list(BankAccount.objects.filter(is_active=True))
+            assigned_bank = eligible_banks[0]
+            admission.assigned_bank_id = assigned_bank.id
             admission.status = 'payment_pending'
             admission.note = 'Form submitted. Waiting for fee payment.'
             admission.save(update_fields=['assigned_bank_id', 'status', 'note', 'updated_at'])
@@ -104,6 +117,18 @@ class AdmissionListView(APIView):
                     from core.email import send_email
                     payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
 
+                    # Build bank details text for all eligible banks (shuffled)
+                    bank_details = ""
+                    for bank in eligible_banks:
+                        bank_details += (
+                            f"Bank Name       : {bank.bank_name}\n"
+                            f"Account Holder  : {bank.account_holder}\n"
+                            f"Account Number  : {bank.account_number}\n"
+                            f"IFSC Code       : {bank.ifsc_code}\n"
+                            f"Branch          : {bank.branch}\n"
+                            f"Account Type    : {bank.account_type}\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        )
                     text_content = (
                         f"Hello {admission.first_name},\n\n"
                         f"Thank you for submitting your admission form. "
@@ -111,13 +136,7 @@ class AdmissionListView(APIView):
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"BANK DETAILS FOR FEE PAYMENT\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"Bank Name       : {assigned_bank['bank_name']}\n"
-                        f"Account Holder  : {assigned_bank['account_holder']}\n"
-                        f"Account Number  : {assigned_bank['account_number']}\n"
-                        f"IFSC Code       : {assigned_bank['ifsc_code']}\n"
-                        f"Branch          : {assigned_bank['branch']}\n"
-                        f"Account Type    : {assigned_bank['account_type']}\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"{bank_details}"
                         f"After making the payment, please click the link below to "
                         f"upload your payment screenshot and transaction ID:\n\n"
                         f"{payment_link}\n\n"
@@ -134,7 +153,7 @@ class AdmissionListView(APIView):
                         template_context={},
                         organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                     )
-                    logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank['bank_name']}")
+                    logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank.bank_name}")
                 except Exception as e:
                     logger.error(f"Failed to send payment email to {admission.email}: {e}")
 
@@ -253,9 +272,24 @@ class AdmissionDetailView(APIView):
         # Auto-assign bank and send payment email directly if form is submitted
         if admission.status == 'form_pending' and admission.dob is not None:
             try:
-                from .models import BANK_ACCOUNTS, AdmissionStatusHistory
-                bank_index = (admission.id - 1) % len(BANK_ACCOUNTS)
-                assigned_bank = BANK_ACCOUNTS[bank_index]
+                # Auto-assign bank based on payment amount and threshold
+                from fees.utils import select_bank_accounts_for_payment
+                from fees.models import BankAccount, AdmissionStatusHistory
+                # Determine payment amount: use fee_structure total_amount if available
+                payment_amount = None
+                if admission.fee_structure_id:
+                    from fees.models import FeeStructure
+                    fee_struct = FeeStructure.objects.filter(id=admission.fee_structure_id).first()
+                    if fee_struct:
+                        payment_amount = fee_struct.total_amount
+                # Fallback amount if unknown
+                if payment_amount is None:
+                    from decimal import Decimal
+                    payment_amount = Decimal('0')
+                eligible_banks = select_bank_accounts_for_payment(payment_amount)
+                if not eligible_banks:
+                    eligible_banks = list(BankAccount.objects.filter(is_active=True))
+                assigned_bank = eligible_banks[0]
 
                 admission.assigned_bank_id = assigned_bank['id']
                 admission.status = 'payment_pending'
@@ -273,6 +307,17 @@ class AdmissionDetailView(APIView):
                     from core.email import send_email
                     payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
 
+                    # Build bank details text for all eligible banks (shuffled)
+                    bank_details = ""
+                    for bank in eligible_banks:
+                        bank_details += (
+                            f"Bank Name       : {bank.bank_name}\n"
+                            f"Account Holder  : {bank.name}\n"
+                            f"Account Number  : {bank.account_number}\n"
+                            f"IFSC Code       : {bank.ifsc_code}\n"
+                            f"Branch          : {bank.branch_name}\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        )
                     text_content = (
                         f"Hello {admission.first_name},\n\n"
                         f"Thank you for submitting your admission form. "
@@ -280,13 +325,7 @@ class AdmissionDetailView(APIView):
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"BANK DETAILS FOR FEE PAYMENT\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"Bank Name       : {assigned_bank['bank_name']}\n"
-                        f"Account Holder  : {assigned_bank['account_holder']}\n"
-                        f"Account Number  : {assigned_bank['account_number']}\n"
-                        f"IFSC Code       : {assigned_bank['ifsc_code']}\n"
-                        f"Branch          : {assigned_bank['branch']}\n"
-                        f"Account Type    : {assigned_bank['account_type']}\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"{bank_details}"
                         f"After making the payment, please click the link below to "
                         f"upload your payment screenshot and transaction ID:\n\n"
                         f"{payment_link}\n\n"

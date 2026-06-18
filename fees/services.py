@@ -29,7 +29,7 @@ def create_student_fee(student):
         fs = (
             FeeStructure.objects
             .filter(
-                course__course_type=admission.course,
+                level__course_type=admission.course,
                 is_active=True,
             )
             .order_by('-created_at')
