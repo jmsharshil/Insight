@@ -186,6 +186,7 @@ class Admission(models.Model):
     transaction_id        = models.CharField(max_length=100, blank=True, help_text="UPI / Bank transaction reference number.")
     payment_note          = models.TextField(blank=True, help_text="Optional note from student regarding payment.")
     payment_submitted_at  = models.DateTimeField(null=True, blank=True)
+    payment_amount        = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Amount paid by the student.")
 
     class Meta:
         db_table = 'admissions'

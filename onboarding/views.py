@@ -1,3 +1,4 @@
+from onboarding.models import AdmissionStatusHistory
 from django.shortcuts import render
 
 # Create your views here.
@@ -640,10 +641,11 @@ class AdmissionPaymentSubmitView(APIView):
         admission.transaction_id       = serializer.validated_data['transaction_id']
         admission.payment_note         = serializer.validated_data.get('payment_note', '')
         admission.payment_submitted_at = timezone.now()
+        admission.payment_amount       = serializer.validated_data.get('payment_amount', None)
         admission.status               = 'approval_pending'
         admission.save(update_fields=[
             'payment_screenshot', 'transaction_id', 'payment_note',
-            'payment_submitted_at', 'status', 'updated_at',
+            'payment_submitted_at', 'status', 'updated_at', 'payment_amount',
         ])
 
         from .models import AdmissionStatusHistory
