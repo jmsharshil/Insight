@@ -6,7 +6,7 @@ from .views import (
     BatchAssignStudentsView, BatchRemoveStudentView,
     BatchAssignFacultyView, BatchRemoveFacultyView,
     ClassroomListView, ClassroomDetailView,
-    TimetableListView, TimetableDetailView,
+    TimetableListView, TimetableDetailView, TimetableDuplicateSlotView,
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
     ChapterListView, ChapterDetailView,
@@ -46,4 +46,5 @@ urlpatterns = [
     path('timetable/<uuid:pk>/', TimetableDetailView.as_view(), name='timetable-detail'),
     path('timetable/faculty/<uuid:faculty_id>/', FacultyTimetableView.as_view(), name='faculty-timetable'),
     path('timetable/student/<uuid:student_id>/', StudentTimetableView.as_view(), name='student-timetable'),
+    path('timetable/<uuid:pk>/duplicate/', TimetableDuplicateSlotView.as_view(), name='timetable-duplicate-slot'),
 ]
