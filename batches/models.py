@@ -347,23 +347,6 @@ class Chapter(models.Model):
         return f"{self.subject.code} | Ch {self.order}: {self.name}"
 
 
-# E4 ─ Timetable Exam Type
-class TimetableExamType(models.Model):
-    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='timetable_exam_types')
-    name         = models.CharField(max_length=100, unique=True)
-    description  = models.TextField(blank=True)
-    is_active    = models.BooleanField(default=True)
-    created_at   = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = 'timetable_exam_types'
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Timetable Slot
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -395,7 +378,6 @@ class TimetableSlot(models.Model):
     chapters            = models.ManyToManyField('batches.Chapter', blank=True, related_name='timetable_slots')
     examiners           = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='examiner_slots')
     paper_checkers      = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='checker_slots')
-    timetable_exam_type = models.ForeignKey(TimetableExamType, on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slots')
     exam                = models.OneToOneField('exams.Exam', on_delete=models.SET_NULL, null=True, blank=True, related_name='timetable_slot')
     created_by    = models.ForeignKey(
         settings.AUTH_USER_MODEL,
