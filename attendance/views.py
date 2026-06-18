@@ -299,11 +299,11 @@ class QRScanView(APIView):
         if scan_type == 'check_in':
             record, created = AttendanceRecord.objects.get_or_create(
                 student=student, batch_id=batch.id, date=now.date(),
-                defaults={'branch_id': student_branch_id, 'status': 'present', 'marked_by': user, 'checked_in_at': now},
+                defaults={'branch_id': student_branch_id, 'status': 'checkout_pending', 'marked_by': user, 'checked_in_at': now},
             )
             if not created and not record.checked_in_at:
                 record.checked_in_at = now
-                record.status = 'present'
+                record.status = 'checkout_pending'
                 record.save(update_fields=['checked_in_at', 'status'])
             attendance_status = 'already_scanned' if (not created and record.checked_in_at and record.checked_in_at != now) else record.status
             checked_in_at = record.checked_in_at
@@ -318,7 +318,8 @@ class QRScanView(APIView):
                     student=student, batch_id=batch.id, date=now.date(),
                 )
                 record.checked_out_at = now
-                record.save(update_fields=['checked_out_at'])
+                record.status = 'present'
+                record.save(update_fields=['checked_out_at', 'status'])
                 attendance_status = record.status
                 checked_in_at = record.checked_in_at
                 checked_out_at = record.checked_out_at
@@ -509,12 +510,6 @@ class StudentAttendanceView(APIView):
         if batch_id:
             qs = qs.filter(batch_id=batch_id)
 
-        records_data = [{
-            'date': r.date, 'status': r.status,
-            'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
-            'marked_by_name': r.marked_by.name if r.marked_by else None,
-        } for r in qs]
-
         present, total, pct = compute_attendance_percentage(student_id, month=month, batch_id=batch_id)
 
         # v3 FRD §4.4.3: violations visible on student profile
@@ -525,12 +520,38 @@ class StudentAttendanceView(APIView):
             'is_resolved': v.is_resolved, 'created_at': v.created_at,
         } for v in violations_qs]
 
+        summary_data = {'present': present, 'absent': qs.filter(status='absent').count(), 'total': total, 'percentage': pct}
+
         from core.pagination import StandardPagination
         paginator = StandardPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
 
-        return paginator.get_paginated_response({
+        if page is not None:
+            records_data = [{
+                'date': r.date, 'status': r.status,
+                'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
+                'marked_by_name': r.marked_by.name if r.marked_by else None,
+            } for r in page]
+            return Response({
+                'success': True, 
+                'count': paginator.page.paginator.count,
+                'next': paginator.get_next_link(),
+                'previous': paginator.get_previous_link(),
+                'page_size': paginator.get_page_size(request),
+                'data': records_data,
+                'summary': summary_data,
+                'violations': violations_data,
+            })
+
+        records_data = [{
+            'date': r.date, 'status': r.status,
+            'checked_in_at': r.checked_in_at, 'checked_out_at': r.checked_out_at,
+            'marked_by_name': r.marked_by.name if r.marked_by else None,
+        } for r in qs]
+
+        return Response({
             'success': True, 'data': records_data,
-            'summary': {'present': present, 'absent': qs.filter(status='absent').count(), 'total': total, 'percentage': pct},
+            'summary': summary_data,
             'violations': violations_data,
         })
 
