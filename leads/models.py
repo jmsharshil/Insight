@@ -35,6 +35,7 @@ STAGE_CHOICES = [
     ('contacted', 'Contacted'),
     ('interested', 'Interested'),
     ('visit', 'Visit'),
+    ('visited', 'Visited'),
     ('follow_up', 'Follow-up'),
     ('converted', 'Converted'),
     ('lost', 'Lost'),

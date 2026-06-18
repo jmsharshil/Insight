@@ -181,7 +181,7 @@ class Admission(models.Model):
     updated_at   = models.DateTimeField(auto_now=True)
 
     # ── Fee Payment Tracking ──────────────────────────────────────────────────
-    assigned_bank_id      = models.IntegerField(null=True, blank=True, help_text="ID of the bank from BANK_ACCOUNTS assigned to this student.")
+    assigned_bank_id      = models.CharField(max_length=50, null=True, blank=True, help_text="ID of the bank from BANK_ACCOUNTS assigned to this student.")
     payment_screenshot    = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     transaction_id        = models.CharField(max_length=100, blank=True, help_text="UPI / Bank transaction reference number.")
     payment_note          = models.TextField(blank=True, help_text="Optional note from student regarding payment.")

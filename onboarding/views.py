@@ -274,7 +274,7 @@ class AdmissionDetailView(APIView):
             try:
                 # Auto-assign bank based on payment amount and threshold
                 from fees.utils import select_bank_accounts_for_payment
-                from fees.models import BankAccount, AdmissionStatusHistory
+                from fees.models import BankAccount
                 # Determine payment amount: use fee_structure total_amount if available
                 payment_amount = None
                 if admission.fee_structure_id:

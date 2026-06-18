@@ -392,6 +392,9 @@ class LeadStatusUpdateView(APIView):
             lead.visit_set_at = today
             lead.visit_date = serializer.validated_data.get("visit_date")
 
+        elif new_stage == "visited":
+            lead.is_visited = True
+
         if "is_visited" in serializer.validated_data:
             lead.is_visited = serializer.validated_data["is_visited"]
 
