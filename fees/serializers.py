@@ -8,6 +8,9 @@ from .models import (
     FEE_STATUS_CHOICES, INSTALLMENT_PLAN_STATUS_CHOICES,
     REFUND_STATUS_CHOICES,
 )
+from .utils import get_installment_plan_status
+from decimal import Decimal
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43,18 +46,48 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         fee_structure = super().create(validated_data)
         
-        # Auto-assign the fee to students in the batch/course
+        # Auto-assign the fee to students. Use level name mapping (CSEET, CSExecutive,
+        # CS Professional) to match admission.course since course_type on levels is deprecated.
         from students.models import Student
         
         students_to_assign = set()
         
-        if fee_structure.batch:
+        if fee_structure.level:
+            # Map level name to student's course field value
+            level_name = fee_structure.level.name or ''
+            level_upper = level_name.upper().replace(' ', '')
+            if 'CSEET' in level_upper:
+                course_val = 'cseet'
+            elif 'EXECUTIVE' in level_upper:
+                course_val = 'cs_executive'
+            elif 'PROFESSIONAL' in level_upper:
+                course_val = 'cs_professional'
+            else:
+                course_val = None
+            if course_val:
+                # Match students whose course matches the level (from admission)
+                students = Student.objects.filter(
+                    course=course_val, is_active=True
+                )
+                for s in students:
+                    students_to_assign.add(s)
+            else:
+                # Fallback to level's related batches
+                students = Student.objects.filter(
+                    batch__course__levels=fee_structure.level,
+                    is_active=True
+                )
+                for s in students:
+                    students_to_assign.add(s)
+        elif fee_structure.batch:
             students = Student.objects.filter(batch=fee_structure.batch, is_active=True)
             for s in students:
                 students_to_assign.add(s)
         elif fee_structure.course:
-            # Fallback to course if no specific batch
-            students = Student.objects.filter(batch__course=fee_structure.course, is_active=True)
+            # Fallback to course if no specific batch or level
+            students = Student.objects.filter(
+                batch__course=fee_structure.course, is_active=True
+            )
             for s in students:
                 students_to_assign.add(s)
 
@@ -67,20 +100,49 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         student_fees_to_create = []
         for student in students_to_assign:
             if student.id in existing_student_ids:
-                continue  # student already has a fee record — skip
+                continue
             student_fees_to_create.append(
                 StudentFee(
                     student=student,
                     fee_structure=fee_structure,
                     total_amount=fee_structure.total_amount,
-                    discount=0,
-                    amount_paid=0,
+                    discount=Decimal('0'),
+                    amount_paid=Decimal('0'),
                     status='approval_pending'
                 )
             )
 
         if student_fees_to_create:
             StudentFee.objects.bulk_create(student_fees_to_create)
+            
+            # Re-fetch the created StudentFees (bulk_create doesn't populate PKs on instances)
+            # Auto-create basic InstallmentPlan + item for each. When student pays,
+            # update_student_fee_status() directly "cuts" the paid amount from the
+            # next unpaid installment item(s) by marking them paid sequentially.
+            created_student_fees = StudentFee.objects.filter(
+                student__in=[s.id for s in students_to_assign],
+                fee_structure=fee_structure,
+            )
+            from .models import InstallmentPlan, InstallmentItem
+            from django.utils import timezone
+            for sf in created_student_fees:
+                # Use updated get_installment_plan_status with level name
+                num_items = 1  # default lumpsum; customize based on business rules
+                plan_status = get_installment_plan_status(
+                    getattr(fee_structure.level, 'name', ''), num_items
+                )
+                plan = InstallmentPlan.objects.create(
+                    student_fee=sf,
+                    created_by=fee_structure.created_by,
+                    status=plan_status,
+                )
+                # One item by default (full amount); can be split into multiple via UI
+                InstallmentItem.objects.create(
+                    plan=plan,
+                    amount=sf.total_amount,
+                    due_date=timezone.now().date() + timezone.timedelta(days=30),
+                    is_paid=False,
+                )
 
         return fee_structure
 
@@ -94,9 +156,6 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     fee_name = serializers.CharField(source='fee_structure.name', read_only=True)
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-
-
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
     course_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
 
@@ -118,7 +177,7 @@ class StudentFeeListSerializer(serializers.ModelSerializer):
         fields = ['id', 'student', 'student_name', 'fee_structure', 'fee_name',
                   'total_amount', 'discount', 'amount_paid', 'amount_due',
                   'status', 'status_display', 'due_date', 'created_at',
-                  'course_name','batch_name']
+                  'course_name', 'batch_name']
 
 
 class StudentFeeDetailSerializer(serializers.ModelSerializer):
@@ -126,11 +185,9 @@ class StudentFeeDetailSerializer(serializers.ModelSerializer):
     student_email = serializers.CharField(source='student.email', read_only=True)
     fee_name = serializers.CharField(source='fee_structure.name', read_only=True)
     amount_due = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     payments = serializers.SerializerMethodField()
     installment_plans = serializers.SerializerMethodField()
-
-
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     def get_student_name(self, obj):
         return obj.student.full_name if obj.student else ''
@@ -384,7 +441,7 @@ class BankAccountListSerializer(serializers.ModelSerializer):
     class Meta:
         model = BankAccount
         fields = ['id', 'name', 'bank_name', 'account_number',
-                  'ifsc_code', 'is_active']
+                  'ifsc_code', 'branch_name', 'is_active', 'max_payment_amount']
 
 
 class BankAccountCreateUpdateSerializer(serializers.ModelSerializer):

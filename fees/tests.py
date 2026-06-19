@@ -38,7 +38,7 @@ class FeeStructureModelTest(TestCase):
 
     def setUp(self):
 
-        self.course = Course.objects.create(name='CSEET', code='CSEET01', course_type='cseet')
+        self.course = Course.objects.create(name='CSEET', code='CSEET01')
 
         self.fee = FeeStructure.objects.create(
 
@@ -654,7 +654,7 @@ class FeeStructureAPITest(TestCase):
 
     def test_filter_by_course(self):
 
-        course2 = Course.objects.create(name='CS Exec', code='CSEXE01', course_type='cs_executive')
+        course2 = Course.objects.create(name='CS Exec', code='CSEXE01')
 
         FeeStructure.objects.create(name='Exec Fee', course=course2, total_amount=50000)
 

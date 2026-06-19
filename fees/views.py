@@ -298,14 +298,16 @@ class InstallmentPlanCreateView(APIView):
         except StudentFee.DoesNotExist:
             return Response({'success': False, 'message': 'Student fee not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Determine initial status using utility (CSEET >2 or others >4 items → pending approval)
+        # Determine initial status using utility (CSEET >2 or others >4 items → pending_approval).
+        # Uses level.name (replaces deprecated course_type).
         fee_structure = student_fee.fee_structure
-        course_type = None
-        if hasattr(fee_structure, 'level') and fee_structure.level:
-            course_type = getattr(fee_structure.level, 'course_type', None)
-
+        level_name = (
+            getattr(getattr(fee_structure, 'level', None), 'name', '')
+            or getattr(getattr(fee_structure, 'course', None), 'name', '')
+            or ''
+        )
         num_installments = len(items_data)
-        initial_status = get_installment_plan_status(course_type, num_installments)
+        initial_status = get_installment_plan_status(level_name, num_installments)
 
         approved_by = None
         approved_at = None

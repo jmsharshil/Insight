@@ -5,17 +5,24 @@ from django.db.models import Q
 from django.utils import timezone
 
 
-def get_installment_plan_status(course_type, num_installments):
+def get_installment_plan_status(level_or_course, num_installments):
     """
-    Determine initial status for an InstallmentPlan based on course_type of the level
-    and number of installment items.
+    Determine initial status for an InstallmentPlan based on level name
+    (CSEET, CSExecutive, CS Professional) instead of the deprecated course_type
+    on CourseLevel. Also supports legacy course_type strings for backward compat.
     
     Rules:
-    - If course_type is 'cseet' and >2 items → 'pending_approval'
-    - For other course_types if >4 items → 'pending_approval'
-    - Otherwise → 'approved' (no approval needed)
+    - CSEET: pending_approval if >2 installments
+    - CSExecutive / CS Professional: pending_approval if >4 installments
+    - Otherwise: approved (no approval needed)
     """
-    if course_type == 'cseet':
+    if not level_or_course:
+        return 'approved'
+    
+    val = str(level_or_course).strip().lower().replace(' ', '').replace('_', '').replace('-', '')
+    is_cseet = any(x in val for x in ['cseet', 'cse et'])
+    
+    if is_cseet:
         return 'pending_approval' if num_installments > 2 else 'approved'
     return 'pending_approval' if num_installments > 4 else 'approved'
 
