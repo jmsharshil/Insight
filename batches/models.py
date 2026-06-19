@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Sum
 from django.conf import settings
 import uuid
 from leads.models import COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
@@ -111,6 +112,22 @@ class Subject(models.Model):
                 seq = 1
             self.code = f"SUB-{seq:04d}"
         super().save(*args, **kwargs)
+
+    def update_total_hours(self):
+        """Auto-calculate and update total_hours from sum of active chapters' duration_hours.
+        This can be called manually if needed (e.g. bulk operations)."""
+        if not self.pk:
+            return 0
+        total = self.chapters.filter(
+            is_active=True
+        ).aggregate(total=Sum('duration_hours'))['total'] or 0
+        if self.total_hours != total:
+            self.total_hours = total
+            # Avoid recursive signals by using update_fields (no full save)
+            update_fields = ['total_hours']
+            # Note: Subject has no updated_at, but if added later it would be included
+            self.save(update_fields=update_fields)
+        return total
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -337,6 +354,7 @@ class Chapter(models.Model):
     order       = models.PositiveSmallIntegerField()
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
+    duration_hours = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = 'subject_chapters'

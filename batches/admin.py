@@ -14,6 +14,7 @@ class SubjectAdmin(admin.ModelAdmin):
     list_display = ('id', 'organization', 'level', 'name', 'code', 'total_hours', 'is_active', 'created_at',)
     list_filter = ('created_at', 'organization', 'level', 'is_active',)
     list_editable = ['is_active']
+    readonly_fields = ('total_hours', 'code', 'created_at')
     ordering = ['name']
     search_fields = ('name', 'description', 'code',)
 
@@ -65,9 +66,10 @@ class CourseLevelAdmin(admin.ModelAdmin):
 
 @admin.register(Chapter)
 class ChapterAdmin(admin.ModelAdmin):
-    list_display = ('id', 'subject', 'name', 'order', 'description', 'is_active',)
-    search_fields = ('name',)
+    list_display = ('id', 'subject', 'name', 'order', 'duration_hours', 'description', 'is_active',)
+    search_fields = ('name', 'description')
     list_filter = ('subject', 'is_active',)
+    list_editable = ('duration_hours', 'is_active', 'order')
 
 
 @admin.register(TimetableSlot)

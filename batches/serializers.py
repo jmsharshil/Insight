@@ -106,7 +106,7 @@ class ChapterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Chapter
-        fields = ['id', 'subject', 'name', 'order', 'description', 'is_active']
+        fields = ['id', 'subject', 'name', 'order', 'description', 'is_active','duration_hours']
         read_only_fields = ['id', 'subject']
 
     def validate(self, data):
@@ -141,7 +141,8 @@ class SubjectListSerializer(serializers.ModelSerializer):
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
-        fields = ['level', 'name', 'total_hours', 'is_active', 'organization']
+        fields = ['level', 'name', 'is_active', 'organization']
+        # total_hours is now auto-managed via Chapter.duration_hours signals
 
     # def validate_code(self, value):
     #     if not value:
@@ -151,12 +152,17 @@ class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         if 'organization' not in validated_data or validated_data['organization'] is None:
             validated_data['organization'] = self.context['request'].user.organization
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+        # Ensure total_hours is calculated after creation (in case chapters are added via nested later)
+        instance.update_total_hours()
+        return instance
 
     def update(self, instance, validated_data):
         if 'organization' not in validated_data or validated_data['organization'] is None:
             validated_data['organization'] = instance.organization or self.context['request'].user.organization
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+        instance.update_total_hours()
+        return instance
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
