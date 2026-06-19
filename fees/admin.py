@@ -3,11 +3,14 @@ from fees.models import *
 
 @admin.register(FeeStructure)
 class FeeStructureAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'course', 'batch', 'total_amount', 'description', 'is_active', 'created_by', 'created_at', 'updated_at',)
+    list_display = ('id', 'name', 'course', 'batch', 'total_amount', 'icsi_registration_fees',
+                    'icsi_exam_fees', 'token_amount', 'description', 'is_active',
+                    'created_by', 'created_at',)
     search_fields = ('name', 'description')
     list_filter = ('course', 'updated_at', 'created_by', 'batch', 'created_at', 'is_active',)
     ordering = ['-created_at']
-    list_editable = ('total_amount', 'is_active',)
+    list_editable = ('icsi_registration_fees', 'icsi_exam_fees', 'token_amount', 'is_active',)
+    readonly_fields = ('total_amount',)
 
 
 @admin.register(StudentFee)

@@ -25,7 +25,8 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
-                  'level', 'level_name', 'total_amount', 'is_active', 'created_at']
+                  'level', 'level_name', 'total_amount', 'icsi_registration_fees',
+                  'icsi_exam_fees', 'token_amount', 'is_active', 'created_at']
 
 
 class FeeStructureDetailSerializer(serializers.ModelSerializer):
@@ -41,10 +42,32 @@ class FeeStructureDetailSerializer(serializers.ModelSerializer):
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
-        fields = ['name', 'course', 'batch', 'level', 'total_amount', 'description', 'is_active']
+        fields = ['name', 'course', 'batch', 'level', 'total_amount', 'icsi_registration_fees',
+                  'icsi_exam_fees', 'token_amount', 'description', 'is_active']
+
+    def validate(self, data):
+        """Ensure total_amount is consistent with fee breakdown components."""
+        reg = data.get('icsi_registration_fees') or 0
+        exam = data.get('icsi_exam_fees') or 0
+        token = data.get('token_amount') or 0
+        component_sum = reg + exam + token
+        if component_sum > 0:
+            if data.get('total_amount') and data['total_amount'] != component_sum:
+                raise serializers.ValidationError({
+                    'total_amount': f'Total must equal sum of components ({component_sum}) or be omitted.'
+                })
+            # If no total provided, it will be set by model.save()
+            if 'total_amount' not in data:
+                data['total_amount'] = component_sum
+        return data
 
     def create(self, validated_data):
+        # Remove total if it was set by validate (to let model compute in save)
+        validated_data.pop('total_amount', None)
         fee_structure = super().create(validated_data)
+        
+        # Refresh to ensure computed total_amount from model.save() is loaded
+        fee_structure.refresh_from_db()
         
         # Auto-assign the fee to students. Use level name mapping (CSEET, CSExecutive,
         # CS Professional) to match admission.course since course_type on levels is deprecated.
