@@ -61,6 +61,19 @@ class FeeStructure(models.Model):
         related_name='fee_structures', null=True, blank=True,
     )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    # Fee type breakdown (total_amount is auto-calculated as sum of these)
+    icsi_registration_fees = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='ICSI Registration Fees'
+    )
+    icsi_exam_fees = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='ICSI Exam Fees'
+    )
+    token_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Token Amount'
+    )
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
     created_by  = models.ForeignKey(
@@ -80,6 +93,20 @@ class FeeStructure(models.Model):
 
     def __str__(self):
         return f"{self.name} — ₹{self.total_amount}"
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate total_amount as sum of fee components.
+        For backward compatibility with existing records, only override
+        if at least one component fee is non-zero.
+        """
+        reg = self.icsi_registration_fees or 0
+        exam = self.icsi_exam_fees or 0
+        token = self.token_amount or 0
+        component_sum = reg + exam + token
+        if component_sum > 0:
+            self.total_amount = component_sum
+        # else: keep existing total_amount for legacy records
+        super().save(*args, **kwargs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

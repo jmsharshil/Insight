@@ -25,7 +25,8 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
-                  'level', 'level_name', 'total_amount', 'is_active', 'created_at']
+                  'level', 'level_name', 'total_amount', 'icsi_registration_fees',
+                  'icsi_exam_fees', 'token_amount', 'is_active', 'created_at']
 
 
 class FeeStructureDetailSerializer(serializers.ModelSerializer):
@@ -41,7 +42,8 @@ class FeeStructureDetailSerializer(serializers.ModelSerializer):
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
-        fields = ['name', 'course', 'batch', 'level', 'total_amount', 'description', 'is_active']
+        fields = ['name', 'course', 'batch', 'level', 'total_amount', 'icsi_registration_fees',
+                  'icsi_exam_fees', 'token_amount', 'description', 'is_active']
 
     def create(self, validated_data):
         fee_structure = super().create(validated_data)
