@@ -120,13 +120,13 @@ class AdmissionListView(APIView):
 
                     # Build bank details text for all eligible banks (shuffled)
                     bank_details = ""
-                    for bank in eligible_banks:
-                        bank_details += (
-                            f"Bank Name       : {bank.bank_name}\n"
-                            f"Account Holder  : {bank.name}\n"
-                            f"Account Number  : {bank.account_number}\n"
-                            f"IFSC Code       : {bank.ifsc_code}\n"
-                            f"Branch          : {bank.branch_name}\n"
+                    if assigned_bank:
+                        bank_details = (
+                            f"Bank Name       : {assigned_bank.bank_name}\n"
+                            f"Account Holder  : {assigned_bank.name}\n"
+                            f"Account Number  : {assigned_bank.account_number}\n"
+                            f"IFSC Code       : {assigned_bank.ifsc_code}\n"
+                            f"Branch          : {assigned_bank.branch_name}\n"
                             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                         )
                     text_content = (
@@ -309,13 +309,13 @@ class AdmissionDetailView(APIView):
 
                     # Build bank details text for all eligible banks (shuffled)
                     bank_details = ""
-                    for bank in eligible_banks:
-                        bank_details += (
-                            f"Bank Name       : {bank.bank_name}\n"
-                            f"Account Holder  : {bank.name}\n"
-                            f"Account Number  : {bank.account_number}\n"
-                            f"IFSC Code       : {bank.ifsc_code}\n"
-                            f"Branch          : {bank.branch_name}\n"
+                    if assigned_bank:
+                        bank_details = (
+                            f"Bank Name       : {assigned_bank.bank_name}\n"
+                            f"Account Holder  : {assigned_bank.name}\n"
+                            f"Account Number  : {assigned_bank.account_number}\n"
+                            f"IFSC Code       : {assigned_bank.ifsc_code}\n"
+                            f"Branch          : {assigned_bank.branch_name}\n"
                             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                         )
                     text_content = (
