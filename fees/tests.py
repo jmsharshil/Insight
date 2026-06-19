@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.test import TestCase, Client
 
 from django.urls import reverse
@@ -7,6 +9,10 @@ from django.utils import timezone
 from datetime import date, timedelta
 
 import json
+
+from onboarding.models import Admission
+from students.utils import StudentService
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 
 
@@ -22,7 +28,7 @@ from .models import (
 
 from .utils import update_student_fee_status
 
-from batches.models import Course, Batch
+from batches.models import Course, Batch, CourseLevel
 
 from auth_user.models import User
 
