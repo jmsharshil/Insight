@@ -89,7 +89,15 @@ class ExamListCreateView(APIView):
             except Exception:
                 qs = qs.none()
         elif role == 'faculty':
-            qs = qs.filter(created_by=user)
+            from django.db.models import Q
+            try:
+                from faculty.models import FacultyProfile
+                fp = FacultyProfile.objects.only('id').get(user=user)
+                faculty_id = fp.id
+                qs = qs.filter(Q(created_by=user) | Q(faculty_id=faculty_id))
+            except Exception:
+                # Fallback: just show what they created
+                qs = qs.filter(created_by=user)
         elif role == 'exam_supervisor':
             bid = _user_branch_id(user)
             if bid:
