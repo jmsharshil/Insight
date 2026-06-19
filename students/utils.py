@@ -135,6 +135,18 @@ class StudentService:
         except Exception as exc:
             logger.error(f"ID card generation failed for student {student.id}: {exc}")
 
+        # Delegate fee logic (StudentFee + InstallmentPlan + verified Payment if applicable)
+        # to fees.services to avoid duplication with admission approval flow.
+        try:
+            from fees.services import create_student_fee
+            create_student_fee(student, acting_user)
+        except Exception as exc:
+            logger.error(
+                f"Fee creation failed for student {student.admission_number} "
+                f"(admission {admission.id}): {exc}. Student profile created successfully; "
+                "fees can be assigned manually."
+            )
+
         logger.info(f"Student created: {student.admission_number} from admission {admission.id}")
         return student
 

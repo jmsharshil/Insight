@@ -2162,3 +2162,138 @@ class FeesLoggingTest(TestCase):
 
         self.assertIsInstance(handlers, dict)
 
+
+class AutoStudentFeeCreationTest(TestCase):
+    """Test that fee (StudentFee + InstallmentPlan + InstallmentItem + verified Payment)
+    is automatically generated when a student is created from an approved admission.
+    This verifies the integration between onboarding/views.py:AdmissionApproveView,
+    students/utils.py:StudentService.create_from_admission(), and fees/services.py:create_student_fee().
+    """
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        self.acting_user = User.objects.create_user(
+            username='counsellor',
+            email='counsellor@test.com',
+            password='pass1234',
+            role='counsellor',
+        )
+        self.student_user = User.objects.create_user(
+            username='teststu',
+            email='student@test.com',
+            password='pass1234',
+            role='student',
+        )
+
+        # Supporting data for FeeStructure fallback logic (uses level.name)
+        course = Course.objects.create(name='CSEET', code='CSET01')
+        level = CourseLevel.objects.create(
+            course=course,
+            name='CSEET',
+            course_type='cseet',
+            order=1,
+            duration_months=6,
+            fee_amount=Decimal('30000'),
+        )
+        self.fee_structure = FeeStructure.objects.create(
+            name='CSEET Standard Fee',
+            level=level,
+            total_amount=Decimal('30000.00'),
+            is_active=True,
+            created_by=self.acting_user,
+        )
+
+        # Dummy files (required for Admission)
+        dummy_pdf = SimpleUploadedFile(
+            name='dummy.pdf',
+            content=b'%PDF-1.4 dummy content for test',
+            content_type='application/pdf'
+        )
+        dummy_img = SimpleUploadedFile(
+            name='dummy.jpg',
+            content=b'\xff\xd8\xff\xe0 dummy jpg content',
+            content_type='image/jpeg'
+        )
+
+        self.admission = Admission.objects.create(
+            first_name='Test',
+            surname='Student',
+            father_name='Test Father',
+            mother_name='Test Mother',
+            dob=date(2002, 1, 1),
+            category='GENERAL',
+            email='student@test.com',
+            email_parent='parent@test.com',
+            phone_student='9876543210',
+            phone_father='9876543211',
+            street='123 Test Street',
+            city='Ahmedabad',
+            state='Gujarat',
+            pincode='380015',
+            country='India',
+            course='cseet',
+            group_module='group1',
+            batch_attempt='jun24',
+            location='Ahmedabad',
+            qualification='12TH',
+            reference='self',
+            consent=True,
+            tenth_medium='CBSE',
+            tenth_school='Test High School',
+            tenth_percentage=Decimal('85.50'),
+            tenth_percentile=Decimal('90.00'),
+            twelfth_medium='CBSE',
+            twelfth_school='Test High School',
+            twelfth_percentage=Decimal('82.00'),
+            twelfth_percentile=Decimal('88.00'),
+            doc_signature=dummy_pdf,
+            doc_photo=dummy_img,
+            doc_dob_certificate=dummy_pdf,
+            doc_id_card=dummy_pdf,
+            fee_structure=self.fee_structure,
+            status='approval_pending',
+            payment_amount=Decimal('30000.00'),
+            transaction_id='AUTO-TX-12345',
+        )
+
+        # This triggers the auto fee creation via StudentService -> create_student_fee
+        self.student = StudentService.create_from_admission(
+            admission=self.admission,
+            user=self.student_user,
+            acting_user=self.acting_user,
+        )
+
+    def test_fee_is_auto_generated_on_student_creation(self):
+        """Core test: confirms StudentFee, plan, items, and verified Payment are created."""
+        from fees.models import StudentFee, InstallmentPlan, InstallmentItem, Payment
+
+        fees = StudentFee.objects.filter(student=self.student)
+        self.assertEqual(fees.count(), 1, 'Should auto-create StudentFee')
+        sf = fees.first()
+        self.assertEqual(sf.fee_structure, self.fee_structure)
+        self.assertEqual(sf.total_amount, Decimal('30000.00'))
+        self.assertEqual(sf.status, 'paid', 'Full payment should mark as paid')
+
+        plans = InstallmentPlan.objects.filter(student_fee=sf)
+        self.assertEqual(plans.count(), 1)
+        plan = plans.first()
+        self.assertIn(plan.status, ('approved', 'completed'))
+
+        items = InstallmentItem.objects.filter(plan=plan)
+        self.assertEqual(items.count(), 1)
+        item = items.first()
+        self.assertTrue(item.is_paid)
+        self.assertIsNotNone(item.paid_at)
+
+        payments = Payment.objects.filter(student=self.student, student_fee=sf)
+        self.assertEqual(payments.count(), 1, 'Should auto-create verified Payment from admission data')
+        payment = payments.first()
+        self.assertEqual(payment.status, 'verified')
+        self.assertEqual(payment.amount, Decimal('30000.00'))
+        self.assertEqual(payment.installment_item, item)
+        self.assertTrue(payment.receipt_number.startswith('RCT-'))
+        self.assertIn('Auto-verified from admission', payment.note)
+
+        print('SUCCESS: Fee is auto-generating on student creation!')
+
