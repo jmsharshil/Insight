@@ -84,7 +84,7 @@ def create_student_fee(student, acting_user=None):
 
     item = InstallmentItem.objects.create(
         plan=plan,
-        amount=student_fee.total_amount,
+        amount=student_fee.total_amount - admission.payment_amount,
         due_date=student_fee.due_date or (timezone.now().date() + timezone.timedelta(days=30)),
         is_paid=False,
     )
