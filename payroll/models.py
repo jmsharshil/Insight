@@ -110,3 +110,26 @@ class SessionLatePenaltyLog(models.Model):
 
     def __str__(self):
         return f"Late {self.late_minutes}m → ₹{self.penalty_amount}"
+
+class ExtraHoursApproval(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    faculty = models.ForeignKey('faculty.FacultyProfile', on_delete=models.CASCADE, related_name='extra_hours_requests')
+    chapter = models.ForeignKey('batches.Chapter', on_delete=models.CASCADE, related_name='extra_hours_requests')
+    payroll_month = models.IntegerField()
+    payroll_year = models.IntegerField()
+    extra_minutes = models.IntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=[('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected')],
+        default='pending'
+    )
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'payroll_extra_hours_approval'
+        unique_together = ('faculty', 'chapter', 'payroll_month', 'payroll_year')
+
+    def __str__(self):
+        return f"{self.faculty.user.name} - {self.chapter.name} - {self.extra_minutes}m ({self.status})"

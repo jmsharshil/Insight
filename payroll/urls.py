@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (
     PayrollListCreateView, PayrollDetailView, PayrollPayslipsView,
     PayrollApproveView, PayrollDisburseView, FacultyPayslipsView,
-    LatePolicyView, LatePolicyDetailView, PayslipAdjustView, FacultySalaryPreviewView
+    LatePolicyView, LatePolicyDetailView, PayslipAdjustView, FacultySalaryPreviewView,
+    ExtraHoursApprovalListView, ExtraHoursApprovalUpdateView
 )
 
 urlpatterns = [
@@ -14,6 +15,8 @@ urlpatterns = [
     path('payroll/<uuid:payroll_id>/disburse/', PayrollDisburseView.as_view(), name='payroll-disburse'),
     path('payroll/late-policy/', LatePolicyView.as_view(), name='payroll-late-policy'),
     path('payroll/late-policy/<uuid:policy_id>/', LatePolicyDetailView.as_view(), name='payroll-late-policy-detail'),
+    path('payroll/extra-hours/', ExtraHoursApprovalListView.as_view(), name='payroll-extra-hours-list'),
+    path('payroll/extra-hours/<uuid:approval_id>/', ExtraHoursApprovalUpdateView.as_view(), name='payroll-extra-hours-update'),
     path('faculty/<uuid:faculty_id>/payslips/', FacultyPayslipsView.as_view(), name='faculty-payslips'),
     path('faculty/<uuid:faculty_id>/salary-preview/', FacultySalaryPreviewView.as_view(), name='faculty-salary-preview'),
 ]

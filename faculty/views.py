@@ -403,20 +403,24 @@ class FacultyQRCheckinView(APIView):
         scan_type = ser.validated_data['scan_type']
         is_late = False
         late_minutes = 0
+        is_early_checkout = False
+        early_minutes = 0
         now = timezone.now()
+
+        from payroll.models import LateEntryPolicy
+        policy = LateEntryPolicy.objects.filter(branch=fp.branch, is_active=True).first()
+        grace = policy.grace_period_minutes if policy else 5
+
+        from batches.models import TimetableSlot
+        from django.db.models import Q
 
         # Determine late status for check_in
         if scan_type == 'check_in':
-            from payroll.models import LateEntryPolicy
-            policy = LateEntryPolicy.objects.filter(branch=fp.branch, is_active=True).first()
-            grace = policy.grace_period_minutes if policy else 5
-
-            # Try to find today's expected start from batch timetable
-            from batches.models import TimetableSlot
             dow = now.weekday()
             slots = TimetableSlot.objects.filter(
+                Q(day_of_week=dow) | Q(session_date=now.date()),
                 faculty=fp, batch__branch=fp.branch, batch__is_active=True,
-                day_of_week=dow, start_time__isnull=False
+                start_time__isnull=False
             )
             expected_start = None
             for slot in slots:
@@ -424,13 +428,34 @@ class FacultyQRCheckinView(APIView):
                     expected_start = slot.start_time
 
             if expected_start:
-                from datetime import datetime, timedelta
+                from datetime import datetime
                 expected_dt = datetime.combine(now.date(), expected_start)
                 actual_dt = datetime.combine(now.date(), now.time())
                 diff = (actual_dt - expected_dt).total_seconds() / 60
                 if diff > grace:
                     is_late = True
                     late_minutes = int(diff - grace)
+        
+        elif scan_type == 'check_out':
+            dow = now.weekday()
+            slots = TimetableSlot.objects.filter(
+                Q(day_of_week=dow) | Q(session_date=now.date()),
+                faculty=fp, batch__branch=fp.branch, batch__is_active=True,
+                end_time__isnull=False
+            )
+            expected_end = None
+            for slot in slots:
+                if expected_end is None or slot.end_time > expected_end:
+                    expected_end = slot.end_time
+            
+            if expected_end:
+                from datetime import datetime
+                expected_dt = datetime.combine(now.date(), expected_end)
+                actual_dt = datetime.combine(now.date(), now.time())
+                diff = (expected_dt - actual_dt).total_seconds() / 60
+                if diff > grace:
+                    is_early_checkout = True
+                    early_minutes = int(diff - grace)
 
         log = FacultyQRScanLog.objects.create(
             faculty=fp, branch=fp.branch,
@@ -438,7 +463,50 @@ class FacultyQRCheckinView(APIView):
             longitude=ser.validated_data.get('longitude'),
             scan_type=scan_type,
             is_late=is_late, late_minutes=late_minutes,
+            is_early_checkout=is_early_checkout, early_minutes=early_minutes,
         )
+        
+        if scan_type == 'check_out':
+            session_reports_data = ser.validated_data.get('session_reports')
+            if session_reports_data:
+                from batches.models import Batch, Subject, Chapter
+                from datetime import time
+                for rdata in session_reports_data:
+                    batch_id = rdata.get('batch_id')
+                    subject_id = rdata.get('subject_id')
+                    chapter_ids = rdata.get('chapter_ids', [])
+                    status_val = rdata.get('status', 'completed')
+                    start_time_str = rdata.get('start_time')
+                    end_time_str = rdata.get('end_time')
+                    if batch_id and subject_id and start_time_str and end_time_str:
+                        batch = Batch.objects.filter(id=batch_id).first()
+                        subject = Subject.objects.filter(id=subject_id).first()
+                        
+                        chapters_str = ""
+                        if chapter_ids:
+                            chapters_qs = Chapter.objects.filter(id__in=chapter_ids)
+                            chapters_str = ", ".join([c.name for c in chapters_qs])
+                        
+                        try:
+                            start_time = time.fromisoformat(start_time_str)
+                            end_time = time.fromisoformat(end_time_str)
+                        except ValueError:
+                            continue
+                            
+                        if batch and subject:
+                            sr = SessionReport.objects.create(
+                                faculty=fp, branch=fp.branch,
+                                batch=batch, subject=subject,
+                                session_date=now.date(),
+                                chapter_covered=chapters_str,
+                                topics_covered=rdata.get('topics_covered', ''),
+                                status=status_val,
+                                start_time=start_time,
+                                end_time=end_time,
+                                completion_percentage=rdata.get('completion_percentage', 100),
+                            )
+                            if chapter_ids and chapters_qs:
+                                sr.chapters.set(chapters_qs)
 
         if is_late:
             from leave.models import LateEntryRecord

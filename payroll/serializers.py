@@ -117,3 +117,22 @@ class PaySlipAdjustSerializer(serializers.Serializer):
     other_deductions = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
     deduction_note = serializers.CharField(max_length=300, required=False, allow_blank=True)
     leave_deductions = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
+
+class ExtraHoursApprovalSerializer(serializers.ModelSerializer):
+    faculty_name = serializers.CharField(source='faculty.user.name', read_only=True)
+    chapter_name = serializers.CharField(source='chapter.name', read_only=True)
+    subject_name = serializers.CharField(source='chapter.subject.name', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.name', read_only=True)
+
+    class Meta:
+        from .models import ExtraHoursApproval
+        model = ExtraHoursApproval
+        fields = [
+            'id', 'faculty', 'faculty_name', 'chapter', 'chapter_name', 'subject_name',
+            'payroll_month', 'payroll_year', 'extra_minutes', 'status',
+            'approved_by', 'approved_by_name', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+class ExtraHoursApprovalUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=['pending', 'approved', 'rejected'])

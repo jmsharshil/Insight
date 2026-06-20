@@ -263,6 +263,9 @@ class FacultyQRCheckinSerializer(serializers.Serializer):
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     scan_type = serializers.ChoiceField(choices=['check_in', 'check_out'], default='check_in')
+    session_reports = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_null=True
+    )
 
 
 class FacultyQRScanLogSerializer(serializers.ModelSerializer):

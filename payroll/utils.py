@@ -49,16 +49,91 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         session_date__month=month,
     ).select_related('subject')
 
-    # 2. Compute session hours and hour_based_amount per subject
     session_dates = set()
     subject_hours = defaultdict(Decimal)
     total_session_minutes = Decimal(0)
+    
+    chapter_monthly_minutes = defaultdict(Decimal)
 
     for s in sessions:
         session_dates.add(s.session_date)
-        hours = Decimal(s.duration_minutes) / Decimal(60)
-        subject_hours[s.subject_id] += hours
-        total_session_minutes += Decimal(s.duration_minutes)
+        
+        # Calculate scheduled duration
+        from batches.models import TimetableSlot
+        from django.db.models import Q
+        dow = s.session_date.weekday()
+        slot = TimetableSlot.objects.filter(
+            Q(day_of_week=dow) | Q(session_date=s.session_date),
+            batch_id=s.batch_id, subject_id=s.subject_id
+        ).first()
+        
+        scheduled_minutes = Decimal(s.duration_minutes)
+        if slot and slot.start_time and slot.end_time:
+            s_dt = datetime.combine(s.session_date, slot.start_time)
+            e_dt = datetime.combine(s.session_date, slot.end_time)
+            if e_dt < s_dt:
+                e_dt += timedelta(days=1)
+            scheduled_minutes = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+            
+        actual_minutes = Decimal(s.duration_minutes)
+        if scheduled_minutes > 0:
+            actual_minutes = min(actual_minutes, scheduled_minutes)
+            
+        chapters = list(s.chapters.all())
+        if chapters:
+            mins_per_chap = actual_minutes / len(chapters)
+            for c in chapters:
+                chapter_monthly_minutes[c] += mins_per_chap
+        else:
+            hours = actual_minutes / Decimal(60)
+            subject_hours[s.subject_id] += hours
+            total_session_minutes += actual_minutes
+
+    from payroll.models import ExtraHoursApproval
+    from datetime import date
+    first_of_month = date(year, month, 1)
+
+    for chap, monthly_mins in chapter_monthly_minutes.items():
+        prev_reports = SessionReport.objects.filter(
+            faculty=faculty_profile,
+            chapters=chap,
+            session_date__lt=first_of_month
+        ).distinct()
+        
+        prev_mins = Decimal(0)
+        for pr in prev_reports:
+            pr_chapters_count = pr.chapters.count()
+            if pr_chapters_count > 0:
+                prev_mins += Decimal(pr.duration_minutes) / pr_chapters_count
+
+        allocated_mins = Decimal(chap.duration_hours * 60)
+        remaining_allocated_mins = max(allocated_mins - prev_mins, Decimal(0))
+        
+        payable_mins = monthly_mins
+        extra_mins = Decimal(0)
+        
+        if monthly_mins > remaining_allocated_mins:
+            payable_mins = remaining_allocated_mins
+            extra_mins = monthly_mins - remaining_allocated_mins
+            
+            approval, _ = ExtraHoursApproval.objects.get_or_create(
+                faculty=faculty_profile,
+                chapter=chap,
+                payroll_month=month,
+                payroll_year=year,
+                defaults={'extra_minutes': int(extra_mins)}
+            )
+            
+            if approval.status == 'pending' and approval.extra_minutes != int(extra_mins):
+                approval.extra_minutes = int(extra_mins)
+                approval.save(update_fields=['extra_minutes'])
+                
+            if approval.status == 'approved':
+                payable_mins += Decimal(approval.extra_minutes)
+
+        hours = payable_mins / Decimal(60)
+        subject_hours[chap.subject_id] += hours
+        total_session_minutes += payable_mins
 
     # 3. QR attendance hours for dates WITHOUT session reports
     qr_logs = FacultyQRScanLog.objects.filter(
@@ -82,6 +157,27 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             first_in = min(l.scanned_at for l in check_ins)
             last_out = max(l.scanned_at for l in check_outs)
             diff_minutes = Decimal((last_out - first_in).total_seconds()) / Decimal(60)
+            
+            # Find scheduled time for this date to cap extra minutes
+            from batches.models import TimetableSlot
+            from django.db.models import Q
+            dow = log_date.weekday()
+            slots = TimetableSlot.objects.filter(
+                Q(day_of_week=dow) | Q(session_date=log_date),
+                faculty=faculty_profile,
+            )
+            scheduled_minutes = Decimal(0)
+            for slot in slots:
+                if slot.start_time and slot.end_time:
+                    s_dt = datetime.combine(log_date, slot.start_time)
+                    e_dt = datetime.combine(log_date, slot.end_time)
+                    if e_dt < s_dt:
+                        e_dt += timedelta(days=1)
+                    scheduled_minutes += Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+                    
+            if scheduled_minutes > 0:
+                diff_minutes = min(diff_minutes, scheduled_minutes)
+                
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
     total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
@@ -106,7 +202,20 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # 5. Late penalty computation
     late_penalty = Decimal(0)
     policy = LateEntryPolicy.objects.filter(branch=faculty_profile.branch, is_active=True).first()
-
+    
+    if policy:
+        # Include late/early minutes from QR scans
+        total_penalty_minutes = 0
+        for log_date, logs in qr_by_date.items():
+            for log in logs:
+                total_penalty_minutes += log.late_minutes
+                total_penalty_minutes += log.early_minutes
+                
+        if total_penalty_minutes > 0:
+            late_penalty += min(
+                Decimal(total_penalty_minutes) * policy.deduction_per_minute,
+                policy.max_deduction_per_session * len(qr_by_date) if policy.max_deduction_per_session > 0 else Decimal('999999')
+            )
     # 6. Leave deductions
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,

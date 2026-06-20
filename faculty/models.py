@@ -100,6 +100,8 @@ class FacultyQRScanLog(models.Model):
     is_late = models.BooleanField(default=False)
     # True if scanned after expected start time + grace period
     late_minutes = models.IntegerField(default=0)
+    is_early_checkout = models.BooleanField(default=False)
+    early_minutes = models.IntegerField(default=0)
 
     class Meta:
         db_table = 'faculty_qr_scans'
@@ -127,6 +129,7 @@ class SessionReport(models.Model):
     # FK to timetable slot — using Subject as stand-in since TimetableSlot does not exist yet
     session_date = models.DateField()
     chapter_covered = models.CharField(max_length=300)
+    chapters = models.ManyToManyField('batches.Chapter', blank=True, related_name='session_reports')
     topics_covered = models.TextField()
     completion_percentage = models.IntegerField(
         default=100,

@@ -598,3 +598,78 @@ class LatePolicyDetailView(APIView):
 
         policy.delete()
         return Response({'success': True, 'message': 'Late policy deleted.'}, status=status.HTTP_200_OK)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. GET & PATCH  /api/v1/payroll/extra-hours/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ExtraHoursApprovalListView(APIView):
+    # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['payroll_month', 'payroll_year', 'status']
+    search_fields = ['faculty__user__name', 'chapter__name']
+    ordering_fields = '__all__'
+
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in PAYROLL_VIEW_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        from .models import ExtraHoursApproval
+        from .serializers import ExtraHoursApprovalSerializer
+        
+        qs = ExtraHoursApproval.objects.select_related('faculty__user', 'chapter__subject', 'approved_by').all()
+        
+        bid = _user_branch_id(request.user)
+        if role != 'super_admin' and bid:
+            qs = qs.filter(faculty__branch_id=bid)
+            
+        qs = apply_filters(self, request, qs)
+        return paginate_queryset(qs, request, ExtraHoursApprovalSerializer)
+
+class ExtraHoursApprovalUpdateView(APIView):
+    # permission_classes = [IsAuthenticated]
+
+    def patch(self, request, approval_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin']:
+            return Response({'success': False, 'message': 'Permission denied. Super Admin only.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        from .models import ExtraHoursApproval
+        from .serializers import ExtraHoursApprovalSerializer, ExtraHoursApprovalUpdateSerializer
+        
+        try:
+            approval = ExtraHoursApproval.objects.get(id=approval_id)
+        except ExtraHoursApproval.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        ser = ExtraHoursApprovalUpdateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+            
+        status_val = ser.validated_data['status']
+        approval.status = status_val
+        if status_val == 'approved':
+            approval.approved_by = request.user
+            
+        approval.save()
+        
+        # We need to recalculate the payslip for that month if the payroll is still draft
+        pr = PayrollRun.objects.filter(
+            branch=approval.faculty.branch,
+            month=approval.payroll_month,
+            year=approval.payroll_year
+        ).first()
+        
+        if pr and pr.status == 'draft':
+            from .utils import compute_payslip_for_faculty
+            ps = compute_payslip_for_faculty(approval.faculty, pr.month, pr.year, pr)
+            # Recompute total
+            pr.total_amount = sum(s.net_salary for s in pr.payslips.all())
+            pr.save(update_fields=['total_amount'])
+            
+        return Response({
+            'success': True,
+            'message': f'Extra hours request {status_val}.',
+            'data': ExtraHoursApprovalSerializer(approval).data
+        })
