@@ -58,6 +58,7 @@ The `batches` module manages academic structures, including courses, subjects, b
 **`GET /api/v1/timetable/<uuid>/`**
 
 - Retrieves and creates timetable slots.
+- Slots usually follow a daily fixed schedule, but new slot codes `P5` and `P6` allow for custom, flexible timings (with specific date and start/end time support) without a fixed predefined timetable pattern.
 - Creating a slot with `exam_data` (for `class_test` or `prelim`) will automatically generate an `Exam` record.
 
 ### 8. Faculty / Student Timetable

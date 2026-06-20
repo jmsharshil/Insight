@@ -88,6 +88,8 @@
 | `P2` | P2 10:15–12:15 | 10:15:00 | 12:15:00 |
 | `P3` | P3 12:45–14:45 | 12:45:00 | 14:45:00 |
 | `P4` | P4 15:00–17:00 | 15:00:00 | 17:00:00 |
+| `P5` | P5 (Custom Time) | *(manual)* | *(manual)* |
+| `P6` | P6 (Custom Time) | *(manual)* | *(manual)* |
 
 ### A.4 Exam Type (`exam_type` inside `exam_data`)
 | Value | Display |

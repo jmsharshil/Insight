@@ -28,7 +28,9 @@ The `faculty` module manages faculty profiles, hourly rates by subject, and the 
 ### 3. Faculty QR / Identity
 **`GET /api/v1/faculty/<uuid>/qr-id/`**
 **`POST /api/v1/faculty/qr-checkin/`**
-Allows faculty to scan a QR code to check in for attendance/session tracking.
+Allows faculty to scan a QR code to check in and check out. 
+- During `check_in`, it logs the faculty entry and automatically calculates late penalties if applicable.
+- During `check_out`, it accepts an optional array of `session_reports` in the payload (containing chapters covered, completion status, topics) to automatically generate Session Report records for payroll computation. It also calculates early checkout penalties if the faculty leaves before their scheduled classes end.
 
 ### 4. Subject Hourly Rates
 **`GET /api/v1/faculty/<uuid>/subject-rates/`**

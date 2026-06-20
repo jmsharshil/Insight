@@ -129,10 +129,19 @@ Students scan a Class/Batch QR code to mark themselves present. The backend vali
   "device_id": "dev-12345-abcde",
   "latitude": 19.0760,
   "longitude": 72.8777,
-  "timetable_slot": "slot-uuid-001" 
+  "timetable_slot": "slot-uuid-001",
+  "session_reports": [
+    {
+      "batch_id": "uuid",
+      "subject_id": "uuid",
+      "chapter_ids": ["uuid-1", "uuid-2"],
+      "status": "continue",
+      "topics_covered": "Introduction to accounting"
+    }
+  ]
 }
 ```
-*(Note: `timetable_slot` is optional but recommended if scanning for a specific lecture)*
+*(Note: `timetable_slot` is optional but recommended if scanning for a specific lecture. `session_reports` is specifically used by faculty during `check_out` to automatically log session details.)*
 
 #### Response (201 Created)
 ```json

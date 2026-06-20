@@ -49,3 +49,10 @@ Allows a faculty member to see all their historical payslips.
 
 **`GET /api/v1/faculty/<faculty_id>/salary-preview/`**
 Provides an estimated preview of the current month's salary based on sessions conducted so far.
+
+### 6. Extra Hours Approval
+**`GET /api/v1/payroll/extra-hours/`**
+List all extra hours requests. Automatically generated when a faculty's total teaching time for a chapter exceeds the chapter's allocated duration.
+
+**`PATCH /api/v1/payroll/extra-hours/<approval_id>/`**
+Allows a Super Admin to approve or reject extra teaching hours. Approved hours are automatically added to the draft payroll for the month.
