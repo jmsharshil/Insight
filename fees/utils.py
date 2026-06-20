@@ -26,9 +26,11 @@ def get_installment_plan_status(level_or_course, num_installments):
         return 'pending_approval' if num_installments > 2 else 'approved'
     return 'pending_approval' if num_installments > 4 else 'approved'
 
+
 def select_bank_accounts_for_payment(amount, limit=None):
     """Return a shuffled list of active BankAccount objects whose max_payment_amount
-    is either unset (None) or greater than or equal to the given amount.
+    is either unset (None) or greater than or equal to the total payments received
+    in the current financial year plus the given amount.
 
     Args:
         amount (Decimal): The payment amount to compare against thresholds.
@@ -37,14 +39,13 @@ def select_bank_accounts_for_payment(amount, limit=None):
         list[BankAccount]: Shuffled list of eligible bank accounts.
     """
     from .models import BankAccount
-    eligible_qs = BankAccount.objects.filter(is_active=True).filter(
-        Q(max_payment_amount__isnull=True) | Q(max_payment_amount__gte=amount)
-    )
-    accounts = list(eligible_qs)
-    random.shuffle(accounts)
+    bank_accounts = BankAccount.objects.filter(is_active=True)
+    eligible_accounts = [acc for acc in bank_accounts if acc.is_under_threshold(amount)]
+    import random
+    random.shuffle(eligible_accounts)
     if limit is not None:
-        return accounts[:limit]
-    return accounts
+        return eligible_accounts[:limit]
+    return eligible_accounts
 
 
 def update_student_fee_status(student_fee_id):
@@ -142,3 +143,22 @@ def mark_installment_paid(installment_item_id):
             plan.save(update_fields=['status'])
 
     return item
+
+
+def has_overdue_installment(student_id):
+    """
+    Returns True if the student has any unpaid InstallmentItem that is
+    more than 15 days past its due_date (the 'expiry date of installment').
+    This is used to block attendance QR check-in.
+    """
+    from datetime import timedelta
+    today = timezone.now().date()
+    # due_date < (today - 15 days) = overdue by more than 15 days
+    threshold = today - timedelta(days=15)
+
+    return InstallmentItem.objects.filter(
+        plan__student_fee__student_id=student_id,
+        is_paid=False,
+        due_date__lt=threshold,
+        plan__status__in=['approved', 'active'],
+    ).exists()

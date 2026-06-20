@@ -369,7 +369,28 @@ class BankAccount(models.Model):
         return f"{self.name} — {self.bank_name} ({self.account_number})"
 
     def is_under_threshold(self, amount):
-        """Return True if amount is less than or equal to max_payment_amount or if no threshold set."""
+        """Return True if the sum of verified payments in the current financial year plus amount is <= max_payment_amount."""
         if self.max_payment_amount is None:
             return True
-        return amount <= self.max_payment_amount
+            
+        from django.utils import timezone
+        from .models import Payment
+        from django.db.models import Sum
+        from decimal import Decimal
+        
+        now = timezone.now()
+        if now.month >= 4:
+            start_date = now.replace(month=4, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_date = now.replace(year=now.year + 1, month=4, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(year=now.year - 1, month=4, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_date = now.replace(month=4, day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+        total_paid = Payment.objects.filter(
+            student__admission__assigned_bank_id=str(self.id),
+            payment_date__gte=start_date.date(),
+            payment_date__lt=end_date.date(),
+            status='verified'
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        
+        return (Decimal(total_paid) + Decimal(amount)) <= self.max_payment_amount

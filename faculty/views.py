@@ -733,3 +733,66 @@ class FacultySessionsView(APIView):
         qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, SessionReportSerializer)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. GET  /api/v1/faculty/extra-hours/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class FacultyExtraHoursView(APIView):
+    def get(self, request):
+        role = _user_role(request.user)
+        if role != 'faculty':
+            return Response({'success': False, 'message': 'Only faculty can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        try:
+            fp = FacultyProfile.objects.get(user=request.user)
+        except FacultyProfile.DoesNotExist:
+            return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        from batches.models import TimetableSlot
+        slots = TimetableSlot.objects.filter(faculty=fp).prefetch_related('chapters')
+        
+        from collections import defaultdict
+        chapter_duration = defaultdict(float)
+        chapter_objects = {}
+        
+        from datetime import datetime, date
+        for slot in slots:
+            if slot.start_time and slot.end_time:
+                t1 = datetime.combine(date.today(), slot.start_time)
+                t2 = datetime.combine(date.today(), slot.end_time)
+                if t2 > t1:
+                    duration = (t2 - t1).total_seconds()
+                    if slot.is_recurring and slot.effective_from and slot.effective_to:
+                        days = (slot.effective_to - slot.effective_from).days
+                        weeks = max(1, days // 7)
+                        total_seconds = duration * weeks
+                    else:
+                        total_seconds = duration
+                        
+                    for chapter in slot.chapters.all():
+                        chapter_duration[chapter.id] += total_seconds
+                        chapter_objects[chapter.id] = chapter
+                        
+        results = []
+        for ch_id, total_seconds in chapter_duration.items():
+            total_hours_given = total_seconds / 3600.0
+            chapter = chapter_objects[ch_id]
+            allocated = chapter.duration_hours
+            
+            if total_hours_given > allocated:
+                extra_hours = total_hours_given - allocated
+                results.append({
+                    'chapter_id': chapter.id,
+                    'chapter_name': chapter.name,
+                    'subject_name': chapter.subject.name,
+                    'allocated_hours': allocated,
+                    'total_hours_given': round(total_hours_given, 1),
+                    'extra_hours': round(extra_hours, 1),
+                    'message': f"Great dedication! You have spent {round(extra_hours, 1)} extra hours ensuring students deeply understand this chapter."
+                })
+                
+        return Response({
+            'success': True,
+            'data': results
+        })

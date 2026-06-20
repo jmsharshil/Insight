@@ -185,11 +185,28 @@ def get_active_violations_count(student_id):
 
 
 def should_block_qr(student_id):
+    """Returns True if QR/attendance check-in should be blocked (violations or overdue fees)."""
+    return get_qr_block_reason(student_id) is not None
+
+
+def get_qr_block_reason(student_id):
     """
-    Returns True if the student has 3 or more active (unresolved) violations,
-    meaning their QR should be temporarily blocked.
+    Returns reason string ('violations' or 'overdue_fees') or None if not blocked.
+    Used by QRScanView to give specific user messages.
     """
-    return get_active_violations_count(student_id) >= 3
+    if get_active_violations_count(student_id) >= 3:
+        return 'violations'
+
+    # Check for fee overdue (>15 days past installment due_date)
+    try:
+        from fees.utils import has_overdue_installment
+        if has_overdue_installment(student_id):
+            return 'overdue_fees'
+    except Exception:
+        # Graceful fallback (fees app unavailable)
+        pass
+
+    return None
 
 
 def get_all_dates_in_month(month_str):

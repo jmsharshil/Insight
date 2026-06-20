@@ -136,7 +136,7 @@ class LateEntryRecord(models.Model):
     expected_time = models.TimeField()
     actual_time = models.TimeField()
     late_minutes = models.IntegerField()
-    grace_minutes = models.IntegerField(default=10)
+    grace_minutes = models.IntegerField(default=15)
     is_penalized = models.BooleanField(default=False)
     penalty_type = models.CharField(max_length=20, choices=PENALTY_TYPE_CHOICES, blank=True)
     auto_deduction_triggered = models.BooleanField(default=False)

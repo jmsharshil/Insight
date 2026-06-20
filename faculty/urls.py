@@ -3,12 +3,13 @@ from .views import (
     FacultyListCreateView, FacultyDetailView, FacultyQRIDView,
     FacultyQRCheckinView, SubjectHourlyRateView, SubjectRateDetailView,
     SessionListCreateView, SessionDetailView, SessionSummaryView,
-    FacultySessionsView,
+    FacultySessionsView, FacultyExtraHoursView,
 )
 
 urlpatterns = [
     path('faculty/', FacultyListCreateView.as_view(), name='faculty-list-create'),
     path('faculty/qr-checkin/', FacultyQRCheckinView.as_view(), name='faculty-qr-checkin'),
+    path('faculty/extra-hours/', FacultyExtraHoursView.as_view(), name='faculty-extra-hours'),
     path('faculty/sessions/', SessionListCreateView.as_view(), name='session-list-create'),
     path('faculty/sessions/summary/', SessionSummaryView.as_view(), name='session-summary'),
     path('faculty/sessions/<uuid:session_id>/', SessionDetailView.as_view(), name='session-detail'),

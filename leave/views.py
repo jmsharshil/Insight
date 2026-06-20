@@ -592,7 +592,7 @@ class LateEntryListCreateView(APIView):
         # Get grace from policy
         from payroll.models import LateEntryPolicy
         policy = LateEntryPolicy.objects.filter(branch_id=bid, is_active=True).first()
-        grace = policy.grace_period_minutes if policy else 10
+        grace = policy.grace_period_minutes if policy else 15
 
         record = LateEntryRecord.objects.create(
             user_id=d['user_id'], branch_id=bid, date=d['date'],
