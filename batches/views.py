@@ -981,26 +981,59 @@ class TimetableDuplicateSlotView(APIView):
                 {'success': False, 'message': f"Invalid slot_code. Choose from {valid_codes}."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if day_of_week is None:
+        if day_of_week is None and session_date is None:
             return Response(
-                {'success': False, 'message': 'day_of_week is required.'},
+                {'success': False, 'message': 'day_of_week or session_date is required.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            day_of_week = int(day_of_week)
-        except (ValueError, TypeError):
-            return Response(
-                {'success': False, 'message': 'day_of_week must be an integer.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if day_of_week not in valid_days:
-            return Response(
-                {'success': False, 'message': f"Invalid day_of_week. Choose from {valid_days}."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if day_of_week is not None:
+            try:
+                day_of_week = int(day_of_week)
+            except (ValueError, TypeError):
+                return Response(
+                    {'success': False, 'message': 'day_of_week must be an integer.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if day_of_week not in valid_days:
+                return Response(
+                    {'success': False, 'message': f"Invalid day_of_week. Choose from {valid_days}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif session_date:
+            from datetime import date
+            if isinstance(session_date, str):
+                try:
+                    parsed_date = date.fromisoformat(session_date)
+                    day_of_week = parsed_date.weekday()
+                    session_date = parsed_date
+                except ValueError:
+                    return Response({'success': False, 'message': 'Invalid session_date format.'}, status=400)
+            else:
+                day_of_week = session_date.weekday()
 
         # 4. Resolve start/end times from slot code
-        start_time, end_time = FIXED_SLOTS[slot_code]
+        if slot_code in ['P5', 'P6']:
+            from datetime import time
+            start_time_str = request.data.get('start_time')
+            end_time_str = request.data.get('end_time')
+            if not start_time_str or not end_time_str:
+                return Response(
+                    {'success': False, 'message': 'start_time and end_time required for P5/P6.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                start_time = time.fromisoformat(start_time_str)
+                end_time = time.fromisoformat(end_time_str)
+            except ValueError:
+                return Response({'success': False, 'message': 'Invalid time format.'}, status=400)
+                
+            if start_time >= end_time:
+                return Response(
+                    {'success': False, 'message': 'end_time must be after start_time.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            start_time, end_time = FIXED_SLOTS[slot_code]
 
         # 5. Clash detection — faculty
         if source.faculty_id:

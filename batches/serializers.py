@@ -452,16 +452,28 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
 
         if session_type == 'regular':
             _require('slot_code')
-            _require('day_of_week')
             _require('faculty')
             _forbid('examiners')
             _forbid('paper_checkers')
-            # Auto-fill times from FIXED_SLOTS
+            
             slot_code = data.get('slot_code')
-            if slot_code and slot_code in FIXED_SLOTS:
-                data['start_time'], data['end_time'] = FIXED_SLOTS[slot_code]
+            if slot_code in ['P5', 'P6']:
+                _require('start_time')
+                _require('end_time')
+                if data.get('start_time') and data.get('end_time') and data['start_time'] >= data['end_time']:
+                    raise serializers.ValidationError({'end_time': 'End time must be after start time.'})
+                
+                # They can provide either day_of_week or session_date.
+                if data.get('session_date'):
+                    data['day_of_week'] = data['session_date'].weekday()
+                elif data.get('day_of_week') is None:
+                    raise serializers.ValidationError({'day_of_week': 'day_of_week or session_date is required for P5/P6.'})
             else:
-                raise serializers.ValidationError({'slot_code': f"Invalid slot_code '{slot_code}'. Choose P1–P4."})
+                _require('day_of_week')
+                if slot_code and slot_code in FIXED_SLOTS:
+                    data['start_time'], data['end_time'] = FIXED_SLOTS[slot_code]
+                else:
+                    raise serializers.ValidationError({'slot_code': f"Invalid slot_code '{slot_code}'. Choose P1–P6."})
 
         elif session_type == 'class_test':
             _forbid('slot_code')

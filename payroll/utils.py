@@ -131,10 +131,16 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     # 9. Compute net salary
     if faculty_profile.employment_type == 'full_time':
-        net = (faculty_profile.salary - late_penalty - absence_deductions
-               - leave_deductions - Decimal(0) + Decimal(0))  # other_deductions + bonus
+        basic_salary = faculty_profile.salary
+        applied_hour_based_amount = Decimal(0)
+        applied_leave_deductions = leave_deductions
+        net = (basic_salary - late_penalty - absence_deductions
+               - applied_leave_deductions)
     else:
-        net = hour_based_amount - late_penalty - absence_deductions + Decimal(0)  # bonus
+        basic_salary = Decimal(0)
+        applied_hour_based_amount = hour_based_amount
+        applied_leave_deductions = Decimal(0)
+        net = applied_hour_based_amount - late_penalty - absence_deductions
 
     net = max(net, Decimal(0))
 
@@ -142,12 +148,12 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=faculty_profile,
-        basic_salary=faculty_profile.salary,
+        basic_salary=basic_salary,
         total_session_hours=total_hours,
-        hour_based_amount=hour_based_amount,
+        hour_based_amount=applied_hour_based_amount,
         late_penalty=late_penalty,
         absence_deductions=absence_deductions,
-        leave_deductions=leave_deductions,
+        leave_deductions=applied_leave_deductions,
         net_salary=net,
         leaves_taken=int(leave_days),
         working_days=working_days,
@@ -203,12 +209,12 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             payslip.late_penalty = late_penalty
             if faculty_profile.employment_type == 'full_time':
                 payslip.net_salary = max(
-                    faculty_profile.salary - late_penalty - absence_deductions
-                    - leave_deductions, Decimal(0)
+                    basic_salary - late_penalty - absence_deductions
+                    - applied_leave_deductions, Decimal(0)
                 )
             else:
                 payslip.net_salary = max(
-                    hour_based_amount - late_penalty - absence_deductions, Decimal(0)
+                    applied_hour_based_amount - late_penalty - absence_deductions, Decimal(0)
                 )
             payslip.save(update_fields=['late_penalty', 'net_salary'])
 
@@ -346,20 +352,26 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 late_penalty += penalty
 
     if faculty_profile.employment_type == 'full_time':
-        net = (faculty_profile.salary - late_penalty - absence_deductions
-               - leave_deductions)
+        basic_salary = faculty_profile.salary
+        applied_hour_based_amount = Decimal(0)
+        applied_leave_deductions = leave_deductions
+        net = (basic_salary - late_penalty - absence_deductions
+               - applied_leave_deductions)
     else:
-        net = hour_based_amount - late_penalty - absence_deductions
+        basic_salary = Decimal(0)
+        applied_hour_based_amount = hour_based_amount
+        applied_leave_deductions = Decimal(0)
+        net = applied_hour_based_amount - late_penalty - absence_deductions
 
     net = max(net, Decimal(0))
 
     return {
-        'basic_salary': str(faculty_profile.salary),
+        'basic_salary': str(basic_salary),
         'total_session_hours': str(round(total_hours, 2)),
-        'hour_based_amount': str(round(hour_based_amount, 2)),
+        'hour_based_amount': str(round(applied_hour_based_amount, 2)),
         'late_penalty': str(round(late_penalty, 2)),
         'absence_deductions': str(round(absence_deductions, 2)),
-        'leave_deductions': str(round(leave_deductions, 2)),
+        'leave_deductions': str(round(applied_leave_deductions, 2)),
         'bonus': "0.00",
         'other_deductions': "0.00",
         'net_salary': str(round(net, 2)),
