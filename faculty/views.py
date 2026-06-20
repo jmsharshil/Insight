@@ -434,7 +434,7 @@ class FacultyQRCheckinView(APIView):
                 diff = (actual_dt - expected_dt).total_seconds() / 60
                 if diff > grace:
                     is_late = True
-                    late_minutes = int(diff - grace)
+                    late_minutes = int(diff)
         
         elif scan_type == 'check_out':
             dow = now.weekday()
@@ -455,7 +455,7 @@ class FacultyQRCheckinView(APIView):
                 diff = (expected_dt - actual_dt).total_seconds() / 60
                 if diff > grace:
                     is_early_checkout = True
-                    early_minutes = int(diff - grace)
+                    early_minutes = int(diff)
 
         log = FacultyQRScanLog.objects.create(
             faculty=fp, branch=fp.branch,
