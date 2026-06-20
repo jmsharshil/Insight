@@ -121,6 +121,18 @@ class PayrollListCreateView(APIView):
                         total += ps.net_salary
                     pr.total_amount = total
                     pr.save(update_fields=['total_amount'])
+                
+                else:
+                    # It's approved or disbursed. Generate for missing faculties only.
+                    existing_faculty_ids = set(pr.payslips.values_list('faculty_id', flat=True))
+                    missing_faculties = faculty_list.exclude(id__in=existing_faculty_ids)
+                    if missing_faculties.exists():
+                        added_total = Decimal(0)
+                        for fp in missing_faculties:
+                            ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
+                            added_total += ps.net_salary
+                        pr.total_amount += added_total
+                        pr.save(update_fields=['total_amount'])
 
         except (ValueError, TypeError):
             pass
@@ -151,8 +163,44 @@ class PayrollListCreateView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         d = ser.validated_data
-        if PayrollRun.objects.filter(branch=d['branch_id'], month=d['month'], year=d['year']).exists():
-            return Response({'success': False, 'message': 'Payroll already exists for this month.'}, status=status.HTTP_409_CONFLICT)
+        existing_run = PayrollRun.objects.filter(branch=d['branch_id'], month=d['month'], year=d['year']).first()
+        if existing_run:
+            from faculty.models import FacultyProfile
+            if existing_run.status == 'draft':
+                # Regenerate payslips for draft
+                existing_run.payslips.all().delete()
+                faculty_list = FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True)
+                total = Decimal(0)
+                for fp in faculty_list:
+                    ps = compute_payslip_for_faculty(fp, d['month'], d['year'], existing_run)
+                    total += ps.net_salary
+                existing_run.total_amount = total
+                existing_run.save(update_fields=['total_amount'])
+                message = 'Payroll regenerated.'
+            else:
+                # It's approved or disbursed. Just generate for missing faculties.
+                existing_faculty_ids = set(existing_run.payslips.values_list('faculty_id', flat=True))
+                faculty_list = FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True).exclude(id__in=existing_faculty_ids)
+                if not faculty_list.exists():
+                    return Response({'success': False, 'message': f'Payroll already {existing_run.status}. All active faculties already have payslips.'}, status=status.HTTP_409_CONFLICT)
+                
+                added_total = Decimal(0)
+                for fp in faculty_list:
+                    ps = compute_payslip_for_faculty(fp, d['month'], d['year'], existing_run)
+                    added_total += ps.net_salary
+                
+                existing_run.total_amount += added_total
+                existing_run.save(update_fields=['total_amount'])
+                message = f'Added missing payslips to {existing_run.status} payroll.'
+            
+            return Response({
+                'success': True, 'message': message,
+                'data': {
+                    'payroll_run_id': str(existing_run.id), 'status': existing_run.status,
+                    'total_amount': str(existing_run.total_amount),
+                    'faculty_count': existing_run.payslips.count(), 'generated_at': existing_run.generated_at,
+                },
+            }, status=status.HTTP_200_OK)
 
         from faculty.models import FacultyProfile
         payroll_run = PayrollRun.objects.create(
