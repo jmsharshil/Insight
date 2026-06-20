@@ -203,19 +203,25 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     late_penalty = Decimal(0)
     policy = LateEntryPolicy.objects.filter(branch=faculty_profile.branch, is_active=True).first()
     
-    if policy:
-        # Include late/early minutes from QR scans
-        total_penalty_minutes = 0
-        for log_date, logs in qr_by_date.items():
-            for log in logs:
-                total_penalty_minutes += log.late_minutes
-                total_penalty_minutes += log.early_minutes
-                
-        if total_penalty_minutes > 0:
-            late_penalty += min(
-                Decimal(total_penalty_minutes) * policy.deduction_per_minute,
-                policy.max_deduction_per_session * len(qr_by_date) if policy.max_deduction_per_session > 0 else Decimal('999999')
-            )
+    # Calculate implicit deduction per minute based on salary/hourly_rate
+    if faculty_profile.employment_type == 'full_time':
+        # Assuming 8 hours a day, 30 days a month
+        implicit_deduction_per_minute = (faculty_profile.salary / Decimal(30)) / Decimal(8) / Decimal(60) if faculty_profile.salary else Decimal(0)
+    else:
+        implicit_deduction_per_minute = faculty_profile.hourly_rate / Decimal(60) if faculty_profile.hourly_rate else Decimal(0)
+        
+    deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
+    
+    # Include late/early minutes from QR scans
+    total_penalty_minutes = 0
+    for log_date, logs in qr_by_date.items():
+        for log in logs:
+            total_penalty_minutes += log.late_minutes
+            total_penalty_minutes += log.early_minutes
+            
+    if total_penalty_minutes > 0:
+        max_deduction = policy.max_deduction_per_session * len(qr_by_date) if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
+        late_penalty += min(Decimal(total_penalty_minutes) * deduction_rate, max_deduction)
     # 6. Leave deductions
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
@@ -270,62 +276,59 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     )
 
     # 11. Late penalty logs (per session)
-    if policy:
-        for s in sessions:
-            grace = policy.grace_period_minutes
-            # Compare start_time with batch session_start_time as scheduled time
-            from batches.models import TimetableSlot
-            scheduled_time = s.start_time  # default fallback
-            dow = s.session_date.weekday()
-            slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
-            if slot and slot.start_time:
-                scheduled_time = slot.start_time
+    grace = policy.grace_period_minutes if policy else 5
+    max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
+    
+    for s in sessions:
+        # Compare start_time with batch session_start_time as scheduled time
+        from batches.models import TimetableSlot
+        scheduled_time = s.start_time  # default fallback
+        dow = s.session_date.weekday()
+        slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
+        if slot and slot.start_time:
+            scheduled_time = slot.start_time
 
-            sched_dt = datetime.combine(datetime.today(), scheduled_time)
-            actual_dt = datetime.combine(datetime.today(), s.start_time)
-            diff = (actual_dt - sched_dt).total_seconds() / 60
+        sched_dt = datetime.combine(datetime.today(), scheduled_time)
+        actual_dt = datetime.combine(datetime.today(), s.start_time)
+        diff = (actual_dt - sched_dt).total_seconds() / 60
 
-            if diff > grace:
-                late_min = int(diff - grace)
-                penalty = min(
-                    Decimal(late_min) * policy.deduction_per_minute,
-                    policy.max_deduction_per_session if policy.max_deduction_per_session > 0
-                    else Decimal('999999'),
-                )
-                SessionLatePenaltyLog.objects.create(
-                    payslip=payslip,
-                    session_report=s,
-                    scheduled_time=scheduled_time,
-                    actual_start=s.start_time,
-                    late_minutes=late_min,
-                    penalty_amount=penalty,
-                    grace_applied=False,
-                )
-                late_penalty += penalty
-            elif diff > 0:
-                SessionLatePenaltyLog.objects.create(
-                    payslip=payslip,
-                    session_report=s,
-                    scheduled_time=scheduled_time,
-                    actual_start=s.start_time,
-                    late_minutes=int(diff),
-                    penalty_amount=Decimal(0),
-                    grace_applied=True,
-                )
+        if diff > grace:
+            late_min = int(diff - grace)
+            penalty = min(Decimal(late_min) * deduction_rate, max_deduction)
+            SessionLatePenaltyLog.objects.create(
+                payslip=payslip,
+                session_report=s,
+                scheduled_time=scheduled_time,
+                actual_start=s.start_time,
+                late_minutes=late_min,
+                penalty_amount=penalty,
+                grace_applied=False,
+            )
+            late_penalty += penalty
+        elif diff > 0:
+            SessionLatePenaltyLog.objects.create(
+                payslip=payslip,
+                session_report=s,
+                scheduled_time=scheduled_time,
+                actual_start=s.start_time,
+                late_minutes=int(diff),
+                penalty_amount=Decimal(0),
+                grace_applied=True,
+            )
 
-        # Update payslip with computed late penalty
-        if late_penalty > 0:
-            payslip.late_penalty = late_penalty
-            if faculty_profile.employment_type == 'full_time':
-                payslip.net_salary = max(
-                    basic_salary - late_penalty - absence_deductions
-                    - applied_leave_deductions, Decimal(0)
-                )
-            else:
-                payslip.net_salary = max(
-                    applied_hour_based_amount - late_penalty - absence_deductions, Decimal(0)
-                )
-            payslip.save(update_fields=['late_penalty', 'net_salary'])
+    # Update payslip with computed late penalty
+    if late_penalty > 0:
+        payslip.late_penalty = late_penalty
+        if faculty_profile.employment_type == 'full_time':
+            payslip.net_salary = max(
+                basic_salary - late_penalty - absence_deductions
+                - applied_leave_deductions, Decimal(0)
+            )
+        else:
+            payslip.net_salary = max(
+                applied_hour_based_amount - late_penalty - absence_deductions, Decimal(0)
+            )
+        payslip.save(update_fields=['late_penalty', 'net_salary'])
 
     return payslip
 
