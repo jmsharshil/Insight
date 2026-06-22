@@ -103,48 +103,60 @@ class ExamListSerializer(serializers.ModelSerializer):
     def get_can_start_exam(self, obj):
         request = self.context.get('request')
         if not request or getattr(request.user, 'role', None) != 'student':
+            print(f"can_start_exam=False: Role is not student. user={getattr(request, 'user', None)}, role={getattr(getattr(request, 'user', None), 'role', None)}")
             return False
 
         student = getattr(request, '_cached_student', None)
         if student is None:
             try:
                 from students.models import Student
-                student = Student.objects.get(user=request.user)
-                request._cached_student = student
-            except Exception:
+                student = Student.objects.filter(user=request.user).first()
+                if student:
+                    request._cached_student = student
+                else:
+                    request._cached_student = False
+                    print("can_start_exam=False: No Student profile found for this user.")
+                    return False
+            except Exception as e:
                 request._cached_student = False
+                print(f"can_start_exam=False: Exception fetching student: {e}")
                 return False
         elif student is False:
             return False
 
         if student.batch_id != obj.batch_id:
+            print(f"can_start_exam=False: Batch mismatch. student.batch_id={student.batch_id}, exam.batch_id={obj.batch_id}")
             return False
 
         # Block only on terminal statuses — time is the primary gate
         if obj.status in ['draft', 'completed', 'results_published']:
+            print(f"can_start_exam=False: Status is blocked. obj.status={obj.status}")
             return False
 
         from django.utils import timezone
+        import datetime
         now = timezone.now()
-        # Use replace to safely build a timezone-aware datetime without double-awareness
-        try:
-            dt_start = timezone.make_aware(
-                timezone.datetime.combine(obj.scheduled_date, obj.start_time)
-            )
-            dt_end = timezone.make_aware(
-                timezone.datetime.combine(obj.scheduled_date, obj.end_time)
-            )
-        except Exception:
-            # Datetime may already be aware (edge case)
-            dt_start = timezone.datetime.combine(obj.scheduled_date, obj.start_time).replace(tzinfo=timezone.utc)
-            dt_end = timezone.datetime.combine(obj.scheduled_date, obj.end_time).replace(tzinfo=timezone.utc)
+        
+        # Build naive datetime from exam schedule
+        dt_start_naive = datetime.datetime.combine(obj.scheduled_date, obj.start_time)
+        dt_end_naive = datetime.datetime.combine(obj.scheduled_date, obj.end_time)
+        
+        # Safely convert to aware datetime
+        if timezone.is_naive(dt_start_naive):
+            dt_start = timezone.make_aware(dt_start_naive)
+            dt_end = timezone.make_aware(dt_end_naive)
+        else:
+            dt_start = dt_start_naive
+            dt_end = dt_end_naive
 
         # can_start_exam becomes True exactly when the scheduled time is reached
         if not (dt_start <= now <= dt_end):
+            print(f"can_start_exam=False: Time out of bounds. dt_start={dt_start}, now={now}, dt_end={dt_end}")
             return False
 
         from .models import ExamSession
         if ExamSession.objects.filter(exam=obj, student=student).exists():
+            print("can_start_exam=False: ExamSession already exists for this student.")
             return False
 
         return True
