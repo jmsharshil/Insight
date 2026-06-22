@@ -70,7 +70,6 @@ Items represent the actual stock units. They belong to a category.
       "category": "category-uuid",
       "category_name": "Uniforms",
       "name": "Uniform Shirt",
-      "sku": "UNI-SHT-M",
       "description": "White uniform shirt, medium size.",
       "size": "M",
       "total_stock": 50,
@@ -92,7 +91,6 @@ Items represent the actual stock units. They belong to a category.
 {
   "category": "category-uuid",
   "name": "Uniform Shirt",
-  "sku": "UNI-SHT-M",
   "description": "White uniform shirt.",
   "size": "M",
   "reorder_level": 10,
@@ -116,7 +114,6 @@ Transactions act as a strict ledger. Whenever you purchase new stock, find damag
   "item": "item-uuid",
   "transaction_type": "purchase",
   "quantity": 100,
-  "unit_price": "200.00",
   "reference": "INV-10293",
   "notes": "Purchased from Vendor XYZ"
 }
@@ -138,7 +135,6 @@ Allocations are used to issue an item to a specific `Student` or `Faculty`.
   "item": "item-uuid",
   "student": "student-profile-uuid",
   "quantity": 1,
-  "size": "M",
   "status": "issued",
   "notes": "Issued first set of uniforms."
 }
@@ -151,7 +147,6 @@ Allocations are used to issue an item to a specific `Student` or `Faculty`.
   "item": "item-uuid",
   "faculty": "faculty-profile-uuid",
   "quantity": 1,
-  "size": "L",
   "status": "issued",
   "notes": "Issued faculty blazer."
 }
@@ -168,7 +163,6 @@ Allocations are used to issue an item to a specific `Student` or `Faculty`.
   "faculty": null,
   "faculty_name": null,
   "quantity": 1,
-  "size": "M",
   "status": "issued",
   "status_display": "Issued",
   "issued_at": "2026-06-22T10:05:00Z",
@@ -193,13 +187,11 @@ Use this custom endpoint to issue multiple different items (e.g., a shirt, a bla
     {
       "item": "item-uuid-1",
       "quantity": 2,
-      "size": "M",
       "notes": "2 Shirts"
     },
     {
       "item": "item-uuid-2",
       "quantity": 1,
-      "size": "",
       "notes": "Math Book"
     }
   ]
@@ -244,7 +236,6 @@ The forecasting API dynamically calculates how fast items are being consumed (ba
   {
     "item_id": "item-uuid",
     "item_name": "Uniform Shirt",
-    "sku": "UNI-SHT-M",
     "category": "Uniforms",
     "current_stock": 10,
     "reorder_level": 15,
@@ -258,7 +249,6 @@ The forecasting API dynamically calculates how fast items are being consumed (ba
   {
     "item_id": "another-item-uuid",
     "item_name": "Math Textbook",
-    "sku": "BOK-MTH-10",
     "category": "Textbooks",
     "current_stock": 200,
     "reorder_level": 20,

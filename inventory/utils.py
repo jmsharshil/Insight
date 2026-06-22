@@ -52,7 +52,6 @@ def get_inventory_forecast():
         forecast_data.append({
             'item_id': item.id,
             'item_name': item.name,
-            'sku': item.sku,
             'category': item.category.name,
             'current_stock': item.total_stock,
             'reorder_level': item.reorder_level,

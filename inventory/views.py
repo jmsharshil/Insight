@@ -24,7 +24,7 @@ class ItemViewSet(viewsets.ModelViewSet):
     serializer_class = ItemSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['category', 'category__branch', 'is_active']
-    search_fields = ['name', 'sku', 'description']
+    search_fields = ['name', 'description']
 
 
 class StockTransactionViewSet(viewsets.ModelViewSet):
@@ -101,7 +101,6 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                 for alloc_data in allocations_data:
                     item_id = alloc_data.get('item')
                     quantity = int(alloc_data.get('quantity', 1))
-                    size = alloc_data.get('size', '')
                     notes = alloc_data.get('notes', '')
 
                     item = Item.objects.get(id=item_id)
@@ -111,7 +110,6 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                         student_id=student_id,
                         faculty_id=faculty_id,
                         quantity=quantity,
-                        size=size,
                         status='issued',
                         notes=notes,
                         issued_by=request.user

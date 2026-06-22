@@ -29,7 +29,6 @@ class Item(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     category = models.ForeignKey(ItemCategory, on_delete=models.CASCADE, related_name='items')
     name = models.CharField(max_length=200)
-    sku = models.CharField(max_length=50, unique=True, help_text="Stock Keeping Unit / Unique Item Code")
     description = models.TextField(blank=True)
     size = models.CharField(max_length=50, blank=True, help_text="e.g., S, M, L, XL (useful for uniforms)")
     
@@ -46,7 +45,7 @@ class Item(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return f"{self.name} (SKU: {self.sku})"
+        return self.name
 
 
 class StockTransaction(models.Model):
@@ -62,7 +61,7 @@ class StockTransaction(models.Model):
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='transactions')
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     quantity = models.IntegerField(help_text="Positive for inward (purchase, return), negative for outward (allocation, damage)")
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Cost at the time of transaction")
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Cost at the time of transaction")
     
     reference = models.CharField(max_length=100, blank=True, help_text="Invoice number or Allocation ID reference")
     notes = models.TextField(blank=True)
@@ -101,7 +100,6 @@ class ItemAllocation(models.Model):
     faculty = models.ForeignKey(FacultyProfile, on_delete=models.CASCADE, null=True, blank=True, related_name='inventory_allocations')
     
     quantity = models.PositiveIntegerField(default=1)
-    size = models.CharField(max_length=20, blank=True, help_text="Specific size allocated (e.g., M, L, XL)")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='issued')
     
     issued_at = models.DateTimeField(default=timezone.now)

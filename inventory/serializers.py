@@ -15,7 +15,7 @@ class ItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = Item
         fields = [
-            'id', 'category', 'category_name', 'name', 'sku', 'description', 'size',
+            'id', 'category', 'category_name', 'name', 'description', 'size',
             'total_stock', 'reorder_level', 'unit_price', 'is_active',
             'created_at', 'updated_at'
         ]
@@ -48,7 +48,7 @@ class ItemAllocationSerializer(serializers.ModelSerializer):
         model = ItemAllocation
         fields = [
             'id', 'item', 'item_name', 'student', 'student_name', 'faculty', 'faculty_name',
-            'quantity', 'size', 'status', 'status_display', 'issued_at', 'issued_by', 'issued_by_name',
+            'quantity', 'status', 'status_display', 'issued_at', 'issued_by', 'issued_by_name',
             'returned_at', 'return_notes', 'notes'
         ]
         read_only_fields = ['issued_by', 'issued_at', 'returned_at']
