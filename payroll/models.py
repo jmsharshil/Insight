@@ -133,3 +133,18 @@ class ExtraHoursApproval(models.Model):
 
     def __str__(self):
         return f"{self.faculty.user.name} - {self.chapter.name} - {self.extra_minutes}m ({self.status})"
+
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+from django.db.models import Sum
+
+@receiver(post_save, sender=PaySlip)
+@receiver(post_delete, sender=PaySlip)
+def update_payroll_total(sender, instance, **kwargs):
+    if instance.payroll_run_id:
+        try:
+            pr = instance.payroll_run
+            total = pr.payslips.aggregate(total=Sum('net_salary'))['total'] or 0
+            PayrollRun.objects.filter(id=pr.id).update(total_amount=total)
+        except PayrollRun.DoesNotExist:
+            pass
