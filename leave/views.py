@@ -127,8 +127,8 @@ class LeaveListCreateView(APIView):
         d = ser.validated_data
         today = timezone.now().date()
 
-        # Past date check (except sick leave)
-        if d['leave_type'] != 'sick' and d['from_date'] < today:
+        # Past date check (except sick leave or students)
+        if d['leave_type'] != 'sick' and d['from_date'] < today and role not in ['student', 'parents']:
             return Response({'success': False, 'message': 'Leave date cannot be in the past.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get branch and policy
@@ -138,8 +138,8 @@ class LeaveListCreateView(APIView):
         
         policy = LeavePolicy.objects.filter(branch_id=bid, leave_type=d['leave_type'], is_active=True).first()
 
-        # Advance notice check (except sick leave)
-        if policy and d['leave_type'] != 'sick':
+        # Advance notice check (except sick leave or students)
+        if policy and d['leave_type'] != 'sick' and role not in ['student', 'parents']:
             advance = (d['from_date'] - today).days
             if advance < policy.min_advance_days:
                 return Response({
