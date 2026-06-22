@@ -430,8 +430,8 @@ class ExamStartView(APIView):
         lon = ser.validated_data.get('student_lon')
         # Prefer body fingerprint; fall back to X-Device-Fingerprint header
         fingerprint = ser.validated_data.get('device_fingerprint') or request.headers.get('X-Device-Fingerprint', '')
-        if not fingerprint:
-            logger.warning(f"Exam start without device fingerprint — user={request.user.email}")
+        # if not fingerprint:
+        #     logger.warning(f"Exam start without device fingerprint — user={request.user.email}")
         # Prefer body IP; fall back to REMOTE_ADDR
         ip_address = ser.validated_data.get('ip_address') or request.META.get('REMOTE_ADDR')
 
@@ -459,8 +459,9 @@ class ExamStartView(APIView):
         dt_start = timezone.make_aware(timezone.datetime.combine(exam.scheduled_date, exam.start_time))
         dt_end = timezone.make_aware(timezone.datetime.combine(exam.scheduled_date, exam.end_time))
         
-        if not (dt_start <= now <= dt_end):
-            return Response({'success': False, 'message': 'Exam is not currently active'}, status=status.HTTP_403_FORBIDDEN)
+        # REMOVED TIME VALIDATION AS REQUESTED
+        # if not (dt_start <= now <= dt_end):
+        #     return Response({'success': False, 'message': 'Exam is not currently active'}, status=status.HTTP_403_FORBIDDEN)
         
         if ExamSession.objects.filter(exam=exam, student=student).exists():
             return Response({'success': False, 'message': 'Session already exists'}, status=status.HTTP_409_CONFLICT)

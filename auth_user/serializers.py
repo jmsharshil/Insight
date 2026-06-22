@@ -183,8 +183,9 @@ class ChangePasswordSerializer(serializers.Serializer):
         if attrs['new_password'] != attrs['confirm_new_password']:
             raise serializers.ValidationError({"confirm_new_password": "Passwords do not match"})
 
-        if attrs['current_password'] == attrs['new_password']:
-            raise serializers.ValidationError({"new_password": "New password must be different from current password"})
+        # Removed as per request
+        # if attrs['current_password'] == attrs['new_password']:
+        #     raise serializers.ValidationError({"new_password": "New password must be different from current password"})
 
         return attrs
 
