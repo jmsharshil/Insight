@@ -88,7 +88,7 @@ class LeaveBalance(models.Model):
 class LeaveApplication(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     applied_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='leave_applications')
-    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='leave_applications')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='leave_applications', null=True, blank=True)
     leave_type = models.CharField(max_length=10, choices=LEAVE_TYPE_CHOICES)
     from_date = models.DateField()
     to_date = models.DateField()
