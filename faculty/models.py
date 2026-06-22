@@ -26,6 +26,7 @@ class FacultyProfile(models.Model):
     employment_type = models.CharField(max_length=20, choices=EMPLOYMENT_TYPE_CHOICES, default='full_time')
     joining_date = models.DateField()
     hourly_rate = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    session_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     # default hourly rate; overridden per subject by SubjectHourlyRate
     salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # fixed monthly salary for full_time employees

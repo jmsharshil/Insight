@@ -180,7 +180,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
-    total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
+    total_hours = faculty_profile.session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
 
     # 4. Compute hour_based_amount per subject
     hour_based_amount = Decimal(0)
@@ -196,6 +196,9 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # Add QR-only hours at default rate
     qr_extra_hours = qr_extra_minutes / Decimal(60)
     hour_based_amount += qr_extra_hours * faculty_profile.hourly_rate
+    
+    # Add profile base session hours at default rate
+    hour_based_amount += faculty_profile.session_hours * faculty_profile.hourly_rate
 
     sessions_count = sessions.count()
 
@@ -389,7 +392,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             diff_minutes = Decimal((last_out - first_in).total_seconds()) / Decimal(60)
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
-    total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
+    total_hours = faculty_profile.session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
 
     hour_based_amount = Decimal(0)
     for subject_id, hours in subject_hours.items():
@@ -403,6 +406,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 
     qr_extra_hours = qr_extra_minutes / Decimal(60)
     hour_based_amount += qr_extra_hours * faculty_profile.hourly_rate
+    hour_based_amount += faculty_profile.session_hours * faculty_profile.hourly_rate
 
     sessions_count = sessions.count()
 
