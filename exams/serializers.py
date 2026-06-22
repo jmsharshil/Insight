@@ -80,6 +80,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
     can_start_exam = serializers.SerializerMethodField()
+    questions_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
@@ -94,7 +95,10 @@ class ExamListSerializer(serializers.ModelSerializer):
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
          'exam_type_display', 'status_display', 'screen_lock_action_display', 
-         'split_screen_action_display', 'result_release_mode_display', 'can_start_exam']
+         'split_screen_action_display', 'result_release_mode_display', 'can_start_exam', 'questions_count']
+
+    def get_questions_count(self, obj):
+        return obj.questions.count()
 
     def get_can_start_exam(self, obj):
         request = self.context.get('request')
