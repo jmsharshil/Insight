@@ -78,6 +78,9 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
     employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
     batch_name = serializers.SerializerMethodField()
 
+    session_hours = serializers.SerializerMethodField()
+    hour_based_amount = serializers.SerializerMethodField()
+    
     class Meta:
         model = FacultyProfile
         fields = [
@@ -87,7 +90,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             'salary', 'hourly_rate', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
             'level_display', 'employment_type_display', 'batch_name',
-            'subjects', 'subject_name']
+            'subjects', 'subject_name', 'session_hours', 'hour_based_amount']
 
     subjects = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
@@ -136,6 +139,20 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             if name not in unique_names:
                 unique_names.append(name)
         return ", ".join(unique_names)
+
+    def get_session_hours(self, obj):
+        from django.utils import timezone
+        from payroll.utils import preview_payslip_for_faculty
+        today = timezone.now().date()
+        preview = preview_payslip_for_faculty(obj, today.month, today.year)
+        return preview.get('total_session_hours', "0.00")
+
+    def get_hour_based_amount(self, obj):
+        from django.utils import timezone
+        from payroll.utils import preview_payslip_for_faculty
+        today = timezone.now().date()
+        preview = preview_payslip_for_faculty(obj, today.month, today.year)
+        return preview.get('hour_based_amount', "0.00")
 
 
 class FacultyCreateSerializer(serializers.Serializer):
