@@ -121,7 +121,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             return False
 
         # Block only on terminal statuses — time is the primary gate
-        if obj.status in ['completed', 'results_published']:
+        if obj.status in ['draft', 'completed', 'results_published']:
             return False
 
         from django.utils import timezone
