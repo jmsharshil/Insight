@@ -125,7 +125,7 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
 
 
 class LeaveApplicationCreateSerializer(serializers.Serializer):
-    leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual', 'club', 'unpaid'])
+    leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual', 'club', 'unpaid'], required=False, default='casual')
     from_date = serializers.DateField()
     to_date = serializers.DateField()
     is_half_day = serializers.BooleanField(default=False)
