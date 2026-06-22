@@ -493,9 +493,11 @@ class UserListAPIView(APIView):
             users = users.filter(is_active=is_active.lower() == 'true')
         
         users = apply_filters(self, request, users)
-        
-        return paginate_queryset(users, request, UserListSerializer)
-
+        serializer = UserListSerializer(users, many=True)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        }, status=status.HTTP_200_OK)
 class UserProfileAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     def get(self, request):
