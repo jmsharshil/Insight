@@ -476,9 +476,8 @@ class FacultyQRCheckinView(APIView):
                     subject_id = rdata.get('subject_id')
                     chapter_ids = rdata.get('chapter_ids', [])
                     status_val = rdata.get('status', 'completed')
-                    start_time_str = rdata.get('start_time')
-                    end_time_str = rdata.get('end_time')
-                    if batch_id and subject_id and start_time_str and end_time_str:
+                    
+                    if batch_id and subject_id:
                         batch = Batch.objects.filter(id=batch_id).first()
                         subject = Subject.objects.filter(id=subject_id).first()
                         
@@ -487,11 +486,17 @@ class FacultyQRCheckinView(APIView):
                             chapters_qs = Chapter.objects.filter(id__in=chapter_ids)
                             chapters_str = ", ".join([c.name for c in chapters_qs])
                         
-                        try:
-                            start_time = time.fromisoformat(start_time_str)
-                            end_time = time.fromisoformat(end_time_str)
-                        except ValueError:
-                            continue
+                        # Get actual check-in time for today, fallback to slot or now
+                        checkin_log = FacultyQRScanLog.objects.filter(
+                            faculty=fp, scan_type='check_in', scanned_at__date=now.date()
+                        ).order_by('scanned_at').first()
+                        
+                        if checkin_log:
+                            start_time = checkin_log.scanned_at.time()
+                        else:
+                            start_time = now.time()
+                            
+                        end_time = now.time()
                             
                         if batch and subject:
                             sr = SessionReport.objects.create(
