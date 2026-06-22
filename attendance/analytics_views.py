@@ -354,23 +354,35 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         try:
             s = Student.objects.get(id=student_id)
         except Student.DoesNotExist:
-            return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+            s = Student.objects.filter(user__id=student_id).first()
+            if not s:
+                return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Scoping check
         if role == 'student':
             student_profile = Student.objects.filter(user=user).first()
             if not student_profile or student_profile.id != s.id:
-                return Response({'success': False, 'message': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'success': False, 'message': 'Access denied (Student role mismatch).'}, status=status.HTTP_403_FORBIDDEN)
         elif role == 'parents':
-            if not user.linked_student or Student.objects.filter(user=user.linked_student).first().id != s.id:
-                return Response({'success': False, 'message': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+            has_access = False
+            linked_profile = Student.objects.filter(user=user.linked_student).first() if getattr(user, 'linked_student', None) else None
+            if linked_profile and linked_profile.id == s.id:
+                has_access = True
+            else:
+                from students.models import ParentLink
+                if ParentLink.objects.filter(parent=user, student=s).exists():
+                    has_access = True
+                    
+            if not has_access:
+                return Response({'success': False, 'message': 'Access denied (Parent role mismatch).'}, status=status.HTTP_403_FORBIDDEN)
         elif role == 'faculty':
             batch_ids = list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)) if hasattr(user, 'faculty_profile') else []
             if s.batch_id not in batch_ids:
-                return Response({'success': False, 'message': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'success': False, 'message': 'Access denied (Faculty not assigned to batch).'}, status=status.HTTP_403_FORBIDDEN)
 
-        if getattr(user, 'organization', None) and s.branch and s.branch.organization != user.organization:
-            return Response({'success': False, 'message': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+        user_org_id = getattr(user, 'organization_id', None)
+        if user_org_id and s.branch and getattr(s.branch, 'organization_id', None) != user_org_id:
+            return Response({'success': False, 'message': 'Access denied (Organization mismatch).'}, status=status.HTTP_403_FORBIDDEN)
 
         # Attendance data
         records = AttendanceRecord.objects.filter(student=s)

@@ -278,9 +278,9 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # 9. Compute net salary
     if faculty_profile.employment_type == 'full_time':
         basic_salary = faculty_profile.salary
-        applied_hour_based_amount = Decimal(0)
+        applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = leave_deductions
-        net = (basic_salary - late_penalty - absence_deductions
+        net = (basic_salary + applied_hour_based_amount - late_penalty - absence_deductions
                - applied_leave_deductions)
     else:
         basic_salary = Decimal(0)
@@ -453,9 +453,9 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 
     if faculty_profile.employment_type == 'full_time':
         basic_salary = faculty_profile.salary
-        applied_hour_based_amount = Decimal(0)
+        applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = leave_deductions
-        net = (basic_salary - late_penalty - absence_deductions
+        net = (basic_salary + applied_hour_based_amount - late_penalty - absence_deductions
                - applied_leave_deductions)
     else:
         basic_salary = Decimal(0)
