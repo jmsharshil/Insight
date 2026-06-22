@@ -133,10 +133,9 @@ class LeaveListCreateView(APIView):
 
         # Get branch and policy
         bid = request.data.get('branch_id') or _user_branch_id(request.user)
-        if not bid:
-            return Response({'success': False, 'message': 'Branch required. Please specify branch_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Branch validation removed as per request
         
-        policy = LeavePolicy.objects.filter(branch_id=bid, leave_type=d['leave_type'], is_active=True).first()
+        policy = LeavePolicy.objects.filter(branch_id=bid, leave_type=d.get('leave_type'), is_active=True).first() if bid and d.get('leave_type') else None
 
         # Advance notice check (except sick leave or students)
         if policy and d['leave_type'] != 'sick' and role not in ['student', 'parents']:

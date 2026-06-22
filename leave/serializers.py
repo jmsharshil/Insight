@@ -82,7 +82,9 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
     applied_by_role = serializers.SerializerMethodField()
+    first_approver = serializers.SerializerMethodField()
     first_approver_name = serializers.SerializerMethodField()
+    second_approver = serializers.SerializerMethodField()
     second_approver_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
 
@@ -109,11 +111,41 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
     def get_applied_by_role(self, obj):
         return getattr(obj.applied_by, 'role', '') if obj.applied_by else ''
 
+    def get_first_approver(self, obj):
+        if obj.first_approver_id:
+            return obj.first_approver_id
+        if obj.branch_id:
+            from django.contrib.auth import get_user_model
+            approver = get_user_model().objects.filter(role='admin_senior_executive', branch_id=obj.branch_id, is_active=True).first()
+            if approver: return approver.id
+        return None
+
     def get_first_approver_name(self, obj):
-        return obj.first_approver.name if obj.first_approver else ''
+        if obj.first_approver:
+            return obj.first_approver.name
+        if obj.branch_id:
+            from django.contrib.auth import get_user_model
+            approver = get_user_model().objects.filter(role='admin_senior_executive', branch_id=obj.branch_id, is_active=True).first()
+            if approver: return approver.name
+        return ''
+
+    def get_second_approver(self, obj):
+        if obj.second_approver_id:
+            return obj.second_approver_id
+        if obj.branch_id:
+            from django.contrib.auth import get_user_model
+            approver = get_user_model().objects.filter(role='branch_manager', branch_id=obj.branch_id, is_active=True).first()
+            if approver: return approver.id
+        return None
 
     def get_second_approver_name(self, obj):
-        return obj.second_approver.name if obj.second_approver else ''
+        if obj.second_approver:
+            return obj.second_approver.name
+        if obj.branch_id:
+            from django.contrib.auth import get_user_model
+            approver = get_user_model().objects.filter(role='branch_manager', branch_id=obj.branch_id, is_active=True).first()
+            if approver: return approver.name
+        return ''
 
     def get_supporting_document_url(self, obj):
         if obj.supporting_document and hasattr(obj.supporting_document, 'url'):
