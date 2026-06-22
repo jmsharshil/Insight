@@ -465,6 +465,7 @@ class UserListAPIView(APIView):
     filterset_fields = ['is_active']
     search_fields = ['name', 'email', 'phone']
     ordering_fields = '__all__'
+    pagination_class = None
 
     def get(self, request):
         if not request.user.is_authenticated:

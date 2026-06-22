@@ -180,6 +180,36 @@ Allocations are used to issue an item to a specific `Student` or `Faculty`.
 }
 ```
 
+### Issue Multiple Items at Once (Bulk Allocation)
+Use this custom endpoint to issue multiple different items (e.g., a shirt, a blazer, and books) to a single student or faculty at the same time. This is done atomically, meaning if one item fails, none are issued.
+
+**POST** `/allocations/bulk_issue/`
+
+**Request Body:**
+```json
+{
+  "student": "student-profile-uuid",
+  "allocations": [
+    {
+      "item": "item-uuid-1",
+      "quantity": 2,
+      "size": "M",
+      "notes": "2 Shirts"
+    },
+    {
+      "item": "item-uuid-2",
+      "quantity": 1,
+      "size": "",
+      "notes": "Math Book"
+    }
+  ]
+}
+```
+*Note: Replace `"student"` with `"faculty"` if issuing to a faculty member.*
+
+**Response:**
+Returns a JSON array of the created allocation objects, automatically deducting the correct stock quantities.
+
 ### Return an Issued Item
 If an item is returned by a student/faculty, use this custom action to mark the allocation as returned. It automatically restores the stock quantity.
 

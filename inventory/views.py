@@ -81,6 +81,60 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
         )
         return Response({'status': 'Item returned successfully.'})
 
+    @action(detail=False, methods=['post'])
+    def bulk_issue(self, request):
+        student_id = request.data.get('student')
+        faculty_id = request.data.get('faculty')
+        allocations_data = request.data.get('allocations', [])
+
+        if not student_id and not faculty_id:
+            return Response({'error': 'Must provide either student or faculty ID.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not allocations_data or not isinstance(allocations_data, list):
+            return Response({'error': 'Must provide a list of allocations.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        created_allocations = []
+        from django.db import transaction
+
+        try:
+            with transaction.atomic():
+                for alloc_data in allocations_data:
+                    item_id = alloc_data.get('item')
+                    quantity = int(alloc_data.get('quantity', 1))
+                    size = alloc_data.get('size', '')
+                    notes = alloc_data.get('notes', '')
+
+                    item = Item.objects.get(id=item_id)
+
+                    allocation = ItemAllocation.objects.create(
+                        item=item,
+                        student_id=student_id,
+                        faculty_id=faculty_id,
+                        quantity=quantity,
+                        size=size,
+                        status='issued',
+                        notes=notes,
+                        issued_by=request.user
+                    )
+                    
+                    # Create StockTransaction
+                    StockTransaction.objects.create(
+                        item=item,
+                        transaction_type='allocation',
+                        quantity=-quantity,
+                        reference=f"Bulk allocation to {allocation.student.admission_number if allocation.student else allocation.faculty.user.name if allocation.faculty else 'Unknown'}",
+                        notes=notes,
+                        created_by=request.user
+                    )
+                    created_allocations.append(allocation)
+        except Item.DoesNotExist:
+            return Response({'error': 'One or more items not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(created_allocations, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 @api_view(['GET'])
 def inventory_forecast_view(request):
