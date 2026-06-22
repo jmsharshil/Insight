@@ -206,7 +206,9 @@ class AddUserAPIView(APIView):
                     from django.utils import timezone
                     if not FacultyProfile.objects.filter(user=user).exists():
                         emp_id = generate_employee_id(user.branch)
-                        FacultyProfile.objects.create(
+                        from faculty.utils import generate_faculty_qr_code
+                        qr_file = generate_faculty_qr_code(emp_id)
+                        fp = FacultyProfile.objects.create(
                             user=user,
                             branch=user.branch,
                             employee_id=emp_id,
@@ -214,6 +216,8 @@ class AddUserAPIView(APIView):
                             specialization="N/A",
                             joining_date=timezone.now().date()
                         )
+                        if qr_file:
+                            fp.qr_code.save(qr_file.name, qr_file, save=True)
                 except Exception as e:
                     # If faculty profile fails to create, log it but don't break the user creation
                     pass

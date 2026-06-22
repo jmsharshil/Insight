@@ -437,6 +437,15 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
             } if v.is_resolved else None
         } for v in violations]
 
+        # Recent absences
+        recent_absences = []
+        for r in records.filter(status='absent').order_by('-date')[:5]:
+            recent_absences.append({
+                'date': r.date,
+                'formatted_date': r.date.strftime('%d %b %Y'),
+                'status': 'Absent'
+            })
+
         # Monthly trends
         monthly_trend = []
         today = timezone.now().date()
@@ -463,8 +472,10 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
             m_present = m_records.filter(status__in=['present', 'late', 'half_day']).count()
             m_pct = round((m_present / m_total) * 100, 2) if m_total > 0 else 0.0
 
+            import calendar
             monthly_trend.append({
                 'month': month_str,
+                'month_name': calendar.month_abbr[m],
                 'percentage': m_pct
             })
 
@@ -547,8 +558,22 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                 'percentage': round((stats['present'] / stats['total']) * 100, 2) if stats['total'] > 0 else 0.0
             })
 
+        page = request.GET.get('page', 1)
+        page_size = request.GET.get('page_size', 50)
+        try:
+            page = int(page)
+            page_size = int(page_size)
+        except ValueError:
+            page = 1
+            page_size = 50
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
         return Response({
             'success': True,
+            'count': len(day_wise_attendance),
+            'page_size': page_size,
             'data': {
                 'student_profile': {
                     'id': str(s.id),
@@ -560,14 +585,16 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                 },
                 'attendance_percentage': pct,
                 'summary': {
+                    'total_classes': total_days,
                     'present_count': present_count,
                     'absent_count': absent_count,
                     'late_count': late_count,
                 },
-                'day_wise_attendance': day_wise_attendance,
-                'check_in_history': check_in_history,
-                'check_out_history': check_out_history,
-                'violations': violations_data,
+                'day_wise_attendance': day_wise_attendance[start:end],
+                'recent_absences': recent_absences,
+                'check_in_history': check_in_history[start:end],
+                'check_out_history': check_out_history[start:end],
+                'violations': violations_data[start:end],
                 'monthly_trend': monthly_trend,
                 'subject_wise_attendance': subject_wise,
                 'session_wise_attendance': session_wise

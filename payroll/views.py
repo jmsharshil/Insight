@@ -132,7 +132,8 @@ class PayrollListCreateView(APIView):
                             ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
                             added_total += ps.net_salary
                         pr.total_amount += added_total
-                        pr.save(update_fields=['total_amount'])
+                        pr.status = 'pending_approval'
+                        pr.save(update_fields=['total_amount', 'status'])
 
         except (ValueError, TypeError):
             pass
@@ -190,8 +191,9 @@ class PayrollListCreateView(APIView):
                     added_total += ps.net_salary
                 
                 existing_run.total_amount += added_total
-                existing_run.save(update_fields=['total_amount'])
-                message = f'Added missing payslips to {existing_run.status} payroll.'
+                existing_run.status = 'pending_approval'
+                existing_run.save(update_fields=['total_amount', 'status'])
+                message = f'Added missing payslips and changed status to pending_approval.'
             
             return Response({
                 'success': True, 'message': message,
