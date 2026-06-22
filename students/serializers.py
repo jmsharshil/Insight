@@ -3,6 +3,20 @@ from rest_framework import serializers
 from .models import (Student,ParentLink,BatchHistory,InventoryIssue,DigitalIDCard,StudentStatusHistory,STUDENT_STATUS_CHOICES,)
 
 
+class IssuedInventoryItemSerializer(serializers.Serializer):
+    """Nested read-only snapshot of an inventory allocation issued to this student."""
+    allocation_id = serializers.UUIDField(source='id')
+    item_id = serializers.UUIDField(source='item.id')
+    item_name = serializers.CharField(source='item.name')
+    item_description = serializers.CharField(source='item.description')
+    item_size = serializers.CharField(source='item.size')
+    quantity = serializers.IntegerField()
+    status = serializers.CharField()
+    status_display = serializers.CharField(source='get_status_display')
+    issued_at = serializers.DateTimeField()
+    returned_at = serializers.DateTimeField()
+    notes = serializers.CharField()
+
 # ── Nested Micro-Serializers (read-only) ──────────────────────────────────────
 
 class BranchInfoSerializer(serializers.Serializer):
@@ -129,6 +143,7 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     photo_url = serializers.SerializerMethodField()
     id_card_ready = serializers.BooleanField(read_only=True)
     branch_name = serializers.CharField(source='branch.name', default=None)
+    issued_items = serializers.SerializerMethodField()
 
 
     gender_display = serializers.CharField(source="get_gender_display", read_only=True)
@@ -142,6 +157,16 @@ class StudentDetailSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return obj.full_name
+
+    def get_issued_items(self, obj):
+        try:
+            from inventory.models import ItemAllocation
+            allocations = ItemAllocation.objects.filter(
+                student=obj
+            ).select_related('item').order_by('-issued_at')
+            return IssuedInventoryItemSerializer(allocations, many=True).data
+        except Exception:
+            return []
 
     def get_photo_url(self, obj):
         request = self.context.get('request')
