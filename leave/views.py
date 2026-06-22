@@ -26,7 +26,7 @@ from .utils import calculate_leave_days, check_leave_overlap, check_late_entry_t
 logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
-LEAVE_APPLY_EXCLUDE = ['student', 'parents', 'accountant']
+LEAVE_APPLY_EXCLUDE = ['accountant']
 LEAVE_APPROVE_ROLES = ['branch_manager', 'admin_senior_executive']
 POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
 LATE_ENTRY_ADMIN = ['branch_manager', 'admin_senior_executive']
@@ -49,6 +49,24 @@ def _user_branch_id(user):
         return fp.branch_id
     except Exception:
         pass
+
+    # Fallback: check Student
+    try:
+        from students.models import Student
+        s = Student.objects.get(user=user)
+        return s.branch_id
+    except Exception:
+        pass
+
+    # Fallback: check Parent
+    try:
+        if getattr(user, 'role', None) in ['parent', 'parents'] and getattr(user, 'linked_student', None):
+            from students.models import Student
+            s = Student.objects.get(user=user.linked_student)
+            return s.branch_id
+    except Exception:
+        pass
+
     return None
 
 

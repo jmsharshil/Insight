@@ -42,6 +42,7 @@ class LeaveBalanceSerializer(serializers.ModelSerializer):
 class LeaveApplicationListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
+    applied_by_role = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
     is_first_approval_done = serializers.SerializerMethodField()
 
@@ -52,7 +53,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     class Meta:
         model = LeaveApplication
         fields = [
-            'id', 'applied_by', 'applied_by_name', 'leave_type',
+            'id', 'applied_by', 'applied_by_name', 'applied_by_role', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'total_days',
             'status', 'status_display', 'is_auto_generated', 'supporting_document_url', 'created_at',
             'leave_type_display', 'half_day_session_display', 'status_display', 'is_first_approval_done'
@@ -64,6 +65,9 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
 
     def get_applied_by_name(self, obj):
         return obj.applied_by.name if obj.applied_by else ''
+        
+    def get_applied_by_role(self, obj):
+        return getattr(obj.applied_by, 'role', '') if obj.applied_by else ''
 
     def get_supporting_document_url(self, obj):
         if obj.supporting_document and hasattr(obj.supporting_document, 'url'):
@@ -77,6 +81,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
 class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     applied_by_name = serializers.SerializerMethodField()
+    applied_by_role = serializers.SerializerMethodField()
     first_approver_name = serializers.SerializerMethodField()
     second_approver_name = serializers.SerializerMethodField()
     supporting_document_url = serializers.SerializerMethodField()
@@ -89,7 +94,7 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = LeaveApplication
         fields = [
-            'id', 'applied_by', 'applied_by_name', 'branch', 'leave_type',
+            'id', 'applied_by', 'applied_by_name', 'applied_by_role', 'branch', 'leave_type',
             'from_date', 'to_date', 'is_half_day', 'half_day_session', 'total_days',
             'reason', 'supporting_document', 'supporting_document_url',
             'is_auto_generated', 'status', 'status_display',
@@ -100,6 +105,9 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
 
     def get_applied_by_name(self, obj):
         return obj.applied_by.name if obj.applied_by else ''
+        
+    def get_applied_by_role(self, obj):
+        return getattr(obj.applied_by, 'role', '') if obj.applied_by else ''
 
     def get_first_approver_name(self, obj):
         return obj.first_approver.name if obj.first_approver else ''
