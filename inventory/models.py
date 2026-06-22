@@ -64,6 +64,7 @@ class StockTransaction(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Cost at the time of transaction")
     
     reference = models.CharField(max_length=100, blank=True, help_text="Invoice number or Allocation ID reference")
+    invoice_document = models.FileField(upload_to='inventory/invoices/', null=True, blank=True, help_text="Attach invoice document for purchase transactions")
     notes = models.TextField(blank=True)
     
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='inventory_transactions')
@@ -78,6 +79,15 @@ class StockTransaction(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self._state.adding
+        if is_new and self.quantity < 0:
+            # Validate stock won't go negative before committing
+            from django.core.exceptions import ValidationError
+            current_stock = Item.objects.get(pk=self.item_id).total_stock
+            if current_stock + self.quantity < 0:
+                raise ValidationError(
+                    f"Insufficient stock for '{self.item.name}'. "
+                    f"Available: {current_stock}, Requested: {abs(self.quantity)}."
+                )
         super().save(*args, **kwargs)
         if is_new:
             # Automatically update the item's total stock

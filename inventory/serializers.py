@@ -31,7 +31,7 @@ class StockTransactionSerializer(serializers.ModelSerializer):
         model = StockTransaction
         fields = [
             'id', 'item', 'item_name', 'transaction_type', 'transaction_type_display',
-            'quantity', 'unit_price', 'reference', 'notes',
+            'quantity', 'unit_price', 'reference', 'invoice_document', 'notes',
             'created_by', 'created_by_name', 'transaction_date'
         ]
         read_only_fields = ['created_by', 'transaction_date']

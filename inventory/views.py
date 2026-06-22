@@ -5,11 +5,30 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 
 from .models import ItemCategory, Item, StockTransaction, ItemAllocation
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .serializers import (
     ItemCategorySerializer, ItemSerializer,
     StockTransactionSerializer, ItemAllocationSerializer
 )
 from .utils import get_inventory_forecast
+
+from students.models import StudentProfile
+from faculty.models import FacultyProfile
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+def resolve_profile_id(model_class, id_val):
+    if not id_val:
+        return None
+    if model_class.objects.filter(id=id_val).exists():
+        return id_val
+    if User.objects.filter(id=id_val).exists():
+        profile = model_class.objects.filter(user_id=id_val).first()
+        if profile:
+            return str(profile.id)
+    return id_val
+
 
 class ItemCategoryViewSet(viewsets.ModelViewSet):
     queryset = ItemCategory.objects.all()
@@ -44,6 +63,22 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['item', 'status', 'student', 'faculty', 'item__category__branch']
     search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name']
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy() if hasattr(request.data, 'copy') else request.data
+        if 'student' in data and data['student']:
+            data['student'] = resolve_profile_id(StudentProfile, data['student'])
+        if 'faculty' in data and data['faculty']:
+            data['faculty'] = resolve_profile_id(FacultyProfile, data['faculty'])
+            
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            self.perform_create(serializer)
+        except DjangoValidationError as e:
+            return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
         allocation = serializer.save(issued_by=self.request.user)
@@ -85,6 +120,10 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     def bulk_issue(self, request):
         student_id = request.data.get('student')
         faculty_id = request.data.get('faculty')
+        
+        student_id = resolve_profile_id(StudentProfile, student_id)
+        faculty_id = resolve_profile_id(FacultyProfile, faculty_id)
+
         allocations_data = request.data.get('allocations', [])
 
         if not student_id and not faculty_id:
@@ -103,7 +142,14 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                     quantity = int(alloc_data.get('quantity', 1))
                     notes = alloc_data.get('notes', '')
 
-                    item = Item.objects.get(id=item_id)
+                    item = Item.objects.select_for_update().get(id=item_id)
+
+                    # Pre-validate stock before creating anything
+                    if item.total_stock - quantity < 0:
+                        raise DjangoValidationError(
+                            f"Insufficient stock for '{item.name}'. "
+                            f"Available: {item.total_stock}, Requested: {quantity}."
+                        )
 
                     allocation = ItemAllocation.objects.create(
                         item=item,
@@ -127,6 +173,8 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                     created_allocations.append(allocation)
         except Item.DoesNotExist:
             return Response({'error': 'One or more items not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except DjangoValidationError as e:
+            return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
