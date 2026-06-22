@@ -120,14 +120,26 @@ class ExamListSerializer(serializers.ModelSerializer):
         if student.batch_id != obj.batch_id:
             return False
 
-        if obj.status not in ['scheduled', 'ongoing']:
+        # Block only on terminal statuses — time is the primary gate
+        if obj.status in ['completed', 'results_published']:
             return False
 
         from django.utils import timezone
         now = timezone.now()
-        dt_start = timezone.make_aware(timezone.datetime.combine(obj.scheduled_date, obj.start_time))
-        dt_end = timezone.make_aware(timezone.datetime.combine(obj.scheduled_date, obj.end_time))
+        # Use replace to safely build a timezone-aware datetime without double-awareness
+        try:
+            dt_start = timezone.make_aware(
+                timezone.datetime.combine(obj.scheduled_date, obj.start_time)
+            )
+            dt_end = timezone.make_aware(
+                timezone.datetime.combine(obj.scheduled_date, obj.end_time)
+            )
+        except Exception:
+            # Datetime may already be aware (edge case)
+            dt_start = timezone.datetime.combine(obj.scheduled_date, obj.start_time).replace(tzinfo=timezone.utc)
+            dt_end = timezone.datetime.combine(obj.scheduled_date, obj.end_time).replace(tzinfo=timezone.utc)
 
+        # can_start_exam becomes True exactly when the scheduled time is reached
         if not (dt_start <= now <= dt_end):
             return False
 
@@ -136,6 +148,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             return False
 
         return True
+
 
     def get_batch_name(self, obj):
         return obj.batch.name if obj.batch else None
