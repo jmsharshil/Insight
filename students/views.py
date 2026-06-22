@@ -35,7 +35,16 @@ def _get_student(request, student_id):
         )
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(branch__organization=request.user.organization)
-        return queryset.get(id=student_id)
+        
+        try:
+            return queryset.get(id=student_id)
+        except Student.DoesNotExist:
+            # Fallback to check if student_id is actually a user ID
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            if User.objects.filter(id=student_id).exists():
+                return queryset.get(user_id=student_id)
+            raise
     except Student.DoesNotExist:
         return None
 
