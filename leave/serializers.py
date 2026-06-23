@@ -114,41 +114,39 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
     def get_applied_by_role(self, obj):
         return getattr(obj.applied_by, 'role', '') if obj.applied_by else ''
 
-    def get_first_approver(self, obj):
-        if obj.first_approver_id:
-            return obj.first_approver_id
-        if obj.branch_id:
-            from django.contrib.auth import get_user_model
-            approver = get_user_model().objects.filter(role='admin_senior_executive', branch_id=obj.branch_id, is_active=True).first()
-            if approver: return approver.id
+    def _find_approver(self, obj, role):
+        if not obj.branch_id:
+            return None
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        approver = User.objects.filter(role=role, branch_id=obj.branch_id, is_active=True).first()
+        if approver: return approver
+        
+        if obj.branch and getattr(obj.branch, 'organization_id', None):
+            approver = User.objects.filter(role=role, organization_id=obj.branch.organization_id, branch_id__isnull=True, is_active=True).first()
+            if approver: return approver
+            
         return None
+
+    def get_first_approver(self, obj):
+        if obj.first_approver_id: return obj.first_approver_id
+        app = self._find_approver(obj, 'admin_senior_executive')
+        return app.id if app else None
 
     def get_first_approver_name(self, obj):
-        if obj.first_approver:
-            return obj.first_approver.name
-        if obj.branch_id:
-            from django.contrib.auth import get_user_model
-            approver = get_user_model().objects.filter(role='admin_senior_executive', branch_id=obj.branch_id, is_active=True).first()
-            if approver: return approver.name
-        return ''
+        if obj.first_approver: return obj.first_approver.name
+        app = self._find_approver(obj, 'admin_senior_executive')
+        return app.name if app else ''
 
     def get_second_approver(self, obj):
-        if obj.second_approver_id:
-            return obj.second_approver_id
-        if obj.branch_id:
-            from django.contrib.auth import get_user_model
-            approver = get_user_model().objects.filter(role='branch_manager', branch_id=obj.branch_id, is_active=True).first()
-            if approver: return approver.id
-        return None
+        if obj.second_approver_id: return obj.second_approver_id
+        app = self._find_approver(obj, 'branch_manager')
+        return app.id if app else None
 
     def get_second_approver_name(self, obj):
-        if obj.second_approver:
-            return obj.second_approver.name
-        if obj.branch_id:
-            from django.contrib.auth import get_user_model
-            approver = get_user_model().objects.filter(role='branch_manager', branch_id=obj.branch_id, is_active=True).first()
-            if approver: return approver.name
-        return ''
+        if obj.second_approver: return obj.second_approver.name
+        app = self._find_approver(obj, 'branch_manager')
+        return app.name if app else ''
 
     def get_supporting_document_url(self, obj):
         if obj.supporting_document and hasattr(obj.supporting_document, 'url'):
@@ -162,17 +160,20 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
 class LeaveApplicationCreateSerializer(serializers.Serializer):
     leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual', 'club', 'unpaid'], required=False, default='casual')
     from_date = serializers.DateField()
-    to_date = serializers.DateField()
+    to_date = serializers.DateField(required=False)
     is_half_day = serializers.BooleanField(default=False)
-    half_day_session = serializers.ChoiceField(choices=['morning', 'afternoon'], required=False, default='')
+    half_day_session = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='')
     reason = serializers.CharField()
     supporting_document = serializers.FileField(required=False, allow_null=True)
     # NEW (FRD §4.9.2 + §4.9.1): optional upload, required for sick > 2 days
 
     def validate(self, data):
+        if 'to_date' not in data:
+            data['to_date'] = data['from_date']
+            
         if data['from_date'] > data['to_date']:
             raise serializers.ValidationError({'to_date': 'to_date must be >= from_date.'})
-        if data['is_half_day'] and data['from_date'] != data['to_date']:
+        if data.get('is_half_day') and data['from_date'] != data['to_date']:
             raise serializers.ValidationError({'is_half_day': 'Half-day leave must be a single date.'})
         return data
 
@@ -207,11 +208,9 @@ class LateEntryCreateSerializer(serializers.Serializer):
 
 
 class PublicHolidaySerializer(serializers.ModelSerializer):
-    branch_name = serializers.CharField(source='branch.name', read_only=True)
-
     class Meta:
         model = PublicHoliday
-        fields = ['id', 'branch', 'branch_name', 'date', 'name', 'year', 'created_at']
+        fields = ['id', 'date', 'name', 'year', 'created_at']
         read_only_fields = ['id', 'year', 'created_at']
 
 

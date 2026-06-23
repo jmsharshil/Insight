@@ -34,7 +34,8 @@ class PublicHoliday(models.Model):
     Public holidays that are counted as leave days when sandwiched between leave dates.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='public_holidays')
+    branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='public_holidays', null=True, blank=True)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='public_holidays', null=True, blank=True)
     date = models.DateField()
     name = models.CharField(max_length=200)
     year = models.IntegerField()
@@ -44,7 +45,7 @@ class PublicHoliday(models.Model):
 
     class Meta:
         db_table = 'public_holidays'
-        unique_together = ('branch', 'date')
+        unique_together = ('organization', 'date')
         ordering = ['date']
 
     def __str__(self):

@@ -32,8 +32,9 @@ def calculate_leave_days(from_date, to_date, is_half_day=False,
     public_holiday_dates = set()
     if branch:
         from .models import PublicHoliday
+        from django.db import models
         holidays = PublicHoliday.objects.filter(
-            branch=branch,
+            models.Q(branch=branch) | models.Q(branch__organization=branch.organization_id),
             date__gte=from_date,
             date__lte=to_date,
         ).values_list('date', flat=True)
@@ -47,8 +48,8 @@ def calculate_leave_days(from_date, to_date, is_half_day=False,
             # Sandwich rule: count ALL days (weekdays, weekends, and public holidays)
             days += Decimal(1)
         else:
-            # Normal: count only weekdays, exclude public holidays
-            if weekday < 5 and current not in public_holiday_dates:
+            # Normal: count only working days (exclude Sundays and public holidays)
+            if weekday != 6 and current not in public_holiday_dates:
                 days += Decimal(1)
         current += timedelta(days=1)
     return days
