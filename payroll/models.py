@@ -78,9 +78,12 @@ class PaySlip(models.Model):
     absence_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     # NEW (FRD §4.8.4): days absent * absence_deduction_per_day
     leave_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    retention_deduction = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     other_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     deduction_note = models.CharField(max_length=300, blank=True)
     bonus = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    attendance_bonus = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    leave_encashment = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     net_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     leaves_taken = models.IntegerField(default=0)
     working_days = models.IntegerField(default=0)

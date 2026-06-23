@@ -23,7 +23,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url', 'branch', 'branch_name',
             'level', 'employment_type', 'specialization', 'subject_expertise',
             'joining_date', 'is_active', 'batch_count', 'created_at',
-            'work_start_time', 'work_end_time',
+            'work_start_time', 'work_end_time', 'salary_retention_percentage',
             'level_display', 'employment_type_display', 'batch_name',
             'subjects', 'subject_name']
 
@@ -87,7 +87,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url',
             'branch', 'qualification', 'specialization', 'subject_expertise',
             'level', 'employment_type', 'joining_date',
-            'salary', 'hourly_rate', 'bank_account', 'ifsc_code', 'pan_number',
+            'salary', 'hourly_rate', 'salary_retention_percentage', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
             'work_start_time', 'work_end_time',
             'level_display', 'employment_type_display', 'batch_name',
@@ -185,7 +185,7 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
             'level', 'employment_type', 'salary', 'hourly_rate', 'session_hours',
             'bank_account', 'ifsc_code', 'pan_number', 'is_active', 'photo',
             'full_name', 'name', 'email', 'phone', 'branch_id', 'branch',
-            'work_start_time', 'work_end_time',
+            'work_start_time', 'work_end_time', 'salary_retention_percentage',
         ]
 
     def update(self, instance, validated_data):

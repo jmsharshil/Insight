@@ -249,12 +249,23 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 'grace_applied': (late_min <= grace)
             })
             
-    # Compute total late penalty across all days
+    # Compute total late penalty and half-day deductions
     late_penalty = Decimal(0)
+    late_half_days = 0
+    days_late_15_mins = 0
     for d_date, d_delay in daily_delays.items():
-        if d_delay > grace:
-            penalty_min = d_delay - grace
-            late_penalty += min(Decimal(penalty_min) * deduction_rate, max_deduction)
+        if d_delay >= 60:
+            late_half_days += 1
+            # Per user request: late time should not be counted if marked as half-day
+        else:
+            if d_delay >= 15:
+                days_late_15_mins += 1
+            
+            if d_delay > grace:
+                penalty_min = d_delay - grace
+                late_penalty += min(Decimal(penalty_min) * deduction_rate, max_deduction)
+
+    late_half_days += (days_late_15_mins // 3)
 
     # 6. Leave deductions
     approved_leaves = LeaveApplication.objects.filter(
@@ -265,7 +276,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         leave_type='unpaid',
     )
     leave_days = sum(l.total_days for l in approved_leaves)
-    daily_rate = faculty_profile.salary / Decimal(30) if faculty_profile.salary else Decimal(0)
+    if faculty_profile.hourly_rate != Decimal(0):
+        daily_rate = Decimal(0)
+    else:
+        daily_rate = faculty_profile.salary / Decimal(30) if faculty_profile.salary else Decimal(0)
     leave_deductions = Decimal(leave_days) * daily_rate
 
     # 7. Working days
@@ -274,22 +288,49 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     # 8. Absence deductions
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
-    absent_days = max(0, working_days - days_with_attendance)
-    absence_deduction_rate = policy.absence_deduction_per_day if policy else Decimal(0)
-    absence_deductions = Decimal(absent_days) * absence_deduction_rate
+    absent_days = Decimal(max(0, working_days - days_with_attendance))
+    
+    # Add late half days
+    absent_days += Decimal(late_half_days) * Decimal('0.5')
+    
+    absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+    absence_deductions = absent_days * absence_deduction_rate
+
+    # 8.5 Attendance Bonus & Salary Retention
+    attendance_bonus = Decimal(0)
+    if working_days > 0:
+        attendance_percentage = (Decimal(days_with_attendance) / Decimal(working_days)) * 100
+        if attendance_percentage > Decimal(80):
+            attendance_bonus = daily_rate
+
+    basic_salary = faculty_profile.salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
+    retention_deduction = Decimal(0)
+    if faculty_profile.salary_retention_percentage > 0:
+        gross_salary = basic_salary + hour_based_amount
+        retention_deduction = gross_salary * (faculty_profile.salary_retention_percentage / Decimal(100))
+
+    leave_encashment = Decimal(0)
+    if month == 3:
+        from leave.models import LeaveBalance
+        balances = LeaveBalance.objects.filter(user=faculty_profile.user, year=year - 1)
+        for bal in balances:
+            if bal.remaining_days > Decimal(0):
+                leave_encashment += bal.remaining_days * daily_rate
+                # Ensure it's not carried forward
+                bal.used_days += bal.remaining_days
+                bal.save(update_fields=['used_days'])
 
     # 9. Compute net salary
     if faculty_profile.employment_type == 'full_time':
-        basic_salary = faculty_profile.salary
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = leave_deductions
-        net = (basic_salary + applied_hour_based_amount - late_penalty - absence_deductions
-               - applied_leave_deductions)
+        net = (basic_salary + applied_hour_based_amount + attendance_bonus + leave_encashment
+               - late_penalty - absence_deductions
+               - applied_leave_deductions - retention_deduction)
     else:
-        basic_salary = Decimal(0)
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = Decimal(0)
-        net = applied_hour_based_amount - late_penalty - absence_deductions
+        net = applied_hour_based_amount + attendance_bonus + leave_encashment - late_penalty - absence_deductions - retention_deduction
 
     net = max(net, Decimal(0))
 
@@ -303,6 +344,9 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         late_penalty=late_penalty,
         absence_deductions=absence_deductions,
         leave_deductions=applied_leave_deductions,
+        retention_deduction=retention_deduction,
+        attendance_bonus=attendance_bonus,
+        leave_encashment=leave_encashment,
         net_salary=net,
         leaves_taken=int(leave_days),
         working_days=working_days,
@@ -421,51 +465,101 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         leave_type='unpaid',
     )
     leave_days = sum(l.total_days for l in approved_leaves)
-    daily_rate = faculty_profile.salary / Decimal(30) if faculty_profile.salary else Decimal(0)
+    if faculty_profile.hourly_rate != Decimal(0):
+        daily_rate = Decimal(0)
+    else:
+        daily_rate = faculty_profile.salary / Decimal(30) if faculty_profile.salary else Decimal(0)
     leave_deductions = Decimal(leave_days) * daily_rate
 
     working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
                        if calendar.weekday(year, month, d) < 5)
 
+    # 5. Aggregate daily late/early minutes from QR scans and Sessions
+    daily_delays = defaultdict(int)
+    
+    for log_date, logs in qr_by_date.items():
+        for log in logs:
+            daily_delays[log_date] += log.late_minutes
+            daily_delays[log_date] += log.early_minutes
+
+    for s in sessions:
+        from batches.models import TimetableSlot
+        scheduled_time = s.start_time
+        dow = s.session_date.weekday()
+        slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
+        if slot and slot.start_time:
+            scheduled_time = slot.start_time
+
+        sched_dt = datetime.combine(datetime.today(), scheduled_time)
+        actual_dt = datetime.combine(datetime.today(), s.start_time)
+        diff = (actual_dt - sched_dt).total_seconds() / 60
+
+        if diff > 0:
+            daily_delays[s.session_date] += int(diff)
+
+    late_penalty = Decimal(0)
+    late_half_days = 0
+    days_late_15_mins = 0
+    
+    if faculty_profile.employment_type == 'full_time':
+        implicit_deduction_per_minute = (faculty_profile.salary / Decimal(30)) / Decimal(8) / Decimal(60) if faculty_profile.salary else Decimal(0)
+    else:
+        implicit_deduction_per_minute = faculty_profile.hourly_rate / Decimal(60) if faculty_profile.hourly_rate else Decimal(0)
+        
+    deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
+    grace = policy.grace_period_minutes if policy else 5
+    max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
+
+    for d_date, d_delay in daily_delays.items():
+        if d_delay >= 60:
+            late_half_days += 1
+        else:
+            if d_delay >= 15:
+                days_late_15_mins += 1
+            
+            if d_delay > grace:
+                penalty_min = d_delay - grace
+                late_penalty += min(Decimal(penalty_min) * deduction_rate, max_deduction)
+
+    late_half_days += (days_late_15_mins // 3)
+
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
-    absent_days = max(0, working_days - days_with_attendance)
-    absence_deduction_rate = policy.absence_deduction_per_day if policy else Decimal(0)
-    absence_deductions = Decimal(absent_days) * absence_deduction_rate
+    absent_days = Decimal(max(0, working_days - days_with_attendance))
+    absent_days += Decimal(late_half_days) * Decimal('0.5')
 
-    if policy:
-        for s in sessions:
-            grace = policy.grace_period_minutes
-            from batches.models import TimetableSlot
-            scheduled_time = s.start_time
-            dow = s.session_date.weekday()
-            slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
-            if slot and slot.start_time:
-                scheduled_time = slot.start_time
+    absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+    absence_deductions = absent_days * absence_deduction_rate
 
-            sched_dt = datetime.combine(datetime.today(), scheduled_time)
-            actual_dt = datetime.combine(datetime.today(), s.start_time)
-            diff = (actual_dt - sched_dt).total_seconds() / 60
+    attendance_bonus = Decimal(0)
+    if working_days > 0:
+        attendance_percentage = (Decimal(days_with_attendance) / Decimal(working_days)) * 100
+        if attendance_percentage > Decimal(80):
+            attendance_bonus = daily_rate
 
-            if diff > grace:
-                late_min = int(diff - grace)
-                penalty = min(
-                    Decimal(late_min) * policy.deduction_per_minute,
-                    policy.max_deduction_per_session if policy.max_deduction_per_session > 0
-                    else Decimal('999999'),
-                )
-                late_penalty += penalty
+    basic_salary = faculty_profile.salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
+    retention_deduction = Decimal(0)
+    if faculty_profile.salary_retention_percentage > 0:
+        gross_salary = basic_salary + hour_based_amount
+        retention_deduction = gross_salary * (faculty_profile.salary_retention_percentage / Decimal(100))
+
+    leave_encashment = Decimal(0)
+    if month == 3:
+        from leave.models import LeaveBalance
+        balances = LeaveBalance.objects.filter(user=faculty_profile.user, year=year - 1)
+        for bal in balances:
+            if bal.remaining_days > Decimal(0):
+                leave_encashment += bal.remaining_days * daily_rate
 
     if faculty_profile.employment_type == 'full_time':
-        basic_salary = faculty_profile.salary
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = leave_deductions
-        net = (basic_salary + applied_hour_based_amount - late_penalty - absence_deductions
-               - applied_leave_deductions)
+        net = (basic_salary + applied_hour_based_amount + attendance_bonus + leave_encashment
+               - late_penalty - absence_deductions
+               - applied_leave_deductions - retention_deduction)
     else:
-        basic_salary = Decimal(0)
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = Decimal(0)
-        net = applied_hour_based_amount - late_penalty - absence_deductions
+        net = applied_hour_based_amount + attendance_bonus + leave_encashment - late_penalty - absence_deductions - retention_deduction
 
     net = max(net, Decimal(0))
 
@@ -476,6 +570,9 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         'late_penalty': str(round(late_penalty, 2)),
         'absence_deductions': str(round(absence_deductions, 2)),
         'leave_deductions': str(round(applied_leave_deductions, 2)),
+        'retention_deduction': str(round(retention_deduction, 2)),
+        'attendance_bonus': str(round(attendance_bonus, 2)),
+        'leave_encashment': str(round(leave_encashment, 2)),
         'bonus': "0.00",
         'other_deductions': "0.00",
         'net_salary': str(round(net, 2)),

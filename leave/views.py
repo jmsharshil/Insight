@@ -182,6 +182,13 @@ class LeaveListCreateView(APIView):
                 'message': "Total leave days calculated is 0. Please ensure you are not exclusively applying on Sundays or holidays."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Max 3 days limit
+        if d['leave_type'] not in ['sick', 'unpaid'] and total_days > Decimal(3):
+            return Response({
+                'success': False,
+                'message': "Maximum 3 days of leave allowed at once for this leave type."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Sick leave > 2 days: require supporting_document (FRD §4.9.1)
         if d['leave_type'] == 'sick' and total_days > 2 and not d.get('supporting_document'):
             return Response({
@@ -199,11 +206,13 @@ class LeaveListCreateView(APIView):
                 return Response({'success': False, 'message': f"Club leave cap exceeded (max {policy.max_club_days} days/year)."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Balance check
-        balance = LeaveBalance.objects.filter(
-            user=request.user, leave_type=d['leave_type'], year=today.year,
-        ).first()
-        if balance and balance.remaining_days < total_days:
-            return Response({'success': False, 'message': f"Insufficient balance. Remaining: {balance.remaining_days} days."}, status=status.HTTP_400_BAD_REQUEST)
+        if d['leave_type'] != 'unpaid':
+            balance = LeaveBalance.objects.filter(
+                user=request.user, leave_type=d['leave_type'], year=today.year,
+            ).first()
+            if not balance or balance.remaining_days < total_days:
+                remaining = balance.remaining_days if balance else 0
+                return Response({'success': False, 'message': f"Insufficient balance. Remaining: {remaining} days."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Overlap check
         has_overlap, conflict = check_leave_overlap(request.user, d['from_date'], d['to_date'])

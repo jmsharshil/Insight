@@ -44,8 +44,8 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'id', 'faculty', 'faculty_name', 'employee_id',
             'basic_salary', 'total_session_hours', 'hour_based_amount',
             'late_penalty', 'absence_deductions', 'leave_deductions',
-            'other_deductions', 'deduction_note',
-            'bonus', 'net_salary', 'leaves_taken', 'working_days',
+            'retention_deduction', 'other_deductions', 'deduction_note',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
         ]
 
@@ -152,8 +152,8 @@ class MyPaySlipSerializer(serializers.ModelSerializer):
             'id', 'payroll_month', 'payroll_year', 'payroll_status', 'branch_name',
             'basic_salary', 'total_session_hours', 'hour_based_amount',
             'late_penalty', 'absence_deductions', 'leave_deductions',
-            'other_deductions', 'deduction_note',
-            'bonus', 'net_salary', 'leaves_taken', 'working_days',
+            'retention_deduction', 'other_deductions', 'deduction_note',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
         ]
 

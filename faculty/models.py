@@ -30,6 +30,8 @@ class FacultyProfile(models.Model):
     # default hourly rate; overridden per subject by SubjectHourlyRate
     salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # fixed monthly salary for full_time employees
+    salary_retention_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    # percentage of gross salary to retain each month
     bank_account = models.CharField(max_length=30, blank=True)
     ifsc_code = models.CharField(max_length=15, blank=True)
     pan_number = models.CharField(max_length=15, blank=True)
