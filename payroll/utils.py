@@ -250,10 +250,14 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             })
             
     # Compute total late penalty and half-day deductions
+    # Sundays (weekday == 6): any attendance = full day, skip penalty entirely
     late_penalty = Decimal(0)
     late_half_days = 0
     days_late_15_mins = 0
     for d_date, d_delay in daily_delays.items():
+        if d_date.weekday() == 6:
+            # Sunday — attendance counts as full day, no penalty
+            continue
         if d_delay >= 60:
             late_half_days += 1
             # Per user request: late time should not be counted if marked as half-day
@@ -287,6 +291,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                        if calendar.weekday(year, month, d) < 5)
 
     # 8. Absence deductions
+    # Sundays that have any QR/session attendance count as full day present
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
     absent_days = Decimal(max(0, working_days - days_with_attendance))
     
@@ -511,6 +516,9 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
 
     for d_date, d_delay in daily_delays.items():
+        if d_date.weekday() == 6:
+            # Sunday — attendance counts as full day, no penalty
+            continue
         if d_delay >= 60:
             late_half_days += 1
         else:
