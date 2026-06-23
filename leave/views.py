@@ -135,6 +135,32 @@ class LeaveListCreateView(APIView):
         bid = request.data.get('branch_id') or _user_branch_id(request.user)
         # Branch validation removed as per request
         
+        # Holiday check
+        from branch.models import Branch
+        branch_obj = Branch.objects.filter(id=bid).first() if bid else None
+        
+        holidays = PublicHoliday.objects.filter(
+            date__gte=d['from_date'],
+            date__lte=d['to_date']
+        )
+        if branch_obj and getattr(branch_obj, 'organization_id', None):
+            holidays = holidays.filter(branch__organization=branch_obj.organization_id)
+        elif bid:
+            holidays = holidays.filter(branch_id=bid)
+        else:
+            holidays = holidays.none()
+            
+        if holidays.exists():
+            unique_holidays = {}
+            for h in holidays:
+                if h.date not in unique_holidays:
+                    unique_holidays[h.date] = h.name
+            holiday_names = ", ".join([f"{name} ({date})" for date, name in unique_holidays.items()])
+            return Response({
+                'success': False,
+                'message': f"Cannot apply for leave on public holidays: {holiday_names}."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         policy = LeavePolicy.objects.filter(branch_id=bid, leave_type=d.get('leave_type'), is_active=True).first() if bid and d.get('leave_type') else None
 
         # Advance notice check (except sick leave or students)
@@ -148,9 +174,13 @@ class LeaveListCreateView(APIView):
 
         # Calculate total days
         sandwich = policy.sandwich_rule if policy else False
-        from branch.models import Branch
-        branch_obj = Branch.objects.filter(id=bid).first() if bid else None
         total_days = calculate_leave_days(d['from_date'], d['to_date'], d['is_half_day'], sandwich, branch=branch_obj)
+
+        if total_days <= 0:
+            return Response({
+                'success': False,
+                'message': "Total leave days calculated is 0. Please ensure you are not exclusively applying on Sundays or holidays."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Sick leave > 2 days: require supporting_document (FRD §4.9.1)
         if d['leave_type'] == 'sick' and total_days > 2 and not d.get('supporting_document'):
@@ -297,12 +327,31 @@ class LeaveApproveView(APIView):
                 return Response({'success': False, 'message': 'First approval already done.'}, status=status.HTTP_400_BAD_REQUEST)
             app.first_approver = request.user
             app.first_approved_at = now
+            
             app.save(update_fields=['first_approver', 'first_approved_at'])
 
             # FRD §4.9.2: Push notification to branch_manager (Step 2)
             from django.contrib.auth import get_user_model
             User = get_user_model()
             bm_users = User.objects.filter(role='branch_manager', is_active=True)
+            if app.branch_id:
+                bm_users = bm_users.filter(models.Q(branch_id=app.branch_id) | models.Q(branch_id__isnull=True, organization_id=app.branch.organization_id))
+
+            if not bm_users.exists():
+                # If no branch manager exists, auto-approve the leave at step 1
+                app.status = 'approved'
+                app.reviewed_by = request.user
+                app.reviewed_at = now
+                app.save()
+                
+                notify(
+                    str(app.applied_by.id),
+                    title="Leave Approved",
+                    body=f"Your leave from {app.from_date} to {app.to_date} has been approved.",
+                    metadata={"leave_id": str(app.id), "status": "approved"},
+                )
+                return Response({'success': True, 'message': 'Leave approved successfully (no branch manager found).'})
+
             for bm in bm_users:
                 notify(
                     str(bm.id),
@@ -692,12 +741,9 @@ class PublicHolidayListCreateView(APIView):
     ordering_fields = '__all__'
 
     def get(self, request):
-        bid = _user_branch_id(request.user)
         qs = PublicHoliday.objects.all()
         if getattr(request.user, 'organization', None):
-            qs = qs.filter(branch__organization=request.user.organization)
-        if bid:
-            qs = qs.filter(branch_id=bid)
+            qs = qs.filter(organization=request.user.organization)
 
         year = request.GET.get('year')
         if year:
@@ -716,28 +762,23 @@ class PublicHolidayListCreateView(APIView):
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        bid = _user_branch_id(request.user) or request.data.get('branch_id')
-        if not bid:
-            return Response({'success': False, 'message': 'Branch required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        from branch.models import Branch
-        if not Branch.objects.filter(id=bid).exists():
-            return Response({'success': False, 'message': 'Invalid branch_id. Branch does not exist.'}, status=status.HTTP_400_BAD_REQUEST)
+        organization = getattr(request.user, 'organization', None)
 
         d = ser.validated_data
-        if PublicHoliday.objects.filter(branch_id=bid, date=d['date']).exists():
+        if PublicHoliday.objects.filter(organization=organization, date=d['date']).exists():
             return Response({'success': False, 'message': 'Holiday already exists for this date.'}, status=status.HTTP_409_CONFLICT)
 
         try:
             holiday = PublicHoliday.objects.create(
-                branch_id=bid,
+                organization=organization,
                 date=d['date'],
                 name=d['name'],
                 year=d['date'].year,
-                created_by=request.user,
+                created_by=request.user
             )
             return Response({
-                'success': True, 'message': 'Public holiday created.',
+                'success': True,
+                'message': 'Public holiday added successfully.',
                 'data': PublicHolidaySerializer(holiday).data,
             }, status=status.HTTP_201_CREATED)
         except Exception as e:
@@ -751,7 +792,7 @@ class PublicHolidayDetailView(APIView):
         try:
             qs = PublicHoliday.objects.all()
             if getattr(request.user, 'organization', None):
-                qs = qs.filter(branch__organization=request.user.organization)
+                qs = qs.filter(organization=request.user.organization)
             holiday = qs.get(id=holiday_id)
             return Response({'success': True, 'data': PublicHolidaySerializer(holiday).data})
         except PublicHoliday.DoesNotExist:
@@ -766,7 +807,7 @@ class PublicHolidayDetailView(APIView):
         try:
             qs = PublicHoliday.objects.all()
             if getattr(request.user, 'organization', None):
-                qs = qs.filter(branch__organization=request.user.organization)
+                qs = qs.filter(organization=request.user.organization)
             holiday = qs.get(id=holiday_id)
         except PublicHoliday.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -790,7 +831,7 @@ class PublicHolidayDetailView(APIView):
         try:
             qs = PublicHoliday.objects.all()
             if getattr(request.user, 'organization', None):
-                qs = qs.filter(branch__organization=request.user.organization)
+                qs = qs.filter(organization=request.user.organization)
             holiday = qs.get(id=holiday_id)
         except PublicHoliday.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
