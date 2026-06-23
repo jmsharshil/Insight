@@ -1,62 +1,142 @@
-# Onboarding & Admissions Module — API Documentation
+# Onboarding & Admissions Module — Full Walkthrough & API Reference Guide
 
-The `onboarding` module manages the student admission lifecycle — from form submission through document collection, payment verification, and final enrollment. Enrollment automatically triggers student and fee record creation.
+> **Base URL:** `https://api.example.com/api/v1/`  
+> **Auth Header:** `Authorization: Bearer <access_token>` (most endpoints; payment submit is public/AllowAny)  
+> **Content-Type:** `application/json` or `multipart/form-data` for uploads  
+> All responses follow: `{ "success": true/false, "message": "...", "data": {...} }` (with errors where applicable).
 
 ---
 
-## Data Model
+## Key Utility Functions (`onboarding/utils.py`)
 
+Core business logic (views delegate to these):
+
+### `AdmissionService.get_next_counsellor()`
+Round-robin assignment from active `counsellor` users (uses last assigned from recent admissions to cycle fairly).
+
+### `AdmissionService.create_admission(validated_data, user=None)`
+- Creates `Admission` (status=`form_pending`).
+- Auto-assigns counsellor.
+- Handles document fields.
+- Logs initial `AdmissionStatusHistory`.
+- **Post-creation (in view):** Calls `fees.utils.select_bank_accounts_for_payment()` to set `assigned_bank_id`, transitions to `payment_pending`, sends payment email with shuffled eligible banks + frontend upload link.
+
+### `AdmissionService.update_status(admission, new_status, note='', user=None)`
+- Atomic update + `AdmissionStatusHistory` entry.
+- **On transition to `enrolled`**: Calls `_create_user_accounts()` to create student/parent `User`s, send credential emails (using `auth_user.utils`).
+- Downstream: `students.utils.StudentService.create_from_admission()` (copies data, generates `DigitalIDCard` if photo present, calls `fees.services.create_student_fee()`).
+
+### `_create_user_accounts(admission)`
+- Creates/updates `auth_user.User` (role=student/parents, temp password via `generate_temporary_password()`).
+- Sends login emails (`send_student_login_credentials`, `send_parent_login_credentials`).
+- Skips duplicate parent email.
+
+**Fee/Installment Integration:** Handled in `students/utils.py` (calls `create_student_fee` which uses `get_installment_plan_status(level.name, num_installments)` — CSEET >2 or Exec/Prof >4 = `pending_approval`). See `fees_module_api_documentation.md` for `update_student_fee_status()`, `mark_installment_paid()`, `has_overdue_installment()` (used by attendance).
+
+---
+
+## Data Models & Statuses
+
+### Core Models
 | Model | Purpose |
-|---|---|
-| `Admission` | Full admission application record |
-| `AdmissionStatusHistory` | Immutable log of every status change |
+|-------|---------|
+| `Admission` | Complete application record (personal, docs, payment proof, status, linked lead/fee_structure/bank) |
+| `AdmissionStatusHistory` | Immutable log of all status changes, notes, changed_by |
 
 ### Admission Statuses
-`form_pending` → `payment_pending` → `payment_submitted` → `approval_pending` → `approved` → `enrolled`  
-*(Also: `rejected` at any stage)*
+- `form_pending` (initial)
+- `payment_pending` (bank assigned, email sent)
+- `payment_submitted` (proof uploaded)
+- `approval_pending`
+- `approved`
+- `enrolled` (triggers full chain)
+- `rejected` (terminal, cannot approve directly)
 
-### Key Fields
-| Field | Description |
-|---|---|
-| `fee_structure` | FK to `fees.FeeStructure` — pinned at time of approval, drives auto-fee creation |
-| `assigned_bank_id` | ID from the built-in `BANK_ACCOUNTS` list assigned for payment |
-| `payment_screenshot` | Uploaded by student as proof of payment |
-| `transaction_id` | UPI / bank reference number |
-
----
-
-## Enrollment Signal Chain
-
-When `Admission.status` is set to `enrolled`, the following auto-triggers fire:
-
-```
-Admission → enrolled
-    │
-    ▼  onboarding/signals.py
-    ├── Creates User (role=student)
-    └── Creates Student profile
-            │
-            ▼  students/signals.py
-            ├── auto_assign_batch()   (batches.services)
-            └── create_student_fee() (fees.services)
-```
+**Key Fields:**
+- `fee_structure` (FK to `fees.FeeStructure` — used for auto StudentFee)
+- `assigned_bank_id` (from `fees.BankAccount`, respects `max_payment_amount` thresholds)
+- `payment_screenshot`, `transaction_id`, `payment_amount`, `payment_submitted_at`
+- `assigned_counsellor`, `note`, `status_history`
 
 ---
 
-## API Endpoints
+## Architecture & Workflow Diagram
 
-### 1. List & Create Admissions
-**`GET /api/v1/admissions/`**
-**`POST /api/v1/admissions/`**
+```text
+LEAD ──convert──► Admission (form_pending)
+          │
+          ▼
+Student submits detailed form (POST /admissions/<id>/)
+          │
+          ▼
+select_bank_accounts_for_payment() + email with bank details + payment link
+          │
+          ▼
+payment_pending ──(POST /payment/)──► payment_submitted (screenshot + txn_id)
+          │
+          ▼
+Admin review: PATCH /status/ or POST /approve/
+          │
+          ▼
+enrolled
+    ├── AdmissionService.update_status() → _create_user_accounts() (student/parent Users + credential emails)
+    ├── StudentService.create_from_admission() → Student profile, DigitalIDCard (QR), BatchHistory
+    └── create_student_fee() → StudentFee + InstallmentPlan (pending_approval rules per level) + verified Payment if admission fee present
+          │
+          ▼
+Fees status updated (update_student_fee_status()) ──► Attendance QR blocked if has_overdue_installment()
+```
 
-**GET Query Parameters:**
-| Param | Description |
-|---|---|
-| `status` | Filter by admission status |
-| `course` | Filter by course type |
-| `branch` | Filter by branch UUID |
+**Key Integrations (updated in recent changes):**
+- Fees utils for bank selection and installment status.
+- Students utils for profile + fee creation (replaces commented code in approve view).
+- No direct signals.py for enrollment anymore; handled in service methods.
+- Guards: Payment verification blocked for `pending_approval` plans (in fees PaymentVerifyView).
 
-**POST Request Body:** (all fields from the admission form)
+---
+
+## FULL WALKTHROUGH: End-to-End Admission-to-Student Lifecycle
+
+### Step 1: Admission Creation (from Lead)
+Admin converts lead or POST to create `Admission` with basic info (`form_pending`).
+
+### Step 2: Student Form Completion
+Student (or counsellor) PATCHes full details + documents. Backend auto-assigns bank using `select_bank_accounts_for_payment(total_amount)`, sets `payment_pending`, sends detailed email.
+
+### Step 3: Document Uploads
+Use `/documents/` for photo, signature, marksheets (updates Admission fields).
+
+### Step 4: Payment Proof Submission (Student)
+Public POST to `/payment/` with screenshot and `transaction_id`. Transitions to `approval_pending`. History logged.
+
+### Step 5: Admin Verification & Status Updates
+Use `/status/` PATCH for incremental changes or `/approve/` for final step.
+
+### Step 6: Approve → Enroll
+POST `/approve/` (when ready):
+- Sets `enrolled`.
+- Creates User accounts + emails credentials.
+- `create_from_admission()`: copies data to Student, generates QR ID card (using PIL/qrcode if photo present), auto batch/fee creation.
+- Fee creation uses updated `get_installment_plan_status()` (replaced course_type with level.name).
+
+### Step 7: Post-Enrollment Flows
+- Student can regenerate ID card, upload more docs, get inventory issued.
+- Fees module takes over (installments, payments, refunds, status recalc).
+- Attendance uses `has_overdue_installment(student_id)` to block QR if >15 days overdue on approved plan.
+- Reports across modules.
+
+**Example Error (from fees integration):** If trying to verify payment on `pending_approval` InstallmentPlan: blocked with message.
+
+---
+
+## Complete API Reference
+
+### List & Detail
+- **GET** `/api/v1/admissions/` — Paginated list. Filters: `status`, `course`, `branch`, `attempt_year`; search on name/email/phone. Uses `AdmissionListSerializer`.
+- **GET** `/api/v1/admissions/<id>/` — Full detail (tries matching admission ID or linked `lead.id`). Includes history. `AdmissionDetailSerializer`.
+- **PATCH/PUT/POST** `/api/v1/admissions/<id>/` — Update form (partial OK). Triggers bank assignment/email on first complete submit if `form_pending`. Uses `AdmissionUpdateSerializer`.
+
+**Example Request Body (form completion):**
 ```json
 {
   "first_name": "Priya",
@@ -76,171 +156,158 @@ Admission → enrolled
   "course": "cseet",
   "group_module": "full",
   "batch_attempt": "june",
-  "location": "Ahmedabad",
   "qualification": "pass_12",
+  "fee_structure": "fs-uuid-001",
   "reference": "google",
-  "tenth_medium": "cbse",
-  "tenth_school": "DPS School",
-  "tenth_percentage": "89.50",
-  "tenth_percentile": "94.00",
-  "twelfth_medium": "cbse",
-  "twelfth_school": "DPS School",
-  "twelfth_percentage": "82.00",
-  "twelfth_percentile": "88.00"
+  "tenth_percentage": 89.5,
+  ...
 }
 ```
 
-**POST Success Response:**
+**Success Response (form submit):**
 ```json
 {
   "success": true,
-  "message": "Admission submitted successfully.",
-  "admission_id": 42
-}
-```
-
----
-
-### 2. Get / Update Admission Detail
-**`GET /api/v1/admissions/<admission_id>/`**
-**`PATCH /api/v1/admissions/<admission_id>/`** *(Admin / Counsellor)*
-
-Returns full admission details including status history.
-
----
-
-### 3. Update Admission Status
-**`POST /api/v1/admissions/<admission_id>/status/`**
-
-**Request Body:**
-```json
-{
-  "status": "approval_pending",
-  "note": "Documents verified, pending manager approval."
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Status updated to approval_pending.",
-  "status_history": [...]
-}
-```
-
----
-
-### 4. Approve Admission
-**`POST /api/v1/admissions/<admission_id>/approve/`**
-
-Moves admission to `approved`. Can optionally pin a `FeeStructure`.
-
-**Request Body:**
-```json
-{
-  "note": "Approved by manager.",
-  "fee_structure_id": "uuid-of-fee-structure"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Admission approved.",
-  "assigned_bank": {
-    "bank_name": "SBI",
-    "account_number": "38976542103",
-    "ifsc_code": "SBIN0001234"
+  "message": "Your admission form has been submitted successfully. We have sent you an email with bank details for fee payment. Please check your inbox...",
+  "data": {
+    "admission_id": "adm-uuid-001",
+    "status": "payment_pending",
+    "name": "Priya Shah",
+    "assigned_counsellor": {"id": "coun-uuid", "name": "Counsellor Name", "email": "..."}
   }
 }
 ```
 
----
+### Status, Approve, Reject
+- **PATCH** `/api/v1/admissions/<id>/status/` — General status update.
 
-### 5. Reject Admission
-**`POST /api/v1/admissions/<admission_id>/reject/`**
-
-**Request Body:**
+**Request:**
 ```json
 {
-  "note": "Incomplete documents."
+  "status": "approval_pending",
+  "note": "Payment verified, documents complete."
 }
 ```
-
----
-
-### 6. Upload Admission Documents
-**`POST /api/v1/admissions/<admission_id>/documents/`**
-
-Multipart form upload for required documents.
-
-**Form Fields:**
-| Field | Required |
-|---|---|
-| `doc_photo` | Yes |
-| `doc_signature` | Yes |
-| `doc_dob_certificate` | Yes |
-| `doc_id_card` | Yes |
-| `doc_twelfth_marksheet` | No |
-| `doc_category_cert` | No |
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Documents uploaded successfully."
+  "message": "Admission status updated successfully.",
+  "data": {"admission_id": "adm-uuid-001", "status": "approval_pending", "note": "..."}
 }
 ```
 
----
+- **POST** `/api/v1/admissions/<id>/approve/` — Main enrollment endpoint (handles `payment_submitted` → `enrolled` flow, user/student/fee creation).
 
-### 7. Submit Payment Proof
-**`POST /api/v1/admissions/<admission_id>/payment/`**
+**Request:**
+```json
+{
+  "note": "Approved after payment verification. Fee structure assigned.",
+  "fee_structure_id": "fs-uuid-001"
+}
+```
 
-Student uploads payment screenshot after paying to the assigned bank account.
+**Success (full enrollment):**
+```json
+{
+  "success": true,
+  "message": "Payment verified. Admission approved and student enrolled. Admission number: ADM-2026-001. Login credentials dispatched...",
+  "data": {
+    "admission_id": "adm-uuid-001",
+    "admission_status": "enrolled",
+    "student_id": "stu-uuid-001",
+    "admission_number": "ADM-2026-001",
+    "student_status": "active"
+  }
+}
+```
 
-**Form Fields:**
-| Field | Type | Required |
-|---|---|---|
-| `payment_screenshot` | File | Yes |
-| `transaction_id` | string | Yes |
-| `payment_note` | string | No |
+- **POST** `/api/v1/admissions/<id>/reject/` 
+
+**Request:**
+```json
+{
+  "reason": "Documents incomplete and payment mismatch."
+}
+```
+
+**Response:** Success with status=`rejected`.
+
+### Documents & Payment (Student-Facing)
+- **POST** `/api/v1/admissions/<id>/documents/` — Upload by `field_name` (e.g. "doc_photo", "doc_signature", "doc_twelfth_marksheet").
+
+**Multipart:**
+- `field_name`: "doc_photo"
+- `file`: (image/pdf)
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Payment proof submitted. Status updated to payment_submitted."
+  "message": "Document 'doc_photo' uploaded successfully.",
+  "data": {"admission_id": "...", "field_name": "doc_photo", "file_name": "photo.jpg"}
 }
 ```
 
+- **POST** `/api/v1/admissions/<id>/payment/` — **Public** (no auth). 
+
+**Multipart Form:**
+- `payment_screenshot`: file (proof)
+- `transaction_id`: "UPI123456789"
+- `payment_note`: "Paid via Google Pay"
+- `payment_amount`: 5000 (optional)
+
+**Success:**
+```json
+{
+  "success": true,
+  "message": "Payment proof submitted successfully! Your counsellor will verify the payment and complete your enrollment...",
+  "data": {
+    "admission_id": "...",
+    "status": "approval_pending",
+    "transaction_id": "UPI123456789"
+  }
+}
+```
+
+**Error Example (wrong status):**
+```json
+{
+  "success": false,
+  "message": "Payment upload is not expected at this stage. Current status: 'enrolled'."
+}
+```
+
+### Additional Notes
+- All status changes logged in `AdmissionStatusHistory`.
+- ID card (QR) generated in students module post-enrollment (requires photo).
+- Batch assignment happens in `students.utils.allocate_batch()` or signals.
+- Fee summary available via `/fees/student/<id>/` (see fees docs).
+
 ---
 
-## Status Flow
+## Status Transition Logic (from services)
 
+```text
+form_pending ──(complete form + bank auto-assign)──► payment_pending
+payment_pending ──(POST /payment/ with proof)──► payment_submitted
+payment_submitted ──(admin review/approve)──► approval_pending → enrolled
+enrolled ──(service chain)──► User + Student + StudentFee(approval_pending) + InstallmentPlan(approved/pending_approval)
+rejected (terminal from any pre-enrolled state)
 ```
-form_pending
-    │
-    ├── [student uploads documents]
-    ▼
-payment_pending
-    │
-    ├── [admin assigns bank + sends details]
-    ├── [student submits payment proof]
-    ▼
-payment_submitted
-    │
-    ├── [admin verifies payment]
-    ▼
-approval_pending
-    │
-    ├── [BM / Admin approves]
-    ▼
-approved
-    │
-    ├── [Admin enrolls]
-    ▼
-enrolled ──► Auto-creates: User + Student + StudentFee
-```
+
+**Triggers on enrolled:** Credential emails, Student profile (with QR if photo), `create_student_fee()` (respects CSEET vs Executive/Professional rules from `fees.utils`), possible auto-verified Payment.
+
+**Cross-Module:** After enrollment, `has_overdue_installment()` blocks attendance QR scans. `update_student_fee_status()` recalcs on any Payment/Refund.
+
+---
+
+**Related Modules & Docs:**
+- `leads_module_api_documentation.md` (lead conversion)
+- `fees_module_api_documentation.md` (detailed utils, installment plans, payment verify guard, overdue checks)
+- `students_module_api_documentation.md` (profile, QR, status, inventory — updated below)
+- `attendance_procedure_guide.md` (QR integration with fee status)
+- `auth_user` (credentials)
+
+This updated guide reflects current implementation (signals moved to services, fees integration enhanced, level-based installment approval rules, bank threshold logic, ID card generation with PIL/QR). All endpoints, bodies, responses, errors, and flows documented.

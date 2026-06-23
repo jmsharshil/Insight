@@ -498,6 +498,7 @@ class UserListAPIView(APIView):
             'success': True,
             'data': serializer.data
         }, status=status.HTTP_200_OK)
+
 class UserProfileAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     def get(self, request):
