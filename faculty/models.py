@@ -6,7 +6,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 LEVEL_CHOICES = [('executive', 'Executive'), ('professional', 'Professional')]
 EMPLOYMENT_TYPE_CHOICES = [
-    ('full_time', 'Full Time'), ('part_time', 'Part Time'), ('contract', 'Contract'),
+    ('full_time', 'Full Time'), ('part_time', 'Part Time'), ('contract', 'Contract'), ('visiting', 'Visiting')
 ]
 SCAN_TYPE_CHOICES = [('check_in', 'Check In'), ('check_out', 'Check Out')]
 SESSION_STATUS_CHOICES = [('in_progress', 'In Progress'), ('completed', 'Completed')]
@@ -35,6 +35,8 @@ class FacultyProfile(models.Model):
     pan_number = models.CharField(max_length=15, blank=True)
     qr_code = models.ImageField(upload_to='qr/faculty/', null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    work_start_time = models.TimeField(null=True, blank=True, help_text="Faculty shift start time (e.g. 09:00)")
+    work_end_time = models.TimeField(null=True, blank=True, help_text="Faculty shift end time (e.g. 17:00)")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

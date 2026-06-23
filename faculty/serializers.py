@@ -23,6 +23,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url', 'branch', 'branch_name',
             'level', 'employment_type', 'specialization', 'subject_expertise',
             'joining_date', 'is_active', 'batch_count', 'created_at',
+            'work_start_time', 'work_end_time',
             'level_display', 'employment_type_display', 'batch_name',
             'subjects', 'subject_name']
 
@@ -88,6 +89,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             'level', 'employment_type', 'joining_date',
             'salary', 'hourly_rate', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
+            'work_start_time', 'work_end_time',
             'level_display', 'employment_type_display', 'batch_name',
             'subjects', 'subject_name', 'session_hours', 'hour_based_amount']
 

@@ -723,3 +723,82 @@ class ExtraHoursApprovalUpdateView(APIView):
             'message': f'Extra hours request {status_val}.',
             'data': ExtraHoursApprovalSerializer(approval).data
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# My Payroll — GET /api/v1/payroll/my/
+# Returns all payroll runs that include a payslip for the logged-in faculty.
+# Each entry contains the full payroll run metadata + the user's payslip detail.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MyPayrollView(APIView):
+    """
+    Personal payroll history for the currently authenticated faculty member.
+
+    GET /api/v1/payroll/my/
+      → list of all payroll runs that include this faculty's payslip,
+        each with full payslip breakdown.
+
+    GET /api/v1/payroll/my/?year=2026
+      → filter by year
+
+    GET /api/v1/payroll/my/?month=6&year=2026
+      → filter by month + year
+    """
+
+    def get(self, request):
+        from .serializers import MyPaySlipSerializer
+
+        user = request.user
+        role = _user_role(user)
+
+        # Resolve faculty profile
+        try:
+            from faculty.models import FacultyProfile
+            faculty = FacultyProfile.objects.get(user=user)
+        except Exception:
+            return Response(
+                {'success': False, 'message': 'No faculty profile found for this user.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = PaySlip.objects.filter(faculty=faculty).select_related(
+            'payroll_run', 'payroll_run__branch', 'faculty',
+        ).prefetch_related('late_logs').order_by('-payroll_run__year', '-payroll_run__month')
+
+        # Optional filters
+        year = request.GET.get('year')
+        month = request.GET.get('month')
+        run_status = request.GET.get('status')
+
+        if year:
+            qs = qs.filter(payroll_run__year=year)
+        if month:
+            qs = qs.filter(payroll_run__month=month)
+        if run_status:
+            qs = qs.filter(payroll_run__status=run_status)
+
+        payslips = MyPaySlipSerializer(qs, many=True, context={'request': request}).data
+
+        # Summary totals
+        total_net = sum(p['net_salary'] for p in payslips)
+        total_disbursed = sum(
+            p['net_salary'] for p in payslips if p['is_disbursed']
+        )
+
+        return Response({
+            'success': True,
+            'faculty': {
+                'id': str(faculty.id),
+                'employee_id': faculty.employee_id,
+                'name': user.name,
+                'email': user.email,
+            },
+            'summary': {
+                'total_payslips': len(payslips),
+                'total_net_earned': total_net,
+                'total_disbursed': total_disbursed,
+            },
+            'payslips': payslips,
+        })
+

@@ -7,6 +7,15 @@ LEAVE_TYPE_CHOICES = [
     ('paid', 'Paid Leave'), ('sick', 'Sick Leave'), ('casual', 'Casual Leave'),
     ('club', 'Club Leave'), ('unpaid', 'Unpaid Leave'),
 ]
+
+STUDENT_LEAVE_TYPE_CHOICES = [
+    ('casual', 'Casual Leave'),
+    ('medical', 'Medical Leave'),
+    ('emergency', 'Emergency Leave'),
+    ('exam', 'Exam Leave'),
+    ('mobile_usage', 'Mobile Usage Permission'),
+    ('uniform', 'Uniform Leave'),
+]
 LEAVE_STATUS_CHOICES = [
     ('approval_pending', 'Approval Pending'), ('approved', 'Approved'),
     ('rejected', 'Rejected'), ('cancelled', 'Cancelled'),
@@ -151,3 +160,80 @@ class LateEntryRecord(models.Model):
 
     def __str__(self):
         return f"{self.user.name} late {self.late_minutes}m on {self.date}"
+
+
+# ── Student Leave ─────────────────────────────────────────────────────────────
+
+STUDENT_LEAVE_STATUS_CHOICES = [
+    ('pending', 'Pending'),
+    ('approved', 'Approved'),
+    ('rejected', 'Rejected'),
+    ('cancelled', 'Cancelled'),
+]
+
+class StudentLeaveApplication(models.Model):
+    """
+    Leave application submitted by a student.
+    Mirrors the physical Student Leave Application Form.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    student = models.ForeignKey(
+        'students.Student', on_delete=models.CASCADE, related_name='leave_applications'
+    )
+    leave_type = models.CharField(max_length=20, choices=STUDENT_LEAVE_TYPE_CHOICES)
+
+    # Period of Leave — Date
+    from_date = models.DateField()
+    to_date = models.DateField()
+
+    # Period of Leave — Time (optional, e.g. for half-day or timed permissions)
+    from_time = models.TimeField(null=True, blank=True, help_text="Leave start time (if applicable)")
+    to_time = models.TimeField(null=True, blank=True, help_text="Leave end time (if applicable)")
+
+    reason = models.TextField(help_text="Reason of Leave")
+
+    # Is the Leave Request Capable of Proof?
+    is_capable_of_proof = models.BooleanField(
+        default=False,
+        help_text="Is the student able to provide supporting proof for this leave?"
+    )
+    proof_document = models.FileField(
+        upload_to='leave/student_proof/', null=True, blank=True,
+        help_text="Upload proof document if applicable"
+    )
+
+    # Parent Consultation
+    parent_consulted = models.BooleanField(
+        default=False,
+        help_text="Has the parent been consulted about this leave?"
+    )
+    parent_signature_date = models.DateField(
+        null=True, blank=True,
+        help_text="Date of parent signature on the physical form"
+    )
+
+    # Admin / Staff tracking
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='received_student_leaves',
+        help_text="Staff member who received this leave application"
+    )
+    status = models.CharField(max_length=20, choices=STUDENT_LEAVE_STATUS_CHOICES, default='pending')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='reviewed_student_leaves'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'student_leave_applications'
+        ordering = ['-created_at']
+
+    @property
+    def leave_type_display(self):
+        return dict(STUDENT_LEAVE_TYPE_CHOICES).get(self.leave_type, self.leave_type)
+
+    def __str__(self):
+        return f"{self.student} — {self.leave_type} ({self.from_date} → {self.to_date}) [{self.status}]"

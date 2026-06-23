@@ -8,9 +8,18 @@ The `faculty` module manages faculty profiles, hourly rates by subject, and the 
 
 | Model | Purpose |
 |---|---|
-| `FacultyProfile` | Core profile for teachers |
+| `FacultyProfile` | Core profile for teachers. Includes `work_start_time` and `work_end_time` for shift scheduling |
 | `SubjectHourlyRate` | Defines how much a faculty is paid per hour for a specific subject |
 | `SessionReport` | Logs each class/session conducted by the faculty for payroll |
+
+### FacultyProfile — Key Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `work_start_time` | `TimeField` (nullable) | Shift start time, e.g. `09:00`. Used for late-entry detection and attendance checks |
+| `work_end_time` | `TimeField` (nullable) | Shift end time, e.g. `17:00`. Used to detect early checkout |
+
+These fields are returned in both the **list** (`GET /api/v1/faculty/`) and **detail** (`GET /api/v1/faculty/<uuid>/`) responses, and can be set via `PATCH /api/v1/faculty/<uuid>/`.
 
 ---
 

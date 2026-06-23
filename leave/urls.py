@@ -4,6 +4,8 @@ from .views import (
     LeavePolicyView, LeavePolicyDetailView, LeaveBalanceView, LeaveBalanceUserView,
     LateEntryListCreateView, LateEntryDetailView,
     PublicHolidayListCreateView, PublicHolidayDetailView,
+    StudentLeaveListCreateView, StudentLeaveDetailView,
+    StudentLeaveApproveView, StudentLeaveRejectView,
 )
 
 urlpatterns = [
@@ -19,5 +21,10 @@ urlpatterns = [
     path('leave/<uuid:leave_id>/', LeaveDetailView.as_view(), name='leave-detail'),
     path('leave/<uuid:leave_id>/approve/', LeaveApproveView.as_view(), name='leave-approve'),
     path('leave/<uuid:leave_id>/reject/', LeaveRejectView.as_view(), name='leave-reject'),
-]
 
+    # ── Student Leave ────────────────────────────────────────────────────────
+    path('leave/student/', StudentLeaveListCreateView.as_view(), name='student-leave-list-create'),
+    path('leave/student/<uuid:leave_id>/', StudentLeaveDetailView.as_view(), name='student-leave-detail'),
+    path('leave/student/<uuid:leave_id>/approve/', StudentLeaveApproveView.as_view(), name='student-leave-approve'),
+    path('leave/student/<uuid:leave_id>/reject/', StudentLeaveRejectView.as_view(), name='student-leave-reject'),
+]

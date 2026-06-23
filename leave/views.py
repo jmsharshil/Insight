@@ -797,3 +797,248 @@ class PublicHolidayDetailView(APIView):
 
         holiday.delete()
         return Response({'success': True, 'message': 'Public holiday deleted.'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Student Leave APIs
+# Mirrors the faculty/staff leave flow but tied to Student profiles.
+# POST   /api/v1/leave/student/           — apply (student) or create (admin)
+# GET    /api/v1/leave/student/           — list (admin sees all; student sees own)
+# GET    /api/v1/leave/student/<id>/      — detail
+# PATCH  /api/v1/leave/student/<id>/      — edit (student, while pending)
+# DELETE /api/v1/leave/student/<id>/      — cancel (student, while pending)
+# POST   /api/v1/leave/student/<id>/approve/ — approve (admin)
+# POST   /api/v1/leave/student/<id>/reject/  — reject (admin)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from .models import StudentLeaveApplication
+from .serializers import (
+    StudentLeaveListSerializer, StudentLeaveDetailSerializer, StudentLeaveCreateSerializer,
+)
+
+STUDENT_LEAVE_ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']
+
+
+class StudentLeaveListCreateView(APIView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'leave_type', 'student']
+    search_fields = ['student__first_name', 'student__surname', 'reason']
+    ordering_fields = '__all__'
+
+    def get(self, request):
+        role = _user_role(request.user)
+        if role in STUDENT_LEAVE_ADMIN_ROLES:
+            qs = StudentLeaveApplication.objects.select_related('student', 'reviewed_by', 'received_by').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(student__branch__organization=request.user.organization)
+            bid = _user_branch_id(request.user)
+            if role != 'super_admin' and bid:
+                qs = qs.filter(student__branch_id=bid)
+        elif role == 'student':
+            # Student sees only their own
+            try:
+                from students.models import Student
+                student = Student.objects.filter(user=request.user).first()
+                if not student:
+                    return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+                qs = StudentLeaveApplication.objects.filter(student=student).select_related('reviewed_by', 'received_by')
+            except Exception:
+                return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Optional filters
+        for param, field in [('status', 'status'), ('leave_type', 'leave_type')]:
+            val = request.GET.get(param)
+            if val:
+                qs = qs.filter(**{field: val})
+
+        from_date = request.GET.get('from_date')
+        to_date = request.GET.get('to_date')
+        if from_date:
+            qs = qs.filter(from_date__gte=from_date)
+        if to_date:
+            qs = qs.filter(to_date__lte=to_date)
+
+        qs = apply_filters(self, request, qs)
+        return paginate_queryset(qs, request, StudentLeaveListSerializer, serializer_context={'request': request})
+
+    def post(self, request):
+        role = _user_role(request.user)
+
+        ser = StudentLeaveCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        d = ser.validated_data
+
+        # Resolve which student this is for
+        if role == 'student':
+            try:
+                from students.models import Student
+                student = Student.objects.filter(user=request.user).first()
+                if not student:
+                    return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+            except Exception:
+                return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        elif role in STUDENT_LEAVE_ADMIN_ROLES:
+            # Admin must pass student_id
+            student_id = request.data.get('student_id') or request.data.get('student')
+            if not student_id:
+                return Response({'success': False, 'message': 'student_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                from students.models import Student
+                student = Student.objects.get(id=student_id)
+            except Exception:
+                return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        app = StudentLeaveApplication.objects.create(
+            student=student,
+            leave_type=d['leave_type'],
+            from_date=d['from_date'],
+            to_date=d['to_date'],
+            from_time=d.get('from_time'),
+            to_time=d.get('to_time'),
+            reason=d['reason'],
+            is_capable_of_proof=d.get('is_capable_of_proof', False),
+            proof_document=d.get('proof_document'),
+            parent_consulted=d.get('parent_consulted', False),
+            parent_signature_date=d.get('parent_signature_date'),
+        )
+
+        return Response({
+            'success': True,
+            'message': 'Leave application submitted.',
+            'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+        }, status=status.HTTP_201_CREATED)
+
+
+class StudentLeaveDetailView(APIView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def _get_leave(self, request, leave_id):
+        try:
+            qs = StudentLeaveApplication.objects.select_related('student', 'reviewed_by', 'received_by')
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(student__branch__organization=request.user.organization)
+            return qs.get(id=leave_id)
+        except StudentLeaveApplication.DoesNotExist:
+            return None
+
+    def _is_own(self, request, app):
+        """Check if the requesting student owns this leave."""
+        if _user_role(request.user) != 'student':
+            return False
+        try:
+            from students.models import Student
+            student = Student.objects.filter(user=request.user).first()
+            return student and app.student_id == student.id
+        except Exception:
+            return False
+
+    def get(self, request, leave_id):
+        app = self._get_leave(request, leave_id)
+        if app is None:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        role = _user_role(request.user)
+        if role not in STUDENT_LEAVE_ADMIN_ROLES and not self._is_own(request, app):
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'success': True, 'data': StudentLeaveDetailSerializer(app, context={'request': request}).data})
+
+    def patch(self, request, leave_id):
+        app = self._get_leave(request, leave_id)
+        if app is None:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not self._is_own(request, app):
+            return Response({'success': False, 'message': 'Only the student can edit their own leave.'}, status=status.HTTP_403_FORBIDDEN)
+        if app.status != 'pending':
+            return Response({'success': False, 'message': 'Can only edit pending applications.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        allowed_fields = ['from_date', 'to_date', 'from_time', 'to_time', 'reason',
+                          'is_capable_of_proof', 'parent_consulted', 'parent_signature_date']
+        for key, val in request.data.items():
+            if key in allowed_fields:
+                setattr(app, key, val)
+        app.save()
+        return Response({
+            'success': True,
+            'message': 'Leave updated.',
+            'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+        })
+
+    def delete(self, request, leave_id):
+        app = self._get_leave(request, leave_id)
+        if app is None:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not self._is_own(request, app):
+            return Response({'success': False, 'message': 'Only the student can cancel their own leave.'}, status=status.HTTP_403_FORBIDDEN)
+        if app.status != 'pending':
+            return Response({'success': False, 'message': 'Can only cancel pending applications.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        app.status = 'cancelled'
+        app.save(update_fields=['status'])
+        return Response({'success': True, 'message': 'Leave cancelled.'})
+
+
+class StudentLeaveApproveView(APIView):
+
+    def post(self, request, leave_id):
+        role = _user_role(request.user)
+        if role not in STUDENT_LEAVE_ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            app = StudentLeaveApplication.objects.get(id=leave_id)
+        except StudentLeaveApplication.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if app.status != 'pending':
+            return Response({'success': False, 'message': f'Cannot approve a leave with status "{app.status}".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        app.status = 'approved'
+        app.reviewed_by = request.user
+        app.reviewed_at = timezone.now()
+        app.received_by = request.user
+        app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'received_by'])
+
+        return Response({
+            'success': True,
+            'message': 'Student leave approved.',
+            'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+        })
+
+
+class StudentLeaveRejectView(APIView):
+
+    def post(self, request, leave_id):
+        role = _user_role(request.user)
+        if role not in STUDENT_LEAVE_ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            app = StudentLeaveApplication.objects.get(id=leave_id)
+        except StudentLeaveApplication.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if app.status != 'pending':
+            return Response({'success': False, 'message': f'Cannot reject a leave with status "{app.status}".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rejection_reason = request.data.get('rejection_reason', '')
+        if not rejection_reason:
+            return Response({'success': False, 'message': 'rejection_reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        app.status = 'rejected'
+        app.reviewed_by = request.user
+        app.reviewed_at = timezone.now()
+        app.rejection_reason = rejection_reason
+        app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+        return Response({
+            'success': True,
+            'message': 'Student leave rejected.',
+            'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+        })
+

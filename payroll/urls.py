@@ -3,10 +3,12 @@ from .views import (
     PayrollListCreateView, PayrollDetailView, PayrollPayslipsView,
     PayrollApproveView, PayrollDisburseView, FacultyPayslipsView,
     LatePolicyView, LatePolicyDetailView, PayslipAdjustView, FacultySalaryPreviewView,
-    ExtraHoursApprovalListView, ExtraHoursApprovalUpdateView
+    ExtraHoursApprovalListView, ExtraHoursApprovalUpdateView,
+    MyPayrollView,
 )
 
 urlpatterns = [
+    path('payroll/my/', MyPayrollView.as_view(), name='payroll-my'),
     path('payroll/', PayrollListCreateView.as_view(), name='payroll-list-create'),
     path('payroll/<uuid:payroll_id>/', PayrollDetailView.as_view(), name='payroll-detail'),
     path('payroll/<uuid:payroll_id>/payslips/', PayrollPayslipsView.as_view(), name='payroll-payslips'),

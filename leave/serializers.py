@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday
+from .models import (
+    LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday,
+    StudentLeaveApplication, STUDENT_LEAVE_TYPE_CHOICES,
+)
 
 
 class LeavePolicySerializer(serializers.ModelSerializer):
@@ -215,3 +218,106 @@ class PublicHolidaySerializer(serializers.ModelSerializer):
 class PublicHolidayCreateSerializer(serializers.Serializer):
     date = serializers.DateField()
     name = serializers.CharField(max_length=200)
+
+
+# ── Student Leave Serializers ──────────────────────────────────────────────────
+
+class StudentLeaveListSerializer(serializers.ModelSerializer):
+    """Compact list view — used in admin list and student dashboard."""
+    leave_type_display = serializers.CharField(source='get_leave_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    student_name = serializers.SerializerMethodField()
+    batch_name = serializers.SerializerMethodField()
+    proof_document_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentLeaveApplication
+        fields = [
+            'id', 'student', 'student_name', 'batch_name',
+            'leave_type', 'leave_type_display',
+            'from_date', 'to_date', 'from_time', 'to_time',
+            'status', 'status_display',
+            'is_capable_of_proof', 'proof_document_url',
+            'parent_consulted', 'created_at',
+        ]
+
+    def get_student_name(self, obj):
+        return obj.student.full_name if obj.student else ''
+
+    def get_batch_name(self, obj):
+        return obj.student.current_batch_name if obj.student else ''
+
+    def get_proof_document_url(self, obj):
+        if obj.proof_document and hasattr(obj.proof_document, 'url'):
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.proof_document.url)
+            return obj.proof_document.url
+        return None
+
+
+class StudentLeaveDetailSerializer(serializers.ModelSerializer):
+    """Full detail view including reviewer, parent info and proof."""
+    leave_type_display = serializers.CharField(source='get_leave_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    student_name = serializers.SerializerMethodField()
+    batch_name = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+    received_by_name = serializers.SerializerMethodField()
+    proof_document_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentLeaveApplication
+        fields = [
+            'id', 'student', 'student_name', 'batch_name',
+            'leave_type', 'leave_type_display',
+            'from_date', 'to_date', 'from_time', 'to_time',
+            'reason',
+            'is_capable_of_proof', 'proof_document', 'proof_document_url',
+            'parent_consulted', 'parent_signature_date',
+            'status', 'status_display',
+            'received_by', 'received_by_name',
+            'reviewed_by', 'reviewed_by_name',
+            'reviewed_at', 'rejection_reason',
+            'created_at',
+        ]
+
+    def get_student_name(self, obj):
+        return obj.student.full_name if obj.student else ''
+
+    def get_batch_name(self, obj):
+        return obj.student.current_batch_name if obj.student else ''
+
+    def get_reviewed_by_name(self, obj):
+        return obj.reviewed_by.name if obj.reviewed_by else ''
+
+    def get_received_by_name(self, obj):
+        return obj.received_by.name if obj.received_by else ''
+
+    def get_proof_document_url(self, obj):
+        if obj.proof_document and hasattr(obj.proof_document, 'url'):
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.proof_document.url)
+            return obj.proof_document.url
+        return None
+
+
+class StudentLeaveCreateSerializer(serializers.Serializer):
+    """Input serializer for student submitting a leave application."""
+    leave_type = serializers.ChoiceField(choices=[c[0] for c in STUDENT_LEAVE_TYPE_CHOICES])
+    from_date = serializers.DateField()
+    to_date = serializers.DateField()
+    from_time = serializers.TimeField(required=False, allow_null=True)
+    to_time = serializers.TimeField(required=False, allow_null=True)
+    reason = serializers.CharField()
+    is_capable_of_proof = serializers.BooleanField(default=False)
+    proof_document = serializers.FileField(required=False, allow_null=True)
+    parent_consulted = serializers.BooleanField(default=False)
+    parent_signature_date = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, data):
+        if data['from_date'] > data['to_date']:
+            raise serializers.ValidationError({'to_date': 'to_date must be >= from_date.'})
+        return data
+

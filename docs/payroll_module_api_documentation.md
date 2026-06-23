@@ -110,6 +110,9 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
 - GET `/faculty/<id>/payslips/` — Historical slips.
 - GET `/faculty/<id>/salary-preview/?month=6&year=2026` — Current estimate (uses `preview_payslip_for_faculty()`).
 
+### Step 8: My Payroll (Logged-in Faculty)
+- GET `/payroll/my/` — Personal payroll history (see below).
+
 **Integration Notes:** 
 - Depends on accurate `SessionReport` from timetable/attendance.
 - Ties to `faculty` module (profiles with basic_salary, hourly_rate).
@@ -175,6 +178,49 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
 ```
 
 - Faculty payslips: **GET** `/api/v1/faculty/<faculty_id>/payslips/`
+
+### My Payroll (Self-Service)
+**`GET /api/v1/payroll/my/`**  
+Returns all payroll history for the currently authenticated faculty member — no admin role needed. Auto-resolves the faculty profile from the auth token.
+
+**Query params:** `?year=2026` `?month=6` `?status=disbursed`
+
+**Response:**
+```json
+{
+  "success": true,
+  "faculty": {
+    "id": "fp-uuid",
+    "employee_id": "EMP-2026-0001",
+    "name": "Prof. Ramesh Kumar",
+    "email": "ramesh@institute.com"
+  },
+  "summary": {
+    "total_payslips": 3,
+    "total_net_earned": "125000.00",
+    "total_disbursed": "80000.00"
+  },
+  "payslips": [
+    {
+      "id": "ps-uuid",
+      "payroll_month": 6,
+      "payroll_year": 2026,
+      "payroll_status": "Disbursed",
+      "branch_name": "Main Branch",
+      "basic_salary": "50000.00",
+      "hour_based_amount": "15000.00",
+      "late_penalty": "500.00",
+      "absence_deductions": "0.00",
+      "leave_deductions": "2000.00",
+      "bonus": "5000.00",
+      "net_salary": "67500.00",
+      "sessions_conducted": 45,
+      "is_disbursed": true,
+      "late_logs": []
+    }
+  ]
+}
+```
 
 ### Late Policy
 - **GET / POST** `/api/v1/payroll/late-policy/` 
