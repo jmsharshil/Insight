@@ -119,7 +119,11 @@ Used by faculty to manually mark attendance for a whole batch.
 **Used by:** Students (Mobile App only)  
 **`POST /api/v1/attendance/qr-scan/`**
 
-Students scan a Class/Batch QR code to mark themselves present. The backend validates geofencing and device IDs.
+Students scan a Class/Batch QR code to mark themselves present. The backend performs multiple validations:
+1. **Geofencing** (location within branch)
+2. **Time window** (within class schedule)
+3. **Device uniqueness** (prevent proxy)
+4. **Fee Status** — Calls `fees.utils.has_overdue_installment(student_id)`. If student has any unpaid installment >15 days past due_date, scan is **blocked**.
 
 #### Request Body
 ```json
@@ -143,7 +147,7 @@ Students scan a Class/Batch QR code to mark themselves present. The backend vali
 ```
 *(Note: `timetable_slot` is optional but recommended if scanning for a specific lecture. `session_reports` is specifically used by faculty during `check_out` to automatically log session details.)*
 
-#### Response (201 Created)
+#### Response — Success (201 Created)
 ```json
 {
   "success": true,
@@ -162,6 +166,19 @@ Students scan a Class/Batch QR code to mark themselves present. The backend vali
   "message": "Class QR check_in recorded successfully."
 }
 ```
+
+#### Response — Fee Overdue Block (403)
+```json
+{
+  "success": false,
+  "message": "Attendance blocked: Student has overdue installments (>15 days past due date). Please clear fees to continue.",
+  "reason": "overdue_installment",
+  "overdue_count": 1,
+  "next_due_date": "2026-05-01"
+}
+```
+
+**Implementation Note:** The check uses `fees.utils.has_overdue_installment(student_id)` which queries unpaid `InstallmentItem`s where `due_date < (today - 15 days)` and plan status is approved/active. This integrates the Fees module with Attendance.
 
 ---
 
