@@ -781,9 +781,9 @@ class MyPayrollView(APIView):
         payslips = MyPaySlipSerializer(qs, many=True, context={'request': request}).data
 
         # Summary totals
-        total_net = sum(p['net_salary'] for p in payslips)
+        total_net = sum((Decimal(str(p['net_salary'])) for p in payslips), Decimal('0'))
         total_disbursed = sum(
-            p['net_salary'] for p in payslips if p['is_disbursed']
+            (Decimal(str(p['net_salary'])) for p in payslips if p.get('is_disbursed')), Decimal('0')
         )
 
         return Response({
