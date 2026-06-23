@@ -4,6 +4,7 @@ from .views import (
     CheckerStatusView, CheckerPortalSubmitView,
     PublishResultView, ResultView, ResultDeleteView,
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
+    MarkAbsentView, MarkAllAbsentView,
 )
 
 urlpatterns = [
@@ -13,6 +14,8 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/papers/', PaperView.as_view(), name='paper-list'),
     path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/marks/', PaperMarksView.as_view(), name='paper-marks'),
     path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/recheck/', PaperRecheckView.as_view(), name='paper-recheck'),
+    path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/mark-absent/', MarkAbsentView.as_view(), name='mark-absent'),
+    path('exams/<uuid:exam_id>/mark-absent-all/', MarkAllAbsentView.as_view(), name='mark-absent-all'),
     path('exams/<uuid:exam_id>/checker-status/', CheckerStatusView.as_view(), name='checker-status'),
     path('exams/<uuid:exam_id>/results/publish/', PublishResultView.as_view(), name='publish-result'),
     path('exams/<uuid:exam_id>/results/', ResultView.as_view(), name='exam-results'),
@@ -23,3 +26,4 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/recheck-requests/', RecheckRequestListView.as_view(), name='recheck-request-list'),
     path('exams/<uuid:exam_id>/recheck-requests/<uuid:request_id>/', RecheckRequestActionView.as_view(), name='recheck-request-action'),
 ]
+

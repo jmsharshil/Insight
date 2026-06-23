@@ -10,7 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch','organization', 'organization_name', 'profile_pic']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'organization', 'organization_name', 'profile_pic', 'salary_retention_percentage']
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
@@ -198,7 +198,7 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_student','is_active','organization','profile_pic']
+        fields = ['username','email','phone','name','role','branch','linked_student','is_active','organization','profile_pic', 'salary_retention_percentage']
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -218,7 +218,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name', 'profile_pic', 'role_display']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name', 'profile_pic', 'role_display', 'salary_retention_percentage']
         read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
 
     def to_representation(self, instance):

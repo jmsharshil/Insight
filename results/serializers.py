@@ -12,7 +12,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'paper_checker', 'checker_name', 'marks_obtained', 'is_pass',
-            'remarks', 'checked_at', 'is_submitted', 'is_rechecked',
+            'remarks', 'checked_at', 'is_submitted', 'is_rechecked', 'is_absent',
         ]
 
     def get_student_name(self, obj):
@@ -96,7 +96,12 @@ class RecheckRequestSerializer(serializers.ModelSerializer):
 
 
 class RecheckRequestCreateSerializer(serializers.Serializer):
-    reason = serializers.CharField(required=False, allow_blank=True, default='')
+    reason = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        min_length=10,
+        help_text="Reason for requesting recheck (minimum 10 characters)."
+    )
 
 
 class RecheckRequestActionSerializer(serializers.Serializer):

@@ -162,6 +162,7 @@ class FacultyListCreateView(APIView):
                 salary=d.get('salary', 0), hourly_rate=d.get('hourly_rate', 0),
                 bank_account=d.get('bank_account', ''),
                 ifsc_code=d.get('ifsc_code', ''), pan_number=d.get('pan_number', ''),
+                salary_retention_percentage=user.salary_retention_percentage,
             )
             if d.get('photo'):
                 fp.photo = d['photo']

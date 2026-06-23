@@ -513,3 +513,96 @@ class RecheckRequestActionView(APIView):
             logger.info(f"[NOTIFY STUB] Recheck request {rr.id} rejected for student {rr.requested_by_id}")
 
             return Response({'success': True, 'message': 'Recheck request rejected.'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. POST  /api/v1/exams/{id}/papers/{marksheet_id}/mark-absent/
+#    Marks a student as absent on a marksheet.
+#    Also supports bulk-absent: POST /api/v1/exams/{id}/mark-absent-all/
+#    which auto-marks ALL students with no ExamSession as absent.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MarkAbsentView(APIView):
+    """
+    Mark a specific student as absent for an exam.
+    Only admins/ASE can do this manually.
+    """
+    # permission_classes = [IsAuthenticated]
+    ALLOWED_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager', 'paper_checker']
+
+    def post(self, request, exam_id, marksheet_id):
+        role = _user_role(request.user)
+        if role not in self.ALLOWED_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(id=marksheet_id, exam_id=exam_id)
+        except MarkSheet.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if ms.is_submitted:
+            return Response({'success': False, 'message': 'Marks already submitted; cannot mark as absent.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ms.is_absent = True
+        ms.marks_obtained = 0
+        ms.is_pass = False
+        ms.is_submitted = True
+        ms.remarks = 'Absent'
+        ms.checked_at = timezone.now()
+        ms.save()
+
+        return Response({'success': True, 'message': 'Student marked as absent.'}, status=status.HTTP_200_OK)
+
+
+class MarkAllAbsentView(APIView):
+    """
+    Automatically marks all students who have NO ExamSession record for an exam as absent.
+    Should be called after the exam ends.
+    """
+    # permission_classes = [IsAuthenticated]
+    ALLOWED_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
+
+    def post(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in self.ALLOWED_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        from exams.models import ExamSession
+
+        # Get all students who started an exam session
+        attended_student_ids = set(
+            ExamSession.objects.filter(exam=exam, is_submitted=True)
+            .values_list('student_id', flat=True)
+        )
+
+        # Mark absent all marksheets for students without a completed session
+        marksheets = MarkSheet.objects.filter(exam=exam, is_submitted=False)
+        absent_count = 0
+        for ms in marksheets:
+            if ms.student_id not in attended_student_ids:
+                ms.is_absent = True
+                ms.marks_obtained = 0
+                ms.is_pass = False
+                ms.is_submitted = True
+                ms.remarks = 'Absent'
+                ms.checked_at = timezone.now()
+                ms.save()
+                absent_count += 1
+
+        return Response({
+            'success': True,
+            'message': f'{absent_count} students marked as absent.',
+            'absent_count': absent_count,
+        }, status=status.HTTP_200_OK)
+

@@ -70,6 +70,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     fcm_token = models.TextField(blank=True, default='', help_text="Firebase Cloud Messaging device token for push notifications.")
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
+    salary_retention_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text="Percentage of gross salary to retain each month."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     objects = UserManager()
     USERNAME_FIELD = 'username'
