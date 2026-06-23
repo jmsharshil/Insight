@@ -185,6 +185,7 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
             'level', 'employment_type', 'salary', 'hourly_rate', 'session_hours',
             'bank_account', 'ifsc_code', 'pan_number', 'is_active', 'photo',
             'full_name', 'name', 'email', 'phone', 'branch_id', 'branch',
+            'work_start_time', 'work_end_time',
         ]
 
     def update(self, instance, validated_data):

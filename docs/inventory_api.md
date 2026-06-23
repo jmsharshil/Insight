@@ -1,8 +1,53 @@
-# Inventory Management API Documentation
+# Inventory Management API Documentation — Full Walkthrough
 
-This document provides a complete walkthrough of all endpoints in the new `inventory` app, including request bodies, response formats, and operational steps.
+> **Base URL:** `{{BASE_URL}}/api/v1/inventory/`  
+> **Auth Header:** `Authorization: Bearer <access_token>`  
+> **Content-Type:** `application/json` (or multipart for file uploads like invoices)  
+> Responses generally follow DRF conventions (paginated lists, created objects). Custom actions return status messages. See faculty docs for wrapped `{"success": true, "data": ...}` style in other modules.
 
-All endpoints are prefixed with: `{{BASE_URL}}/api/v1/inventory/`
+This document provides a **complete walkthrough** of the inventory system, including data models, key workflows/steps, request/response examples, and operational notes.
+
+---
+
+## Data Models Summary
+
+| Model | Purpose | Key Behaviors |
+|-------|---------|---------------|
+| `ItemCategory` | Groups items (per branch) | Unique per branch+name |
+| `Item` | Stock item definition | `total_stock` is **read-only** — updated exclusively via `StockTransaction` or `ItemAllocation` |
+| `StockTransaction` | Immutable ledger for all stock movements | Auto-updates `Item.total_stock`; prevents negative stock on outward transactions |
+| `ItemAllocation` | Issues items to Student or Faculty | Auto-creates `allocation` transaction on issue; `return_item` action restores stock |
+
+**Note:** `ItemAllocation` supports both `student` and `faculty` FKs (one must be provided). Status flows: `pending` → `issued` → `returned`.
+
+---
+
+## Key Workflows & Steps
+
+### 1. Initial Setup
+1. Create **Category** (POST `/categories/`) linked to a `branch`.
+2. Create **Item** (POST `/items/`) with `category`, `reorder_level`, `unit_price`. `total_stock` starts at 0.
+3. Add initial stock via **Purchase Transaction** (positive `quantity`).
+
+### 2. Daily Operations (Issue / Return)
+1. **Issue items** to student or faculty → `POST /allocations/` or `bulk_issue/` (automatically deducts from `total_stock` via transaction).
+2. Faculty/Student uses the item.
+3. **Return** via `POST /allocations/<id>/return_item/` → restores stock via positive `return` transaction.
+4. Monitor **reorder alerts** via `/forecast/` endpoint (uses last 30 days of allocations to project burn rate).
+
+### 3. Stock Adjustments
+- Use `transaction_type='purchase'` for new inward stock (with optional `invoice_document` upload).
+- Use `transaction_type='damage'` or `'adjustment'` for losses (negative qty, validated).
+- All changes are audited in `StockTransaction` with `reference`, `notes`, `created_by`.
+
+### 4. Forecasting & Reordering
+- Call GET `/forecast/` to get projected stock health, daily burn rate, and days-until-stockout.
+- Critical items (projected to stockout <30 days) should trigger purchase orders.
+
+**Safety Rules (enforced in model + views):**
+- Cannot allocate if `total_stock` would go negative.
+- `bulk_issue` is atomic (all-or-nothing).
+- `total_stock` updates are handled in `StockTransaction.save()`.
 
 ---
 
