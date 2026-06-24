@@ -85,12 +85,28 @@ class ExamListCreateView(APIView):
             try:
                 from students.models import Student
                 from batches.models import BatchStudent
-                sp = Student.objects.get(user=user)
-                enrolled_batch_ids = list(BatchStudent.objects.filter(student=sp).values_list('batch_id', flat=True))
-                if sp.batch_id and sp.batch_id not in enrolled_batch_ids:
-                    enrolled_batch_ids.append(sp.batch_id)
-                qs = qs.filter(batch_id__in=enrolled_batch_ids)
-            except Exception:
+                sp = Student.objects.select_related('batch').get(user=user)
+                # Support both direct batch_id and many-to-many via BatchStudent
+                if sp.batch_id:
+                    qs = qs.filter(batch_id=sp.batch_id)
+                else:
+                    # Fallback for students enrolled via BatchStudent relation
+                    enrolled_batch_ids = BatchStudent.objects.filter(
+                        student=sp
+                    ).values_list('batch_id', flat=True)
+                    if enrolled_batch_ids:
+                        qs = qs.filter(batch_id__in=enrolled_batch_ids)
+                    else:
+                        logger.warning(f"Student {user.email} has no batch assignment")
+                        qs = qs.none()
+                # Students should see scheduled, ongoing, and results (for viewing marks)
+                qs = qs.filter(status__in=['scheduled', 'ongoing', 'completed', 'results_published'])
+                logger.info(f"Student {user.email} (batch={sp.batch_id}) can see {qs.count()} exams")
+            except Student.DoesNotExist:
+                logger.error(f"No Student profile found for user {user.email} (role=student)")
+                qs = qs.none()
+            except Exception as e:
+                logger.error(f"Student exam filter error for {user.email}: {e}")
                 qs = qs.none()
         elif role == 'faculty':
             from django.db.models import Q
@@ -119,6 +135,7 @@ class ExamListCreateView(APIView):
 
         qs = apply_filters(self, request, qs)
         return qs
+
 
     def get(self, request):
         qs = self._get_queryset(request)
@@ -233,10 +250,15 @@ class QuestionView(APIView):
             try:
                 from students.models import Student
                 sp = Student.objects.get(user=request.user)
-                if not ExamSession.objects.filter(exam=exam, student=sp).exists() or exam.status != 'ongoing':
+                # Only allow question fetch if student has an active session for this exam
+                if not ExamSession.objects.filter(exam=exam, student=sp).exists() or exam.status not in ('ongoing', 'completed'):
                     return Response({'success': False, 'message': 'Exam session not active'}, status=status.HTTP_403_FORBIDDEN)
                 return Response(QuestionStudentSerializer(questions, many=True).data)
-            except:
+            except Student.DoesNotExist:
+                logger.error(f"No Student profile for user {request.user.email} trying to access questions")
+                return Response({'success': False, 'message': 'Student profile not found'}, status=status.HTTP_403_FORBIDDEN)
+            except Exception as e:
+                logger.error(f"Student question access error: {e}")
                 return Response({'success': False, 'message': 'Student profile error'}, status=status.HTTP_403_FORBIDDEN)
         elif role in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']:
             return Response(QuestionSerializer(questions, many=True).data)

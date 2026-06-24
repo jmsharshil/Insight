@@ -938,23 +938,53 @@ class EmployeeAttendanceListCreateView(APIView):
         errors = []
 
         for rec in d['records']:
-            user_id = rec.get('user_id')
+            # Support multiple key names from frontend (user_id, id, employee_id)
+            raw_id = rec.get('user_id') or rec.get('id') or rec.get('employee_id')
             rec_status = rec.get('status', 'present')
 
-            if not user_id:
-                errors.append({'user_id': None, 'error': 'user_id is required.'})
+            if not raw_id:
+                errors.append({'user_id': None, 'error': 'user_id (or id/employee_id) is required.'})
                 continue
 
+            emp_user = None
             try:
-                emp_user = User.objects.get(id=user_id, is_active=True)
-            except User.DoesNotExist:
-                errors.append({'user_id': str(user_id), 'error': 'User not found.'})
+                # Primary: lookup by User ID (UUID or PK)
+                emp_user = User.objects.get(id=raw_id, is_active=True)
+            except (User.DoesNotExist, ValueError, TypeError):
+                # Fallback 1: FacultyProfile lookup (common for employees)
+                try:
+                    from faculty.models import FacultyProfile
+                    fp = None
+                    # Try as UUID for FacultyProfile.id
+                    try:
+                        fp = FacultyProfile.objects.filter(id=raw_id).select_related('user').first()
+                    except (ValueError, TypeError):
+                        pass
+                    if not fp:
+                        # Try by employee_id string
+                        fp = FacultyProfile.objects.filter(employee_id=str(raw_id)).select_related('user').first()
+                    if not fp and isinstance(raw_id, (str, int)):
+                        # Try if raw_id was actually a User ID for the profile
+                        fp = FacultyProfile.objects.filter(user_id=raw_id).select_related('user').first()
+                    if fp and fp.user and fp.user.is_active:
+                        emp_user = fp.user
+                except Exception as fallback_err:
+                    logger.warning(f"FacultyProfile fallback failed for ID {raw_id}: {fallback_err}")
+
+            if not emp_user:
+                errors.append({'user_id': str(raw_id), 'error': 'User not found.'})
+                logger.info(f"Employee attendance bulk: User not found for ID {raw_id}")
+                continue
+
+            # Optional: ensure not a student (prevent accidental student records here)
+            if hasattr(emp_user, 'role') and emp_user.role == 'student':
+                errors.append({'user_id': str(raw_id), 'error': 'Student accounts should use student attendance endpoint.'})
                 continue
 
             record, created = EmployeeAttendanceRecord.objects.update_or_create(
                 user=emp_user, date=d['date'],
                 defaults={
-                    'branch_id': d['branch_id'],
+                    'branch_id': d.get('branch_id') or _user_branch_id(request.user),
                     'status': rec_status,
                     'marked_by': request.user,
                 },
@@ -1082,4 +1112,66 @@ class EmployeeAttendanceHistoryView(APIView):
                 'attendance_percentage': percentage,
             },
             'records': serialized,
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. GET  /api/v1/attendance/employees/dropdown/  — Lightweight list for UI dropdowns
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EmployeeDropdownView(APIView):
+    """
+    Returns a simple list of employees (Users + FacultyProfiles) for dropdowns.
+    - Admins see all (filtered by branch if not super_admin).
+    - Includes name, employee_id, role, branch for easy display.
+    """
+    # permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in EMPLOYEE_ATTENDANCE_ADMIN_ROLES + ['faculty']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        from faculty.models import FacultyProfile
+
+        qs = User.objects.filter(is_active=True).exclude(role='student').select_related('branch')
+
+        # Branch scoping
+        if role != 'super_admin':
+            bid = _user_branch_id(request.user)
+            if bid:
+                qs = qs.filter(branch_id=bid)
+
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+
+        # Prefer FacultyProfile data when available
+        employees = []
+        for user in qs.only('id', 'name', 'role', 'branch', 'email'):
+            emp_id = ''
+            branch_name = ''
+            try:
+                if hasattr(user, 'faculty_profile') and user.faculty_profile:
+                    emp_id = user.faculty_profile.employee_id
+                    branch_name = user.faculty_profile.branch.name if user.faculty_profile.branch else ''
+                elif user.branch:
+                    branch_name = user.branch.name
+            except Exception:
+                pass
+
+            employees.append({
+                'id': str(user.id),
+                'name': user.name or user.email,
+                'employee_id': emp_id or f"EMP-{str(user.id)[:8]}",
+                'role': getattr(user, 'role', 'staff'),
+                'branch_name': branch_name,
+                'email': user.email,
+            })
+
+        return Response({
+            'success': True,
+            'count': len(employees),
+            'data': employees
         })
