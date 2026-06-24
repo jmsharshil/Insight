@@ -146,28 +146,30 @@
 
 ---
 
-## Complete API Reference (Matches Current `results/views.py`)
+## Complete API Reference (Matches Current `results/views.py` + Serializers)
+
+All examples use the actual serializers (`MarkSheetSerializer`, `RecheckRequestSerializer`, `CheckerQuerySerializer`, etc.) and view logic.
 
 ### 1. Paper List, Marks Entry & Absent Marking
 
 **`GET /api/v1/exams/<exam_id>/papers/`** (`PaperView`)
 
-#### Query Params
-- `is_submitted`, `is_pass`, `is_rechecked`, `is_absent`; search on `student__user__name`, `paper_checker__name`.
+**Query Params:** `is_submitted`, `is_pass`, `is_rechecked`, `is_absent`, search (`student__user__name`, `paper_checker__name`).
 
-#### Response (200 OK)
+**Response (200 OK)**
 ```json
 {
   "success": true,
   "count": 45,
   "data": [
     {
-      "id": "ms-uuid-001",
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "exam": "exam-uuid",
       "student": "stu-uuid-001",
       "student_name": "Priya Shah",
+      "roll_number": "101",
       "paper_checker": "user-uuid",
-      "paper_checker_name": "Prof. Anil Sharma",
+      "checker_name": "Prof. Anil Sharma",
       "marks_obtained": 42.5,
       "is_pass": true,
       "is_absent": false,
@@ -175,7 +177,7 @@
       "checked_at": "2026-06-20T14:30:00Z",
       "is_submitted": true,
       "is_rechecked": false,
-      "queries": []
+      "has_open_query": false
     }
   ]
 }
@@ -183,72 +185,413 @@
 
 **`POST/PUT /api/v1/exams/<exam_id>/papers/<marksheet_id>/marks/`** (`PaperMarksView`)
 
-- **POST**: Initial submission (blocks if already `is_submitted`).
-- **PUT**: Update/recheck (handles `RecheckRequest` completion, updates `PublishedResult`, accepts `notes`).
-
-#### Request Body
+**Request Body**
 ```json
 {
   "marks_obtained": 78.0,
   "remarks": "Excellent performance on case studies",
-  "notes": "Recheck notes here (for PUT)"
+  "notes": "Recheck verification complete - improved score justified"
 }
 ```
 
-#### Success Response
+**Success Response (200)**
 ```json
 {
   "success": true,
-  "message": "Marks submitted.",
+  "message": "Marks updated. Recheck completed if applicable.",
   "data": {
-    "marksheet_id": "ms-uuid-001",
-    "marks_obtained": 78.0
+    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "student_name": "Priya Shah",
+    "marks_obtained": 78.0,
+    "is_pass": true,
+    "is_rechecked": true,
+    "remarks": "Excellent performance on case studies",
+    "checked_at": "2026-06-22T10:15:00Z"
   }
 }
 ```
 
-**Errors:**
-- 403: Permission denied, not assigned, or **open query** (`has_open_query: true`).
-- 400: Invalid marks range or already submitted (POST).
-- Uses `_get_marksheet()` helper with organization/role guards.
+**Common Errors:**
+```json
+{
+  "success": false,
+  "message": "This marksheet has an open query. Please resolve the query first.",
+  "has_open_query": true
+}
+```
+(or "Not assigned to you.", "Invalid marks.", "Already submitted.")
 
 **`POST /api/v1/exams/<exam_id>/papers/<marksheet_id>/mark-absent/`** (`MarkAbsentView`)
-- Marks student absent (`is_absent=True`, `marks=0`, `submitted=True`).
-- Allowed for admins, ASE, branch_manager, paper_checker.
+
+**Request Body:** (empty or `{ "remarks": "Medical emergency" }`)
+
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "Student marked as absent.",
+  "data": {
+    "marksheet_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "is_absent": true,
+    "marks_obtained": 0,
+    "status": "absent"
+  }
+}
+```
 
 **`POST /api/v1/exams/<exam_id>/mark-absent-all/`** (`MarkAllAbsentView`)
-- Bulk: Uses `ExamSession` to mark all non-attendees as absent. Returns count.
 
-**`DELETE /api/v1/exams/<exam_id>/papers/<marksheet_id>/`** (super_admin/ASE only) — removes marksheet.
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "12 students marked as absent.",
+  "absent_count": 12
+}
+```
+
+**`DELETE /api/v1/exams/<exam_id>/papers/<marksheet_id>/`** — Super admin only. Returns `{"success": true, "message": "Marksheet deleted."}`.
 
 ---
 
 ### 2. Checker Status, Portal & Queries
 
 **`GET /api/v1/exams/<exam_id>/checker-status/`** (`CheckerStatusView`)
-- Returns totals, per-checker stats (assigned/submitted/pending counts, last_activity).
-- Restricted to CHECKER_STATUS_ROLES.
 
-**`POST /api/v1/checker-portal/submit/?token=...`** (`CheckerPortalSubmitView`, `AllowAny`)
-- Token validation (exists, not used, not expired).
-- Updates MarkSheet, marks token used.
-- Simple success: `{"success": true, "message": "Marks submitted successfully."}`
+**Response**
+```json
+{
+  "success": true,
+  "data": {
+    "total_papers": 50,
+    "submitted": 42,
+    "approval_pending": 8,
+    "overdue": 0,
+    "checkers": [
+      {
+        "checker_id": "user-uuid",
+        "checker_name": "Prof. Anil Sharma",
+        "assigned_count": 15,
+        "submitted_count": 12,
+        "pending_count": 3,
+        "last_activity": "2026-06-21T09:15:00Z"
+      }
+    ]
+  }
+}
+```
 
-**Paper Checker Query Endpoints** (`PaperCheckerQueryView`):
+**`POST /api/v1/checker-portal/submit/?token=secure-token-here`** (`AllowAny`)
+
+**Request Body**
+```json
+{
+  "marks_obtained": 85.5,
+  "remarks": "Strong conceptual clarity. Minor deduction for Q2."
+}
+```
+
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "Marks submitted successfully."
+}
+```
+
+**Paper Checker Query Endpoints (`PaperCheckerQueryView`)**
 
 **`POST /api/v1/exams/<exam_id>/papers/<marksheet_id>/query/`**
+
+**Request Body**
 ```json
 {
   "query_type": "answer_key_not_available",
-  "description": "Answer key PDF missing for Q3."
+  "description": "Answer key is missing for the practical section (questions 5-8). Cannot grade accurately."
 }
 ```
-- Only after recheck for paper_checkers. Creates open query, affects payroll.
-- Response includes query details.
+
+**Success Response (201)**
+```json
+{
+  "success": true,
+  "message": "Query raised. This paper will not count toward payment until resolved.",
+  "data": {
+    "id": "query-uuid-001",
+    "query_type": "answer_key_not_available",
+    "query_type_display": "Answer Key Not Available",
+    "description": "...",
+    "status": "open",
+    "status_display": "Open",
+    "created_at": "2026-06-22T11:00:00Z"
+  }
+}
+```
 
 **`PATCH /api/v1/exams/<exam_id>/queries/<query_id>/resolve/`**
-- Admin/ASE only. Can include `marks_obtained` to auto-submit.
-- Sets `status=resolved`, updates payroll eligibility.
+
+**Request Body (optional marks update)**
+```json
+{
+  "marks_obtained": 82.0,
+  "remarks": "Answer key provided. Adjusted marks."
+}
+```
+
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "Query resolved. Paper now eligible for payment on next payroll run (if submitted).",
+  "data": { ...query details with status: "resolved"... }
+}
+```
+
+---
+
+### 3. Publish & View Results
+
+**`POST /api/v1/exams/<exam_id>/results/publish/`**
+
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "Results published.",
+  "data": {
+    "student_count": 45,
+    "top_scorer": "Rahul Sharma"
+  }
+}
+```
+
+**`GET /api/v1/exams/<exam_id>/results/`** (`ResultView`)
+
+**Response Example**
+```json
+{
+  "success": true,
+  "count": 45,
+  "data": [
+    {
+      "id": "pr-uuid-001",
+      "exam": "exam-uuid",
+      "student_name": "Priya Shah",
+      "roll_number": "101",
+      "marks_obtained": 85.5,
+      "total_marks": 100,
+      "percentage": 85.5,
+      "is_pass": true,
+      "rank": 1,
+      "published_at": "2026-06-22T10:00:00Z"
+    }
+  ]
+}
+```
+
+**`DELETE /api/v1/exams/<exam_id>/results/<result_id>/`** → `{"success": true, "message": "Result deleted."}`
+
+---
+
+### 4. Recheck Requests (v2 — Enhanced) (`RecheckRequestSerializer`, `RecheckRequestCreateSerializer`, `RecheckRequestActionSerializer`)
+
+**`POST /api/v1/exams/<exam_id>/results/recheck-request/`** (`StudentRecheckRequestView` — supports `multipart/form-data` for file upload)
+
+**Request Body**
+```json
+{
+  "reason": "Discrepancy between my calculated marks and published score in practical section.",
+  "uploaded_marksheet": "(optional PDF/image of answer sheet)"
+}
+```
+
+**Success Response (201 Created)**
+```json
+{
+  "recheck_requested": true,
+  "status": "approval_pending",
+  "message": "Your recheck request has been submitted for review.",
+  "upload_provided": true
+}
+```
+
+**Error Examples**
+```json
+{
+  "success": false,
+  "message": "Answer key has not been uploaded yet. Recheck not allowed."
+}
+```
+(or 409 for duplicate pending request, 403 for non-student).
+
+**`GET /api/v1/exams/<exam_id>/recheck-requests/`** (`RecheckRequestListView`)
+
+**Response Example**
+```json
+{
+  "success": true,
+  "count": 3,
+  "data": [
+    {
+      "id": "recheck-uuid-001",
+      "student_name": "Priya Shah",
+      "roll_number": "101",
+      "reason": "Discrepancy in practical marks...",
+      "uploaded_marksheet_url": "/media/recheck_uploads/scan.pdf",
+      "checker_notes": "Verified calculation error. Score adjusted +5.",
+      "status": "completed",
+      "status_display": "Completed",
+      "reviewed_by_name": "Admin Senior Executive",
+      "new_checker_name": "Dr. Meera Patel",
+      "created_at": "2026-06-22T10:30:00Z"
+    }
+  ]
+}
+```
+
+**`PATCH /api/v1/exams/<exam_id>/recheck-requests/<request_id>/`** (`RecheckRequestActionView`)
+
+**Request Body — Approve**
+```json
+{
+  "action": "approve",
+  "new_checker_id": "user-uuid-for-new-checker"
+}
+```
+
+**Request Body — Reject**
+```json
+{
+  "action": "reject",
+  "reason": "Insufficient evidence of marking error."
+}
+```
+
+**Success Responses**
+```json
+{
+  "success": true,
+  "message": "Recheck approved and reassigned to new checker."
+}
+```
+(or reject message).
+
+**Bulk Recheck (`BulkRecheckRequestView` — view ready, URL mapping pending):**
+- **Body:** `{"reason": "Batch-wide re-evaluation after answer key review"}`
+- Creates multiple `RecheckRequest` records for the exam's batch (if `PublishedResult` exists and no pending recheck).
+- Returns count of created requests.
+
+**Legacy direct re-assignment:** `POST /api/v1/exams/<exam_id>/papers/<marksheet_id>/recheck/` still supported for admins.
+
+---
+
+### 2. Checker Status, Portal & Queries
+
+**`GET /api/v1/exams/<exam_id>/checker-status/`** (`CheckerStatusView`)
+
+**Response (200 OK)**
+```json
+{
+  "success": true,
+  "data": {
+    "total_papers": 50,
+    "submitted": 42,
+    "approval_pending": 8,
+    "overdue": 0,
+    "checkers": [
+      {
+        "checker_id": "user-uuid-123",
+        "checker_name": "Prof. Anil Sharma",
+        "assigned_count": 15,
+        "submitted_count": 12,
+        "pending_count": 3,
+        "last_activity": "2026-06-21T09:15:00Z"
+      }
+    ]
+  }
+}
+```
+
+**`POST /api/v1/checker-portal/submit/?token=secure-token-here`** (`CheckerPortalSubmitView` — `AllowAny`)
+
+**Request Body**
+```json
+{
+  "marks_obtained": 85.5,
+  "remarks": "Strong conceptual clarity. Minor deduction for Q2."
+}
+```
+
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "Marks submitted successfully."
+}
+```
+
+**Error Example (Invalid Token)**
+```json
+{
+  "success": false,
+  "message": "Token expired or used."
+}
+```
+
+**Paper Checker Query Endpoints** (`PaperCheckerQueryView` — uses `CheckerQueryCreateSerializer` / `CheckerQuerySerializer`):
+
+**`POST /api/v1/exams/<exam_id>/papers/<marksheet_id>/query/`**
+
+**Request Body**
+```json
+{
+  "query_type": "answer_key_not_available",
+  "description": "Answer key is missing for the practical section (questions 5-8). Cannot grade accurately."
+}
+```
+
+**Success Response (201 Created)**
+```json
+{
+  "success": true,
+  "message": "Query raised. This paper will not count toward payment until resolved.",
+  "data": {
+    "id": "query-uuid-001",
+    "query_type": "answer_key_not_available",
+    "query_type_display": "Answer Key Not Available",
+    "description": "Answer key is missing...",
+    "status": "open",
+    "status_display": "Open",
+    "raised_by_name": "Prof. Anil Sharma",
+    "created_at": "2026-06-22T11:00:00Z"
+  }
+}
+```
+
+**`PATCH /api/v1/exams/<exam_id>/queries/<query_id>/resolve/`**
+
+**Request Body (can include marks to auto-resolve & submit)**
+```json
+{
+  "marks_obtained": 82.0,
+  "remarks": "Answer key now provided by ASE. Adjusted final score."
+}
+```
+
+**Success Response**
+```json
+{
+  "success": true,
+  "message": "Query resolved. Paper now eligible for payment on next payroll run (if submitted).",
+  "data": {
+    "id": "query-uuid-001",
+    "status": "resolved",
+    "status_display": "Resolved",
+    "resolved_by_name": "Admin Senior Executive",
+    "resolved_at": "2026-06-22T11:30:00Z"
+  }
+}
+```
 
 ---
 
@@ -322,7 +665,7 @@
 
 ## Common Error Responses (from Current Implementation)
 
-### 403 Permission Denied / Role or Assignment Issues
+### 403 Permission / Role / Assignment Issues
 ```json
 {
   "success": false,
@@ -337,8 +680,15 @@ or
   "has_open_query": true
 }
 ```
+or
+```json
+{
+  "success": false,
+  "message": "Only students can request recheck."
+}
+```
 
-### 400 Validation / Business Rules
+### 400 Validation / Business Rule Violations
 ```json
 {
   "success": false,
@@ -346,10 +696,14 @@ or
   "errors": { ... }
 }
 ```
-- "Invalid marks.", "Already submitted.", "Answer key has not been uploaded yet. Recheck not allowed."
-- "This marksheet has an open query. Please resolve the query first."
+Common messages:
+- `"Invalid marks."`
+- `"Already submitted."`
+- `"Answer key has not been uploaded yet. Recheck not allowed."`
+- `"This marksheet has an open query. Please resolve the query first."`
+- `"A recheck request is already pending or approved."` (also returns 409)
 
-### 409 Conflict (duplicate recheck)
+### 409 Conflict
 ```json
 {
   "success": false,
@@ -357,9 +711,18 @@ or
 }
 ```
 
-### Other Common
-- 403 Token expired/used/invalid (portal).
-- 404 for missing Exam, MarkSheet, RecheckRequest, Query.
+### Portal Token Errors
+```json
+{
+  "success": false,
+  "message": "Token expired or used."
+}
+```
+
+### 404 Not Found
+Standard for missing `Exam`, `MarkSheet`, `RecheckRequest`, or `CheckerQuery`.
+
+**All endpoints** include organization-based filtering and strict role checks matching the constants at the top of `results/views.py`.
 
 ---
 
