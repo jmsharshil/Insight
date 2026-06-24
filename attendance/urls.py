@@ -4,6 +4,7 @@ from .views import (
     StudentAttendanceView, BatchAttendanceSheetView,
     AttendanceReportView, AttendanceAlertView,
     EmployeeAttendanceListCreateView, EmployeeCheckInOutView, EmployeeAttendanceHistoryView,
+    EmployeeDropdownView,
 )
 from .analytics_views import (
     DashboardSummaryAPIView, StudentAttendanceListAPIView, StudentAttendanceDetailAPIView,
@@ -56,5 +57,7 @@ urlpatterns = [
     path('attendance/employee/', EmployeeAttendanceListCreateView.as_view(), name='employee-attendance-list-create'),
     path('attendance/employee/scan/', EmployeeCheckInOutView.as_view(), name='employee-attendance-scan'),
     path('attendance/employee/history/', EmployeeAttendanceHistoryView.as_view(), name='employee-attendance-history'),
+    # Dropdown for assigning employees (paper checkers, faculty, staff)
+    path('attendance/employees/dropdown/', EmployeeDropdownView.as_view(), name='employee-dropdown'),
 ]
 
