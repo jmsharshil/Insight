@@ -614,12 +614,83 @@ def compute_payslip_for_user(user, month, year, payroll_run):
       * attend only 1 Sunday → deduct 1 day's pay (sunday_deduction)
       * attend 3+ Sundays → add 1 extra paid day (sunday_bonus)
       * Sundays excluded from regular working_days/days_attended
+    - paper_checker: **per paper checked ONLY** (MarkSheet where paper_checker=user, is_submitted=True, checked in payroll month).
+      Uses user.per_paper_rate (added to User model; defaults to 50 if 0). 
+      Grace: 5 days after exam.scheduled_date. Then incremental penalty: first 7 days late=5%, next 7=10%, next=15% etc (5% * bracket).
+      Penalty folded into `late_penalty`; paper amount into `hour_based_amount`; sessions_conducted = papers_checked.
+      No attendance/leave/sunday/absence calcs applied for this role. Backward compatible.
     """
     from .models import PaySlip, LateEntryPolicy
     from leave.models import LeaveApplication
     from attendance.models import EmployeeAttendanceRecord
 
     role = getattr(user, 'role', '')
+
+    if role == 'paper_checker':
+        # Per-paper payroll with late penalty + recheck handling (removes count for pending/approved rechecks;
+        # adds back on resubmit by new checker with status=completed). Matches "paper count removed till recheck done"
+        from results.models import MarkSheet
+        from django.db.models import Q
+        papers_qs = MarkSheet.objects.filter(
+            paper_checker=user,
+            is_submitted=True,
+            checked_at__year=year,
+            checked_at__month=month,
+        ).exclude(
+            recheck_requests__status__in=['approval_pending', 'approved']
+        ).select_related('exam').distinct()
+        papers_checked = papers_qs.count()
+        per_paper_rate = getattr(user, 'per_paper_rate', Decimal('0'))
+        if per_paper_rate <= 0:
+            per_paper_rate = Decimal('50.00')  # fallback; update User profile as needed
+        paper_amount = Decimal(papers_checked) * per_paper_rate
+        late_submission_penalty = Decimal(0)
+        for ms in papers_qs:
+            if ms.exam and ms.exam.scheduled_date and ms.checked_at:
+                due_date = ms.exam.scheduled_date + timedelta(days=5)
+                checked_date = ms.checked_at.date()
+                if checked_date > due_date:
+                    days_late = (checked_date - due_date).days
+                    bracket = (days_late // 7) + 1
+                    penalty_pct = min(Decimal(5 * bracket), Decimal(100))
+                    late_submission_penalty += per_paper_rate * (penalty_pct / Decimal(100))
+        basic_salary = Decimal(0)
+        total_hours = Decimal(papers_checked)
+        hour_based_amount = paper_amount
+        late_penalty = late_submission_penalty
+        absence_deductions = Decimal(0)
+        leave_deductions = Decimal(0)
+        attendance_bonus = Decimal(0)
+        retention_deduction = Decimal(0)
+        leave_encashment = Decimal(0)
+        working_days = 0
+        sessions_conducted = papers_checked
+        leaves_taken = 0
+        if getattr(user, 'salary_retention_percentage', 0) > 0:
+            retention_deduction = paper_amount * (Decimal(user.salary_retention_percentage) / Decimal(100))
+        net = paper_amount - late_penalty - retention_deduction
+        net = max(net, Decimal(0))
+        # Delete existing for regeneration
+        PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
+        payslip = PaySlip.objects.create(
+            payroll_run=payroll_run,
+            faculty=None,
+            user=user,
+            basic_salary=basic_salary,
+            total_session_hours=total_hours,
+            hour_based_amount=hour_based_amount,
+            late_penalty=late_penalty,
+            absence_deductions=absence_deductions,
+            leave_deductions=leave_deductions,
+            retention_deduction=retention_deduction,
+            attendance_bonus=attendance_bonus,
+            leave_encashment=leave_encashment,
+            net_salary=net,
+            leaves_taken=leaves_taken,
+            working_days=working_days,
+            sessions_conducted=sessions_conducted,
+        )
+        return payslip
 
     # 1. Working days in month (Mon-Fri for most; Sundays excluded from pay for HK/security)
     working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)

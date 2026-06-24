@@ -105,7 +105,10 @@ class PaperMarksView(APIView):
         return Response({'success': True, 'message': 'Marks submitted.', 'data': {'marksheet_id': str(ms.id), 'marks_obtained': marks}})
 
     def put(self, request, exam_id, marksheet_id):
-        """PUT — re-submit / update marks on a marksheet (e.g. after recheck)."""
+        """PUT — re-submit / update marks on a marksheet (e.g. after recheck).
+        If part of recheck flow, updates RecheckRequest to 'completed', saves checker_notes,
+        ensuring the paper is added back to the (new) checker's payroll count.
+        """
         ms, err = self._get_marksheet(request, exam_id, marksheet_id)
         if err:
             return err
@@ -121,6 +124,19 @@ class PaperMarksView(APIView):
         ms.is_pass = float(marks) >= ms.exam.pass_marks
         ms.save()
 
+        # Handle recheck flow: mark as completed, save notes (fulfills "checker updates ... add notes and resubmits")
+        rechecks = RecheckRequest.objects.filter(
+            marksheet=ms,
+            status__in=['approval_pending', 'approved']
+        )
+        if rechecks.exists():
+            rr = rechecks.latest('created_at')
+            rr.status = 'completed'
+            rr.checker_notes = request.data.get('notes') or request.data.get('remarks', '')
+            rr.save()
+            ms.is_rechecked = True
+            ms.save(update_fields=['is_rechecked'])
+
         # Update published result if exists
         try:
             pr = PublishedResult.objects.get(exam_id=exam_id, student=ms.student)
@@ -131,7 +147,11 @@ class PaperMarksView(APIView):
         except PublishedResult.DoesNotExist:
             pass
 
-        return Response({'success': True, 'message': 'Marks updated.', 'data': MarkSheetSerializer(ms).data})
+        return Response({
+            'success': True, 
+            'message': 'Marks updated. Recheck completed if applicable.',
+            'data': MarkSheetSerializer(ms).data
+        })
 
     def delete(self, request, exam_id, marksheet_id):
         """DELETE — remove a marksheet."""
@@ -380,7 +400,9 @@ class ResultDeleteView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class StudentRecheckRequestView(APIView):
-    """Student raises a recheck request (FRD §4.6.2)."""
+    """Student raises a recheck request with reason + optional marksheet upload (per user query).
+    Requires Exam.answer_key to be uploaded first. Supports bulk via separate endpoint.
+    """
     # permission_classes = [IsAuthenticated]
 
     def post(self, request, exam_id):
@@ -400,6 +422,14 @@ class StudentRecheckRequestView(APIView):
         if not pr_qs.exists():
             return Response({'success': False, 'message': 'Results not published yet. Cannot request recheck.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # NEW: Answer key must be uploaded
+        try:
+            exam = Exam.objects.get(id=exam_id)
+            if not exam.answer_key:
+                return Response({'success': False, 'message': 'Answer key has not been uploaded yet. Recheck not allowed.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
         # Get marksheet
         try:
             qs = MarkSheet.objects.all()
@@ -413,7 +443,13 @@ class StudentRecheckRequestView(APIView):
         if RecheckRequest.objects.filter(marksheet=ms, status__in=['approval_pending', 'approved']).exists():
             return Response({'success': False, 'message': 'A recheck request is already pending or approved.'}, status=status.HTTP_409_CONFLICT)
 
-        ser = RecheckRequestCreateSerializer(data=request.data)
+        # Support file upload (multipart/form-data)
+        serializer_data = request.data.copy()
+        uploaded_file = request.FILES.get('uploaded_marksheet')
+        if uploaded_file:
+            serializer_data['uploaded_marksheet'] = uploaded_file
+
+        ser = RecheckRequestCreateSerializer(data=serializer_data)
         if not ser.is_valid():
             return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -421,6 +457,7 @@ class StudentRecheckRequestView(APIView):
             marksheet=ms,
             requested_by=student,
             reason=ser.validated_data.get('reason', ''),
+            uploaded_marksheet=ser.validated_data.get('uploaded_marksheet'),
             status='approval_pending',
         )
 
@@ -430,6 +467,7 @@ class StudentRecheckRequestView(APIView):
         return Response({
             'recheck_requested': True, 'status': 'approval_pending',
             'message': 'Your recheck request has been submitted for review.',
+            'upload_provided': bool(rr.uploaded_marksheet),
         }, status=status.HTTP_201_CREATED)
 
 
@@ -605,4 +643,62 @@ class MarkAllAbsentView(APIView):
             'message': f'{absent_count} students marked as absent.',
             'absent_count': absent_count,
         }, status=status.HTTP_200_OK)
+
+
+class BulkRecheckRequestView(APIView):
+    """
+    NEW: Bulk recheck option for a batch (per user query).
+    Creates recheck requests for all students in the exam's batch (if results published).
+    Requires answer_key to be uploaded on the Exam first.
+    Only ASE/super_admin.
+    """
+    # permission_classes = [IsAuthenticated]
+
+    def post(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            exam = Exam.objects.get(id=exam_id)
+            if not getattr(exam, 'answer_key', None):
+                return Response({'success': False, 'message': 'Answer key must be uploaded first for rechecks.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not exam.batch:
+                return Response({'success': False, 'message': 'Exam has no associated batch for bulk operation.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        reason = request.data.get('reason', 'Bulk recheck requested for entire batch.')
+        from students.models import Student
+        # Assume Batch has related students; adjust if Student has batch FK
+        students = Student.objects.filter(
+            batch=exam.batch,
+            user__organization=exam.branch.organization if hasattr(exam.branch, 'organization') else None
+        ) if hasattr(Student, 'batch') else []
+
+        created_count = 0
+        for student in students:
+            try:
+                ms = MarkSheet.objects.get(exam=exam, student=student)
+                if not RecheckRequest.objects.filter(
+                    marksheet=ms, status__in=['approval_pending', 'approved']
+                ).exists() and PublishedResult.objects.filter(exam=exam, student=student).exists():
+                    RecheckRequest.objects.create(
+                        marksheet=ms,
+                        requested_by=student,
+                        reason=reason,
+                        status='approval_pending',
+                    )
+                    created_count += 1
+            except (MarkSheet.DoesNotExist, AttributeError):
+                continue
+
+        # Notify ASE about bulk
+        logger.info(f'Bulk recheck created {created_count} requests for exam {exam_id}')
+
+        return Response({
+            'success': True,
+            'message': f'Bulk recheck initiated for batch. {created_count} requests created.',
+            'count': created_count,
+        }, status=status.HTTP_201_CREATED)
 

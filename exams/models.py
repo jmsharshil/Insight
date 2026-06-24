@@ -57,6 +57,14 @@ class Exam(models.Model):
     # v2 NEW: "instant" = auto-publish MCQ results on submit; "manual" = admin triggers
     result_release_mode = models.CharField(max_length=20, choices=RESULT_RELEASE_CHOICES, default='instant')
 
+    # Answer key upload (required for recheck flow per user query)
+    answer_key = models.FileField(
+        upload_to='answer_keys/',
+        null=True,
+        blank=True,
+        help_text='Uploaded answer key (PDF/image). Must be present before allowing recheck requests or bulk recheck.'
+    )
+
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='created_exams')
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

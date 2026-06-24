@@ -56,25 +56,23 @@ class PublishedResultSerializer(serializers.ModelSerializer):
             return ''
 
 
-# v2 NEW: Recheck Request serializers (FRD §4.6.2)
-
+# v2 NEW: Recheck Request serializers (FRD §4.6.2 + upload/bulk/answerkey support)
 class RecheckRequestSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     reviewed_by_name = serializers.SerializerMethodField()
     new_checker_name = serializers.SerializerMethodField()
-
-
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    uploaded_marksheet_url = serializers.SerializerMethodField()
 
     class Meta:
         model = RecheckRequest
         fields = [
             'id', 'marksheet', 'requested_by', 'student_name', 'roll_number',
-            'reason', 'status', 'status_display', 'reviewed_by', 'reviewed_by_name',
+            'reason', 'uploaded_marksheet', 'uploaded_marksheet_url', 'checker_notes',
+            'status', 'status_display', 'reviewed_by', 'reviewed_by_name',
             'reviewed_at', 'new_checker', 'new_checker_name', 'created_at',
-         'status_display']
+        ]
 
     def get_student_name(self, obj):
         try:
@@ -94,14 +92,19 @@ class RecheckRequestSerializer(serializers.ModelSerializer):
     def get_new_checker_name(self, obj):
         return obj.new_checker.name if obj.new_checker else None
 
+    def get_uploaded_marksheet_url(self, obj):
+        if obj.uploaded_marksheet:
+            return obj.uploaded_marksheet.url
+        return None
 
-class RecheckRequestCreateSerializer(serializers.Serializer):
-    reason = serializers.CharField(
-        required=True,
-        allow_blank=False,
-        min_length=10,
-        help_text="Reason for requesting recheck (minimum 10 characters)."
-    )
+
+class RecheckRequestCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecheckRequest
+        fields = ['reason', 'uploaded_marksheet']
+        extra_kwargs = {
+            'reason': {'required': True, 'min_length': 10},
+        }
 
 
 class RecheckRequestActionSerializer(serializers.Serializer):

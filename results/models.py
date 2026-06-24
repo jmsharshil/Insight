@@ -32,14 +32,25 @@ class MarkSheet(models.Model):
 
 class RecheckRequest(models.Model):
     """
-    FRD §4.6.2: Student raises a recheck request.
-    Flow: student submits → status=pending → ASE reviews → assigns new checker
-          → checker grades → result published.
+    Extended per user query: Student can request recheck with reason + upload marksheet/answer sheet.
+    Requires admin (ASE) approval; if approved, reassigns to (new) paper_checker.
+    Checker can update marks/notes and resubmit (sets status=completed).
+    On recheck pending/approved: original paper count removed from payroll (via query filter).
+    On resubmit: added to new checker's payment.
+    Supports bulk recheck requests for a batch (via dedicated view/endpoint).
+    Answer key must be uploaded to Exam before rechecks allowed.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     marksheet = models.ForeignKey(MarkSheet, on_delete=models.CASCADE, related_name='recheck_requests')
     requested_by = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='recheck_requests')
     reason = models.TextField(blank=True)
+    uploaded_marksheet = models.FileField(
+        upload_to='recheck_uploads/',
+        null=True,
+        blank=True,
+        help_text="Student-uploaded copy of marksheet/answer sheet for re-evaluation."
+    )
+    checker_notes = models.TextField(blank=True, help_text="Notes from paper checker on recheck/resubmit.")
     status = models.CharField(max_length=20, choices=RECHECK_STATUS_CHOICES, default='approval_pending')
 
     # ASE who approves/rejects
