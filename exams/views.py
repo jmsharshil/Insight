@@ -255,11 +255,6 @@ class QuestionView(APIView):
         if not serializer.is_valid():
             return Response({'success': False, 'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        total_new_marks = sum(item['marks'] for item in serializer.validated_data)
-        current_marks = sum(q.marks for q in Question.objects.filter(exam=exam))
-        if current_marks + total_new_marks > exam.total_marks:
-            pass # warn, but spec says "Warn if sum... > total_marks", we will just accept it for now or return a warning in response.
-
         with transaction.atomic():
             created_qs = []
             for q_data in serializer.validated_data:
@@ -274,8 +269,15 @@ class QuestionView(APIView):
                         is_correct=c_data['is_correct']
                     )
                 created_qs.append(q)
+            # Signals will auto-trigger, but explicitly recalculate once at end for efficiency
+            exam.recalculate_total_marks()
         
-        return Response({'success': True, 'message': 'Questions added', 'details': {}}, status=status.HTTP_201_CREATED)
+        return Response({
+            'success': True, 
+            'message': 'Questions added. total_marks auto-updated.',
+            'total_marks': exam.total_marks,
+            'questions_count': len(created_qs)
+        }, status=status.HTTP_201_CREATED)
 
 
 class QuestionDetailView(APIView):
@@ -309,14 +311,20 @@ class QuestionDetailView(APIView):
             if field in request.data:
                 setattr(q, field, request.data[field])
         q.save()
-        return Response({'success': True, 'message': 'Question updated.', 'data': QuestionSerializer(q).data})
+        exam.recalculate_total_marks()  # auto-update total_marks via signal or explicit
+        return Response({'success': True, 'message': 'Question updated.', 'data': QuestionSerializer(q).data, 'total_marks': exam.total_marks})
 
     def delete(self, request, exam_id, question_id):
         exam, q, err = self._get_question(request, exam_id, question_id)
         if err:
             return err
         q.delete()
-        return Response({'success': True, 'message': 'Question deleted.'}, status=status.HTTP_200_OK)
+        exam.recalculate_total_marks()  # trigger via signal or explicit after delete
+        return Response({
+            'success': True, 
+            'message': 'Question deleted. total_marks auto-updated.',
+            'total_marks': exam.total_marks
+        }, status=status.HTTP_200_OK)
 
 
 class SeatingView(APIView):

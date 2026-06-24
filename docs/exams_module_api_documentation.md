@@ -6,11 +6,22 @@ This document provides a comprehensive list of all APIs available in the `exams`
 
 ## 1. Exam Creation & Management
 
+**NEW: Automatic `total_marks` Calculation**  
+`Exam.total_marks` is now **auto-derived** as `SUM(Question.marks)` across all linked questions (MCQ, subjective, true_false all support per-question `marks`).  
+- `ExamCreateSerializer` treats `total_marks` as effectively read-only on input (initial value accepted for validation but overridden by questions).  
+- `pass_marks <= total_marks` validation is retained.  
+- On any Question create/update/delete (via dedicated endpoints), `exam.recalculate_total_marks()` runs atomically to sync the value (removes manual drift).  
+- List/Detail/Start-Exam responses now always return up-to-date computed `total_marks`.  
+- `questions_count` is available in list views.  
+- Existing exams are unaffected until next question mutation.
+
 Exams are created automatically through the **Timetable** module when scheduling class tests, prelims, or custom sessions.
 
 ### 1.1 Create Exam via Timetable Slot
 **Endpoint:** `POST /api/v1/timetable/`
 When scheduling a session, you can pass `exam_data` to automatically create an `Exam` record linked to the timetable slot. This is mandatory for `class_test` and `prelim` session types.
+
+**Note:** `total_marks` in `exam_data` is accepted for initial validation but will be recalculated once questions are added.
 
 **POST Request Body Example:**
 ```json
@@ -28,7 +39,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
     "exam_data": {
         "title": "Company Law — Class Test",
         "exam_type": "online",
-        "total_marks": 50,
+        "total_marks": 50,  // initial value; auto-updated from questions
         "pass_marks": 18,
         "instructions": "Attempt all questions. Time: 90 minutes.",
         "result_release_mode": "manual"
@@ -49,6 +60,8 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 ---
 
 ## 2. Questions Management
+
+**Note:** Adding, updating, or deleting questions automatically triggers `Exam.recalculate_total_marks()` (see section 1). This ensures `total_marks` always equals the sum of all `Question.marks`. Questions support independent `marks` values (no longer forced to uniform value).
 
 ### List & Add Questions
 **Endpoint:** `/api/v1/exams/{exam_id}/questions/`
@@ -72,6 +85,12 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
                 "is_correct": false
             }
         ]
+    },
+    {
+        "question_text": "True or False: ...",
+        "question_type": "true_false",
+        "marks": 2,
+        "order": 2
     }
 ]
 ```
@@ -80,14 +99,17 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 ```json
 {
     "success": true,
-    "message": "Questions added",
-    "details": {}
+    "message": "Questions added. total_marks auto-updated.",
+    "total_marks": 50,
+    "questions_count": 2
 }
 ```
 
 ### Update & Delete Question
 **Endpoint:** `/api/v1/exams/{exam_id}/questions/{question_id}/`
 **Methods:** `PATCH`, `DELETE`
+
+**Note:** PATCH (including on `marks`) or DELETE will trigger recalculation of parent `Exam.total_marks` (via Django signals + explicit call). Responses now include the updated `total_marks`.
 
 ---
 

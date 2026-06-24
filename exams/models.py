@@ -82,7 +82,7 @@ class Exam(models.Model):
     def recalculate_total_marks(self):
         """Auto-calculate and update total_marks based on sum of all associated questions' marks.
         Questions (MCQ, subjective, true_false) can have independent/varying marks.
-        Called automatically via signals on Question create/update/delete.
+        Called automatically from exams/signals.py receivers on Question create/update/delete.
         """
         from django.db.models import Sum
         total = self.questions.aggregate(Sum('marks'))['marks__sum'] or 0

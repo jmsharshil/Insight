@@ -62,6 +62,8 @@ class QuestionInputSerializer(serializers.Serializer):
                 raise serializers.ValidationError("MCQ/True-False questions require at least one choice.")
             if not any(c['is_correct'] for c in choices):
                 raise serializers.ValidationError("At least one choice must be marked correct.")
+        # marks are summed automatically at Exam level via signals/recalculate_total_marks();
+        # no strict upper-bound against exam.total_marks (removed per updated spec)
         return data
 
 
@@ -179,6 +181,8 @@ class ExamListSerializer(serializers.ModelSerializer):
 
 
 class ExamCreateSerializer(serializers.ModelSerializer):
+    total_marks = serializers.IntegerField(read_only=True, required=False)
+
     class Meta:
         model = Exam
         fields = [
@@ -199,7 +203,10 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             is_new_date = not self.instance or self.instance.scheduled_date != data['scheduled_date']
             if is_new_date and data['scheduled_date'] < timezone.now().date():
                 raise serializers.ValidationError({"scheduled_date": "Cannot schedule in the past."})
-        if data.get('pass_marks', 0) > data.get('total_marks', 0):
+        # pass_marks <= total_marks retained (but total_marks may be 0 until questions added;
+        # if total_marks==0 we skip strict check as it will be auto-computed later)
+        total_m = data.get('total_marks', 0)
+        if total_m > 0 and data.get('pass_marks', 0) > total_m:
             raise serializers.ValidationError({"pass_marks": "Cannot exceed total marks."})
         if data.get('start_time') and data.get('end_time') and data['end_time'] <= data['start_time']:
             raise serializers.ValidationError({"end_time": "Must be after start time."})
