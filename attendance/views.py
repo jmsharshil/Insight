@@ -949,7 +949,7 @@ class EmployeeAttendanceListCreateView(APIView):
             emp_user = None
             try:
                 # Primary: lookup by User ID (UUID or PK)
-                emp_user = User.objects.get(id=raw_id, is_active=True)
+                emp_user = User.objects.get(id=raw_id)
             except (User.DoesNotExist, ValueError, TypeError):
                 # Fallback 1: FacultyProfile lookup (common for employees)
                 try:
@@ -966,7 +966,7 @@ class EmployeeAttendanceListCreateView(APIView):
                     if not fp and isinstance(raw_id, (str, int)):
                         # Try if raw_id was actually a User ID for the profile
                         fp = FacultyProfile.objects.filter(user_id=raw_id).select_related('user').first()
-                    if fp and fp.user and fp.user.is_active:
+                    if fp and fp.user:
                         emp_user = fp.user
                 except Exception as fallback_err:
                     logger.warning(f"FacultyProfile fallback failed for ID {raw_id}: {fallback_err}")
