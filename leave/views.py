@@ -26,7 +26,7 @@ from .utils import calculate_leave_days, check_leave_overlap, check_late_entry_t
 logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
-LEAVE_APPLY_EXCLUDE = ['accountant']
+LEAVE_APPLY_EXCLUDE = ['accountant', 'house_keeping', 'security']
 LEAVE_APPROVE_ROLES = ['branch_manager', 'admin_senior_executive']
 POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
 LATE_ENTRY_ADMIN = ['branch_manager', 'admin_senior_executive']
@@ -127,6 +127,15 @@ class LeaveListCreateView(APIView):
         d = ser.validated_data
         today = timezone.now().date()
 
+        # Role-specific restrictions (FRD §4.9.3): tele_caller/counsellor cannot apply in peak months
+        if role in ['tele_caller', 'counsellor']:
+            month = d['from_date'].month
+            if month in [3, 4, 5, 6]:
+                return Response({
+                    'success': False,
+                    'message': 'Leave applications blocked during peak admission months (Mar-Jun).'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         # Past date check (except sick leave or students)
         if d['leave_type'] != 'sick' and d['from_date'] < today and role not in ['student', 'parents']:
             return Response({'success': False, 'message': 'Leave date cannot be in the past.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -174,7 +183,10 @@ class LeaveListCreateView(APIView):
 
         # Calculate total days
         sandwich = policy.sandwich_rule if policy else False
-        total_days = calculate_leave_days(d['from_date'], d['to_date'], d['is_half_day'], sandwich, branch=branch_obj)
+        total_days = calculate_leave_days(
+            d['from_date'], d['to_date'], d.get('is_half_day', False), sandwich,
+            branch=branch_obj, user_role=role
+        )
 
         if total_days <= 0:
             return Response({

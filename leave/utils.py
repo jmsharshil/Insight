@@ -14,16 +14,17 @@ def notify(recipient_user_id, title, body, metadata=None):
 
 
 def calculate_leave_days(from_date, to_date, is_half_day=False,
-                         sandwich_rule=False, branch=None):
+                         sandwich_rule=False, branch=None, user_role=None):
     """
-    FRD §4.9.3 — Sandwich Leave Policy.
-    - If is_half_day: return 0.5
-    - If sandwich_rule=True:
-        -> Count ALL days between from_date and to_date (including weekends)
-        -> ALSO include public holidays from PublicHoliday table for this branch
-    - If sandwich_rule=False:
-        -> Count only working days (Mon-Fri, excluding public holidays)
-    - Return: Decimal value (supports 0.5 increments)
+    FRD §4.9.3 — Sandwich Leave + role rules (Sunday=1.5 for select roles, regular=1.0).
+    - is_half_day: always 0.5
+    - sandwich_rule=True: count *every* day (weekends + public holidays) as 1.0
+    - sandwich_rule=False:
+      * Public holidays: skipped
+      * Sunday (weekday=6): 1.5 for branch_manager/admin_senior_executive/
+        admin_executive/front_desk; 0 for others
+      * All other days: 1.0
+    - Uses timedelta for date iteration; returns Decimal.
     """
     if is_half_day:
         return Decimal('0.5')
@@ -40,17 +41,29 @@ def calculate_leave_days(from_date, to_date, is_half_day=False,
         ).values_list('date', flat=True)
         public_holiday_dates = set(holidays)
 
+    SPECIAL_SUNDAY_ROLES = {'branch_manager', 'admin_senior_executive',
+                            'admin_executive', 'front_desk'}
+
     days = Decimal(0)
     current = from_date
     while current <= to_date:
         weekday = current.weekday()
+        is_holiday = current in public_holiday_dates
+
         if sandwich_rule:
-            # Sandwich rule: count ALL days (weekdays, weekends, and public holidays)
+            # Sandwich: count *all* days (incl. weekends + public holidays) as 1.0
             days += Decimal(1)
+        elif is_holiday:
+            # Normal mode: skip public holidays
+            pass
+        elif weekday == 6:  # Sunday
+            if user_role in SPECIAL_SUNDAY_ROLES:
+                days += Decimal('1.5')  # per correction: Sunday = 1.5 for these roles
+            # else: ignore Sunday for other roles
         else:
-            # Normal: count only working days (exclude Sundays and public holidays)
-            if weekday != 6 and current not in public_holiday_dates:
-                days += Decimal(1)
+            # Regular working day (Mon-Sat, non-holiday) = 1.0
+            days += Decimal(1)
+
         current += timedelta(days=1)
     return days
 
@@ -80,6 +93,7 @@ def initialize_leave_balances_for_year(branch, year):
         'faculty', 'branch_manager', 'admin_senior_executive', 'admin_executive',
         'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
         'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
+        # house_keeping/security have no leave option (special Sunday attendance rules instead)
     ]
     staff = User.objects.filter(role__in=staff_roles, is_active=True)
     policies = LeavePolicy.objects.filter(branch=branch, is_active=True)

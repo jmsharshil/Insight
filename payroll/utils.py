@@ -610,12 +610,18 @@ def compute_payslip_for_user(user, month, year, payroll_run):
       - late penalty (from LateEntryRecord)
       - retention deduction
       - attendance bonus
+    - house_keeping/security: NO leave option; instead 2 Sundays required/month:
+      * attend only 1 Sunday → deduct 1 day's pay (sunday_deduction)
+      * attend 3+ Sundays → add 1 extra paid day (sunday_bonus)
+      * Sundays excluded from regular working_days/days_attended
     """
     from .models import PaySlip, LateEntryPolicy
     from leave.models import LeaveApplication
     from attendance.models import EmployeeAttendanceRecord
 
-    # 1. Working days in month
+    role = getattr(user, 'role', '')
+
+    # 1. Working days in month (Mon-Fri for most; Sundays excluded from pay for HK/security)
     working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
                        if calendar.weekday(year, month, d) < 5)
 
@@ -630,13 +636,37 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     basic_salary = user.salary if user.employment_type == 'full_time' else Decimal(0)
 
     # 3. Attendance-based hours (from EmployeeAttendanceRecord)
-    attendance_records = EmployeeAttendanceRecord.objects.filter(
+    # Exclude Sunday for house_keeping/security per requirement
+    qs = EmployeeAttendanceRecord.objects.filter(
         user=user,
         date__year=year,
         date__month=month,
         status__in=['present', 'late', 'half_day'],
     )
+    if role in ['house_keeping', 'security']:
+        qs = qs.exclude(date__week_day=1)  # Django week_day: 1=Sunday
+    attendance_records = qs
     days_attended = attendance_records.count()
+
+    # Special Sunday rules for housekeeping/security (2 Sundays required per month)
+    # - If only 1 Sunday attended: deduct 1 day's pay (cut 1 "leave")
+    # - If 3+ Sundays attended: add 1 extra paid day to payslip
+    sunday_deduction = Decimal(0)
+    sunday_bonus = Decimal(0)
+    if role in ['house_keeping', 'security']:
+        sunday_qs = EmployeeAttendanceRecord.objects.filter(
+            user=user,
+            date__year=year,
+            date__month=month,
+            date__week_day=1,  # Sunday
+            status__in=['present', 'late', 'half_day'],
+        )
+        sunday_attended = sunday_qs.count()
+        if sunday_attended < 2:
+            missing = 2 - sunday_attended
+            sunday_deduction = Decimal(missing) * daily_rate
+        elif sunday_attended >= 3:
+            sunday_bonus = daily_rate  # add one day
 
     # Also count FacultyQRScanLog if user has a faculty profile (backward compat)
     total_hours = Decimal(0)
@@ -692,6 +722,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     absent_days = Decimal(max(0, working_days - days_attended))
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
     absence_deductions = absent_days * absence_deduction_rate
+    absence_deductions += sunday_deduction  # include Sunday shortfall deduction for HK/security
 
     # 7. Attendance bonus
     attendance_bonus = Decimal(0)
@@ -699,6 +730,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         attendance_percentage = (Decimal(days_attended) / Decimal(working_days)) * 100
         if attendance_percentage > Decimal(80):
             attendance_bonus = daily_rate
+    attendance_bonus += sunday_bonus  # extra day bonus if 3+ Sundays attended
 
     # 8. Retention deduction
     retention_deduction = Decimal(0)
