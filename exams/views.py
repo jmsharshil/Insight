@@ -84,8 +84,12 @@ class ExamListCreateView(APIView):
         if role == 'student':
             try:
                 from students.models import Student
+                from batches.models import BatchStudent
                 sp = Student.objects.get(user=user)
-                qs = qs.filter(batch_id=sp.batch_id, status__in=['scheduled', 'ongoing'])
+                enrolled_batch_ids = list(BatchStudent.objects.filter(student=sp).values_list('batch_id', flat=True))
+                if sp.batch_id and sp.batch_id not in enrolled_batch_ids:
+                    enrolled_batch_ids.append(sp.batch_id)
+                qs = qs.filter(batch_id__in=enrolled_batch_ids)
             except Exception:
                 qs = qs.none()
         elif role == 'faculty':
@@ -94,7 +98,11 @@ class ExamListCreateView(APIView):
                 from faculty.models import FacultyProfile
                 fp = FacultyProfile.objects.only('id').get(user=user)
                 faculty_id = fp.id
-                qs = qs.filter(Q(created_by=user) | Q(faculty_id=faculty_id))
+                qs = qs.filter(
+                    Q(created_by=user) | 
+                    Q(faculty_id=faculty_id) |
+                    Q(batch__batch_faculty__faculty_id=faculty_id)
+                ).distinct()
             except Exception:
                 # Fallback: just show what they created
                 qs = qs.filter(created_by=user)
@@ -104,7 +112,7 @@ class ExamListCreateView(APIView):
                 qs = qs.filter(branch_id=bid)
         elif role == 'paper_checker':
             qs = qs.filter(marksheets__paper_checker=user).distinct()
-        elif role not in ['super_admin', 'branch_manager']:
+        elif role != 'super_admin':
             bid = _user_branch_id(user)
             if bid:
                 qs = qs.filter(branch_id=bid)
@@ -445,7 +453,11 @@ class ExamStartView(APIView):
 
         try:
             from students.models import Student
+            from batches.models import BatchStudent
             student = Student.objects.get(user=request.user)
+            enrolled_batch_ids = list(BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True))
+            if student.batch_id and student.batch_id not in enrolled_batch_ids:
+                enrolled_batch_ids.append(student.batch_id)
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -457,7 +469,7 @@ class ExamStartView(APIView):
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if student.batch_id != exam.batch_id:
+        if exam.batch_id not in enrolled_batch_ids:
             return Response({'success': False, 'message': 'Not enrolled in this exam batch'}, status=status.HTTP_403_FORBIDDEN)
         # if exam.status != 'scheduled':
         if exam.status not in ['scheduled', 'ongoing']:
