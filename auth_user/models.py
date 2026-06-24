@@ -26,6 +26,9 @@ class Organization(models.Model):
         return self.name
 
 class UserManager(BaseUserManager):
+    def get_by_natural_key(self, username):
+        return self.get(**{self.model.USERNAME_FIELD: username})
+
     def create_user(self,username,email,password=None,role='student',**extra_fields):
         if not email:
             raise ValueError("Email is required")
@@ -104,6 +107,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="Per-paper rate for paper_checker role (new FRD). Payment = papers_checked * rate - late_submission_penalties (5 days grace after exam.scheduled_date; then +5% per 7-day bracket)."
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    objects = UserManager()
 
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['email']
