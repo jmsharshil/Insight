@@ -858,3 +858,228 @@ class AttendanceAlertView(APIView):
 #                 pass
 # 
 #         return Response({'success': True, 'message': 'Violation deleted.'}, status=status.HTTP_200_OK)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Employee Attendance APIs — check-in/check-out for ALL staff (non-student) users
+# POST   /api/v1/attendance/employee/           — bulk mark (admin)
+# GET    /api/v1/attendance/employee/           — list (admin sees branch; staff sees own)
+# POST   /api/v1/attendance/employee/scan/      — self check-in / check-out
+# GET    /api/v1/attendance/employee/history/    — personal attendance history
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from .models import EmployeeAttendanceRecord
+from .serializers import (
+    EmployeeAttendanceRecordSerializer,
+    EmployeeAttendanceCreateSerializer,
+    EmployeeCheckInOutSerializer,
+)
+
+EMPLOYEE_ATTENDANCE_ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']
+
+
+class EmployeeAttendanceListCreateView(APIView):
+    """
+    GET  — list employee attendance records (admin: by branch; staff: own)
+    POST — bulk mark attendance for employees (admin only)
+    """
+
+    def get(self, request):
+        role = _user_role(request.user)
+
+        if role in EMPLOYEE_ATTENDANCE_ADMIN_ROLES:
+            qs = EmployeeAttendanceRecord.objects.select_related('user', 'branch', 'marked_by').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            bid = _user_branch_id(request.user)
+            if role != 'super_admin' and bid:
+                qs = qs.filter(branch_id=bid)
+        else:
+            # Non-admin staff see only their own records
+            qs = EmployeeAttendanceRecord.objects.filter(user=request.user).select_related('branch', 'marked_by')
+
+        # Optional filters
+        date = request.GET.get('date')
+        from_date = request.GET.get('from_date')
+        to_date = request.GET.get('to_date')
+        status_filter = request.GET.get('status')
+        user_id = request.GET.get('user_id')
+
+        if date:
+            qs = qs.filter(date=date)
+        if from_date:
+            qs = qs.filter(date__gte=from_date)
+        if to_date:
+            qs = qs.filter(date__lte=to_date)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        if user_id and role in EMPLOYEE_ATTENDANCE_ADMIN_ROLES:
+            qs = qs.filter(user_id=user_id)
+
+        qs = apply_filters(self, request, qs)
+        return paginate_queryset(qs, request, EmployeeAttendanceRecordSerializer)
+
+    def post(self, request):
+        """Bulk mark attendance for employees (admin only)."""
+        role = _user_role(request.user)
+        if role not in EMPLOYEE_ATTENDANCE_ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        ser = EmployeeAttendanceCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        d = ser.validated_data
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        created_count = 0
+        updated_count = 0
+        errors = []
+
+        for rec in d['records']:
+            user_id = rec.get('user_id')
+            rec_status = rec.get('status', 'present')
+
+            if not user_id:
+                errors.append({'user_id': None, 'error': 'user_id is required.'})
+                continue
+
+            try:
+                emp_user = User.objects.get(id=user_id, is_active=True)
+            except User.DoesNotExist:
+                errors.append({'user_id': str(user_id), 'error': 'User not found.'})
+                continue
+
+            record, created = EmployeeAttendanceRecord.objects.update_or_create(
+                user=emp_user, date=d['date'],
+                defaults={
+                    'branch_id': d['branch_id'],
+                    'status': rec_status,
+                    'marked_by': request.user,
+                },
+            )
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
+
+        return Response({
+            'success': True,
+            'message': f'Created {created_count}, updated {updated_count} records.',
+            'errors': errors,
+        }, status=status.HTTP_201_CREATED)
+
+
+class EmployeeCheckInOutView(APIView):
+    """
+    POST /api/v1/attendance/employee/scan/
+    Self-service check-in / check-out for the authenticated employee.
+    Creates or updates the EmployeeAttendanceRecord for today.
+    """
+
+    def post(self, request):
+        ser = EmployeeCheckInOutSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        scan_type = ser.validated_data['scan_type']
+        user = request.user
+        today = timezone.now().date()
+
+        bid = _user_branch_id(user)
+        if not bid:
+            return Response(
+                {'success': False, 'message': 'No branch assigned to your account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        record, created = EmployeeAttendanceRecord.objects.get_or_create(
+            user=user, date=today,
+            defaults={'branch_id': bid, 'status': 'checkout_pending'},
+        )
+
+        now = timezone.now()
+
+        if scan_type == 'check_in':
+            if record.checked_in_at and not created:
+                return Response({
+                    'success': False,
+                    'message': 'Already checked in today.',
+                    'data': EmployeeAttendanceRecordSerializer(record).data,
+                }, status=status.HTTP_409_CONFLICT)
+            record.checked_in_at = now
+            record.status = 'checkout_pending'
+            record.save(update_fields=['checked_in_at', 'status'])
+        else:  # check_out
+            if not record.checked_in_at:
+                return Response({
+                    'success': False,
+                    'message': 'Must check in first before checking out.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if record.checked_out_at:
+                return Response({
+                    'success': False,
+                    'message': 'Already checked out today.',
+                    'data': EmployeeAttendanceRecordSerializer(record).data,
+                }, status=status.HTTP_409_CONFLICT)
+            record.checked_out_at = now
+            record.status = 'present'
+            record.save(update_fields=['checked_out_at', 'status'])
+
+        return Response({
+            'success': True,
+            'message': f'{scan_type.replace("_", " ").title()} recorded.',
+            'data': EmployeeAttendanceRecordSerializer(record).data,
+        })
+
+
+class EmployeeAttendanceHistoryView(APIView):
+    """
+    GET /api/v1/attendance/employee/history/
+    Personal attendance history for the authenticated employee.
+    Supports ?month=6&year=2026 for filtering.
+    """
+
+    def get(self, request):
+        user = request.user
+        qs = EmployeeAttendanceRecord.objects.filter(user=user).select_related('branch')
+
+        year = request.GET.get('year')
+        month = request.GET.get('month')
+        from_date = request.GET.get('from_date')
+        to_date = request.GET.get('to_date')
+
+        if year:
+            qs = qs.filter(date__year=year)
+        if month:
+            qs = qs.filter(date__month=month)
+        if from_date:
+            qs = qs.filter(date__gte=from_date)
+        if to_date:
+            qs = qs.filter(date__lte=to_date)
+
+        qs = qs.order_by('-date')
+
+        # Compute summary
+        total = qs.count()
+        present = qs.filter(status__in=['present', 'late']).count()
+        absent = qs.filter(status='absent').count()
+        half_day = qs.filter(status='half_day').count()
+        on_leave = qs.filter(status='on_leave').count()
+        percentage = round((present / total) * 100, 1) if total > 0 else 0
+
+        serialized = EmployeeAttendanceRecordSerializer(qs[:100], many=True).data
+
+        return Response({
+            'success': True,
+            'summary': {
+                'total_days': total,
+                'present_days': present,
+                'absent_days': absent,
+                'half_days': half_day,
+                'on_leave': on_leave,
+                'attendance_percentage': percentage,
+            },
+            'records': serialized,
+        })

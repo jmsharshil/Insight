@@ -589,3 +589,165 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         'sessions_conducted': sessions_count,
     }
 
+
+# Roles that are considered employees for payroll (not students/parents/super_admin)
+EMPLOYEE_ROLES = [
+    'branch_manager', 'admin_senior_executive', 'admin_executive',
+    'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
+    'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
+    'house_keeping', 'security',
+]
+
+
+def compute_payslip_for_user(user, month, year, payroll_run):
+    """
+    Simplified payroll computation for non-faculty employees.
+    Uses User model fields (salary, hourly_rate, employment_type) directly.
+    No session reports or chapter-based hour tracking — just:
+      - base salary / hourly attendance
+      - leave deductions (unpaid)
+      - absence deductions
+      - late penalty (from LateEntryRecord)
+      - retention deduction
+      - attendance bonus
+    """
+    from .models import PaySlip, LateEntryPolicy
+    from leave.models import LeaveApplication
+    from attendance.models import EmployeeAttendanceRecord
+
+    # 1. Working days in month
+    working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+                       if calendar.weekday(year, month, d) < 5)
+
+    # 2. Daily rate
+    if user.salary and user.salary > 0:
+        daily_rate = user.salary / Decimal(30)
+    elif user.hourly_rate and user.hourly_rate > 0:
+        daily_rate = user.hourly_rate * Decimal(8)  # 8-hour workday
+    else:
+        daily_rate = Decimal(0)
+
+    basic_salary = user.salary if user.employment_type == 'full_time' else Decimal(0)
+
+    # 3. Attendance-based hours (from EmployeeAttendanceRecord)
+    attendance_records = EmployeeAttendanceRecord.objects.filter(
+        user=user,
+        date__year=year,
+        date__month=month,
+        status__in=['present', 'late', 'half_day'],
+    )
+    days_attended = attendance_records.count()
+
+    # Also count FacultyQRScanLog if user has a faculty profile (backward compat)
+    total_hours = Decimal(0)
+    hour_based_amount = Decimal(0)
+
+    if user.employment_type != 'full_time' and user.hourly_rate:
+        # Calculate actual hours from attendance check-in/check-out
+        for rec in attendance_records:
+            if rec.checked_in_at and rec.checked_out_at:
+                diff_hours = Decimal((rec.checked_out_at - rec.checked_in_at).total_seconds()) / Decimal(3600)
+                total_hours += max(diff_hours, Decimal(0))
+        hour_based_amount = total_hours * user.hourly_rate
+
+    # 4. Leave deductions (unpaid only)
+    approved_leaves = LeaveApplication.objects.filter(
+        applied_by=user,
+        status='approved',
+        from_date__year=year,
+        from_date__month=month,
+        leave_type='unpaid',
+    )
+    leave_days = sum(l.total_days for l in approved_leaves)
+    leave_deductions = Decimal(leave_days) * daily_rate if user.employment_type == 'full_time' else Decimal(0)
+
+    # 5. Late penalty (from LateEntryRecord)
+    from leave.models import LateEntryRecord
+    late_entries = LateEntryRecord.objects.filter(
+        user=user,
+        date__year=year,
+        date__month=month,
+    )
+
+    policy = LateEntryPolicy.objects.filter(branch=user.branch, is_active=True).first() if user.branch else None
+    grace = policy.grace_period_minutes if policy else 15
+
+    late_penalty = Decimal(0)
+    if user.employment_type == 'full_time':
+        deduction_per_minute = (user.salary / Decimal(30)) / Decimal(8) / Decimal(60) if user.salary else Decimal(0)
+    else:
+        deduction_per_minute = user.hourly_rate / Decimal(60) if user.hourly_rate else Decimal(0)
+
+    if policy and policy.deduction_per_minute > 0:
+        deduction_per_minute = policy.deduction_per_minute
+
+    max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
+
+    for entry in late_entries:
+        if entry.late_minutes > grace:
+            penalty_min = entry.late_minutes - grace
+            late_penalty += min(Decimal(penalty_min) * deduction_per_minute, max_deduction)
+
+    # 6. Absence deductions
+    absent_days = Decimal(max(0, working_days - days_attended))
+    absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+    absence_deductions = absent_days * absence_deduction_rate
+
+    # 7. Attendance bonus
+    attendance_bonus = Decimal(0)
+    if working_days > 0:
+        attendance_percentage = (Decimal(days_attended) / Decimal(working_days)) * 100
+        if attendance_percentage > Decimal(80):
+            attendance_bonus = daily_rate
+
+    # 8. Retention deduction
+    retention_deduction = Decimal(0)
+    if user.salary_retention_percentage and user.salary_retention_percentage > 0:
+        gross_salary = basic_salary + hour_based_amount
+        retention_deduction = gross_salary * (user.salary_retention_percentage / Decimal(100))
+
+    # 9. Leave encashment (March)
+    leave_encashment = Decimal(0)
+    if month == 3:
+        from leave.models import LeaveBalance
+        balances = LeaveBalance.objects.filter(user=user, year=year - 1)
+        for bal in balances:
+            if bal.remaining_days > Decimal(0):
+                leave_encashment += bal.remaining_days * daily_rate
+                bal.used_days += bal.remaining_days
+                bal.save(update_fields=['used_days'])
+
+    # 10. Net salary
+    if user.employment_type == 'full_time':
+        net = (basic_salary + hour_based_amount + attendance_bonus + leave_encashment
+               - late_penalty - absence_deductions - leave_deductions - retention_deduction)
+    else:
+        net = (hour_based_amount + attendance_bonus + leave_encashment
+               - late_penalty - absence_deductions - retention_deduction)
+
+    net = max(net, Decimal(0))
+
+    # 11. Create PaySlip
+    # Delete existing payslip for this user in this payroll run (for regeneration)
+    PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
+
+    payslip = PaySlip.objects.create(
+        payroll_run=payroll_run,
+        faculty=None,
+        user=user,
+        basic_salary=basic_salary,
+        total_session_hours=total_hours,
+        hour_based_amount=hour_based_amount,
+        late_penalty=late_penalty,
+        absence_deductions=absence_deductions,
+        leave_deductions=leave_deductions,
+        retention_deduction=retention_deduction,
+        attendance_bonus=attendance_bonus,
+        leave_encashment=leave_encashment,
+        net_salary=net,
+        leaves_taken=int(leave_days),
+        working_days=working_days,
+        sessions_conducted=0,
+    )
+
+    return payslip

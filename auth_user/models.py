@@ -76,7 +76,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     profile_pic = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
     fcm_token = models.TextField(blank=True, default='', help_text="Firebase Cloud Messaging device token for push notifications.")
     # Employee-specific fields
-    employee_id = models.CharField(max_length=30, unique=True, blank=True)
+    employee_id = models.CharField(max_length=30, unique=True, blank=True, null=True)
     photo = models.ImageField(upload_to='employee/photos/', null=True, blank=True)
     qualification = models.CharField(max_length=200, blank=True)
     specialization = models.CharField(max_length=200, blank=True)

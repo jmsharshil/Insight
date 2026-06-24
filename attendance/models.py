@@ -296,3 +296,80 @@ class ViolationRecord(models.Model):
     def __str__(self):
         status = 'resolved' if self.is_resolved else 'active'
         return f"{self.student} | {self.violation_type} | {self.date} ({status})"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EmployeeAttendanceRecord — check-in/check-out for ALL staff (non-student) users
+# ═══════════════════════════════════════════════════════════════════════════════
+
+EMPLOYEE_ATTENDANCE_STATUS_CHOICES = [
+    ('present', 'Present'),
+    ('absent', 'Absent'),
+    ('late', 'Late'),
+    ('half_day', 'Half Day'),
+    ('on_leave', 'On Leave'),
+    ('checkout_pending', 'Checkout Pending'),
+]
+
+
+class EmployeeAttendanceRecord(models.Model):
+    """
+    One record per employee (User) per date.
+    Tracks presence STATUS + raw check-in / check-out timestamps for all staff.
+    Works alongside FacultyQRScanLog — this is the canonical attendance record,
+    while QR scan logs are the raw audit trail.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='employee_attendance_records',
+    )
+    branch = models.ForeignKey(
+        'branch.Branch',
+        on_delete=models.CASCADE,
+        related_name='employee_attendance_records',
+    )
+
+    date = models.DateField()
+    status = models.CharField(
+        max_length=20,
+        choices=EMPLOYEE_ATTENDANCE_STATUS_CHOICES,
+        default='absent',
+    )
+
+    checked_in_at = models.DateTimeField(null=True, blank=True)
+    checked_out_at = models.DateTimeField(null=True, blank=True)
+
+    marked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='employee_attendance_marked',
+        help_text='Admin who marked this record (null for self-scan).',
+    )
+    marked_at = models.DateTimeField(auto_now_add=True)
+
+    is_corrected = models.BooleanField(default=False)
+    corrected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_attendance_corrected',
+    )
+    correction_note = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'employee_attendance_records'
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+        indexes = [
+            models.Index(fields=['date', 'branch']),
+            models.Index(fields=['user', 'date']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.name} | {self.date} → {self.status}"

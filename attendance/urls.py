@@ -3,6 +3,7 @@ from .views import (
     AttendanceListCreateView, QRScanView, AttendanceCorrectionView,
     StudentAttendanceView, BatchAttendanceSheetView,
     AttendanceReportView, AttendanceAlertView,
+    EmployeeAttendanceListCreateView, EmployeeCheckInOutView, EmployeeAttendanceHistoryView,
 )
 from .analytics_views import (
     DashboardSummaryAPIView, StudentAttendanceListAPIView, StudentAttendanceDetailAPIView,
@@ -50,5 +51,10 @@ urlpatterns = [
     path('attendance/violations/<uuid:violation_id>/', ViolationDetailAPIView.as_view(), name='attendance-violations-detail'),
     path('attendance/export/', AttendanceExportAPIView.as_view(), name='attendance-export'),
     path('attendance/audit-logs/', AttendanceAuditAPIView.as_view(), name='attendance-audit-logs'),
+
+    # I. Employee (Staff) Attendance — for ALL non-student users
+    path('attendance/employee/', EmployeeAttendanceListCreateView.as_view(), name='employee-attendance-list-create'),
+    path('attendance/employee/scan/', EmployeeCheckInOutView.as_view(), name='employee-attendance-scan'),
+    path('attendance/employee/history/', EmployeeAttendanceHistoryView.as_view(), name='employee-attendance-history'),
 ]
 

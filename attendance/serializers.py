@@ -246,3 +246,59 @@ class AttendanceReportRowSerializer(serializers.Serializer):
     violations_count = serializers.IntegerField()
     violations_breakdown = serializers.DictField()
     status = serializers.CharField()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Employee Attendance Serializers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from .models import EmployeeAttendanceRecord, EMPLOYEE_ATTENDANCE_STATUS_CHOICES
+
+
+class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
+    """Read-only serializer for listing employee attendance records."""
+    user_name = serializers.SerializerMethodField()
+    employee_id = serializers.SerializerMethodField()
+    branch_name = serializers.SerializerMethodField()
+    marked_by_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = EmployeeAttendanceRecord
+        fields = [
+            'id', 'user', 'user_name', 'employee_id',
+            'branch', 'branch_name', 'date',
+            'status', 'status_display', 'checked_in_at', 'checked_out_at',
+            'marked_by', 'marked_by_name', 'marked_at',
+            'is_corrected', 'corrected_by', 'correction_note',
+        ]
+
+    def get_user_name(self, obj):
+        return obj.user.name if obj.user else ''
+
+    def get_employee_id(self, obj):
+        return obj.user.employee_id or '' if obj.user else ''
+
+    def get_branch_name(self, obj):
+        return obj.branch.name if obj.branch else ''
+
+    def get_marked_by_name(self, obj):
+        return obj.marked_by.name if obj.marked_by else None
+
+
+class EmployeeAttendanceCreateSerializer(serializers.Serializer):
+    """POST /api/v1/attendance/employee/ — mark attendance for employees."""
+    branch_id = serializers.UUIDField()
+    date = serializers.DateField()
+    records = serializers.ListField(child=serializers.DictField(), min_length=1)
+
+    def validate_date(self, value):
+        if value > timezone.now().date():
+            raise serializers.ValidationError("Cannot mark attendance for a future date.")
+        return value
+
+
+class EmployeeCheckInOutSerializer(serializers.Serializer):
+    """POST /api/v1/attendance/employee/check-in/ or check-out/"""
+    scan_type = serializers.ChoiceField(choices=[('check_in', 'Check In'), ('check_out', 'Check Out')])
+

@@ -3,7 +3,7 @@
 > **Base URL:** `https://api.example.com/api/v1/`  
 > **Auth Header:** `Authorization: Bearer <access_token>`  
 > **Content-Type:** `application/json`  
-> Role-based access: `super_admin`, `accountant`, `branch_manager`, `faculty`.  
+> Role-based access: `super_admin`, `accountant`, `branch_manager`, `faculty`, and all employee roles.  
 > Responses: `{ "success": true/false, "message": "...", "data": {...} }`.
 
 ---
@@ -11,18 +11,41 @@
 ## Key Utility Functions (`payroll/utils.py`)
 
 ### `compute_payslip_for_faculty(faculty_profile, month, year, payroll_run)`
-- Core calculator.
+- Core calculator for **faculty** payslips.
 - Base = `basic_salary`.
 - Hour-based = sessions from `timetable.SessionReport` (rate * hours).
 - Late penalties: uses `LateEntryPolicy` (grace_period, deduction_per_minute, auto_halfday).
 - Leave deductions, absence, bonuses, extra hours (from `ExtraHoursApproval`).
-- Creates/updates `PaySlip` + `SessionLatePenaltyLog`.
+- Creates/updates `PaySlip` (with `faculty` FK) + `SessionLatePenaltyLog`.
 - Handles `PayrollRun` totals.
+
+### `compute_payslip_for_user(user, month, year, payroll_run)`
+- **NEW:** Simplified calculator for **non-faculty employees** (all staff roles).
+- Uses `User` model fields directly (`salary`, `hourly_rate`, `employment_type`).
+- No session reports or chapter-based hour tracking.
+- Accounts for:
+  - Base salary / hourly attendance (from `EmployeeAttendanceRecord`)
+  - Leave deductions (unpaid only, from `LeaveApplication`)
+  - Late penalty (from `LateEntryRecord`)
+  - Absence deductions
+  - Retention deduction, attendance bonus, leave encashment
+- Creates `PaySlip` (with `user` FK, `faculty=null`).
 
 ### `preview_payslip_for_faculty(faculty_profile, month, year)`
 - Read-only preview for faculty (no DB write).
 
-**Integration:** Pulls from `timetable` (SessionReport), `leave` module, `faculty` profiles. Auto-generates `ExtraHoursApproval` if teaching time exceeds chapter allocation. Links to `fees` indirectly via faculty payments if needed.
+### `EMPLOYEE_ROLES` (Constant)
+All non-student, non-parent, non-super_admin roles eligible for payroll:
+```python
+EMPLOYEE_ROLES = [
+    'branch_manager', 'admin_senior_executive', 'admin_executive',
+    'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
+    'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
+    'house_keeping', 'security',
+]
+```
+
+**Integration:** Pulls from `timetable` (SessionReport for faculty), `leave` module, `attendance` module (EmployeeAttendanceRecord for staff), `faculty` profiles. Auto-generates `ExtraHoursApproval` if teaching time exceeds chapter allocation (faculty only).
 
 ---
 
@@ -32,10 +55,18 @@
 | Model | Purpose |
 |-------|---------|
 | `PayrollRun` | Monthly batch (per branch/month/year). Status drives workflow. |
-| `PaySlip` | Per-faculty slip (basic, hours, penalties, net_salary, is_disbursed). |
+| `PaySlip` | Per-employee slip (basic, hours, penalties, net_salary, is_disbursed). Links to **either** `faculty` FK or `user` FK. |
 | `LateEntryPolicy` | Branch config for penalties (grace, rates, thresholds). |
-| `SessionLatePenaltyLog` | Audit for each late session applied. |
-| `ExtraHoursApproval` | Auto-generated for overtime; requires super_admin approval. |
+| `SessionLatePenaltyLog` | Audit for each late session applied (faculty only). |
+| `ExtraHoursApproval` | Auto-generated for overtime; requires super_admin approval (faculty only). |
+
+### PaySlip FK Strategy
+| Employee Type | `faculty` FK | `user` FK | Source of Data |
+|---------------|-------------|-----------|----------------|
+| Faculty (with FacultyProfile) | ✅ Set | null | SessionReport, FacultyQRScanLog |
+| Non-faculty staff (all other roles) | null | ✅ Set | EmployeeAttendanceRecord, LateEntryRecord |
+
+Both types produce identical payslip fields (`basic_salary`, `hour_based_amount`, `late_penalty`, `net_salary`, etc.).
 
 ### PayrollRun.status
 - `draft` (editable, auto-regenerates on GET/POST)
@@ -50,31 +81,38 @@
 ## Architecture & Workflow Diagram
 
 ```text
-TIMETABLE + SESSION REPORTS (faculty attendance)
-          │
-          ▼
-LateEntryPolicy (branch rules) + Leave deductions
-          │
-          ▼
-GET/POST /payroll/  (auto-generates PayrollRun + PaySlips via compute_payslip_for_faculty)
-          │
-          ▼
-PayrollRun (draft) ── adjustments (bonus/deduction) ──► pending_approval
-          │
-          ▼
-POST /approve/ (branch_manager/super_admin) ──► approved
-          │
-          ▼
-POST /disburse/ (super_admin/accountant) ──► disbursed
-          │
-          ▼
-Notifications to faculty (in-app: net_salary, sessions) + ExtraHoursApproval workflow
+FACULTY PATH:                            STAFF PATH:
+  SessionReports + FacultyQRScanLog        EmployeeAttendanceRecord + LateEntryRecord
+           │                                        │
+           ▼                                        ▼
+  compute_payslip_for_faculty()            compute_payslip_for_user()
+           │                                        │
+           └──────────────┬─────────────────────────┘
+                          │
+                          ▼
+  LateEntryPolicy (branch rules) + Leave deductions (both paths)
+                          │
+                          ▼
+  GET/POST /payroll/  (auto-generates PayrollRun + PaySlips for ALL employees)
+                          │
+                          ▼
+  PayrollRun (draft) ── adjustments (bonus/deduction) ──► pending_approval
+                          │
+                          ▼
+  POST /approve/ (branch_manager/super_admin) ──► approved
+                          │
+                          ▼
+  POST /disburse/ (super_admin/accountant) ──► disbursed
+                          │
+                          ▼
+  Notifications to ALL employees (in-app: net_salary, sessions)
 ```
 
 **Auto Behaviors:**
-- GET /payroll/ auto-creates/regenerates for current month if missing/draft.
-- Extra hours detected from SessionReport vs chapter duration.
+- GET /payroll/ auto-creates/regenerates for current month if missing/draft — includes **all employees** (faculty + staff).
+- Extra hours detected from SessionReport vs chapter duration (faculty only).
 - Faculty can preview own salary.
+- Non-faculty staff can view their payslips via `/payroll/my/`.
 - Role guards throughout.
 
 ---
@@ -86,17 +124,20 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
 
 ### Step 2: Generate Payroll
 **GET** or **POST** `/payroll/?month=6&year=2026&branch_id=...`
-- Auto-computes for all active faculty using `compute_payslip_for_faculty()`.
+- Auto-computes for **all active employees**:
+  - Faculty via `compute_payslip_for_faculty()`
+  - Non-faculty staff via `compute_payslip_for_user()`
 - Creates `PayrollRun` (draft) + `PaySlip`s.
-- Pulls hours from timetable SessionReports, applies late penalties, leaves, extra hours.
+- Faculty path pulls hours from SessionReports, applies late penalties, leaves, extra hours.
+- Staff path pulls from EmployeeAttendanceRecord, LateEntryRecord, LeaveApplication.
 
-**Response includes** total_amount, faculty_count.
+**Response includes** total_amount, employee_count.
 
 ### Step 3: Review & Adjust Payslips
-- GET `/payroll/<run_id>/payslips/` — List with details.
+- GET `/payroll/<run_id>/payslips/` — List with details (shows both faculty and staff payslips).
 - PATCH `/payroll/<run_id>/payslips/<slip_id>/` — Adjust bonus, deductions, notes. Recalcs net_salary and run total.
 
-### Step 4: Extra Hours Approvals
+### Step 4: Extra Hours Approvals (Faculty Only)
 - GET `/payroll/extra-hours/` — List pending auto-detected overtime.
 - PATCH `/payroll/extra-hours/<id>/` (super_admin only) with `status=approved/rejected`. If approved, updates related payslip on next compute.
 
@@ -104,20 +145,20 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
 **POST** `/payroll/<run_id>/approve/` — Changes to `approved`, sets approved_by/at, sends notification.
 
 ### Step 6: Disburse
-**POST** `/payroll/<run_id>/disburse/` — Sets `disbursed`, marks all payslips `is_disbursed=True`, sends per-faculty in-app notifications with salary summary.
+**POST** `/payroll/<run_id>/disburse/` — Sets `disbursed`, marks all payslips `is_disbursed=True`, sends per-employee in-app notifications with salary summary.
 
 ### Step 7: Faculty Self-Service
 - GET `/faculty/<id>/payslips/` — Historical slips.
 - GET `/faculty/<id>/salary-preview/?month=6&year=2026` — Current estimate (uses `preview_payslip_for_faculty()`).
 
-### Step 8: My Payroll (Logged-in Faculty)
-- GET `/payroll/my/` — Personal payroll history (see below).
+### Step 8: My Payroll (Any Employee)
+- GET `/payroll/my/` — Personal payroll history for **any authenticated employee** (faculty or staff).
 
 **Integration Notes:** 
-- Depends on accurate `SessionReport` from timetable/attendance.
-- Ties to `faculty` module (profiles with basic_salary, hourly_rate).
-- Can link to `fees` for any faculty fee recoveries if extended.
-- Draft runs regenerate automatically to reflect new sessions/leaves.
+- Faculty path depends on accurate `SessionReport` from timetable/attendance.
+- Staff path depends on `EmployeeAttendanceRecord` from attendance module.
+- Both paths tie to `leave` module (unpaid leave deductions, leave encashment).
+- Draft runs regenerate automatically to reflect new sessions/leaves/attendance.
 
 ---
 
@@ -136,11 +177,13 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
     "payroll_run_id": "pr-uuid-001",
     "status": "draft",
     "total_amount": "125000.00",
-    "faculty_count": 5,
+    "employee_count": 15,
     "generated_at": "2026-06-01T10:00:00Z"
   }
 }
 ```
+
+> **Note:** `employee_count` includes both faculty and non-faculty staff payslips (previously `faculty_count`).
 
 - **GET** `/api/v1/payroll/<run_id>/` — Detail (with summary).
 - **PATCH** `/api/v1/payroll/<run_id>/` — Update notes or status (limited transitions).
@@ -149,11 +192,14 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
 ### Payslips & Adjustments
 - **GET** `/api/v1/payroll/<run_id>/payslips/` — List slips for run (includes late_logs).
 
-**Example Payslip Data:**
+**Example PaySlip Data (Faculty):**
 ```json
 {
   "id": "ps-uuid",
+  "faculty": "faculty-uuid",
+  "user_id": "user-uuid",
   "faculty_name": "Prof. Ramesh Kumar",
+  "employee_id": "EMP-2026-0001",
   "basic_salary": 50000,
   "hour_based_amount": 15000,
   "late_penalty": 500,
@@ -165,6 +211,29 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
   "late_logs": [ ... ]
 }
 ```
+
+**Example PaySlip Data (Non-Faculty Staff):**
+```json
+{
+  "id": "ps-uuid-002",
+  "faculty": null,
+  "user_id": "user-uuid-002",
+  "faculty_name": "Priya Accountant",
+  "employee_id": "EMP-HQ-0012",
+  "basic_salary": 35000,
+  "hour_based_amount": 0,
+  "late_penalty": 200,
+  "leave_deductions": 1000,
+  "absence_deductions": 0,
+  "bonus": 0,
+  "net_salary": 33800,
+  "sessions_conducted": 0,
+  "is_disbursed": false,
+  "late_logs": []
+}
+```
+
+> **Note:** For non-faculty payslips, `faculty` is `null`, `sessions_conducted` is `0`, and `faculty_name` falls back to `user.name`.
 
 - **PATCH** `/api/v1/payroll/<run_id>/payslips/<slip_id>/` — Adjust fields.
 
@@ -181,46 +250,51 @@ POST or PATCH `/payroll/late-policy/` with branch-specific rules (grace_period_m
 
 ### My Payroll (Self-Service)
 **`GET /api/v1/payroll/my/`**  
-Returns all payroll history for the currently authenticated faculty member — no admin role needed. Auto-resolves the faculty profile from the auth token.
+Returns all payroll history for the currently authenticated **employee** (faculty or non-faculty staff). Auto-resolves from the auth token — tries FacultyProfile first, falls back to User-based payslip lookup.
 
 **Query params:** `?year=2026` `?month=6` `?status=disbursed`
 
-**Response:**
+**Response (Faculty):**
 ```json
 {
   "success": true,
-  "faculty": {
+  "employee": {
     "id": "fp-uuid",
     "employee_id": "EMP-2026-0001",
     "name": "Prof. Ramesh Kumar",
-    "email": "ramesh@institute.com"
+    "email": "ramesh@institute.com",
+    "role": "faculty"
   },
   "summary": {
     "total_payslips": 3,
     "total_net_earned": "125000.00",
     "total_disbursed": "80000.00"
   },
-  "payslips": [
-    {
-      "id": "ps-uuid",
-      "payroll_month": 6,
-      "payroll_year": 2026,
-      "payroll_status": "Disbursed",
-      "branch_name": "Main Branch",
-      "basic_salary": "50000.00",
-      "hour_based_amount": "15000.00",
-      "late_penalty": "500.00",
-      "absence_deductions": "0.00",
-      "leave_deductions": "2000.00",
-      "bonus": "5000.00",
-      "net_salary": "67500.00",
-      "sessions_conducted": 45,
-      "is_disbursed": true,
-      "late_logs": []
-    }
-  ]
+  "payslips": [ ... ]
 }
 ```
+
+**Response (Non-Faculty Staff):**
+```json
+{
+  "success": true,
+  "employee": {
+    "id": "user-uuid",
+    "employee_id": "EMP-HQ-0012",
+    "name": "Priya Verma",
+    "email": "priya@institute.com",
+    "role": "accountant"
+  },
+  "summary": {
+    "total_payslips": 2,
+    "total_net_earned": "68000.00",
+    "total_disbursed": "35000.00"
+  },
+  "payslips": [ ... ]
+}
+```
+
+> **Note:** Response key changed from `faculty` to `employee`. Now includes `role` field. Works for all employee roles.
 
 ### Late Policy
 - **GET / POST** `/api/v1/payroll/late-policy/` 
@@ -239,7 +313,7 @@ Returns all payroll history for the currently authenticated faculty member — n
 ```
 
 ### Extra Hours & Preview
-- **GET** `/api/v1/payroll/extra-hours/` — Filtered list.
+- **GET** `/api/v1/payroll/extra-hours/` — Filtered list (faculty only).
 - **PATCH** `/api/v1/payroll/extra-hours/<id>/` with `{"status": "approved"}`.
 
 - **GET** `/api/v1/faculty/<faculty_id>/salary-preview/?month=6&year=2026`
@@ -275,13 +349,13 @@ Returns all payroll history for the currently authenticated faculty member — n
   "message": "Payroll disbursed.",
   "data": {
     "disbursed": true,
-    "faculty_count": 5,
-    "total_amount": "125000.00"
+    "employee_count": 15,
+    "total_amount": "425000.00"
   }
 }
 ```
 
-**Notifications:** In-app to faculty with net salary, sessions count.
+**Notifications:** In-app to **all employees** (faculty and staff) with net salary, sessions count.
 
 ---
 
@@ -293,22 +367,43 @@ pending_approval ──(approve)──► approved
 approved ──(disburse)──► disbursed (final, no edits)
 ```
 
-- Drafts auto-regenerate on access to reflect new SessionReports.
-- Extra hours approval can trigger payslip recalc.
+- Drafts auto-regenerate on access to reflect new SessionReports/attendance records.
+- Extra hours approval can trigger payslip recalc (faculty only).
 - Permissions strictly enforced per role.
 
 **Common Errors:**
 - 403: Role not allowed (e.g. faculty can't approve).
 - 400: Invalid transition, disbursed slip can't be edited, missing branch.
-- 409: Payroll already exists in final state.
+- 404: No payslips found for this user (My Payroll).
+- 409: Payroll already exists in final state with all employees covered.
 
 ---
 
-**Related Modules:**
-- `faculty` (profiles, hourly_rate, SessionReport from timetable)
-- `timetable` / `attendance` (source of hours and late data)
-- `leave` (deductions)
-- `core` (notifications stub)
-- Links to `fees` possible for recoveries (future).
+## Cross-Module Integration
 
-This guide fully documents the current payroll implementation, auto-generation logic, utils, role guards, and integrations. Matches updates in fees/students modules.
+```text
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  ATTENDANCE  │     │    LEAVE     │     │   PAYROLL    │
+│              │     │              │     │              │
+│ Student:     │     │ Staff Leave: │     │ Faculty:     │
+│  QR Scan     │     │  applied_by  │◄───►│  PaySlip     │
+│  Batch Mark  │     │  = User      │     │  (faculty FK)│
+│              │     │              │     │              │
+│ Employee:    │     │ Student      │     │ Staff:       │
+│  Employee    │◄───►│ Leave:       │     │  PaySlip     │
+│  Attendance  │     │  = Student   │     │  (user FK)   │
+│  Record      │     │              │     │              │
+│              │     │ Late Entries │◄───►│ Penalties    │
+│ Faculty:     │     │  = User      │     │ applied in   │
+│  QRScanLog   │◄───►│              │     │ both paths   │
+└──────────────┘     └──────────────┘     └──────────────┘
+```
+
+**Related Modules:**
+- `faculty` (profiles, hourly_rate, SessionReport from timetable) — faculty payslips
+- `attendance` (EmployeeAttendanceRecord) — staff payslips
+- `timetable` (source of hours and late data for faculty)
+- `leave` (deductions for both faculty and staff)
+- `core` (notifications)
+
+This guide fully documents the current payroll implementation, auto-generation logic, utils, role guards, and integrations for **all employee types**.

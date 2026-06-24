@@ -16,7 +16,7 @@ from .serializers import (
     PayrollGenerateSerializer, LateEntryPolicySerializer, LateEntryPolicyInputSerializer,
     PaySlipAdjustSerializer,
 )
-from .utils import compute_payslip_for_faculty
+from .utils import compute_payslip_for_faculty, compute_payslip_for_user, EMPLOYEE_ROLES
 
 logger = logging.getLogger(__name__)
 
@@ -81,21 +81,32 @@ class PayrollListCreateView(APIView):
             y_int = int(year)
             m_int = int(month)
             from faculty.models import FacultyProfile
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
 
             # Determine which branches to auto-generate for
             if target_branch_id:
                 branch_ids = [target_branch_id]
             else:
-                # super_admin with no branch filter → auto-generate for all branches that have active faculty
+                # super_admin with no branch filter → auto-generate for all branches that have active employees
                 fp_qs = FacultyProfile.objects.filter(is_active=True)
+                staff_qs = User.objects.filter(role__in=EMPLOYEE_ROLES, is_active=True)
                 if getattr(request.user, 'organization', None):
                     fp_qs = fp_qs.filter(branch__organization=request.user.organization)
-                branch_ids = list(fp_qs.values_list('branch_id', flat=True).distinct())
+                    staff_qs = staff_qs.filter(organization=request.user.organization)
+                faculty_branch_ids = set(fp_qs.values_list('branch_id', flat=True).distinct())
+                staff_branch_ids = set(staff_qs.exclude(branch_id__isnull=True).values_list('branch_id', flat=True).distinct())
+                branch_ids = list(faculty_branch_ids | staff_branch_ids)
 
             for br_id in branch_ids:
-                # Check if active faculty exist in this branch
                 faculty_list = FacultyProfile.objects.filter(branch_id=br_id, is_active=True)
-                if not faculty_list.exists():
+                # Non-faculty staff employees in this branch (exclude users who already have FacultyProfile)
+                faculty_user_ids = set(FacultyProfile.objects.filter(branch_id=br_id, is_active=True).values_list('user_id', flat=True))
+                staff_users = User.objects.filter(
+                    branch_id=br_id, role__in=EMPLOYEE_ROLES, is_active=True
+                ).exclude(id__in=faculty_user_ids)
+
+                if not faculty_list.exists() and not staff_users.exists():
                     continue
 
                 pr, created = PayrollRun.objects.get_or_create(
@@ -109,6 +120,9 @@ class PayrollListCreateView(APIView):
                     for fp in faculty_list:
                         ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
                         total += ps.net_salary
+                    for u in staff_users:
+                        ps = compute_payslip_for_user(u, m_int, y_int, pr)
+                        total += ps.net_salary
                     pr.total_amount = total
                     pr.save(update_fields=['total_amount'])
 
@@ -119,17 +133,25 @@ class PayrollListCreateView(APIView):
                     for fp in faculty_list:
                         ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
                         total += ps.net_salary
+                    for u in staff_users:
+                        ps = compute_payslip_for_user(u, m_int, y_int, pr)
+                        total += ps.net_salary
                     pr.total_amount = total
                     pr.save(update_fields=['total_amount'])
                 
                 else:
-                    # It's approved or disbursed. Generate for missing faculties only.
-                    existing_faculty_ids = set(pr.payslips.values_list('faculty_id', flat=True))
+                    # It's approved or disbursed. Generate for missing faculties/staff only.
+                    existing_faculty_ids = set(pr.payslips.filter(faculty__isnull=False).values_list('faculty_id', flat=True))
+                    existing_user_ids = set(pr.payslips.filter(user__isnull=False).values_list('user_id', flat=True))
                     missing_faculties = faculty_list.exclude(id__in=existing_faculty_ids)
-                    if missing_faculties.exists():
+                    missing_staff = staff_users.exclude(id__in=existing_user_ids)
+                    if missing_faculties.exists() or missing_staff.exists():
                         added_total = Decimal(0)
                         for fp in missing_faculties:
                             ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
+                            added_total += ps.net_salary
+                        for u in missing_staff:
+                            ps = compute_payslip_for_user(u, m_int, y_int, pr)
                             added_total += ps.net_salary
                         pr.total_amount += added_total
                         pr.status = 'pending_approval'
@@ -164,9 +186,18 @@ class PayrollListCreateView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         d = ser.validated_data
+        from faculty.models import FacultyProfile
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        # Non-faculty staff for this branch
+        faculty_user_ids = set(FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True).values_list('user_id', flat=True))
+        staff_users = User.objects.filter(
+            branch=d['branch_id'], role__in=EMPLOYEE_ROLES, is_active=True
+        ).exclude(id__in=faculty_user_ids)
+
         existing_run = PayrollRun.objects.filter(branch=d['branch_id'], month=d['month'], year=d['year']).first()
         if existing_run:
-            from faculty.models import FacultyProfile
             if existing_run.status == 'draft':
                 # Regenerate payslips for draft
                 existing_run.payslips.all().delete()
@@ -175,19 +206,27 @@ class PayrollListCreateView(APIView):
                 for fp in faculty_list:
                     ps = compute_payslip_for_faculty(fp, d['month'], d['year'], existing_run)
                     total += ps.net_salary
+                for u in staff_users:
+                    ps = compute_payslip_for_user(u, d['month'], d['year'], existing_run)
+                    total += ps.net_salary
                 existing_run.total_amount = total
                 existing_run.save(update_fields=['total_amount'])
                 message = 'Payroll regenerated.'
             else:
-                # It's approved or disbursed. Just generate for missing faculties.
-                existing_faculty_ids = set(existing_run.payslips.values_list('faculty_id', flat=True))
+                # It's approved or disbursed. Just generate for missing employees.
+                existing_faculty_ids = set(existing_run.payslips.filter(faculty__isnull=False).values_list('faculty_id', flat=True))
+                existing_user_ids = set(existing_run.payslips.filter(user__isnull=False).values_list('user_id', flat=True))
                 faculty_list = FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True).exclude(id__in=existing_faculty_ids)
-                if not faculty_list.exists():
-                    return Response({'success': False, 'message': f'Payroll already {existing_run.status}. All active faculties already have payslips.'}, status=status.HTTP_409_CONFLICT)
+                missing_staff = staff_users.exclude(id__in=existing_user_ids)
+                if not faculty_list.exists() and not missing_staff.exists():
+                    return Response({'success': False, 'message': f'Payroll already {existing_run.status}. All active employees already have payslips.'}, status=status.HTTP_409_CONFLICT)
                 
                 added_total = Decimal(0)
                 for fp in faculty_list:
                     ps = compute_payslip_for_faculty(fp, d['month'], d['year'], existing_run)
+                    added_total += ps.net_salary
+                for u in missing_staff:
+                    ps = compute_payslip_for_user(u, d['month'], d['year'], existing_run)
                     added_total += ps.net_salary
                 
                 existing_run.total_amount += added_total
@@ -200,11 +239,10 @@ class PayrollListCreateView(APIView):
                 'data': {
                     'payroll_run_id': str(existing_run.id), 'status': existing_run.status,
                     'total_amount': str(existing_run.total_amount),
-                    'faculty_count': existing_run.payslips.count(), 'generated_at': existing_run.generated_at,
+                    'employee_count': existing_run.payslips.count(), 'generated_at': existing_run.generated_at,
                 },
             }, status=status.HTTP_200_OK)
 
-        from faculty.models import FacultyProfile
         payroll_run = PayrollRun.objects.create(
             branch=d['branch_id'], month=d['month'], year=d['year'],
             generated_by=request.user,
@@ -215,6 +253,9 @@ class PayrollListCreateView(APIView):
         for fp in faculty_list:
             ps = compute_payslip_for_faculty(fp, d['month'], d['year'], payroll_run)
             total += ps.net_salary
+        for u in staff_users:
+            ps = compute_payslip_for_user(u, d['month'], d['year'], payroll_run)
+            total += ps.net_salary
 
         payroll_run.total_amount = total
         payroll_run.save(update_fields=['total_amount'])
@@ -224,7 +265,7 @@ class PayrollListCreateView(APIView):
             'data': {
                 'payroll_run_id': str(payroll_run.id), 'status': payroll_run.status,
                 'total_amount': str(payroll_run.total_amount),
-                'faculty_count': faculty_list.count(), 'generated_at': payroll_run.generated_at,
+                'employee_count': faculty_list.count() + staff_users.count(), 'generated_at': payroll_run.generated_at,
             },
         }, status=status.HTTP_201_CREATED)
 
@@ -446,16 +487,19 @@ class PayrollDisburseView(APIView):
         if pr.status != 'approved':
             return Response({'success': False, 'message': 'Payroll must be approved first.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        payslips = pr.payslips.select_related('faculty__user')
+        payslips = pr.payslips.select_related('faculty__user', 'user')
         payslips.update(is_disbursed=True)
         pr.status = 'disbursed'
         pr.disbursed_at = timezone.now()
         pr.save()
 
-        # FRD §4.8.4: send IN-APP notification to each faculty with payslip data
+        # Send IN-APP notification to each employee with payslip data
         for ps in payslips:
+            recipient_user = ps.faculty.user if ps.faculty else ps.user
+            if not recipient_user:
+                continue
             notify(
-                recipient_user_id=str(ps.faculty.user.id),
+                recipient_user_id=str(recipient_user.id),
                 title=f"Your payslip for {pr.month}/{pr.year} is ready",
                 body=f"Net salary: {ps.net_salary}. Sessions: {ps.sessions_conducted}.",
                 metadata={
@@ -727,16 +771,17 @@ class ExtraHoursApprovalUpdateView(APIView):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # My Payroll — GET /api/v1/payroll/my/
-# Returns all payroll runs that include a payslip for the logged-in faculty.
+# Returns all payroll runs that include a payslip for the logged-in employee.
 # Each entry contains the full payroll run metadata + the user's payslip detail.
+# Works for faculty (via FacultyProfile) AND non-faculty staff (via User).
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MyPayrollView(APIView):
     """
-    Personal payroll history for the currently authenticated faculty member.
+    Personal payroll history for the currently authenticated employee.
 
     GET /api/v1/payroll/my/
-      → list of all payroll runs that include this faculty's payslip,
+      → list of all payroll runs that include this employee's payslip,
         each with full payslip breakdown.
 
     GET /api/v1/payroll/my/?year=2026
@@ -748,21 +793,33 @@ class MyPayrollView(APIView):
 
     def get(self, request):
         from .serializers import MyPaySlipSerializer
+        from django.db.models import Q
 
         user = request.user
-        role = _user_role(user)
 
-        # Resolve faculty profile
+        # Try to find faculty profile (may not exist for non-faculty staff)
+        faculty = None
         try:
             from faculty.models import FacultyProfile
             faculty = FacultyProfile.objects.get(user=user)
         except Exception:
+            pass
+
+        # Build payslip queryset — faculty-based OR user-based
+        if faculty:
+            qs = PaySlip.objects.filter(
+                Q(faculty=faculty) | Q(user=user)
+            )
+        else:
+            qs = PaySlip.objects.filter(user=user)
+
+        if not qs.exists():
             return Response(
-                {'success': False, 'message': 'No faculty profile found for this user.'},
+                {'success': False, 'message': 'No payslips found for this user.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        qs = PaySlip.objects.filter(faculty=faculty).select_related(
+        qs = qs.select_related(
             'payroll_run', 'payroll_run__branch', 'faculty',
         ).prefetch_related('late_logs').order_by('-payroll_run__year', '-payroll_run__month')
 
@@ -786,13 +843,16 @@ class MyPayrollView(APIView):
             (Decimal(str(p['net_salary'])) for p in payslips if p.get('is_disbursed')), Decimal('0')
         )
 
+        employee_id = faculty.employee_id if faculty else (user.employee_id or '')
+
         return Response({
             'success': True,
-            'faculty': {
-                'id': str(faculty.id),
-                'employee_id': faculty.employee_id,
+            'employee': {
+                'id': str(faculty.id) if faculty else str(user.id),
+                'employee_id': employee_id,
                 'name': user.name,
                 'email': user.email,
+                'role': user.role,
             },
             'summary': {
                 'total_payslips': len(payslips),

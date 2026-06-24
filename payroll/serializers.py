@@ -36,12 +36,13 @@ class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
 class PaySlipSerializer(serializers.ModelSerializer):
     faculty_name = serializers.SerializerMethodField()
     employee_id = serializers.SerializerMethodField()
+    user_id = serializers.SerializerMethodField()
     late_logs = SessionLatePenaltyLogSerializer(many=True, read_only=True)
 
     class Meta:
         model = PaySlip
         fields = [
-            'id', 'faculty', 'faculty_name', 'employee_id',
+            'id', 'faculty', 'user_id', 'faculty_name', 'employee_id',
             'basic_salary', 'total_session_hours', 'hour_based_amount',
             'late_penalty', 'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
@@ -50,10 +51,25 @@ class PaySlipSerializer(serializers.ModelSerializer):
         ]
 
     def get_faculty_name(self, obj):
-        return obj.faculty.user.name if obj.faculty else ''
+        if obj.faculty:
+            return obj.faculty.user.name
+        if obj.user:
+            return obj.user.name
+        return ''
 
     def get_employee_id(self, obj):
-        return obj.faculty.employee_id if obj.faculty else ''
+        if obj.faculty:
+            return obj.faculty.employee_id
+        if obj.user:
+            return obj.user.employee_id or ''
+        return ''
+
+    def get_user_id(self, obj):
+        if obj.user_id:
+            return str(obj.user_id)
+        if obj.faculty:
+            return str(obj.faculty.user_id)
+        return None
 
 
 class PayrollRunListSerializer(serializers.ModelSerializer):

@@ -14,39 +14,73 @@
                               │     ATTENDANCE MARKING      │
                               └──────────────┬──────────────┘
                                              │
-                       ┌─────────────────────┴─────────────────────┐
-                       ▼                                           ▼
-            [Mobile App / Web App]                       [Mobile App]
-         Manual Batch Marking by Admin/Faculty         Student scans Class QR
-                       │                                           │
-                       ▼                                           ▼
-            POST /api/v1/attendance/             POST /api/v1/attendance/qr-scan/
-                       │                                           │
-                       ▼                                           ▼
-           ┌───────────────────────┐                 ┌───────────────────────┐
-           │ Creates multiple      │                 │ Validates Location,   │
-           │ AttendanceRecord      │                 │ Time, Device, and     │
-           │ objects at once       │                 │ logs QRScanLog        │
-           └───────────┬───────────┘                 └───────────┬───────────┘
-                       │                                         │
-                       └───────────────────┬─────────────────────┘
-                                           ▼
-                            ┌─────────────────────────────┐
-                            │      ATTENDANCE DATABASE    │
-                            └──────────────┬──────────────┘
-                                           │
-                     ┌─────────────────────┴─────────────────────┐
-                     ▼                                           ▼
-           [Web App - Dashboards]                     [Web App - Violations]
-        Role-based access to Reports,                Proxy scans, location mismatches
-        Registers, Defaulters, History               are flagged automatically
+               ┌─────────────────────────────┼─────────────────────────────┐
+               ▼                             ▼                             ▼
+    [Mobile App / Web App]         [Mobile App]                  [Mobile App / Web App]
+  Manual Batch Marking          Student scans Class QR        Employee Self Check-In/Out
+  by Admin/Faculty               (student attendance)         (staff attendance via scan)
+               │                             │                             │
+               ▼                             ▼                             ▼
+    POST /attendance/           POST /attendance/qr-scan/     POST /attendance/employee/scan/
+               │                             │                             │
+               ▼                             ▼                             ▼
+  ┌───────────────────────┐   ┌───────────────────────┐   ┌───────────────────────────────┐
+  │ Creates multiple      │   │ Validates Location,   │   │ Creates/updates               │
+  │ AttendanceRecord      │   │ Time, Device, and     │   │ EmployeeAttendanceRecord      │
+  │ (student-based)       │   │ logs QRScanLog        │   │ (user-based, per date)        │
+  └───────────┬───────────┘   └───────────┬───────────┘   └───────────────┬───────────────┘
+              │                           │                               │
+              └───────────────┬───────────┘                               │
+                              ▼                                           │
+               ┌─────────────────────────────┐                            │
+               │   STUDENT ATTENDANCE DB     │                            │
+               └──────────────┬──────────────┘                            │
+                              │                                           ▼
+        ┌─────────────────────┴─────────────────────┐  ┌─────────────────────────────────┐
+        ▼                                           ▼  │   EMPLOYEE ATTENDANCE DB        │
+  [Web App - Dashboards]                 [Violations]  │   (for payroll integration)     │
+  Role-based Reports,                  Proxy scans,    └─────────────────────────────────┘
+  Registers, Defaulters               flagged auto
 ```
+
+---
+
+## Data Models
+
+### Student Attendance Models
+| Model | Purpose |
+|-------|---------|
+| `AttendanceRecord` | One record per student per date per batch (status, check-in/out times) |
+| `QRScanLog` | Raw QR scan audit trail (device, location, time) |
+| `AlertLog` | Low-attendance alerts sent to parents/admin |
+| `ViolationRecord` | Proxy scans, location mismatches, missing checkouts |
+
+### Employee Attendance Model (NEW)
+| Model | Purpose |
+|-------|---------|
+| `EmployeeAttendanceRecord` | One record per employee (User) per date. Tracks status + check-in/out timestamps for ALL non-student staff. Feeds into payroll computation. |
+
+**EmployeeAttendanceRecord Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `user` | FK → User | The employee |
+| `branch` | FK → Branch | Branch where attendance was recorded |
+| `date` | Date | Attendance date |
+| `status` | Choice | `present`, `absent`, `late`, `half_day`, `on_leave`, `checkout_pending` |
+| `checked_in_at` | DateTime | Check-in timestamp (nullable) |
+| `checked_out_at` | DateTime | Check-out timestamp (nullable) |
+| `marked_by` | FK → User | Admin who marked (null for self-scan) |
+| `is_corrected` | Boolean | Whether record was manually corrected |
+| `corrected_by` | FK → User | Who corrected it |
+| `correction_note` | Text | Reason for correction |
+
+**Unique constraint:** `(user, date)` — one record per employee per day.
 
 ---
 
 ## Appendix A: System Choice Values
 
-### A.1 Attendance Statuses (`status`)
+### A.1 Student Attendance Statuses (`status`)
 | Value | Display | Notes |
 | :--- | :--- | :--- |
 | `present` | Present | Fully attended |
@@ -55,14 +89,24 @@
 | `half_day` | Half Day | Attended partial session |
 | `on_leave` | On Leave | Approved leave |
 
-### A.2 QR Scan Types (`scan_type`)
+### A.2 Employee Attendance Statuses (`status`)
+| Value | Display | Notes |
+| :--- | :--- | :--- |
+| `present` | Present | Checked in and out |
+| `absent` | Absent | No check-in recorded |
+| `late` | Late | Checked in after expected time |
+| `half_day` | Half Day | Partial day |
+| `on_leave` | On Leave | Approved leave |
+| `checkout_pending` | Checkout Pending | Checked in but not yet out |
+
+### A.3 QR Scan Types (`scan_type`)
 | Value | Display | Notes |
 | :--- | :--- | :--- |
 | `check_in` | Check In | Entering the class/premises |
 | `check_out` | Check Out | Leaving the class/premises |
 | `exam_entry` | Exam Entry | Entry specifically for exams |
 
-### A.3 Violation Types (`violation_type`)
+### A.4 Violation Types (`violation_type`)
 | Value | Display | Notes |
 | :--- | :--- | :--- |
 | `proxy_scan` | Proxy Scan | Same device used for multiple students |
@@ -217,13 +261,173 @@ Shows a student's own attendance records, summary, and any active violations.
 
 ---
 
-## SECTION 2 — Web App APIs (Dashboards & Reports)
+## SECTION 2 — Employee (Staff) Attendance APIs (NEW)
+
+These APIs handle attendance tracking for **all non-student users** (faculty, admin, accountant, security, etc.). Data feeds into the payroll module's `compute_payslip_for_user()`.
+
+---
+
+### 2.0 Employee Self Check-In / Check-Out
+**Used by:** Any authenticated employee (Mobile App & Web App)  
+**`POST /api/v1/attendance/employee/scan/`**
+
+Self-service check-in or check-out. Creates an `EmployeeAttendanceRecord` for today. On check-in, status is set to `checkout_pending`. On check-out, status is updated to `present`.
+
+#### Request Body
+```json
+{
+  "scan_type": "check_in"
+}
+```
+
+#### Response — Check-In Success (200 OK)
+```json
+{
+  "success": true,
+  "message": "Check In recorded.",
+  "data": {
+    "id": "ear-uuid-001",
+    "user": "user-uuid",
+    "user_name": "Priya Verma",
+    "employee_id": "EMP-HQ-0012",
+    "branch": "branch-uuid",
+    "branch_name": "Main Campus",
+    "date": "2026-06-24",
+    "status": "checkout_pending",
+    "status_display": "Checkout Pending",
+    "checked_in_at": "2026-06-24T09:02:00Z",
+    "checked_out_at": null,
+    "marked_by": null,
+    "marked_by_name": null,
+    "marked_at": "2026-06-24T09:02:00Z",
+    "is_corrected": false,
+    "corrected_by": null,
+    "correction_note": ""
+  }
+}
+```
+
+#### Response — Check-Out Success (200 OK)
+```json
+{
+  "success": true,
+  "message": "Check Out recorded.",
+  "data": {
+    "...same fields...",
+    "status": "present",
+    "status_display": "Present",
+    "checked_out_at": "2026-06-24T18:00:00Z"
+  }
+}
+```
+
+#### Error Cases
+- `409 Conflict` — "Already checked in today." or "Already checked out today."
+- `400 Bad Request` — "Must check in first before checking out." or "No branch assigned to your account."
+
+---
+
+### 2.0b Bulk Mark Employee Attendance (Admin)
+**Used by:** Admins only (Web App)  
+**`POST /api/v1/attendance/employee/`**
+
+Bulk mark attendance for multiple employees at once. Creates or updates `EmployeeAttendanceRecord` for each employee on the given date.
+
+#### Request Body
+```json
+{
+  "branch_id": "branch-uuid-001",
+  "date": "2026-06-24",
+  "records": [
+    { "user_id": "user-uuid-001", "status": "present" },
+    { "user_id": "user-uuid-002", "status": "absent" },
+    { "user_id": "user-uuid-003", "status": "late" }
+  ]
+}
+```
+
+#### Response (201 Created)
+```json
+{
+  "success": true,
+  "message": "Created 2, updated 1 records.",
+  "errors": []
+}
+```
+
+---
+
+### 2.0c List Employee Attendance Records
+**Used by:** Admins (all in branch), Staff (own records only)  
+**`GET /api/v1/attendance/employee/`**
+
+#### Query Params (Optional)
+- `date=2026-06-24` — single date
+- `from_date=2026-06-01` & `to_date=2026-06-30` — date range
+- `status=present` — filter by status
+- `user_id=uuid` — filter by specific user (admin only)
+
+#### Response (200 OK)
+Paginated list of `EmployeeAttendanceRecord` objects.
+
+---
+
+### 2.0d Employee Attendance History (Personal)
+**Used by:** Any authenticated employee  
+**`GET /api/v1/attendance/employee/history/`**
+
+Personal attendance history with summary statistics.
+
+#### Query Params (Optional)
+- `year=2026`
+- `month=6`
+- `from_date=2026-06-01`
+- `to_date=2026-06-30`
+
+#### Response (200 OK)
+```json
+{
+  "success": true,
+  "summary": {
+    "total_days": 22,
+    "present_days": 20,
+    "absent_days": 1,
+    "half_days": 1,
+    "on_leave": 0,
+    "attendance_percentage": 90.9
+  },
+  "records": [
+    {
+      "id": "ear-uuid-001",
+      "user": "user-uuid",
+      "user_name": "Priya Verma",
+      "employee_id": "EMP-HQ-0012",
+      "branch": "branch-uuid",
+      "branch_name": "Main Campus",
+      "date": "2026-06-24",
+      "status": "present",
+      "status_display": "Present",
+      "checked_in_at": "2026-06-24T09:02:00Z",
+      "checked_out_at": "2026-06-24T18:00:00Z",
+      "marked_by": null,
+      "marked_by_name": null,
+      "is_corrected": false
+    }
+  ]
+}
+```
+
+> **Payroll Integration:** The `EmployeeAttendanceRecord` data is consumed by `compute_payslip_for_user()` in the payroll module. `present`, `late`, and `half_day` records count as days attended. Actual hours worked are computed from `checked_in_at` / `checked_out_at` for hourly-rate employees.
+
+---
+
+## SECTION 3 — Web App APIs (Dashboards & Reports)
 
 These APIs are exclusively for the **Web App** (Admin Panel) to view analytics, reports, registers, and resolve violations.
 
 ---
 
-### 2.1 Dashboard Summary
+### 3.1 Dashboard Summary
 **Used by:** Admins, Branch Managers (Web App)  
 **`GET /api/v1/attendance/dashboard/`**
 
@@ -263,7 +467,7 @@ High-level summary of today's attendance for the organization or specific branch
 
 ---
 
-### 2.2 Batch-wise Attendance Summary
+### 3.2 Batch-wise Attendance Summary
 **Used by:** Admins, Branch Managers (Web App)  
 **`GET /api/v1/attendance/batch-wise/`**
 
@@ -296,7 +500,7 @@ Summary of attendance aggregated by batch. Useful for plotting batch-wise attend
 
 ---
 
-### 2.3 List Students (with Attendance Aggregates)
+### 3.3 List Students (with Attendance Aggregates)
 **Used by:** Admins, Branch Managers, Faculty (Web App)  
 **`GET /api/v1/attendance/students/`**
 
@@ -340,7 +544,7 @@ Lists students along with their computed attendance percentages and basic stats 
 
 ---
 
-### 2.3 Detailed Student Analytics
+### 3.4 Detailed Student Analytics
 **Used by:** Admins, Faculty (Web App)  
 **`GET /api/v1/attendance/students/<student_id>/`**
 
@@ -384,7 +588,7 @@ Deep-dive into a single student's attendance, including subject-wise, session-wi
 
 ---
 
-### 2.4 Batch Attendance Register (Matrix View)
+### 3.5 Batch Attendance Register (Matrix View)
 **Used by:** Admins, Faculty (Web App)  
 **`GET /api/v1/attendance/batches/<batch_id>/register/`**
 
@@ -417,7 +621,7 @@ Returns a tabular matrix (Rows = Students, Columns = Dates) for rendering an att
 
 ---
 
-### 2.5 Flat Attendance History (Audit Logs)
+### 3.6 Flat Attendance History (Audit Logs)
 **Used by:** Admins (Web App)  
 **`GET /api/v1/attendance/history/`**
 
@@ -449,15 +653,15 @@ A flat list of all attendance logs, heavily filterable. Used for global audit ta
 
 ---
 
-## SECTION 3 — Violations & Admin Corrections (Web App)
+## SECTION 4 — Violations & Admin Corrections (Web App)
 
 ---
 
-### 3.1 List Violations
+### 4.1 List Violations
 **`GET /api/v1/attendance/violations/`**  
 Lists all QR scan violations (e.g., location mismatch, proxy).
 
-### 3.2 Create Manual Violation
+### 4.2 Create Manual Violation
 **`POST /api/v1/attendance/violations/`**  
 Admins can manually flag a student for a violation.
 ```json
@@ -469,7 +673,7 @@ Admins can manually flag a student for a violation.
 }
 ```
 
-### 3.3 Resolve Violation
+### 4.3 Resolve Violation
 **`PATCH /api/v1/attendance/violations/<violation_id>/`**  
 Admins mark a violation as resolved after discussion with parents/student.
 ```json
@@ -479,15 +683,15 @@ Admins mark a violation as resolved after discussion with parents/student.
 }
 ```
 
-### 3.4 Correct Single Attendance Record
+### 4.4 Correct Single Attendance Record
 **`GET / PATCH /api/v1/attendance/<record_id>/`**  
 Used by admins to correct a mistakenly marked attendance (e.g. changing absent to present).
 
 ---
 
-## SECTION 4 — Reporting & Alerts
+## SECTION 5 — Reporting & Alerts
 
-### 4.1 Trigger Low Attendance Alerts
+### 5.1 Trigger Low Attendance Alerts
 **Used by:** Admins (Web App)  
 **`POST /api/v1/attendance/alert/`**
 
@@ -499,10 +703,69 @@ Checks all students in a branch and triggers an alert if their attendance is bel
 }
 ```
 
-### 4.2 Defaulters List
+### 5.2 Defaulters List
 **`GET /api/v1/attendance/defaulters/`**  
 Returns students whose attendance is below the institutional threshold.
 
-### 4.3 Export Attendance
+### 5.3 Export Attendance
 **`GET /api/v1/attendance/export/?format=csv&batch_id=uuid`**  
 Generates and downloads a CSV/Excel export of the attendance register.
+
+---
+
+## Full URL Reference
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| **Student Attendance** | | |
+| `POST` | `/api/v1/attendance/` | Batch mark student attendance |
+| `POST` | `/api/v1/attendance/qr-scan/` | Student QR scan |
+| `GET/PATCH` | `/api/v1/attendance/<record_id>/` | Correction |
+| `GET` | `/api/v1/attendance/student/<student_id>/` | Student history |
+| `GET` | `/api/v1/attendance/batch/<batch_id>/` | Batch sheet |
+| `GET` | `/api/v1/attendance/report/` | Report |
+| `POST` | `/api/v1/attendance/alert/` | Trigger alerts |
+| **Employee Attendance (NEW)** | | |
+| `GET/POST` | `/api/v1/attendance/employee/` | List/bulk mark staff attendance |
+| `POST` | `/api/v1/attendance/employee/scan/` | Self check-in/out |
+| `GET` | `/api/v1/attendance/employee/history/` | Personal history with summary |
+| **Analytics** | | |
+| `GET` | `/api/v1/attendance/dashboard/` | Dashboard summary |
+| `GET` | `/api/v1/attendance/students/` | Student list with stats |
+| `GET` | `/api/v1/attendance/students/<id>/` | Student detail |
+| `GET` | `/api/v1/attendance/history/` | Audit log |
+| `GET` | `/api/v1/attendance/batches/<id>/register/` | Register matrix |
+| `GET` | `/api/v1/attendance/faculty/` | Faculty attendance list |
+| `GET` | `/api/v1/attendance/faculty/<id>/` | Faculty attendance detail |
+| `GET` | `/api/v1/attendance/batch-wise/` | Batch-wise summary |
+| `GET` | `/api/v1/attendance/analytics/` | Analytics |
+| `GET` | `/api/v1/attendance/defaulters/` | Defaulter students |
+| `GET/POST` | `/api/v1/attendance/violations/` | Violations |
+| `GET/PATCH` | `/api/v1/attendance/violations/<id>/` | Violation detail |
+| `GET` | `/api/v1/attendance/export/` | Export CSV/Excel |
+| `GET` | `/api/v1/attendance/audit-logs/` | Audit logs |
+
+---
+
+## Cross-Module Integration
+
+```text
+┌──────────────────────┐     ┌──────────────────────┐
+│ EmployeeAttendance   │────►│ Payroll Module        │
+│ Record               │     │ compute_payslip_for_  │
+│ (days_attended,      │     │ user() uses records   │
+│  check-in/out hours) │     │ for absence/hour calc │
+└──────────────────────┘     └──────────────────────┘
+
+┌──────────────────────┐     ┌──────────────────────┐
+│ Student Attendance   │────►│ Fees Module           │
+│ QR Scan              │     │ Overdue check blocks  │
+│                      │     │ QR scan if >15 days   │
+└──────────────────────┘     └──────────────────────┘
+
+┌──────────────────────┐     ┌──────────────────────┐
+│ Leave Module         │────►│ Attendance (both)     │
+│ Approved leaves      │     │ on_leave status auto  │
+│                      │     │ set where applicable  │
+└──────────────────────┘     └──────────────────────┘
+```

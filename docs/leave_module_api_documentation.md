@@ -162,3 +162,26 @@ pending → cancelled (by student)
 }
 ```
 
+---
+
+## Cross-Module Integration
+
+```text
+┌──────────────────────┐     ┌──────────────────────┐
+│ Leave Module         │────►│ Payroll Module        │
+│ Approved leaves      │     │ Unpaid leaves trigger │
+│ LateEntryRecords     │     │ deductions. Leave     │
+│ (tied to User)       │     │ encashment applied.   │
+└──────────────────────┘     └──────────────────────┘
+
+┌──────────────────────┐     ┌──────────────────────┐
+│ Leave Module         │────►│ Attendance Module     │
+│ Approved leaves      │     │ Attendance records    │
+│                      │     │ auto-flagged as       │
+│                      │     │ "on_leave" status.    │
+└──────────────────────┘     └──────────────────────┘
+```
+
+**Key Integrations:**
+- **Payroll**: `compute_payslip_for_user()` and `compute_payslip_for_faculty()` both query `LeaveApplication` for unpaid leaves to apply salary deductions, and query `LateEntryRecord` to apply late penalties according to branch `LateEntryPolicy`.
+- **Attendance**: Approved leaves can automatically affect or justify attendance records for both students and employees.
