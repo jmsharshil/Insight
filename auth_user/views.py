@@ -460,28 +460,26 @@ class DeleteUserAPIView(APIView):
         })
 
 class UserListAPIView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['is_active']
+    filterset_fields = ['is_active', 'role', 'branch', 'organization']
     search_fields = ['name', 'email', 'phone']
     ordering_fields = '__all__'
     pagination_class = None
 
     def get(self, request):
-        if not request.user.is_authenticated:
-            return Response({'error': 'Authentication required'}, status=401)
-            
         from django.db.models import Q
         if request.user.is_superuser:
-            users = User.objects.all().order_by('-created_at')
+            users = User.objects.select_related('branch').all().order_by('-created_at')
         elif request.user.role == 'super_admin':
-            users = User.objects.filter(
+            users = User.objects.select_related('branch').filter(
                 Q(organization=request.user.organization) | Q(is_superuser=True)
             ).order_by('-created_at')
         else:
-            users = User.objects.filter(organization=request.user.organization).order_by('-created_at')
+            users = User.objects.select_related('branch').filter(organization=request.user.organization).order_by('-created_at')
         roles = self.request.query_params.getlist('role')
         is_active = self.request.query_params.get('is_active')
+        branch = self.request.query_params.get('branch')  # explicit support for branch param
 
         if roles:
             # Handle comma-separated list if passed as ?role=admin,student
@@ -489,9 +487,12 @@ class UserListAPIView(APIView):
                 roles = [r.strip() for r in roles[0].split(',')]
             users = users.filter(role__in=roles)
             
-        if is_active:
-            users = users.filter(is_active=is_active.lower() == 'true')
+        if is_active is not None:  # support ?is_active=true/false or 1/0
+            users = users.filter(is_active=is_active.lower() in ('true', '1', 'yes') if isinstance(is_active, str) else bool(is_active))
         
+        if branch:
+            users = users.filter(branch_id=branch)  # support both ?branch=uuid and via filter backend
+
         users = apply_filters(self, request, users)
         serializer = UserListSerializer(users, many=True)
         return Response({
