@@ -4,7 +4,7 @@ from .views import (
     SeatingView, SeatingDetailView,
     ExamStartView, ExamSubmitView, AutosaveView, ScreenEventView,
     GeoCheckView, AnswerKeyDistributeView, AnswerKeyView,
-    MalpracticeView, MalpracticeDetailView,
+    MalpracticeView, MalpracticeDetailView, ExamScheduleView,
 )
 
 urlpatterns = [
@@ -14,10 +14,11 @@ urlpatterns = [
     # Exam CRUD
     path('exams/', ExamListCreateView.as_view(), name='exam-list-create'),
     path('exams/<uuid:exam_id>/', ExamDetailView.as_view(), name='exam-detail'),
+    path('exams/<uuid:exam_id>/schedule/', ExamScheduleView.as_view(), name='exam-schedule'),
 
     # Questions
     path('exams/<uuid:exam_id>/questions/', QuestionView.as_view(), name='exam-questions'),
-    path('exams/<uuid:exam_id>/questions/<uuid:question_id>/', QuestionDetailView.as_view(), name='exam-question-detail'),
+
 
     # Seating
     path('exams/<uuid:exam_id>/seating/', SeatingView.as_view(), name='exam-seating'),

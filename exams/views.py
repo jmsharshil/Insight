@@ -895,3 +895,47 @@ class MalpracticeDetailView(APIView):
             return Response({'success': False, 'message': 'Only super_admin or ASE can delete.'}, status=status.HTTP_403_FORBIDDEN)
         rep.delete()
         return Response({'success': True, 'message': 'Report deleted.'}, status=status.HTTP_200_OK)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 11. POST  /api/v1/exams/{exam_id}/schedule/  — transition draft → scheduled
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ExamScheduleView(APIView):
+    """Dedicated API to schedule an exam (sets status='scheduled').
+    Can only be done on 'draft' exams with future scheduled_date.
+    """
+
+    def post(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in EXAM_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if exam.status != 'draft':
+            return Response({
+                'success': False,
+                'message': f'Cannot schedule exam. Current status is "{exam.status}". Must be "draft".'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if exam.scheduled_date < timezone.now().date():
+            return Response({
+                'success': False,
+                'message': 'Cannot schedule an exam for a past date.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        exam.status = 'scheduled'
+        exam.save(update_fields=['status'])
+
+        return Response({
+            'success': True,
+            'message': 'Exam has been scheduled successfully.',
+            'data': ExamListSerializer(exam).data
+        })
