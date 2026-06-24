@@ -33,11 +33,12 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserListSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
     profile_pic = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active','created_at', 'profile_pic']
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'profile_pic']
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
