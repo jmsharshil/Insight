@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import MarkSheet, PublishedResult, RecheckRequest
+from .models import MarkSheet, PublishedResult, RecheckRequest, CheckerQuery
 
 
 class MarkSheetSerializer(serializers.ModelSerializer):
@@ -13,6 +13,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'paper_checker', 'checker_name', 'marks_obtained', 'is_pass',
             'remarks', 'checked_at', 'is_submitted', 'is_rechecked', 'is_absent',
+            'has_open_query',
         ]
 
     def get_student_name(self, obj):
@@ -29,6 +30,10 @@ class MarkSheetSerializer(serializers.ModelSerializer):
 
     def get_checker_name(self, obj):
         return obj.paper_checker.name if obj.paper_checker else None
+
+    def get_has_open_query(self, obj):
+        """Indicates if there is an open checker query preventing payroll inclusion."""
+        return obj.queries.filter(status='open').exists()
 
 
 class PublishedResultSerializer(serializers.ModelSerializer):
@@ -116,3 +121,35 @@ class RecheckRequestActionSerializer(serializers.Serializer):
         if data['action'] == 'approve' and not data.get('new_checker_id'):
             raise serializers.ValidationError({"new_checker_id": "Required when approving."})
         return data
+
+
+class CheckerQueryCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CheckerQuery
+        fields = ['query_type', 'description']
+        extra_kwargs = {
+            'query_type': {'required': True, 'allow_blank': False},
+        }
+
+
+class CheckerQuerySerializer(serializers.ModelSerializer):
+    """Serializer for paper checker queries (e.g. 'answer key not available')."""
+    query_type_display = serializers.CharField(source='get_query_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    raised_by_name = serializers.SerializerMethodField()
+    resolved_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CheckerQuery
+        fields = [
+            'id', 'marksheet', 'raised_by', 'raised_by_name', 'query_type',
+            'query_type_display', 'description', 'status', 'status_display',
+            'resolved_by', 'resolved_by_name', 'resolved_at', 'created_at',
+        ]
+        read_only_fields = ['marksheet', 'raised_by', 'status', 'resolved_by', 'resolved_at', 'created_at']
+
+    def get_raised_by_name(self, obj):
+        return obj.raised_by.name if obj.raised_by else None
+
+    def get_resolved_by_name(self, obj):
+        return obj.resolved_by.name if obj.resolved_by else None

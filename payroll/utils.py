@@ -627,8 +627,11 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     role = getattr(user, 'role', '')
 
     if role == 'paper_checker':
-        # Per-paper payroll with late penalty + recheck handling (removes count for pending/approved rechecks;
-        # adds back on resubmit by new checker with status=completed). Matches "paper count removed till recheck done"
+        # Per-paper payroll with late penalty + recheck handling + checker query support.
+        # Removes count for pending/approved rechecks OR open queries.
+        # For queries raised *after recheck starts*, payment (paper count) is cut/withheld
+        # until query status='resolved' (then included in next payroll run).
+        # Queries examples: answer_key_not_available, etc. (see QUERY_TYPE_CHOICES).
         from results.models import MarkSheet
         from django.db.models import Q
         papers_qs = MarkSheet.objects.filter(
@@ -638,6 +641,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             checked_at__month=month,
         ).exclude(
             recheck_requests__status__in=['approval_pending', 'approved']
+        ).exclude(
+            queries__status='open'
         ).select_related('exam').distinct()
         papers_checked = papers_qs.count()
         per_paper_rate = getattr(user, 'per_paper_rate', Decimal('0'))

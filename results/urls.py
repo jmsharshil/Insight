@@ -4,7 +4,7 @@ from .views import (
     CheckerStatusView, CheckerPortalSubmitView,
     PublishResultView, ResultView, ResultDeleteView,
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
-    MarkAbsentView, MarkAllAbsentView,
+    MarkAbsentView, MarkAllAbsentView, BulkRecheckRequestView, PaperCheckerQueryView,
 )
 
 urlpatterns = [
@@ -25,5 +25,9 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/results/recheck-request/', StudentRecheckRequestView.as_view(), name='student-recheck-request'),
     path('exams/<uuid:exam_id>/recheck-requests/', RecheckRequestListView.as_view(), name='recheck-request-list'),
     path('exams/<uuid:exam_id>/recheck-requests/<uuid:request_id>/', RecheckRequestActionView.as_view(), name='recheck-request-action'),
+    
+    # NEW: Paper checker query option
+    path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/query/', PaperCheckerQueryView.as_view(), name='paper-checker-query'),
+    path('exams/<uuid:exam_id>/queries/<uuid:query_id>/resolve/', PaperCheckerQueryView.as_view(), name='query-resolve'),
 ]
 

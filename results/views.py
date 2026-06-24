@@ -9,11 +9,12 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 
-from .models import MarkSheet, PublishedResult, RecheckRequest
+from .models import MarkSheet, PublishedResult, RecheckRequest, CheckerQuery
 from .serializers import (
     MarkSheetSerializer, PublishedResultSerializer,
     RecheckRequestSerializer, RecheckRequestCreateSerializer,
-    RecheckRequestActionSerializer,
+    RecheckRequestActionSerializer, CheckerQuerySerializer,
+    CheckerQueryCreateSerializer,
 )
 from exams.models import Exam, CheckerToken
 from exams.utils import calculate_ranks, generate_checker_token
@@ -28,6 +29,7 @@ RECHECK_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 CHECKER_STATUS_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
 PUBLISH_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
 RECHECK_REQUEST_REVIEW_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
+QUERY_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 
 
 def _user_role(user):
@@ -50,7 +52,7 @@ class PaperView(APIView):
         if role not in PAPER_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = MarkSheet.objects.filter(exam_id=exam_id).select_related('student__user', 'paper_checker')
+        qs = MarkSheet.objects.filter(exam_id=exam_id).select_related('student__user', 'paper_checker').prefetch_related('queries')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
         if role == 'paper_checker':
@@ -73,7 +75,7 @@ class PaperMarksView(APIView):
         if role not in PAPER_MARK_ROLES:
             return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            qs = MarkSheet.objects.all()
+            qs = MarkSheet.objects.prefetch_related('queries')
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
@@ -81,6 +83,13 @@ class PaperMarksView(APIView):
             return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if ms.paper_checker != request.user and role != 'super_admin':
             return None, Response({'success': False, 'message': 'Not assigned to you.'}, status=status.HTTP_403_FORBIDDEN)
+        # Respect open checker queries for permissions (prevents modification while payroll-excluded)
+        if any(q.status == 'open' for q in ms.queries.all()) and role not in ['super_admin', 'admin_senior_executive']:
+            return None, Response({
+                'success': False,
+                'message': 'This marksheet has an open query. Please resolve the query first.',
+                'has_open_query': True
+            }, status=status.HTTP_403_FORBIDDEN)
         return ms, None
 
     def post(self, request, exam_id, marksheet_id):
@@ -701,4 +710,118 @@ class BulkRecheckRequestView(APIView):
             'message': f'Bulk recheck initiated for batch. {created_count} requests created.',
             'count': created_count,
         }, status=status.HTTP_201_CREATED)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 11. Paper Checker Query Option (NEW FRD)
+# POST  /api/v1/exams/{exam_id}/papers/{marksheet_id}/query/   — raise query (paper_checker)
+# PATCH /api/v1/exams/{exam_id}/queries/{query_id}/resolve/     — resolve query (admin/ASE)
+# If query raised after recheck (ms.is_rechecked=True), payroll excludes the paper
+# from count until query.status == 'resolved'. See CheckerQuery model + updated
+# compute_payslip_for_user().
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PaperCheckerQueryView(APIView):
+    """Handles raising and resolving paper checker queries.
+    Queries prevent payroll payment until completed/resolved.
+    """
+    # permission_classes = [IsAuthenticated]
+
+    def post(self, request, exam_id, marksheet_id=None):
+        """Paper checker raises a query on a marksheet (e.g. answer key missing).
+        URL: /exams/{exam_id}/papers/{marksheet_id}/query/
+        """
+        role = _user_role(request.user)
+        if role not in QUERY_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        marksheet_id = marksheet_id or request.data.get('marksheet_id')
+        try:
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(id=marksheet_id, exam_id=exam_id)
+        except MarkSheet.DoesNotExist:
+            return Response({'success': False, 'message': 'MarkSheet not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if ms.paper_checker != request.user and role != 'super_admin':
+            return Response({'success': False, 'message': 'Not assigned to you.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Enforce after recheck start per requirement
+        if not getattr(ms, 'is_rechecked', False) and role == 'paper_checker':
+            return Response({
+                'success': False,
+                'message': 'Queries typically raised after recheck starts. Use marks submission instead.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        ser = CheckerQueryCreateSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        query = CheckerQuery.objects.create(
+            marksheet=ms,
+            raised_by=request.user,
+            query_type=ser.validated_data['query_type'],
+            description=ser.validated_data.get('description', ''),
+            status='open',
+        )
+
+        # Mark as not submitted until resolved (affects payroll immediately)
+        if not ms.is_submitted:
+            ms.is_submitted = False
+            ms.save(update_fields=['is_submitted'])
+
+        logger.info(f"Checker query raised by {request.user} on marksheet {marksheet_id}: {query.query_type}")
+
+        return Response({
+            'success': True,
+            'message': 'Query raised. This paper will not count toward payment until resolved.',
+            'data': CheckerQuerySerializer(query).data
+        }, status=status.HTTP_201_CREATED)
+
+    def patch(self, request, exam_id, query_id=None):
+        """Admin/ASE resolves a query. 
+        URL: /exams/{exam_id}/queries/{query_id}/resolve/
+        Sets status=resolved; payment cut only lifted when completed.
+        """
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive']:
+            return Response({'success': False, 'message': 'Only admins can resolve queries.'}, status=status.HTTP_403_FORBIDDEN)
+
+        query_id = query_id or request.data.get('query_id')
+        try:
+            q_qs = CheckerQuery.objects.select_related('marksheet').all()
+            if getattr(request.user, 'organization', None):
+                q_qs = q_qs.filter(marksheet__exam__branch__organization=request.user.organization)
+            query_obj = q_qs.get(id=query_id, marksheet__exam_id=exam_id)
+        except (CheckerQuery.DoesNotExist, ValueError):
+            return Response({'success': False, 'message': 'Query not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if query_obj.status != 'open':
+            return Response({'success': False, 'message': 'Query already resolved.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        query_obj.status = 'resolved'
+        query_obj.resolved_by = request.user
+        query_obj.resolved_at = timezone.now()
+        query_obj.save()
+
+        # Optionally allow marks update on resolve (triggers submission for payroll)
+        ms = query_obj.marksheet
+        if 'marks_obtained' in request.data:
+            marks = request.data.get('marks_obtained')
+            if marks is not None:
+                ms.marks_obtained = marks
+                ms.remarks = request.data.get('remarks', ms.remarks or 'Query resolved with marks')
+                ms.checked_at = timezone.now()
+                ms.is_submitted = True
+                ms.is_pass = float(marks) >= (ms.exam.total_marks or 0)
+                ms.save()
+
+        logger.info(f"Query {query_obj.id} resolved by {request.user}")
+
+        return Response({
+            'success': True,
+            'message': 'Query resolved. Paper now eligible for payment on next payroll run (if submitted).',
+            'data': CheckerQuerySerializer(query_obj).data
+        })
 

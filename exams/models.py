@@ -27,7 +27,10 @@ class Exam(models.Model):
     faculty = models.ForeignKey('faculty.FacultyProfile', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_exams')
     title = models.CharField(max_length=200)
     exam_type = models.CharField(max_length=20, choices=EXAM_TYPE_CHOICES)
-    total_marks = models.IntegerField()
+    total_marks = models.IntegerField(
+        default=0,
+        help_text='Auto-calculated as sum of all questions.marks (questions including MCQs can have varying marks per question). Updated automatically via signals.'
+    )
     pass_marks = models.IntegerField()
     duration_minutes = models.IntegerField(help_text='Drives the countdown timer')
     scheduled_date = models.DateField()
@@ -75,6 +78,18 @@ class Exam(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.scheduled_date})"
+
+    def recalculate_total_marks(self):
+        """Auto-calculate and update total_marks based on sum of all associated questions' marks.
+        Questions (MCQ, subjective, true_false) can have independent/varying marks.
+        Called automatically via signals on Question create/update/delete.
+        """
+        from django.db.models import Sum
+        total = self.questions.aggregate(Sum('marks'))['marks__sum'] or 0
+        if self.total_marks != total:
+            self.total_marks = total
+            self.save(update_fields=['total_marks'])
+        return total
 
 
 class Question(models.Model):

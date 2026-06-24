@@ -105,3 +105,55 @@ class PublishedResult(models.Model):
 
     def __str__(self):
         return f"{self.student} - {self.exam.title}: {self.marks_obtained}/{self.total_marks}"
+
+
+QUERY_STATUS_CHOICES = [
+    ('open', 'Open'), ('resolved', 'Resolved'), ('closed', 'Closed'),
+]
+
+QUERY_TYPE_CHOICES = [
+    ('answer_key_not_available', 'Answer Key Not Available'),
+    ('marksheet_not_clear', 'Marksheet Not Clear/Illegible'),
+    ('discrepancy_found', 'Discrepancy in Answer Key or Marks'),
+    ('other', 'Other Query'),
+]
+
+
+class CheckerQuery(models.Model):
+    """
+    Paper checker query option (new FRD extension).
+    Checker can raise query on a MarkSheet (e.g. 'answer key not available').
+    If raised after recheck starts (is_rechecked=True on MarkSheet), then
+    the paper is excluded from payroll count until query status='resolved'.
+    Admin/ASE can resolve the query (provide clarification/answer key).
+    Once resolved, checker can submit marks and get paid for the paper.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    marksheet = models.ForeignKey(
+        MarkSheet, on_delete=models.CASCADE, related_name='queries'
+    )
+    raised_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='raised_checker_queries',
+        limit_choices_to={'role': 'paper_checker'}
+    )
+    query_type = models.CharField(max_length=30, choices=QUERY_TYPE_CHOICES, default='other')
+    description = models.TextField(blank=True, help_text="Details of the query, e.g. what is missing.")
+    status = models.CharField(
+        max_length=20, choices=QUERY_STATUS_CHOICES, default='open'
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='resolved_checker_queries'
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'result_checker_queries'
+        ordering = ['-created_at']
+        verbose_name = 'Checker Query'
+        verbose_name_plural = 'Checker Queries'
+
+    def __str__(self):
+        return f"{self.get_query_type_display()} on {self.marksheet} — {self.get_status_display()}"
