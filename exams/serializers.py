@@ -1,9 +1,12 @@
 from rest_framework import serializers
 from django.utils import timezone
+from django.contrib.auth import get_user_model
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
     SeatArrangement, MalpracticeReport, ScreenEvent,
 )
+
+User = get_user_model()
 
 
 # ═══ Choices ══════════════════════════════════════════════════════════════════
@@ -81,6 +84,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     screen_lock_action_display = serializers.CharField(source="get_screen_lock_action_display", read_only=True)
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
+    paper_checkers = serializers.SerializerMethodField()
     can_start_exam = serializers.SerializerMethodField()
     questions_count = serializers.SerializerMethodField()
 
@@ -97,7 +101,8 @@ class ExamListSerializer(serializers.ModelSerializer):
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
          'exam_type_display', 'status_display', 'screen_lock_action_display', 
-         'split_screen_action_display', 'result_release_mode_display', 'can_start_exam', 'questions_count']
+         'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
+         'can_start_exam', 'questions_count']
 
     def get_questions_count(self, obj):
         return obj.questions.count()
@@ -179,9 +184,20 @@ class ExamListSerializer(serializers.ModelSerializer):
     def get_created_by_name(self, obj):
         return obj.created_by.name if obj.created_by else None
 
+    def get_paper_checkers(self, obj):
+        """Return list of paper checkers with id and name for frontend display."""
+        return [
+            {'id': user.id, 'name': user.name, 'email': user.email}
+            for user in obj.paper_checkers.all()
+        ]
+
 
 class ExamCreateSerializer(serializers.ModelSerializer):
     total_marks = serializers.IntegerField(read_only=True, required=False)
+    paper_checkers = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role='paper_checker', is_active=True),
+        many=True, required=False, allow_empty=True, write_only=True
+    )
 
     class Meta:
         model = Exam
@@ -194,7 +210,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
-            'result_release_mode',
+            'result_release_mode', 'paper_checkers',
         ]
 
     def validate(self, data):
@@ -214,6 +230,20 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         if radius > 0 and (not data.get('geo_lat') or not data.get('geo_lon')):
             raise serializers.ValidationError({"geo_lat": "Required when geo_radius > 0."})
         return data
+
+    def create(self, validated_data):
+        paper_checkers = validated_data.pop('paper_checkers', [])
+        exam = super().create(validated_data)
+        if paper_checkers:
+            exam.paper_checkers.set(paper_checkers)
+        return exam
+
+    def update(self, instance, validated_data):
+        paper_checkers = validated_data.pop('paper_checkers', None)
+        exam = super().update(instance, validated_data)
+        if paper_checkers is not None:
+            exam.paper_checkers.set(paper_checkers)
+        return exam
 
 
 # ═══ Session ══════════════════════════════════════════════════════════════════

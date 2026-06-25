@@ -17,7 +17,7 @@ from .serializers import (
     CheckerQueryCreateSerializer,
 )
 from exams.models import Exam, CheckerToken
-from exams.utils import calculate_ranks, generate_checker_token
+from exams.utils import calculate_ranks, generate_checker_token, notify
 from exams.emails import send_checker_assignment_email, send_recheck_request_notification
 
 logger = logging.getLogger(__name__)
@@ -463,55 +463,55 @@ class StudentRecheckRequestView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
-        ser = RecheckRequestActionSerializer(data=request.data)
-        if not ser.is_valid():
-            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+        # ser = RecheckRequestActionSerializer(data=request.data)
+        # if not ser.is_valid():
+        #     return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        action = ser.validated_data['action']
-        ms = rr.marksheet
+        # action = ser.validated_data['action']
+        # ms = rr.marksheet
 
-        if action == 'approve':
-            new_checker_id = ser.validated_data['new_checker_id']
-            rr.status = 'approved'
-            rr.reviewed_by = request.user
-            rr.reviewed_at = timezone.now()
-            rr.new_checker_id = new_checker_id
-            rr.save()
+        # if action == 'approve':
+        #     new_checker_id = ser.validated_data['new_checker_id']
+        #     rr.status = 'approved'
+        #     rr.reviewed_by = request.user
+        #     rr.reviewed_at = timezone.now()
+        #     rr.new_checker_id = new_checker_id
+        #     rr.save()
 
-            ms.is_rechecked = True
-            ms.recheck_request_at = timezone.now()
-            ms.paper_checker_id = new_checker_id
-            ms.is_submitted = False
-            ms.save()
+        #     ms.is_rechecked = True
+        #     ms.recheck_request_at = timezone.now()
+        #     ms.paper_checker_id = new_checker_id
+        #     ms.is_submitted = False
+        #     ms.save()
 
-            generate_checker_token(ms)
-            send_checker_assignment_email(ms)
+        #     generate_checker_token(ms)
+        #     send_checker_assignment_email(ms)
 
-            return Response({'success': True, 'message': 'Recheck approved and reassigned to new checker.'})
+        #     return Response({'success': True, 'message': 'Recheck approved and reassigned to new checker.'})
 
-        else:  # reject
-            rr.status = 'rejected'
-            rr.reviewed_by = request.user
-            rr.reviewed_at = timezone.now()
-            rr.save()
+        # else:  # reject
+        #     rr.status = 'rejected'
+        #     rr.reviewed_by = request.user
+        #     rr.reviewed_at = timezone.now()
+        #     rr.save()
 
-            # Stub: notify student of rejection
-            ms = qs.get(id=marksheet_id, exam_id=exam_id)
-        except MarkSheet.DoesNotExist:
-            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        #     # Stub: notify student of rejection
+        #     ms = qs.get(id=marksheet_id, exam_id=exam_id)
+        # except MarkSheet.DoesNotExist:
+        #     return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if ms.is_submitted:
-            return Response({'success': False, 'message': 'Marks already submitted; cannot mark as absent.'}, status=status.HTTP_400_BAD_REQUEST)
+        # if ms.is_submitted:
+        #     return Response({'success': False, 'message': 'Marks already submitted; cannot mark as absent.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        ms.is_absent = True
-        ms.marks_obtained = 0
-        ms.is_pass = False
-        ms.is_submitted = True
-        ms.remarks = 'Absent'
-        ms.checked_at = timezone.now()
-        ms.save()
+        # ms.is_absent = True
+        # ms.marks_obtained = 0
+        # ms.is_pass = False
+        # ms.is_submitted = True
+        # ms.remarks = 'Absent'
+        # ms.checked_at = timezone.now()
+        # ms.save()
 
-        return Response({'success': True, 'message': 'Student marked as absent.'}, status=status.HTTP_200_OK)
+        # return Response({'success': True, 'message': 'Student marked as absent.'}, status=status.HTTP_200_OK)
 
 
 class MarkAllAbsentView(APIView):
@@ -734,4 +734,148 @@ class PaperCheckerQueryView(APIView):
             'message': 'Query resolved. Paper now eligible for payment on next payroll run (if submitted).',
             'data': CheckerQuerySerializer(query_obj).data
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. Mark Absent, Recheck List & Action Views (to satisfy urls.py imports + FRD recheck workflow)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MarkAbsentView(APIView):
+    """POST /api/v1/exams/{exam_id}/papers/{marksheet_id}/mark-absent/ — mark individual student as absent."""
+
+    def post(self, request, exam_id, marksheet_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            qs = MarkSheet.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            ms = qs.get(id=marksheet_id, exam_id=exam_id)
+        except MarkSheet.DoesNotExist:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if ms.is_submitted:
+            return Response({'success': False, 'message': 'Marks already submitted; cannot mark as absent.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ms.is_absent = True
+        ms.marks_obtained = 0
+        ms.is_pass = False
+        ms.is_submitted = True
+        ms.remarks = 'Absent'
+        ms.checked_at = timezone.now()
+        ms.save()
+
+        return Response({'success': True, 'message': 'Student marked as absent.'}, status=status.HTTP_200_OK)
+
+
+class RecheckRequestListView(APIView):
+    """GET /api/v1/exams/{exam_id}/recheck-requests/ — list all recheck requests for an exam."""
+
+    def get(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in RECHECK_REQUEST_REVIEW_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            qs.get(id=exam_id)  # validate exists
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        rechecks = RecheckRequest.objects.filter(
+            marksheet__exam_id=exam_id
+        ).select_related(
+            'marksheet__student__user', 'requested_by', 'reviewed_by', 'new_checker'
+        )
+
+        return Response({
+            'success': True,
+            'count': rechecks.count(),
+            'data': RecheckRequestSerializer(rechecks, many=True).data
+        })
+
+
+class RecheckRequestActionView(APIView):
+    """PATCH /api/v1/exams/{exam_id}/recheck-requests/{request_id}/ — approve or reject a recheck request by ASE."""
+
+    def patch(self, request, exam_id, request_id):
+        role = _user_role(request.user)
+        if role not in RECHECK_REQUEST_REVIEW_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = RecheckRequest.objects.select_related('marksheet', 'marksheet__exam', 'requested_by')
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
+            rr = qs.get(id=request_id, marksheet__exam_id=exam_id)
+        except RecheckRequest.DoesNotExist:
+            return Response({'success': False, 'message': 'Recheck request not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if rr.status != 'approval_pending':
+            return Response({'success': False, 'message': f'Can only act on approval_pending requests (current: {rr.status}).'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ser = RecheckRequestActionSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        action = ser.validated_data['action']
+        if action == 'approve':
+            new_checker_id = ser.validated_data.get('new_checker_id')
+            if not new_checker_id:
+                return Response({'success': False, 'message': 'new_checker_id is required when approving.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            rr.status = 'approved'
+            rr.reviewed_by = request.user
+            rr.reviewed_at = timezone.now()
+            rr.new_checker_id = new_checker_id
+            rr.save()
+
+            ms = rr.marksheet
+            ms.is_rechecked = True
+            ms.recheck_request_at = timezone.now()
+            ms.paper_checker_id = new_checker_id
+            ms.is_submitted = False
+            ms.save()
+
+            generate_checker_token(ms)
+            send_checker_assignment_email(ms)
+
+            # Notify using the helper from exams.utils
+            try:
+                notify(
+                    new_checker_id,
+                    title='Paper Recheck Assigned',
+                    body=f"You have been assigned a recheck paper for exam: {ms.exam.title}",
+                    metadata={"exam_id": str(exam_id), "marksheet_id": str(ms.id), "is_recheck": True},
+                )
+            except Exception:
+                logger.warning('Could not send notification for recheck assignment')
+
+            return Response({'success': True, 'message': 'Recheck approved and reassigned to new checker.'})
+
+        else:  # reject
+            rr.status = 'rejected'
+            rr.reviewed_by = request.user
+            rr.reviewed_at = timezone.now()
+            rr.save()
+
+            # Notify student
+            try:
+                student_id = (getattr(rr.requested_by.user, 'id', None) 
+                             if hasattr(rr.requested_by, 'user') and hasattr(rr.requested_by.user, 'id')
+                             else getattr(rr.requested_by, 'id', None))
+                if student_id:
+                    notify(
+                        student_id,
+                        title='Recheck Request Rejected',
+                        body='Your request for recheck has been reviewed and rejected.',
+                        metadata={"exam_id": str(exam_id), "recheck_id": str(rr.id)},
+                    )
+            except Exception:
+                logger.warning('Could not send rejection notification')
+
+            return Response({'success': True, 'message': 'Recheck request has been rejected.'})
 

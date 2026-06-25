@@ -60,6 +60,19 @@ class Exam(models.Model):
     # v2 NEW: "instant" = auto-publish MCQ results on submit; "manual" = admin triggers
     result_release_mode = models.CharField(max_length=20, choices=RESULT_RELEASE_CHOICES, default='instant')
 
+    # Paper checkers assignment (NEW: auto-assign to marksheets from available checkers in exam time slot)
+    # Allows selecting possible assignable paper_checkers (role='paper_checker') for this exam.
+    # Used by assign_papers_to_checker() to filter by availability matching exam.scheduled_date + start/end_time
+    # with checker's work_start_time/work_end_time overlap.
+    paper_checkers = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='exams_to_check',
+        limit_choices_to={'role': 'paper_checker', 'is_active': True},
+        help_text='Available paper checkers assignable to this exam\'s marksheets. '
+                  'Auto-assignment uses these + time slot availability.'
+    )
+
     # Answer key upload (required for recheck flow per user query)
     answer_key = models.FileField(
         upload_to='answer_keys/',

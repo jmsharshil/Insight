@@ -3,9 +3,12 @@ from exams.models import *
 
 @admin.register(Exam)
 class ExamAdmin(admin.ModelAdmin):
-    list_display = ('id', 'branch', 'batch', 'subject', 'title', 'exam_type', 'total_marks', 'pass_marks', 'duration_minutes', 'scheduled_date',)
+    list_display = ('id', 'branch', 'batch', 'subject', 'title', 'exam_type', 'total_marks', 'pass_marks', 'duration_minutes', 'scheduled_date', 'status')
     search_fields = ('title',)
     list_filter = ('is_deleted', 'exam_type', 'status', 'screen_lock_action', 'branch', 'subject', 'created_by', 'scheduled_date',)
+    filter_horizontal = ('paper_checkers',)
+    raw_id_fields = ('faculty', 'batch', 'subject', 'created_by')
+    readonly_fields = ('total_marks',)
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):

@@ -72,20 +72,83 @@ def auto_submit_session(session):
     return session
 
 
-def assign_papers_to_checker(exam_id, checker_ids):
+def get_available_paper_checkers(exam):
     """
-    Distribute unassigned marksheets round-robin across checkers.
+    Returns list of paper_checker User IDs available in the exam's time slot.
+    Matches against exam.paper_checkers (M2M) and checks time overlap with
+    user's work_start_time / work_end_time on the scheduled_date.
+    """
+    from .models import Exam
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    if not isinstance(exam, Exam):
+        exam = Exam.objects.select_related().prefetch_related('paper_checkers').get(id=exam)
+
+    if not exam.paper_checkers.exists():
+        logger.warning(f"No paper_checkers configured for exam {exam.id}")
+        return []
+
+    # Get all possible checkers for this exam
+    checkers = list(exam.paper_checkers.all())
+
+    available = []
+    exam_start = exam.start_time
+    exam_end = exam.end_time
+    exam_date = exam.scheduled_date
+
+    for checker in checkers:
+        # Skip inactive
+        if not getattr(checker, 'is_active', True):
+            continue
+
+        work_start = getattr(checker, 'work_start_time', None)
+        work_end = getattr(checker, 'work_end_time', None)
+
+        # If no work times set, assume available (fallback)
+        if not work_start or not work_end:
+            available.append(checker.id)
+            continue
+
+        # Check time slot overlap (simple overlap logic)
+        # Available if checker's work period overlaps with exam period
+        if (work_start <= exam_end and work_end >= exam_start):
+            available.append(checker.id)
+        else:
+            logger.info(f"Checker {checker.id} unavailable for exam time slot "
+                       f"({exam_start}-{exam_end} vs their {work_start}-{work_end})")
+
+    logger.info(f"Available paper checkers for exam {exam.id}: {len(available)}/{len(checkers)}")
+    return available
+
+
+def assign_papers_to_checker(exam_id, checker_ids=None):
+    """
+    Auto-assign or distribute unassigned marksheets round-robin to paper checkers.
+    If checker_ids not provided, auto-selects from exam.paper_checkers using
+    get_available_paper_checkers() based on exam's time slot.
     FRD §4.6.2: send email + in-app notification to each checker.
     """
     from results.models import MarkSheet
     from .models import Exam
     from .emails import send_checker_assignment_email
 
-    if not checker_ids:
-        return
-
     exam = Exam.objects.get(id=exam_id)
+
+    if not checker_ids:
+        # Auto-assign from available in time slot
+        checker_ids = get_available_paper_checkers(exam)
+        if not checker_ids:
+            logger.error(f"No available paper checkers for exam {exam_id}. "
+                        "Please configure paper_checkers on Exam and ensure time slot availability.")
+            return 0
+
     sheets = MarkSheet.objects.filter(exam_id=exam_id, paper_checker__isnull=True)
+    if not sheets.exists():
+        logger.info(f"No unassigned marksheets for exam {exam_id}")
+        return 0
+
+    assigned_count = 0
     for i, sheet in enumerate(sheets):
         checker_id = checker_ids[i % len(checker_ids)]
         sheet.paper_checker_id = checker_id
@@ -99,6 +162,10 @@ def assign_papers_to_checker(exam_id, checker_ids):
             body=f"You have been assigned papers for {exam.title}",
             metadata={"exam_id": str(exam_id), "marksheet_id": str(sheet.id)},
         )
+        assigned_count += 1
+
+    logger.info(f"Auto-assigned {assigned_count} papers to {len(set(checker_ids))} checkers for exam {exam.title}")
+    return assigned_count
 
 
 def calculate_ranks(exam_id):

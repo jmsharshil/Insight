@@ -52,6 +52,16 @@ def update_exam_statuses():
             except Exception as e:
                 logger.error(f"Error auto-marking absent for exam {exam.id}: {e}")
 
+            # NEW: Auto-assign papers (marksheets) to available paper checkers
+            # Uses exam.paper_checkers filtered by time slot availability (work hours overlap)
+            try:
+                from .utils import assign_papers_to_checker
+                assigned_count = assign_papers_to_checker(exam.id)
+                if assigned_count > 0:
+                    logger.info(f"Auto-assigned {assigned_count} papers to checkers for exam {exam.title} ({exam.id})")
+            except Exception as e:
+                logger.error(f"Error auto-assigning papers for exam {exam.id}: {e}")
+
     if count_ongoing > 0 or count_completed > 0:
         logger.info(f"Exam Status Update: {count_ongoing} -> ongoing, {count_completed} -> completed.")
     return f"{count_ongoing} ongoing, {count_completed} completed"
