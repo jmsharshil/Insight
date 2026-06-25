@@ -395,32 +395,32 @@ class AttendanceCorrectionView(APIView):
             return err
         return Response({'success': True, 'data': AttendanceRecordListSerializer(record).data})
 
-    # def patch(self, request, record_id):
-    #     role = _user_role(request.user)
-    #     if role not in CORRECTION_ROLES:
-    #         return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
-    #     record, err = self._get_record(request, record_id)
-    #     if err:
-    #         return err
-    # 
-    #     ser = AttendanceCorrectionSerializer(data=request.data)
-    #     if not ser.is_valid():
-    #         return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
-    # 
-    #     if 'status' in ser.validated_data:
-    #         record.status = ser.validated_data['status']
-    #     if 'checked_in_at' in ser.validated_data:
-    #         record.checked_in_at = ser.validated_data['checked_in_at']
-    #     if 'checked_out_at' in ser.validated_data:
-    #         record.checked_out_at = ser.validated_data['checked_out_at']
-    # 
-    #         record.is_corrected = True
-    #         record.corrected_by = request.user
-    #         record.correction_note = ser.validated_data.get('correction_note', '')
-    #         record.save()
-    # 
-    #         return Response({'success': True, 'message': 'Corrected.', 'data': AttendanceRecordListSerializer(record).data})
-    # 
+    def patch(self, request, record_id):
+        role = _user_role(request.user)
+        if role not in CORRECTION_ROLES:
+            return Response({'success': False, 'message': 'Only ASE or BM can correct.'}, status=status.HTTP_403_FORBIDDEN)
+        record, err = self._get_record(request, record_id)
+        if err:
+            return err
+    
+        ser = AttendanceCorrectionSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+    
+        if 'status' in ser.validated_data:
+            record.status = ser.validated_data['status']
+        if 'checked_in_at' in ser.validated_data:
+            record.checked_in_at = ser.validated_data['checked_in_at']
+        if 'checked_out_at' in ser.validated_data:
+            record.checked_out_at = ser.validated_data['checked_out_at']
+    
+        record.is_corrected = True
+        record.corrected_by = request.user
+        record.correction_note = ser.validated_data.get('correction_note', '')
+        record.save()
+    
+        return Response({'success': True, 'message': 'Corrected.', 'data': AttendanceRecordListSerializer(record).data})
+    
     # def put(self, request, record_id):
     #     """PUT /api/v1/attendance/{id}/ — full update of an attendance record."""
     #     role = _user_role(request.user)
@@ -938,12 +938,12 @@ class EmployeeAttendanceListCreateView(APIView):
         errors = []
 
         for rec in d['records']:
-            # Support multiple key names from frontend (user_id, id, employee_id)
-            raw_id = rec.get('user_id') or rec.get('id') or rec.get('employee_id')
+            # Support multiple key names from frontend (user, user_id, id, employee_id)
+            raw_id = rec.get('user') or rec.get('user_id') or rec.get('id') or rec.get('employee_id')
             rec_status = rec.get('status', 'present')
 
             if not raw_id:
-                errors.append({'user_id': None, 'error': 'user_id (or id/employee_id) is required.'})
+                errors.append({'user_id': None, 'error': 'user_id (or user/id/employee_id) is required.'})
                 continue
 
             emp_user = None
@@ -981,13 +981,22 @@ class EmployeeAttendanceListCreateView(APIView):
                 errors.append({'user_id': str(raw_id), 'error': 'Student accounts should use student attendance endpoint.'})
                 continue
 
+            defaults = {
+                'branch_id': d.get('branch_id') or _user_branch_id(request.user),
+                'status': rec_status,
+                'marked_by': request.user,
+            }
+
+            if 'checked_in_at' in rec:
+                val = rec['checked_in_at']
+                defaults['checked_in_at'] = None if val == "" else val
+            if 'checked_out_at' in rec:
+                val = rec['checked_out_at']
+                defaults['checked_out_at'] = None if val == "" else val
+
             record, created = EmployeeAttendanceRecord.objects.update_or_create(
                 user=emp_user, date=d['date'],
-                defaults={
-                    'branch_id': d.get('branch_id') or _user_branch_id(request.user),
-                    'status': rec_status,
-                    'marked_by': request.user,
-                },
+                defaults=defaults,
             )
             if created:
                 created_count += 1

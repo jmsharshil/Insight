@@ -278,8 +278,13 @@ class QuestionView(APIView):
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if role not in ['super_admin', 'admin_senior_executive'] and not (role == 'faculty' and exam.created_by == request.user):
+        is_assigned_faculty = False
+        if role == 'faculty':
+            is_assigned_faculty = hasattr(exam, 'faculty') and exam.faculty and getattr(exam.faculty, 'user', None) == request.user
+ 
+        if role not in ['super_admin', 'admin_senior_executive'] and not (exam.created_by == request.user or is_assigned_faculty):
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+ 
 
         serializer = QuestionInputSerializer(data=request.data, many=True)
         if not serializer.is_valid():
