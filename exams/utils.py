@@ -68,6 +68,7 @@ def auto_submit_session(session):
     else:
         from results.models import MarkSheet
         MarkSheet.objects.get_or_create(exam=exam, student=session.student)
+        assign_papers_to_checker(exam.id)
 
     return session
 
@@ -87,6 +88,10 @@ def get_available_paper_checkers(exam):
 
     if not exam.paper_checkers.exists():
         logger.warning(f"No paper_checkers configured for exam {exam.id}")
+        if exam.faculty and getattr(exam.faculty.user, 'is_active', True):
+            return [exam.faculty.user.id]
+        if exam.created_by:
+            return [exam.created_by.id]
         return []
 
     # Get all possible checkers for this exam
@@ -142,6 +147,8 @@ def assign_papers_to_checker(exam_id, checker_ids=None):
             logger.error(f"No available paper checkers for exam {exam_id}. "
                         "Please configure paper_checkers on Exam and ensure time slot availability.")
             return 0
+        else:
+            exam.paper_checkers.add(*checker_ids)
 
     sheets = MarkSheet.objects.filter(exam_id=exam_id, paper_checker__isnull=True)
     if not sheets.exists():
