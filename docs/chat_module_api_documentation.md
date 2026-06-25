@@ -1,4 +1,6 @@
-# Chat Module — Full Walkthrough & Realtime API Reference Guide
+# Chat Module — Full Walkthrough & Realtime API Reference Guide (Updated with Targeted Messages)
+
+> **Last Updated:** Targeted private messages for student-faculty discussions in group chats (visible only to sender + target faculty + super_admin).
 
 > **Base URL:** `https://api.example.com/api/v1/`  
 > **Auth Header:** `Authorization: Bearer <access_token>`  
@@ -16,10 +18,13 @@ Client (Web/Mobile) ── REST (rooms/messages/upload) ──► Views/Serializ
           ▼
 Django ORM (ChatRoom + Message + ReadReceipt) + Soft-delete (is_active/is_deleted)
           │
+          ├─► **Targeted message visibility** (`target` FK): filtered in views + consumers
+          │     (student ↔ specific faculty + super_admin only)
           ├─► Signals/Tasks (notifications.py, tasks.py — unread counts, push)
           │
           ▼
 WebSocket Consumers (consumers.py) ──► Group broadcast (room_id) + Redis layer
+          │     (with per-user privacy filter for targeted messages)
           │
           ▼
 Frontend receives: new_message, message_read, user_typing, delivery_status
@@ -29,10 +34,11 @@ Frontend receives: new_message, message_read, user_typing, delivery_status
 
 **Key Features:**
 - Direct rooms use deterministic `direct_hash` (sorted user UUIDs) for 1:1 uniqueness.
+- **Group rooms now support targeted messages**: Students can ask questions to a *specific faculty*. These are visible **only to the sender, the target faculty, and `super_admin`** (while staying in the same group room). Normal messages remain visible to all participants.
 - Group rooms support avatar, name, multiple participants.
 - Messages support text + file attachments (S3 URLs).
 - Soft deletes preserve history.
-- Realtime via Channels + Redis.
+- Realtime via Channels + Redis (with per-user visibility filtering for targeted messages).
 - Notifications for unread counts, mentions.
 
 ---
@@ -61,7 +67,7 @@ Frontend receives: new_message, message_read, user_typing, delivery_status
 | Model | Purpose | Key Behaviors |
 |-------|---------|---------------|
 | `ChatRoom` | Container for conversations | `direct_hash` for uniqueness; M2M participants; soft-delete via `is_active` |
-| `Message` | Individual chat entry | Supports `content` + `file_url`; `tick_status` computed from receipts; soft-delete |
+| `Message` | Individual chat entry | Supports `content` + `file_url`; **NEW `target` FK** for private faculty questions in groups; `tick_status` computed from receipts; soft-delete. Visibility filtering enforced in views/consumers. |
 | `MessageReadReceipt` | Delivery tracking | Unique (message, user); updates status to "read" |
 
 **Utils:** `utils.py` for room lookup, `notifications.py` for in-app/push, `tasks.py` for async unread counts.
@@ -81,9 +87,32 @@ Frontend receives: new_message, message_read, user_typing, delivery_status
 3. Members list via `/members/`.
 4. Only creator or admin can delete (sets `is_active=False`).
 
+### 2.1 Targeted Messages in Group Chats (NEW)
+- **Use case**: Student wants to privately ask a question to one specific faculty *inside* an existing group chat (e.g. class/exam batch group).
+- **Visibility rules** (enforced server-side in views + consumers):
+  - `target=None` (default): Visible to **all participants**.
+  - `target=some_faculty_id`: Visible **only to**:
+    - The sender (student).
+    - The target faculty (`paper_checker` / `faculty` role).
+    - Any `super_admin`.
+- The message stays in the **same `ChatRoom`** (no separate thread/room needed).
+- Frontend can display a "Private to: Dr. X" badge.
+
+**How to send (REST or WS):**
+```json
+{
+  "content": "Sir, clarification needed on Q. 5 of the answer key...",
+  "target_user_id": "faculty-uuid-here"
+}
+```
+
+**Filtering:**
+- `GET /messages/` automatically hides targeted messages you shouldn't see.
+- WebSocket `new_message` events are filtered per-connection (unauthorized users never receive them).
+
 ### 3. Messaging & Files
-1. GET `/rooms/<room_id>/messages/` (paginated, latest first).
-2. POST message with `content` or file (first upload via `/upload/` to get URL).
+1. GET `/rooms/<room_id>/messages/` (paginated, latest first; **respects targeted visibility**).
+2. POST message with `content`, optional `target_user_id`, or file (first upload via `/upload/` to get URL).
 3. WS listens for live updates, typing indicators.
 4. Read receipts update on frontend open.
 
@@ -219,13 +248,30 @@ Paginated (newest first), supports `?page=1`.
 ```json
 {
   "content": "Hello team, any updates on the fees module?",
+  "target_user_id": "optional-faculty-uuid-for-private-question",  // NEW: targeted message
   "file_url": "https://s3.../document.pdf",
   "file_name": "report.pdf",
   "file_size": 245760
 }
 ```
 
-**Success:** Returns created message + broadcasts via WS.
+**Response includes `target`** (if set):
+```json
+{
+  "id": "msg-uuid",
+  "sender": { ... },
+  "target": {
+    "id": "faculty-uuid",
+    "full_name": "Dr. Rajesh Sharma",
+    "role": "faculty"
+  },
+  "content": "...",
+  "tick_status": "sent",
+  ...
+}
+```
+
+**Success:** Returns created message + broadcasts via WS (only to authorized viewers for targeted messages).
 
 **`GET /api/v1/chat/messages/<message_id>/`** — Single message detail.
 
@@ -256,12 +302,12 @@ Paginated (newest first), supports `?page=1`.
 **Endpoint:** `ws://api.example.com/ws/chat/<room_id>/`
 
 **Events Sent by Client:**
-- `send_message` — {content, file_url?}
-- `typing` — {is_typing: true}
-- `mark_read` — {message_id}
+- `send_message` — `{content, file_url?, target_user_id?}` (**NEW**: `target_user_id` for private faculty questions in group chats)
+- `typing` — `{is_typing: true}`
+- `mark_read` — `{message_id}`
 
 **Events from Server:**
-- `new_message`
+- `new_message` — includes optional `target` object; **server filters delivery** so only authorized users (sender/target/super_admin) receive targeted messages.
 - `message_read` (updates ticks)
 - `user_typing`
 - `delivery_update`
@@ -282,9 +328,10 @@ Authentication via query param `token=...` or middleware.
 ## Related Modules & Notes
 
 - **Notifications:** `notifications.py` for unread counts, push (Celery tasks).
-- **Exams/Attendance:** Can be used for faculty coordination on results/sessions.
+- **Exams/Results:** Perfect for **student-faculty private queries** inside batch/exam group chats (targeted messages integrate with `CheckerQuery`/`RecheckRequest` workflows).
 - **Storage:** Files go to S3; URLs stored in Message.
 - **Soft Delete:** All list views filter `is_active=True` / `is_deleted=False`.
+- **Roles:** Leverages `super_admin`, `faculty`/`paper_checker`, `student` roles for visibility.
 
 **WebSocket Consumers** in `consumers.py` handle auth, room joining, broadcasting.
 

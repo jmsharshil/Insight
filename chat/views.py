@@ -272,6 +272,12 @@ class MessageListCreateView(APIView):
         Return messages in the room, newest first, paginated with
         cursor-based pagination (using ``before`` query param for the
         cursor and ``limit`` for page size, default 50).
+
+        Targeted messages (target is set) are only visible to:
+        - the sender
+        - the target faculty
+        - super_admin users
+        Normal messages (target=None) are visible to all participants.
         """
         if not self._is_participant(room_id, request.user):
             return Response(
@@ -282,13 +288,25 @@ class MessageListCreateView(APIView):
         before = request.query_params.get("before")  # message UUID cursor
         limit = min(int(request.query_params.get("limit", 50)), 100)
         search = request.query_params.get("search", "").strip()
+
+        # Base queryset
         qs = (
             Message.objects
-            .filter(room_id=room_id)
-            .select_related("sender")
+            .filter(room_id=room_id, is_deleted=False)
+            .select_related("sender", "target")
             .prefetch_related("read_receipts__user")
             .order_by("-created_at")
         )
+
+        # Visibility filter for targeted (private-to-faculty) messages
+        role = getattr(request.user, 'role', None)
+        if role != 'super_admin':
+            qs = qs.filter(
+                # Normal group messages (no target) OR messages involving current user
+                Q(target__isnull=True) |
+                Q(sender=request.user) |
+                Q(target=request.user)
+            )
 
         qs = apply_filters(self, request, qs)
 
@@ -308,7 +326,7 @@ class MessageListCreateView(APIView):
             "search": search or None,
         }
         return Response(response_data)
-    
+
 
     def post(self, request, room_id):
         """
@@ -318,6 +336,10 @@ class MessageListCreateView(APIView):
         Accepts multipart/form-data so a file can be sent in the same
         request as the message text.  Also still accepts plain JSON with
         a pre-uploaded ``file_url``.
+
+        New: ``target_user_id`` (optional) - for group chats, send a targeted
+        message visible only to sender, the specified faculty, and super_admin.
+        Normal messages (no target) are visible to the whole group.
         """
         if not self._is_participant(room_id, request.user):
             return Response(
@@ -330,6 +352,43 @@ class MessageListCreateView(APIView):
         file_url = request.data.get("file_url")     # pre-uploaded URL fallback
         file_name = request.data.get("file_name")
         file_size = request.data.get("file_size")
+        target_user_id = request.data.get("target_user_id")
+
+        # ── Resolve target if provided (student -> specific faculty) ───────
+        target = None
+        if target_user_id:
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                if getattr(request.user, 'organization', None):
+                    target = User.objects.get(
+                        id=target_user_id,
+                        organization=request.user.organization
+                    )
+                else:
+                    target = User.objects.get(id=target_user_id)
+
+                # Must be a participant of the same group
+                room = ChatRoom.objects.get(id=room_id, is_active=True)
+                if not room.participants.filter(id=target.id).exists():
+                    return Response(
+                        {"detail": "Target user must be a participant of this room."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Optional business rule: students typically target faculty
+                if getattr(request.user, 'role', None) == 'student' and getattr(target, 'role', None) not in ['faculty', 'paper_checker', 'admin_senior_executive']:
+                    logger.warning(f"Student {request.user.id} targeting non-faculty {target.id}")
+            except User.DoesNotExist:
+                return Response(
+                    {"detail": "Target user not found or not in organization."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            except ChatRoom.DoesNotExist:
+                return Response(
+                    {"detail": "Room not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         # ── Handle direct file upload ─────────────────────────────────────
         if uploaded_file:
@@ -378,6 +437,7 @@ class MessageListCreateView(APIView):
         message = Message.objects.create(
             room_id=room_id,
             sender=request.user,
+            target=target,
             content=content or "",
             file_url=file_url,
             file_name=file_name,
@@ -397,6 +457,14 @@ class MessageListCreateView(APIView):
                 except Exception:
                     avatar_url = ""
 
+            target_data = None
+            if message.target:
+                target_data = {
+                    "id": str(message.target.id),
+                    "full_name": getattr(message.target, "name", ""),
+                    "role": getattr(message.target, "role", ""),
+                }
+
             async_to_sync(channel_layer.group_send)(
                 f"room_{room_id}",
                 {
@@ -409,6 +477,7 @@ class MessageListCreateView(APIView):
                             "full_name": getattr(request.user, "name", ""),
                             "avatar_url": avatar_url,
                         },
+                        "target":     target_data,
                         "content":    message.content,
                         "file_url":   message.file_url or "",
                         "file_name":  message.file_name or "",

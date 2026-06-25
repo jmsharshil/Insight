@@ -139,6 +139,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         file_url  = data.get("file_url")
         file_name = data.get("file_name")
         file_size = data.get("file_size")
+        target_user_id = data.get("target_user_id")
         # If the REST API already created the message, the frontend can pass
         # the message_id to avoid a duplicate DB insert.
         existing_message_id = data.get("message_id")
@@ -149,6 +150,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         if existing_message_id:
             # Message was already saved via REST POST — just broadcast, don't save again.
+            target_data = None
+            if target_user_id:
+                target_data = {
+                    "id": str(target_user_id),
+                    "full_name": data.get("target_name", ""),
+                }
             message_data = {
                 "id":         str(existing_message_id),
                 "room_id":    self.room_id,
@@ -157,6 +164,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "full_name": getattr(self.user, "name", ""),
                     "avatar_url": getattr(self.user, "avatar_url", None) or "",
                 },
+                "target":     target_data,
                 "content":    content,
                 "file_url":   file_url or "",
                 "file_name":  file_name or "",
@@ -165,7 +173,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 "delivered_at": None,
                 "read_at":      None,
             }
-        else:
+
             # No existing message — save to DB first, then broadcast.
             try:
                 message = await self._save_message(
@@ -175,6 +183,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     file_url=file_url,
                     file_name=file_name,
                     file_size=file_size,
+                    target_user_id=target_user_id,
                 )
             except Exception as exc:
                 logger.exception("Failed to save message in room %s", self.room_id)
@@ -189,6 +198,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "full_name": getattr(self.user, "name", ""),
                     "avatar_url": getattr(self.user, "avatar_url", None) or "",
                 },
+                "target": (
+                    {
+                        "id": str(message.target.id),
+                        "full_name": getattr(message.target, "name", ""),
+                        "role": getattr(message.target, "role", ""),
+                    }
+                    if getattr(message, "target", None) is not None
+                    else None
+                ),
                 "content":    message.content,
                 "file_url":   message.file_url or "",
                 "file_name":  message.file_name or "",
@@ -339,6 +357,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
         msg = event["message"]
         if self.user and str(self.user.id) == msg.get("sender", {}).get("id"):
             return
+
+        # Privacy filter for targeted messages (student <-> specific faculty)
+        # Only sender, target, and super_admin receive the WS event.
+        target = msg.get("target")
+        if target and isinstance(target, dict) and target.get("id"):
+            user_role = getattr(self.user, 'role', None)
+            user_id_str = str(self.user.id)
+            sender_id = msg.get("sender", {}).get("id")
+            target_id = target.get("id")
+            if user_role != 'super_admin' and user_id_str != sender_id and user_id_str != target_id:
+                return  # do not deliver to other group members
+
         await self.send(text_data=json.dumps({
             "type":    "new_message",
             "message": msg,
@@ -442,11 +472,25 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return []
 
     @database_sync_to_async
-    def _save_message(self, *, room_id, sender, content, file_url, file_name, file_size):
+    def _save_message(self, *, room_id, sender, content, file_url, file_name, file_size, target_user_id=None):
         from .models import Message
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        target = None
+        if target_user_id:
+            try:
+                target = User.objects.get(id=target_user_id)
+                # Verify participant (basic check)
+                from .models import ChatRoom
+                if not ChatRoom.objects.filter(id=room_id, participants=target).exists():
+                    target = None  # fallback to no target if invalid
+            except (User.DoesNotExist, ChatRoom.DoesNotExist, ValueError):
+                target = None
+
         return Message.objects.create(
             room_id=room_id,
             sender=sender,
+            target=target,
             content=content or "",
             file_url=file_url,
             file_name=file_name,
