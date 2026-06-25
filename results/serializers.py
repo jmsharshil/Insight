@@ -6,6 +6,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     checker_name = serializers.SerializerMethodField()
+    has_open_query = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
