@@ -57,13 +57,11 @@ class Message(models.Model):
     id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False,)
     room = models.ForeignKey(ChatRoom,on_delete=models.CASCADE,related_name="messages",)
     sender = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name="sent_messages",)
-    target = models.ForeignKey(
+    targets = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
         blank=True,
         related_name="targeted_messages",
-        help_text="If set in a group room, this message is visible ONLY to: sender, the target (e.g. specific faculty), and super_admin. Normal group messages have target=None.",
+        help_text="If set in a group room, this message is visible ONLY to: sender, any of the listed targets (e.g. specific faculty members), and super_admin. Normal group messages have no targets.",
     )
     content = models.TextField(blank=True,default="",help_text="Text body of the message (may be blank for file-only).",)
     file_url = models.URLField(max_length=1024,blank=True,null=True,help_text="URL of the uploaded attachment on S3.",)

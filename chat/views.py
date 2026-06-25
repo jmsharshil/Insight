@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from .models import ChatRoom, Message, MessageReadReceipt
 from .serializers import ChatRoomSerializer, ChatRoomListSerializer, MessageSerializer
+from .notifications import notify_new_message
 
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
@@ -273,11 +274,11 @@ class MessageListCreateView(APIView):
         cursor-based pagination (using ``before`` query param for the
         cursor and ``limit`` for page size, default 50).
 
-        Targeted messages (target is set) are only visible to:
+        Targeted messages (targets m2m is populated) are only visible to:
         - the sender
-        - the target faculty
+        - any of the target users (e.g. specific faculty)
         - super_admin users
-        Normal messages (target=None) are visible to all participants.
+        Normal messages (no targets) are visible to all participants.
         """
         if not self._is_participant(room_id, request.user):
             return Response(
@@ -293,19 +294,20 @@ class MessageListCreateView(APIView):
         qs = (
             Message.objects
             .filter(room_id=room_id, is_deleted=False)
-            .select_related("sender", "target")
-            .prefetch_related("read_receipts__user")
+            .select_related("sender")
+            .prefetch_related("targets", "read_receipts__user")
             .order_by("-created_at")
         )
 
-        # Visibility filter for targeted (private-to-faculty) messages
+        # Visibility filter for targeted (private-to-faculty) messages.
+        # Now supports *multiple* targets via ManyToMany.
         role = getattr(request.user, 'role', None)
         if role != 'super_admin':
-            qs = qs.filter(
-                # Normal group messages (no target) OR messages involving current user
-                Q(target__isnull=True) |
+            qs = qs.annotate(num_targets=Count("targets")).filter(
+                # Normal group messages (no targets) OR messages involving current user
+                Q(num_targets=0) |
                 Q(sender=request.user) |
-                Q(target=request.user)
+                Q(targets=request.user)
             )
 
         qs = apply_filters(self, request, qs)
@@ -337,9 +339,10 @@ class MessageListCreateView(APIView):
         request as the message text.  Also still accepts plain JSON with
         a pre-uploaded ``file_url``.
 
-        New: ``target_user_id`` (optional) - for group chats, send a targeted
-        message visible only to sender, the specified faculty, and super_admin.
-        Normal messages (no target) are visible to the whole group.
+        New: ``target_user_ids`` (optional list) - for group chats, send a
+        targeted message visible *only* to sender, the listed targets (multiple
+        faculty allowed), and super_admin. Normal messages (empty list or omitted)
+        are visible to the whole group.
         """
         if not self._is_participant(room_id, request.user):
             return Response(
@@ -352,38 +355,55 @@ class MessageListCreateView(APIView):
         file_url = request.data.get("file_url")     # pre-uploaded URL fallback
         file_name = request.data.get("file_name")
         file_size = request.data.get("file_size")
-        target_user_id = request.data.get("target_user_id")
+        target_user_ids = request.data.get("target_user_ids") or request.data.get("target_user_id")
 
-        # ── Resolve target if provided (student -> specific faculty) ───────
-        target = None
-        if target_user_id:
+        # Normalize to list
+        if isinstance(target_user_ids, str):
+            if ',' in target_user_ids:
+                target_user_ids = [x.strip() for x in target_user_ids.split(',') if x.strip()]
+            else:
+                target_user_ids = [target_user_ids]
+        if not isinstance(target_user_ids, list):
+            target_user_ids = [target_user_ids] if target_user_ids else []
+
+        target_user_ids = [str(tid).strip() for tid in target_user_ids if str(tid).strip()]
+
+        # ── Resolve multiple targets if provided (student -> specific faculty) ───────
+        targets = []
+        if target_user_ids:
             try:
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
                 if getattr(request.user, 'organization', None):
-                    target = User.objects.get(
-                        id=target_user_id,
+                    targets = list(User.objects.filter(
+                        id__in=target_user_ids,
                         organization=request.user.organization
-                    )
+                    ))
                 else:
-                    target = User.objects.get(id=target_user_id)
+                    targets = list(User.objects.filter(id__in=target_user_ids))
 
-                # Must be a participant of the same group
-                room = ChatRoom.objects.get(id=room_id, is_active=True)
-                if not room.participants.filter(id=target.id).exists():
+                if len(targets) != len(target_user_ids):
                     return Response(
-                        {"detail": "Target user must be a participant of this room."},
+                        {"detail": "One or more target users not found or not in organization."},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+                # Must be participants of the same group
+                room = ChatRoom.objects.get(id=room_id, is_active=True)
+                target_ids = {str(t.id) for t in targets}
+                if not all(room.participants.filter(id=tid).exists() for tid in target_ids):
+                    return Response(
+                        {"detail": "All target users must be participants of this room."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
                 # Optional business rule: students typically target faculty
-                if getattr(request.user, 'role', None) == 'student' and getattr(target, 'role', None) not in ['faculty', 'paper_checker', 'admin_senior_executive']:
-                    logger.warning(f"Student {request.user.id} targeting non-faculty {target.id}")
-            except User.DoesNotExist:
-                return Response(
-                    {"detail": "Target user not found or not in organization."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                student_role = getattr(request.user, 'role', None) == 'student'
+                if student_role:
+                    for tgt in targets:
+                        tgt_role = getattr(tgt, 'role', None)
+                        if tgt_role not in ['faculty', 'paper_checker', 'admin_senior_executive']:
+                            logger.warning(f"Student {request.user.id} targeting non-faculty {tgt.id}")
             except ChatRoom.DoesNotExist:
                 return Response(
                     {"detail": "Room not found."},
@@ -437,12 +457,13 @@ class MessageListCreateView(APIView):
         message = Message.objects.create(
             room_id=room_id,
             sender=request.user,
-            target=target,
             content=content or "",
             file_url=file_url,
             file_name=file_name,
             file_size=int(file_size) if file_size else None,
         )
+        if targets:
+            message.targets.set(targets)
 
         # ── Broadcast to WebSocket so other participants see it in real-time ──
         from channels.layers import get_channel_layer
@@ -457,13 +478,14 @@ class MessageListCreateView(APIView):
                 except Exception:
                     avatar_url = ""
 
-            target_data = None
-            if message.target:
-                target_data = {
-                    "id": str(message.target.id),
-                    "full_name": getattr(message.target, "name", ""),
-                    "role": getattr(message.target, "role", ""),
-                }
+            # Prepare list of targets for WS payload (supports multiple)
+            targets_data = []
+            for tgt in message.targets.all():
+                targets_data.append({
+                    "id": str(tgt.id),
+                    "full_name": getattr(tgt, "name", ""),
+                    "role": getattr(tgt, "role", ""),
+                })
 
             async_to_sync(channel_layer.group_send)(
                 f"room_{room_id}",
@@ -477,7 +499,7 @@ class MessageListCreateView(APIView):
                             "full_name": getattr(request.user, "name", ""),
                             "avatar_url": avatar_url,
                         },
-                        "target":     target_data,
+                        "targets":    targets_data,
                         "content":    message.content,
                         "file_url":   message.file_url or "",
                         "file_name":  message.file_name or "",
@@ -488,6 +510,26 @@ class MessageListCreateView(APIView):
                     },
                 },
             )
+
+        # Send push notifications (filtered by targets for privacy; excludes sender)
+        try:
+            participant_ids = list(
+                ChatRoom.objects.filter(id=room_id, is_active=True)
+                .values_list("participants__id", flat=True)
+                .distinct()
+            )
+            target_ids = [str(t.id) for t in targets]
+            notify_new_message(
+                room_id=room_id,
+                message_id=str(message.id),
+                sender_name=getattr(request.user, "name", "Someone"),
+                content=content or (message.file_name or "📎 Attachment"),
+                participant_ids=participant_ids,
+                target_user_ids=target_ids,
+                sender_id=str(request.user.id),
+            )
+        except Exception as exc:
+            logger.warning("Push notification failed for message %s: %s", message.id, exc)
 
         serializer = MessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

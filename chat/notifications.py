@@ -20,6 +20,7 @@ import threading
 
 import requests
 from django.conf import settings
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -157,19 +158,31 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
         logger.error("FCM: Request error: %s", exc)
 
 
-def notify_new_message(*, room_id: str, message_id: str, sender_name: str, content: str, participant_ids: list):
+def notify_new_message(*, room_id: str, message_id: str, sender_name: str, content: str, participant_ids: list, target_user_ids: list = None, sender_id: str = None):
     """
-    Send push notifications to all participants (except the sender) in a background thread.
-    Called from consumers.py after a message is saved.
+    Send push notifications to relevant users. If target_user_ids are provided
+    (multiple targets supported via m2m), only notify the targets + any super_admin
+    (excluding the sender to avoid self-notifications). Otherwise notify all
+    participants (except sender). Runs in background thread.
+    Called from consumers.py and views.py after a message is saved.
     """
     def _send():
         from django.contrib.auth import get_user_model
         User = get_user_model()
 
-        # Fetch FCM tokens for all recipients who have a token registered
-        recipients = User.objects.filter(
-            id__in=participant_ids,
-        ).exclude(fcm_token='').values('id', 'name', 'fcm_token')
+        if target_user_ids and len([tid for tid in target_user_ids if tid]) > 0:
+            # Targeted message: only notify the specific targets + super_admins (exclude sender)
+            target_ids = [tid for tid in target_user_ids if tid]
+            q = Q(id__in=target_ids) | Q(role='super_admin')
+            if sender_id:
+                q &= ~Q(id=sender_id)
+            recipients = User.objects.filter(q).exclude(fcm_token='').values('id', 'name', 'fcm_token')
+        else:
+            # Normal group message: notify all participants (except sender)
+            qs = User.objects.filter(id__in=participant_ids)
+            if sender_id:
+                qs = qs.exclude(id=sender_id)
+            recipients = qs.exclude(fcm_token='').values('id', 'name', 'fcm_token')
 
         # Truncate long message previews
         preview = content[:100] + '...' if len(content) > 100 else content
@@ -183,6 +196,7 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
                     "type": "new_message",
                     "room_id": str(room_id),
                     "message_id": str(message_id),
+                    "is_targeted": bool(target_user_ids),
                 },
                 user_id=user['id']
             )

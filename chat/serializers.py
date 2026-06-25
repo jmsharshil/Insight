@@ -29,7 +29,7 @@ class ReadReceiptSerializer(serializers.ModelSerializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = UserMiniSerializer(read_only=True)
-    target = UserMiniSerializer(read_only=True)
+    targets = UserMiniSerializer(many=True, read_only=True)
     read_receipts = ReadReceiptSerializer(many=True, read_only=True)
     created_at = serializers.DateTimeField(format="iso-8601", read_only=True)
     updated_at = serializers.DateTimeField(format="iso-8601", read_only=True)
@@ -38,8 +38,8 @@ class MessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ("id","room","sender","target","content","file_url","file_name","file_size","is_deleted","created_at","updated_at","delivered_at","tick_status", "read_receipts",)
-        read_only_fields = ("id", "room", "sender", "target", "created_at", "updated_at", "is_deleted")
+        fields = ("id","room","sender","targets","content","file_url","file_name","file_size","is_deleted","created_at","updated_at","delivered_at","tick_status", "read_receipts",)
+        read_only_fields = ("id", "room", "sender", "targets", "created_at", "updated_at", "is_deleted")
 
     def get_tick_status(self, obj) -> str:
         if obj.read_receipts.all():

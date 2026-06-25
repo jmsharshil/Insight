@@ -16,15 +16,15 @@
 Client (Web/Mobile) ── REST (rooms/messages/upload) ──► Views/Serializers
           │
           ▼
-Django ORM (ChatRoom + Message + ReadReceipt) + Soft-delete (is_active/is_deleted)
+Django ORM (ChatRoom + Message w/ targets M2M + ReadReceipt) + Soft-delete (is_active/is_deleted)
           │
-          ├─► **Targeted message visibility** (`target` FK): filtered in views + consumers
-          │     (student ↔ specific faculty + super_admin only)
-          ├─► Signals/Tasks (notifications.py, tasks.py — unread counts, push)
+          ├─► **Targeted message visibility** (M2M `targets`): filtered in views (annotate+ Q), consumers (per-user check), 
+          │     notifications.py (targeted push filtering). Supports multiple targets; normal msgs (empty targets) visible to all.
+          ├─► notifications.py for push (FCM v1 with service account); respects targets + super_admin only.
           │
           ▼
 WebSocket Consumers (consumers.py) ──► Group broadcast (room_id) + Redis layer
-          │     (with per-user privacy filter for targeted messages)
+          │     (with per-user privacy filter in `chat_new_message` for targeted messages; `_save_message` handles list)
           │
           ▼
 Frontend receives: new_message, message_read, user_typing, delivery_status
@@ -67,7 +67,7 @@ Frontend receives: new_message, message_read, user_typing, delivery_status
 | Model | Purpose | Key Behaviors |
 |-------|---------|---------------|
 | `ChatRoom` | Container for conversations | `direct_hash` for uniqueness; M2M participants; soft-delete via `is_active` |
-| `Message` | Individual chat entry | Supports `content` + `file_url`; **NEW `target` FK** for private faculty questions in groups; `tick_status` computed from receipts; soft-delete. Visibility filtering enforced in views/consumers. |
+| `Message` | Individual chat entry | Supports `content` + `file_url`; **targets** (ManyToManyField to User, blank=True) for private multi-faculty questions in groups; `tick_status` computed from receipts; soft-delete. Visibility filtering enforced in views/consumers/notifications. |
 | `MessageReadReceipt` | Delivery tracking | Unique (message, user); updates status to "read" |
 
 **Utils:** `utils.py` for room lookup, `notifications.py` for in-app/push, `tasks.py` for async unread counts.
@@ -87,28 +87,31 @@ Frontend receives: new_message, message_read, user_typing, delivery_status
 3. Members list via `/members/`.
 4. Only creator or admin can delete (sets `is_active=False`).
 
-### 2.1 Targeted Messages in Group Chats (NEW)
-- **Use case**: Student wants to privately ask a question to one specific faculty *inside* an existing group chat (e.g. class/exam batch group).
-- **Visibility rules** (enforced server-side in views + consumers):
-  - `target=None` (default): Visible to **all participants**.
-  - `target=some_faculty_id`: Visible **only to**:
-    - The sender (student).
-    - The target faculty (`paper_checker` / `faculty` role).
+### 2.1 Targeted Messages in Group Chats (Multi-Target Support)
+- **Use case**: Student wants to privately ask a question to *one or more specific faculty* inside an existing group chat (e.g. class/exam batch group). Supports multiple targets.
+- **Visibility rules** (enforced server-side in `MessageListCreateView.get()`, WS `chat_new_message`, and `notify_new_message`):
+  - `targets` empty (default): Visible to **all participants**.
+  - `targets` populated: Visible **only to**:
+    - The sender.
+    - Any of the listed target user(s).
     - Any `super_admin`.
+- Backward compatible; uses M2M `targets` field (no custom through model). Normal messages have empty `targets`.
 - The message stays in the **same `ChatRoom`** (no separate thread/room needed).
-- Frontend can display a "Private to: Dr. X" badge.
+- Frontend can display "Private to: Dr. X, Prof. Y" badge based on `message.targets` array.
 
 **How to send (REST or WS):**
 ```json
 {
-  "content": "Sir, clarification needed on Q. 5 of the answer key...",
-  "target_user_id": "faculty-uuid-here"
+  "content": "Sirs, clarification needed on Q. 5 of the answer key...",
+  "target_user_ids": ["faculty-uuid-1", "faculty-uuid-2"]
 }
 ```
+(or single as `"target_user_ids": ["faculty-uuid-here"]` or legacy `"target_user_id": "..."` for backward compat).
 
 **Filtering:**
-- `GET /messages/` automatically hides targeted messages you shouldn't see.
-- WebSocket `new_message` events are filtered per-connection (unauthorized users never receive them).
+- `GET /messages/` uses annotation + Q filter to hide targeted messages you shouldn't see (super_admin bypass).
+- WebSocket `new_message` events filtered per-connection based on `targets` list in payload (unauthorized users never receive them).
+- Push notifications similarly filtered to only relevant users + super_admins.
 
 ### 3. Messaging & Files
 1. GET `/rooms/<room_id>/messages/` (paginated, latest first; **respects targeted visibility**).
@@ -248,23 +251,25 @@ Paginated (newest first), supports `?page=1`.
 ```json
 {
   "content": "Hello team, any updates on the fees module?",
-  "target_user_id": "optional-faculty-uuid-for-private-question",  // NEW: targeted message
+  "target_user_ids": ["optional-faculty-uuid-1", "optional-faculty-uuid-2"],  // for targeted (multi supported)
   "file_url": "https://s3.../document.pdf",
   "file_name": "report.pdf",
   "file_size": 245760
 }
 ```
 
-**Response includes `target`** (if set):
+**Response includes `targets`** (array, may be empty):
 ```json
 {
   "id": "msg-uuid",
   "sender": { ... },
-  "target": {
-    "id": "faculty-uuid",
-    "full_name": "Dr. Rajesh Sharma",
-    "role": "faculty"
-  },
+  "targets": [
+    {
+      "id": "faculty-uuid",
+      "full_name": "Dr. Rajesh Sharma",
+      "role": "faculty"
+    }
+  ],
   "content": "...",
   "tick_status": "sent",
   ...
@@ -302,15 +307,16 @@ Paginated (newest first), supports `?page=1`.
 **Endpoint:** `ws://api.example.com/ws/chat/<room_id>/`
 
 **Events Sent by Client:**
-- `send_message` — `{content, file_url?, target_user_id?}` (**NEW**: `target_user_id` for private faculty questions in group chats)
+- `send_message` — `{content, file_url?, target_user_ids?: string[] }` (supports array for multiple targets; also accepts legacy `target_user_id`)
 - `typing` — `{is_typing: true}`
 - `mark_read` — `{message_id}`
+- `edit_message`, `delete_message`
 
 **Events from Server:**
-- `new_message` — includes optional `target` object; **server filters delivery** so only authorized users (sender/target/super_admin) receive targeted messages.
-- `message_read` (updates ticks)
-- `user_typing`
-- `delivery_update`
+- `new_message` — includes `targets` array (may be empty); **server filters delivery per-user** so only authorized users (sender, any target, or super_admin) receive targeted messages. Sender does not receive echo.
+- `message_updated`, `message_deleted`
+- `read_receipt`, `delivered_receipt`
+- `typing`
 
 Authentication via query param `token=...` or middleware.
 
