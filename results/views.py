@@ -93,25 +93,8 @@ class PaperMarksView(APIView):
         return ms, None
 
     def post(self, request, exam_id, marksheet_id):
-        ms, err = self._get_marksheet(request, exam_id, marksheet_id)
-        if err:
-            return err
-
-        if ms.is_submitted:
-            return Response({'success': False, 'message': 'Already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        marks = request.data.get('marks_obtained')
-        if marks is None or float(marks) < 0 or float(marks) > ms.exam.total_marks:
-            return Response({'success': False, 'message': 'Invalid marks.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        ms.marks_obtained = marks
-        ms.remarks = request.data.get('remarks', '')
-        ms.checked_at = timezone.now()
-        ms.is_submitted = True
-        ms.is_pass = float(marks) >= ms.exam.pass_marks
-        ms.save()
-
-        return Response({'success': True, 'message': 'Marks submitted.', 'data': {'marksheet_id': str(ms.id), 'marks_obtained': marks}})
+        """POST — submit or update marks on a marksheet. Delegates to PUT for unified logic."""
+        return self.put(request, exam_id, marksheet_id)
 
     def put(self, request, exam_id, marksheet_id):
         """PUT — re-submit / update marks on a marksheet (e.g. after recheck).
