@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Count, Q
 
 
 class ChatRoom(models.Model):
@@ -45,6 +46,34 @@ class ChatRoom(models.Model):
     def build_direct_hash(user_id_1, user_id_2) -> str:
         """Return a deterministic slug for a two-user direct room."""
         return "_".join(sorted([str(user_id_1), str(user_id_2)]))
+
+    def get_visible_messages_qs(self, user):
+        """Return queryset of non-deleted messages visible to this user (respects M2M `targets`)."""
+        qs = self.messages.filter(is_deleted=False).select_related("sender")
+        role = getattr(user, "role", None)
+        if role != "super_admin":
+            qs = qs.annotate(num_targets=Count("targets")).filter(
+                # Normal messages or ones where user is sender or a target
+                Q(num_targets=0) | Q(sender=user) | Q(targets=user)
+            )
+        return qs
+
+    def get_last_visible_message(self, user):
+        """Return the most recent message visible to the given user (for room list last_message)."""
+        return self.get_visible_messages_qs(user).order_by("-created_at").first()
+
+    def get_unread_count(self, user):
+        """Count unread visible messages for this user (no read receipt + not sent by self)."""
+        qs = self.get_visible_messages_qs(user)
+        user_id = user.id
+        return (
+            qs.filter(
+                ~Q(read_receipts__user_id=user_id),
+                ~Q(sender_id=user_id),
+            )
+            .distinct()
+            .count()
+        )
 
 
 class Message(models.Model):

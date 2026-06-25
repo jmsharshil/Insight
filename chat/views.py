@@ -218,15 +218,7 @@ class RoomListView(APIView):
         rooms = (
             ChatRoom.objects
             .filter(participants=user, is_active=True)  # Exclude deleted rooms
-            .prefetch_related("participants", "messages__sender")
-            .annotate(
-                unread_count=Count(
-                    "messages",
-                    filter=~Q(
-                        messages__read_receipts__user=user,
-                    ) & ~Q(messages__sender=user),
-                ),
-            )
+            .prefetch_related("participants")
             .order_by("-created_at")
         )
 

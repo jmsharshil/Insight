@@ -57,6 +57,7 @@ class MessageSerializer(serializers.ModelSerializer):
             data['file_size'] = None
         return data
 
+
 class LastMessageSerializer(serializers.Serializer):
     sender_name = serializers.CharField()
     content = serializers.CharField(allow_blank=True)
@@ -66,7 +67,7 @@ class LastMessageSerializer(serializers.Serializer):
 
 class ChatRoomListSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
-    unread_count = serializers.IntegerField(read_only=True, default=0)
+    unread_count = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(format="iso-8601", read_only=True)
     room_type_display = serializers.CharField(source="get_room_type_display", read_only=True)
     avatar_url = serializers.SerializerMethodField()
@@ -105,7 +106,30 @@ class ChatRoomListSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(other_user.profile_pic.url) if request else other_user.profile_pic.url
         return ""
 
+    def get_unread_count(self, obj):
+        """Compute unread count respecting targeted message visibility rules."""
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            return obj.get_unread_count(request.user)
+        return 0
+
     def get_last_message(self, obj):
+        """Return last *visible* message (targeted messages not intended for this user are hidden)."""
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            msg = obj.get_last_visible_message(request.user)
+            if msg is None:
+                return None
+            content = "This message was deleted" if getattr(msg, "is_deleted", False) else msg.content
+            return {
+                "sender_name": getattr(msg.sender, "name", ""),
+                "content": content,
+                "file_name": getattr(msg, "file_name", "") or "",
+                "created_at": msg.created_at.isoformat(),
+                "tick_status": getattr(msg, "tick_status", "sent"),
+            }
+
+        # Fallback (for non-request contexts)
         messages = obj.messages.order_by("-created_at")[:1]
         msg = messages[0] if messages else None
         if msg is None:
@@ -115,14 +139,14 @@ class ChatRoomListSerializer(serializers.ModelSerializer):
             "content": msg.content,
             "file_name": msg.file_name or "",
             "created_at": msg.created_at.isoformat(),
-            "tick_status": msg.tick_status,
+            "tick_status": getattr(msg, "tick_status", "sent"),
         }
 
 
 class ChatRoomSerializer(serializers.ModelSerializer):
     participants = UserMiniSerializer(many=True, read_only=True)
     last_message = serializers.SerializerMethodField()
-    unread_count = serializers.IntegerField(read_only=True, default=0)
+    unread_count = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(format="iso-8601", read_only=True)
     room_type_display = serializers.CharField(source="get_room_type_display", read_only=True)
     avatar_url = serializers.SerializerMethodField()
@@ -161,18 +185,40 @@ class ChatRoomSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(other_user.profile_pic.url) if request else other_user.profile_pic.url
         return ""
 
+    def get_unread_count(self, obj):
+        """Compute unread count respecting targeted message visibility rules."""
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            return obj.get_unread_count(request.user)
+        return 0
+
     def get_last_message(self, obj):
-        # If messages were prefetched, use the cached set
+        """Return last *visible* message (targeted messages not intended for this user are hidden).
+        Legacy prefetch fallback retained for non-request contexts.
+        """
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            msg = obj.get_last_visible_message(request.user)
+            if msg is None:
+                return None
+            content = "This message was deleted" if getattr(msg, "is_deleted", False) else msg.content
+            return {
+                "sender_name": getattr(msg.sender, "name", ""),
+                "content": content,
+                "file_name": getattr(msg, "file_name", "") or "",
+                "created_at": msg.created_at.isoformat(),
+                "tick_status": getattr(msg, "tick_status", "sent"),
+            }
+
+        # Legacy fallback (prefetch path - kept for non-request contexts / backward compat)
         messages = obj.messages.order_by("-created_at")[:1]
         msg = messages[0] if messages else None
-
         if msg is None:
             return None
-
         return {
             "sender_name": getattr(msg.sender, "name", ""),
             "content": msg.content,
             "file_name": msg.file_name or "",
             "created_at": msg.created_at.isoformat(),
-            "tick_status": msg.tick_status,
+            "tick_status": getattr(msg, "tick_status", "sent"),
         }
