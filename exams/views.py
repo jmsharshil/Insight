@@ -606,7 +606,9 @@ class ExamSubmitView(APIView):
                 return Response({'submitted': True, 'message': 'Answers submitted. Results will be released by the faculty.'})
         else:
             from results.models import MarkSheet
-            MarkSheet.objects.get_or_create(exam=session.exam, student=session.student,paper_checker=session.exam.paper_checker)
+            ms, _ = MarkSheet.objects.get_or_create(exam=session.exam, student=session.student)
+            from .utils import assign_papers_to_checker
+            assign_papers_to_checker(session.exam.id)
             return Response({'submitted': True, 'message': 'Answers submitted. Results pending review.'})
 
 
