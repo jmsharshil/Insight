@@ -6,6 +6,12 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     checker_name = serializers.SerializerMethodField()
+    exam_title = serializers.SerializerMethodField()
+    exam_scheduled_date = serializers.SerializerMethodField()
+    exam_total_marks = serializers.SerializerMethodField()
+    exam_pass_marks = serializers.SerializerMethodField()
+    batch_name = serializers.SerializerMethodField()
+    subject_name = serializers.SerializerMethodField()
     has_open_query = serializers.SerializerMethodField()
 
     class Meta:
@@ -15,6 +21,8 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             'paper_checker', 'checker_name', 'marks_obtained', 'is_pass',
             'remarks', 'checked_at', 'is_submitted', 'is_rechecked', 'is_absent',
             'has_open_query',
+            'exam_title', 'exam_scheduled_date', 'exam_total_marks',
+            'exam_pass_marks', 'batch_name', 'subject_name',
         ]
 
     def get_student_name(self, obj):
@@ -35,6 +43,42 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     def get_has_open_query(self, obj):
         """Indicates if there is an open checker query preventing payroll inclusion."""
         return obj.queries.filter(status='open').exists()
+
+    def get_exam_title(self, obj):
+        try:
+            return obj.exam.title
+        except Exception:
+            return None
+
+    def get_exam_scheduled_date(self, obj):
+        try:
+            return obj.exam.scheduled_date
+        except Exception:
+            return None
+
+    def get_exam_total_marks(self, obj):
+        try:
+            return obj.exam.total_marks
+        except Exception:
+            return None
+
+    def get_exam_pass_marks(self, obj):
+        try:
+            return obj.exam.pass_marks
+        except Exception:
+            return None
+
+    def get_batch_name(self, obj):
+        try:
+            return obj.exam.batch.name if obj.exam.batch else None
+        except Exception:
+            return None
+
+    def get_subject_name(self, obj):
+        try:
+            return obj.exam.subject.name if obj.exam.subject else None
+        except Exception:
+            return None
 
 
 class PublishedResultSerializer(serializers.ModelSerializer):

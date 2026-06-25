@@ -52,7 +52,7 @@ class PaperView(APIView):
         if role not in PAPER_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = MarkSheet.objects.filter(exam_id=exam_id).select_related('student__user', 'paper_checker').prefetch_related('queries')
+        qs = MarkSheet.objects.filter(exam_id=exam_id).select_related('student__user', 'paper_checker', 'exam__batch', 'exam__subject').prefetch_related('queries')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
         if role == 'paper_checker':
@@ -463,50 +463,6 @@ class StudentRecheckRequestView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
-class RecheckRequestListView(APIView):
-    """List recheck requests for an exam (admin/ASE)."""
-    # permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status']
-    search_fields = ['requested_by__user__name']
-    ordering_fields = '__all__'
-
-    def get(self, request, exam_id):
-        role = _user_role(request.user)
-        if role not in RECHECK_REQUEST_REVIEW_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
-        qs = RecheckRequest.objects.filter(
-            marksheet__exam_id=exam_id
-        ).select_related('marksheet', 'requested_by__user', 'reviewed_by', 'new_checker')
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
-
-        qs = apply_filters(self, request, qs)
-
-        return Response({'success': True, 'count': qs.count(), 'data': RecheckRequestSerializer(qs, many=True).data})
-
-
-class RecheckRequestActionView(APIView):
-    """ASE approves/rejects a recheck request (FRD §4.6.2)."""
-    # permission_classes = [IsAuthenticated]
-
-    def patch(self, request, exam_id, request_id):
-        role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive']:
-            return Response({'success': False, 'message': 'Only ASE can review recheck requests.'}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            qs = RecheckRequest.objects.select_related('marksheet').all()
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
-            rr = qs.get(id=request_id, marksheet__exam_id=exam_id)
-        except RecheckRequest.DoesNotExist:
-            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        if rr.status not in ['approval_pending']:
-            return Response({'success': False, 'message': f'Cannot act on a request with status "{rr.status}".'}, status=status.HTTP_400_BAD_REQUEST)
-
         ser = RecheckRequestActionSerializer(data=request.data)
         if not ser.is_valid():
             return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -540,35 +496,6 @@ class RecheckRequestActionView(APIView):
             rr.save()
 
             # Stub: notify student of rejection
-            logger.info(f"[NOTIFY STUB] Recheck request {rr.id} rejected for student {rr.requested_by_id}")
-
-            return Response({'success': True, 'message': 'Recheck request rejected.'})
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 9. POST  /api/v1/exams/{id}/papers/{marksheet_id}/mark-absent/
-#    Marks a student as absent on a marksheet.
-#    Also supports bulk-absent: POST /api/v1/exams/{id}/mark-absent-all/
-#    which auto-marks ALL students with no ExamSession as absent.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class MarkAbsentView(APIView):
-    """
-    Mark a specific student as absent for an exam.
-    Only admins/ASE can do this manually.
-    """
-    # permission_classes = [IsAuthenticated]
-    ALLOWED_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager', 'paper_checker']
-
-    def post(self, request, exam_id, marksheet_id):
-        role = _user_role(request.user)
-        if role not in self.ALLOWED_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            qs = MarkSheet.objects.all()
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
         except MarkSheet.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
