@@ -177,6 +177,15 @@ class ExamListCreateView(APIView):
             logger.error(f"Exam creation error: {e}")
             return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        # Ensure paper checkers are added to the exam (populates M2M using available checkers
+        # or fallback to faculty/creator if none configured). This fixes paper checkers
+        # not being associated with the exam for visibility in paper_checker role queries
+        # and for auto-assignment of marksheets.
+        try:
+            assign_papers_to_checker(exam.id)
+        except Exception as e:
+            logger.warning(f"Failed to auto-assign paper checkers for new exam {exam.id}: {e}")
+
         return Response({
             'success': True, 'message': 'Exam created.',
             'data': ExamListSerializer(exam).data,
