@@ -127,7 +127,10 @@ class ExamListCreateView(APIView):
             if bid:
                 qs = qs.filter(branch_id=bid)
         elif role == 'paper_checker':
-            qs = qs.filter(marksheets__paper_checker=user).distinct()
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(marksheets__paper_checker=user) | Q(paper_checkers=user)
+            ).distinct()
         elif role != 'super_admin':
             bid = _user_branch_id(user)
             if bid:
