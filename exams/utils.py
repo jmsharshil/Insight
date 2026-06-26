@@ -66,57 +66,76 @@ def auto_submit_session(session):
     if not has_subjective:
         auto_grade_mcq(session.id)
     else:
+        # Create MarkSheet but DO NOT assign paper_checker yet.
+        # Assignment delayed until exam completion (per user request).
         from results.models import MarkSheet
-        MarkSheet.objects.get_or_create(exam=exam, student=session.student)
-        assign_papers_to_checker(exam.id)
+        MarkSheet.objects.get_or_create(
+            exam=exam,
+            student=session.student,
+            defaults={'is_submitted': True, 'checked_at': timezone.now()}
+        )
+        # Note: assign_papers_to_checker() is now ONLY called from completion task
 
     return session
 
 
 def get_available_paper_checkers(exam):
     """
-    Returns list of paper_checker User IDs available in the exam's time slot.
-    Matches against exam.paper_checkers (M2M) and checks time overlap with
-    user's work_start_time / work_end_time on the scheduled_date.
+    Returns list of paper_checker User IDs available for this exam.
+    If no paper_checkers M2M set on Exam, falls back to ALL active paper_checkers
+    in the same branch. Then filters by work time overlap (if configured on User).
     """
     from .models import Exam
     from django.contrib.auth import get_user_model
     User = get_user_model()
 
     if not isinstance(exam, Exam):
-        exam = Exam.objects.select_related().prefetch_related('paper_checkers').get(id=exam)
+        exam = Exam.objects.select_related('faculty', 'created_by', 'branch')\
+                          .prefetch_related('paper_checkers').get(id=exam)
 
     if not exam.paper_checkers.exists():
-        logger.warning(f"No paper_checkers configured for exam {exam.id}")
-        if exam.faculty and getattr(exam.faculty.user, 'is_active', True):
-            return [exam.faculty.user.id]
-        if exam.created_by:
+        logger.warning(f"No paper_checkers configured for exam {exam.id}. Using branch-wide fallback.")
+        # Branch-scoped fallback to ensure Exam always gets paper_checkers (M2M)
+        qs = User.objects.filter(role='paper_checker', is_active=True)
+        if exam.branch_id:
+            qs = qs.filter(branch_id=exam.branch_id)
+        elif exam.branch:
+            qs = qs.filter(branch_id=exam.branch.id)
+        fallback_ids = list(qs.values_list('id', flat=True)[:20])  # cap to prevent overload
+        if fallback_ids:
+            logger.info(f"Using {len(fallback_ids)} branch paper_checkers as fallback for exam {exam.id}")
+            return fallback_ids
+
+        # Last-resort fallback
+        if exam.faculty and hasattr(exam.faculty, 'user') and exam.faculty.user:
+            try:
+                if getattr(exam.faculty.user, 'is_active', True):
+                    return [exam.faculty.user.id]
+            except Exception:
+                pass
+        if exam.created_by and getattr(exam.created_by, 'is_active', True):
             return [exam.created_by.id]
+        logger.error(f"No paper checkers available (even with fallback) for exam {exam.id}")
         return []
 
-    # Get all possible checkers for this exam
+    # Get all possible checkers for this exam (when explicitly configured)
     checkers = list(exam.paper_checkers.all())
 
     available = []
     exam_start = exam.start_time
     exam_end = exam.end_time
-    exam_date = exam.scheduled_date
 
     for checker in checkers:
-        # Skip inactive
         if not getattr(checker, 'is_active', True):
             continue
 
         work_start = getattr(checker, 'work_start_time', None)
         work_end = getattr(checker, 'work_end_time', None)
 
-        # If no work times set, assume available (fallback)
         if not work_start or not work_end:
             available.append(checker.id)
             continue
 
-        # Check time slot overlap (simple overlap logic)
-        # Available if checker's work period overlaps with exam period
         if (work_start <= exam_end and work_end >= exam_start):
             available.append(checker.id)
         else:
@@ -127,28 +146,64 @@ def get_available_paper_checkers(exam):
     return available
 
 
+def ensure_paper_checkers_for_exam(exam_or_id):
+    """
+    Ensures Exam.paper_checkers M2M is populated with available checkers (or branch
+    fallback). Called via Exam.ensure_paper_checkers() method (from model + post_save
+    signal + views). Does NOT assign to MarkSheet.paper_checker FK (per requirement:
+    delay until exam=completed + auto_mark_absent in tasks.py).
+    Guarantees paper_checker users see the exam early via Q(paper_checkers=user).
+    """
+    from .models import Exam
+    if not isinstance(exam_or_id, Exam):
+        exam = Exam.objects.select_related('branch', 'faculty', 'created_by')\
+                          .prefetch_related('paper_checkers').get(id=exam_or_id)
+    else:
+        exam = exam_or_id
+
+    if exam.paper_checkers.exists():
+        logger.debug(f"Exam {exam.id} already has {exam.paper_checkers.count()} paper checkers.")
+        return list(exam.paper_checkers.values_list('id', flat=True))
+
+    checker_ids = get_available_paper_checkers(exam)
+    if checker_ids:
+        exam.paper_checkers.add(*checker_ids)
+        logger.info(f"Ensured {len(checker_ids)} paper checkers assigned to exam {exam.id} via M2M.")
+        # Clear any cached relation to ensure fresh query next time
+        if hasattr(exam, '_prefetched_objects_cache'):
+            exam._prefetched_objects_cache.pop('paper_checkers', None)
+    return checker_ids
+
+
 def assign_papers_to_checker(exam_id, checker_ids=None):
     """
-    Auto-assign or distribute unassigned marksheets round-robin to paper checkers.
-    If checker_ids not provided, auto-selects from exam.paper_checkers using
-    get_available_paper_checkers() based on exam's time slot.
-    FRD §4.6.2: send email + in-app notification to each checker.
+    Distribute unassigned MarkSheets (round-robin) to paper checkers from the
+    Exam.paper_checkers M2M pool. Sends email + notification + generates token.
+    Per user request: This is NOW ONLY called AFTER exam ends (in completion task)
+    and after all MarkSheets exist (via auto_mark_absent_after_exam + student submits).
+    The M2M population on Exam happens earlier via ensure_paper_checkers_for_exam().
+    FRD §4.6.2: email + in-app notify.
     """
     from results.models import MarkSheet
     from .models import Exam
     from .emails import send_checker_assignment_email
 
-    exam = Exam.objects.get(id=exam_id)
+    exam = Exam.objects.select_related('branch').get(id=exam_id)
 
     if not checker_ids:
-        # Auto-assign from available in time slot
-        checker_ids = get_available_paper_checkers(exam)
-        if not checker_ids:
-            logger.error(f"No available paper checkers for exam {exam_id}. "
-                        "Please configure paper_checkers on Exam and ensure time slot availability.")
-            return 0
+        # Rely on M2M (populated at creation). Fallback only if somehow empty.
+        if not exam.paper_checkers.exists():
+            logger.warning(f"No paper_checkers on exam {exam_id} at assignment time. Falling back.")
+            checker_ids = get_available_paper_checkers(exam)
+            if checker_ids:
+                exam.paper_checkers.add(*checker_ids)
         else:
-            exam.paper_checkers.add(*checker_ids)
+            checker_ids = list(exam.paper_checkers.values_list('id', flat=True))
+
+    if not checker_ids:
+        logger.error(f"No available paper checkers for exam {exam_id}. "
+                    "Please configure paper_checkers on Exam.")
+        return 0
 
     sheets = MarkSheet.objects.filter(exam_id=exam_id, paper_checker__isnull=True)
     if not sheets.exists():

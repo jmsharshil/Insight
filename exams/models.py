@@ -1,6 +1,9 @@
 import uuid
+import logging
 from django.db import models
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 EXAM_TYPE_CHOICES = [('online', 'Online'), ('offline', 'Offline')]
@@ -103,6 +106,30 @@ class Exam(models.Model):
             self.total_marks = total
             self.save(update_fields=['total_marks'])
         return total
+
+    def ensure_paper_checkers(self):
+        """Ensure Exam.paper_checkers M2M is populated (with branch-scoped fallback if empty).
+        Called by post_save signal (signals.py) on every Exam creation/update and explicitly
+        from views on create/schedule. This guarantees the M2M for paper_checker visibility
+        *before* any MarkSheet exists. FK assignment to MarkSheet.paper_checker is strictly
+        delayed until update_exam_statuses task (after auto_mark_absent_after_exam).
+        """
+        from django.contrib.auth import get_user_model
+        from .utils import get_available_paper_checkers  # only the helper we need
+
+        if self.paper_checkers.exists():
+            logger.debug(f"Exam {self.id} already has {self.paper_checkers.count()} paper checkers.")
+            return list(self.paper_checkers.values_list('id', flat=True))
+
+        # Use shared helper (with prefetch/fallbacks)
+        checker_ids = get_available_paper_checkers(self)
+        if checker_ids:
+            self.paper_checkers.add(*checker_ids)
+            logger.info(f"Ensured {len(checker_ids)} paper checkers for exam {self.id} via M2M.")
+            # Clear prefetch cache if this instance was loaded with it
+            if hasattr(self, '_prefetched_objects_cache'):
+                self._prefetched_objects_cache.pop('paper_checkers', None)
+        return checker_ids
 
 
 class Question(models.Model):

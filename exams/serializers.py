@@ -80,7 +80,6 @@ class ExamListSerializer(serializers.ModelSerializer):
     faculty_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     exam_type_display = serializers.CharField(source="get_exam_type_display", read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
     screen_lock_action_display = serializers.CharField(source="get_screen_lock_action_display", read_only=True)
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
@@ -100,9 +99,9 @@ class ExamListSerializer(serializers.ModelSerializer):
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
-         'exam_type_display', 'status_display', 'screen_lock_action_display', 
-         'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
-         'can_start_exam', 'questions_count']
+            'exam_type_display', 'status_display', 'screen_lock_action_display',
+            'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
+            'can_start_exam', 'questions_count']
 
     def get_questions_count(self, obj):
         return obj.questions.count()

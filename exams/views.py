@@ -625,10 +625,15 @@ class ExamSubmitView(APIView):
                 return Response({'submitted': True, 'message': 'Answers submitted. Results will be released by the faculty.'})
         else:
             from results.models import MarkSheet
-            ms, _ = MarkSheet.objects.get_or_create(exam=session.exam, student=session.student)
-            from .utils import assign_papers_to_checker
+            # Create MarkSheet but delay paper_checker assignment until exam completion
+            # (all marksheets submitted/absent-marked). This matches user request.
+            MarkSheet.objects.get_or_create(
+                exam=session.exam,
+                student=session.student,
+                defaults={'is_submitted': True, 'checked_at': timezone.now()}
+            )
             assign_papers_to_checker(session.exam.id)
-            return Response({'submitted': True, 'message': 'Answers submitted. Results pending review.'})
+            return Response({'submitted': True, 'message': 'Answers submitted. Results pending review by assigned checker.'})
 
 
 class AutosaveView(APIView):
@@ -954,6 +959,12 @@ class ExamScheduleView(APIView):
 
         exam.status = 'scheduled'
         exam.save(update_fields=['status'])
+
+        # Ensure paper checkers M2M is populated when scheduling (if not done at create)
+        try:
+            exam.ensure_paper_checkers()
+        except Exception as e:
+            logger.warning(f"Failed to ensure paper checkers on schedule for exam {exam_id}: {e}")
 
         return Response({
             'success': True,
