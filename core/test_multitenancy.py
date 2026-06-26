@@ -23,7 +23,9 @@ class MultiTenancyIsolationTest(TestCase):
     def setUp(self):
         # Set up Organization A
         self.org_a = Organization.objects.create(name='Org A')
-        self.branch_a = Branch.objects.create(organization=self.org_a, name='Branch A', code='BR_A')
+        self.branch_a = Branch.objects.create(
+            organization=self.org_a, name='Branch A'
+        )
         self.sa_a = User.objects.create_user(
             username='admin_a', email='admin_a@test.com', password='pass',
             role='super_admin', organization=self.org_a, is_active=True
@@ -31,7 +33,9 @@ class MultiTenancyIsolationTest(TestCase):
 
         # Set up Organization B
         self.org_b = Organization.objects.create(name='Org B')
-        self.branch_b = Branch.objects.create(organization=self.org_b, name='Branch B', code='BR_B')
+        self.branch_b = Branch.objects.create(
+            organization=self.org_b, name='Branch B'
+        )
         self.sa_b = User.objects.create_user(
             username='admin_b', email='admin_b@test.com', password='pass',
             role='super_admin', organization=self.org_b, is_active=True

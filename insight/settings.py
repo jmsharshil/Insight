@@ -62,9 +62,11 @@ INSTALLED_APPS = [
     "students",
     'branch',
     'core',
+    'auditlog',
     'reports',
     'chat',
     'inventory',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
@@ -269,6 +271,11 @@ if USE_AZURE_MEDIA:
 else:
     MEDIA_URL  = "/media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+# Azure settings for audit log blob storage (and media if USE_AZURE_MEDIA=True)
+AZURE_ACCOUNT_NAME = os.environ.get("AZURE_ACCOUNT_NAME")
+AZURE_ACCOUNT_KEY = os.environ.get("AZURE_ACCOUNT_KEY")
+AUDIT_LOG_CONTAINER = os.environ.get("AUDIT_LOG_CONTAINER", "auditlogs")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
