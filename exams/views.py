@@ -4,6 +4,7 @@ import uuid
 import hashlib
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
@@ -109,7 +110,6 @@ class ExamListCreateView(APIView):
                 logger.error(f"Student exam filter error for {user.email}: {e}")
                 qs = qs.none()
         elif role == 'faculty':
-            from django.db.models import Q
             try:
                 from faculty.models import FacultyProfile
                 fp = FacultyProfile.objects.only('id').get(user=user)
@@ -127,10 +127,17 @@ class ExamListCreateView(APIView):
             if bid:
                 qs = qs.filter(branch_id=bid)
         elif role == 'paper_checker':
-            from django.db.models import Q
-            qs = qs.filter(
-                Q(marksheets__paper_checker=user) | Q(paper_checkers=user)
-            ).distinct()
+            try:
+                qs = qs.filter(Q(marksheets__paper_checker=user) | Q(paper_checkers=user)).distinct()
+                count = qs.count()
+                logger.info(
+                    f"Paper checker {getattr(user, 'email', getattr(user, 'id', 'unknown'))} "
+                    f"can see {count} assigned exams "
+                    f"(marksheets__paper_checker OR paper_checkers M2M)"
+                )
+            except Exception as e:
+                logger.error(f"Paper checker exam filter error for {getattr(user, 'email', user)}: {e}")
+                qs = qs.none()
         elif role != 'super_admin':
             bid = _user_branch_id(user)
             if bid:
@@ -169,6 +176,15 @@ class ExamListCreateView(APIView):
         except Exception as e:
             logger.error(f"Exam creation error: {e}")
             return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Ensure paper checkers are added to the exam (populates M2M using available checkers
+        # or fallback to faculty/creator if none configured). This fixes paper checkers
+        # not being associated with the exam for visibility in paper_checker role queries
+        # and for auto-assignment of marksheets.
+        try:
+            assign_papers_to_checker(exam.id)
+        except Exception as e:
+            logger.warning(f"Failed to auto-assign paper checkers for new exam {exam.id}: {e}")
 
         return Response({
             'success': True, 'message': 'Exam created.',
