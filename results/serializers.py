@@ -13,6 +13,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
     has_open_query = serializers.SerializerMethodField()
+    queries = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
@@ -79,6 +80,11 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             return obj.exam.subject.name if obj.exam.subject else None
         except Exception:
             return None
+        
+    def get_queries(self, obj):
+        """Return a list of queries related to this marksheet."""
+        queries = obj.queries.all()
+        return CheckerQuerySerializer(queries, many=True).data
 
 
 class PublishedResultSerializer(serializers.ModelSerializer):
