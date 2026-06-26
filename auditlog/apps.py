@@ -30,6 +30,6 @@ class AuditlogConfig(AppConfig):
             not os.environ.get('GUNICORN_CMD_ARGS')  # Not Gunicorn worker
         )
 
-        # if is_main_process:
-            # from .tasks import schedule_periodic_flush
-            # schedule_periodic_flush()
+        if is_main_process:
+            from .tasks import schedule_periodic_flush
+            schedule_periodic_flush()

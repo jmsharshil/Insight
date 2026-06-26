@@ -19,6 +19,29 @@ class BackgroundTaskQueue:
     def enqueue(self, fn, *args, **kwargs):
         self.queue.put({"fn": fn, "args": args, "kwargs": kwargs, "attempt": 1})
 
+    def schedule_periodic(self, fn, interval_seconds: int, *args, **kwargs):
+        """
+        Schedule a function to run periodically via the task queue.
+        First execution is immediate; subsequent runs every `interval_seconds`.
+        Uses internal daemon Timer (no direct threading usage in calling code).
+        """
+        def _reschedule():
+            self.enqueue(fn, *args, **kwargs)
+            timer = threading.Timer(interval_seconds, _reschedule)
+            timer.daemon = True
+            timer.start()
+
+        # Immediate first run via queue
+        self.enqueue(fn, *args, **kwargs)
+        # Schedule the periodic reschedules
+        timer = threading.Timer(interval_seconds, _reschedule)
+        timer.daemon = True
+        timer.start()
+        logger.info(
+            "[TASK] Periodic scheduler started for %s every %ds",
+            fn.__name__, interval_seconds
+        )
+
     def _worker(self):
         while True:
             task = self.queue.get()

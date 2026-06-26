@@ -5,22 +5,19 @@ File structure in the container:
   audit_logs/{organization_name}/{user_name}/{YYYY-MM-DD}.log
 
 Each file contains plain text log entries in a structured format.
-On re-upload for the same day the file is *overwritten* with the
-full day's data so that the blob always represents the complete
-log for that user-day.
+The upload function *appends* new entries to any existing content
+so that the blob always represents the complete cumulative log
+for that organization/user/date (immediate middleware + periodic
+catch-up both contribute without data loss).
 
 Format per line:
-  [YYYY-MM-DD HH:MM:SS] ACTION METHOD PATH STATUS_CODE IP "user@email.com"
+  [YYYY-MM-DD HH:MM:SS] ACTION METHOD PATH STATUS IP "user@email.com" user_name
 """
 
-import logging
-import io
-from datetime import date, datetime
-from decimal import Decimal
-from uuid import UUID
 
+import logging
+from datetime import date
 from django.conf import settings
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +25,12 @@ logger = logging.getLogger(__name__)
 # ── Custom formatters ─────────────────────────────────────────────
 
 def format_log_entry(entry: dict) -> str:
-    user_name = entry.get("user_name", "system")
     """
     Convert a log entry dict into a human-readable log line.
-    
+
     Format: [timestamp] ACTION METHOD PATH STATUS IP "user_email" user_name
     """
+    user_name = entry.get("user_name", "system")
     timestamp = entry.get("timestamp", "")
     action = entry.get("action", "UNKNOWN")
     method = entry.get("method", "")
@@ -42,16 +39,16 @@ def format_log_entry(entry: dict) -> str:
     ip_address = entry.get("ip_address", "-")
     user_email = entry.get("user_email", "anonymous")
     user_name = entry.get("user_name", "")
-    
+
     # Build the log line
     log_line = f"[{timestamp}] {action} {method} {path} {status_code} {ip_address}"
-    
+
     if user_email:
         log_line += f' "{user_email}"'
-    
+
     if user_name:
         log_line += f" {user_name}"
-    
+
     return log_line
 
 
@@ -85,7 +82,9 @@ def _blob_path(organization_name, user_name, log_date: date) -> str:
 
 def upload_log_file(organization_name, user_name, log_date: date, log_entries: list) -> bool:
     """
-    Upload a list of serialised log entry dicts to Azure Blob Storage.
+    Append a list of serialised log entry dicts to the existing log file
+    (or create new). The blob always contains the cumulative logs for that
+    organization/user/date. Uses overwrite=True after merging with existing content.
 
     Returns True on success, False on failure.
     """
@@ -115,17 +114,20 @@ def upload_log_file(organization_name, user_name, log_date: date, log_entries: l
             container_client.create_container()
             logger.info("[AUDIT BLOB] Created container '%s'", container)
 
-        # Write log file to blob
+        # Write (append semantics via merge) log file to blob
         blob_client = blob_service_client.get_blob_client(
             container=container, blob=blob_name
         )
+        existing = download_log_file(organization_name, user_name, log_date) or ""
         log_content = format_log_entries(log_entries)
-        blob_client.upload_blob(log_content, overwrite=True)
+        full_content = existing + log_content
+        blob_client.upload_blob(full_content, overwrite=True)
 
         logger.info(
-            "[AUDIT BLOB] Uploaded %d entries → %s",
+            "[AUDIT BLOB] Appended %d entries → %s (total ~%d chars)",
             len(log_entries),
             blob_name,
+            len(full_content),
         )
         return True
 

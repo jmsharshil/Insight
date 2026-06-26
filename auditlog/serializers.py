@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django_filters import rest_framework as filters
 from .models import AuditLog
 
 
@@ -51,3 +52,22 @@ class AuditLogFilterSerializer(serializers.Serializer):
     date_from = serializers.DateTimeField(required=False)
     date_to = serializers.DateTimeField(required=False)
     flushed_to_blob = serializers.BooleanField(required=False)
+
+
+class AuditLogFilter(filters.FilterSet):
+    """Django FilterSet with support for date range aliases and organization scoping."""
+
+    date_from = filters.DateTimeFilter(field_name="timestamp", lookup_expr="gte")
+    date_to = filters.DateTimeFilter(field_name="timestamp", lookup_expr="lte")
+    user_id = filters.UUIDFilter(field_name="user_id")
+    organization_id = filters.UUIDFilter(field_name="organization_id")
+    path = filters.CharFilter(field_name="path", lookup_expr="icontains")
+
+    class Meta:
+        model = AuditLog
+        fields = {
+            "action": ["exact"],
+            "method": ["exact"],
+            "status_code": ["exact"],
+            "flushed_to_blob": ["exact"],
+        }

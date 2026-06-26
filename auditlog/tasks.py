@@ -1,23 +1,21 @@
 """
 Background task that periodically flushes un-synced AuditLog entries
-to Azure Blob Storage, organized by organization/user/date.
-
-Uses the project's existing BackgroundTaskQueue for scheduling.
+to Azure Blob Storage (grouped by org/user/date). Uses BackgroundTaskQueue
+for scheduling (no direct threading.Timer in this module).
 """
 
 import logging
-import threading
 from collections import defaultdict
-from datetime import timedelta
 
-from django.utils import timezone
+from .models import AuditLog
+from .blob_service import upload_log_file
 
 logger = logging.getLogger(__name__)
 
 # How many un-flushed logs to process per batch
 BATCH_SIZE = 500
 
-# How often the flush task re-schedules itself (seconds)
+# How often the flush task runs (seconds)
 FLUSH_INTERVAL = 300  # 5 minutes
 
 
@@ -52,9 +50,6 @@ def flush_logs_to_blob():
     group them by (organization, user, date), upload each group
     as a .log file to Azure Blob Storage, then mark them as flushed.
     """
-    from .models import AuditLog
-    from .blob_service import upload_log_file
-
     logger.info("[AUDIT FLUSH] Starting blob flush...")
 
     try:
@@ -95,39 +90,23 @@ def flush_logs_to_blob():
         # Mark flushed logs
         if success_ids:
             updated = AuditLog.objects.filter(id__in=success_ids).update(flushed_to_blob=True)
-            logger.info(f"[AUDIT FLUSH] Marked {updated} logs as flushed.")
+            logger.info("[AUDIT FLUSH] Marked %d logs as flushed.", updated)
 
-        # Log processed logs
         logger.info(
-            f"[AUDIT FLUSH] Processed {len(unflushed)} logs in {len(groups)} groups."
+            "[AUDIT FLUSH] Processed %d logs in %d groups.",
+            len(unflushed), len(groups)
         )
 
     except Exception as exc:
         logger.exception("[AUDIT FLUSH] Error during flush: %s", exc)
 
 
-def flush_logs_and_reschedule():
-    """
-    Run the flush once and then reschedule itself after FLUSH_INTERVAL seconds.
-    """
-    flush_logs_to_blob()
-
-    from core.task_queue import TASK_QUEUE
-
-    timer = threading.Timer(
-        FLUSH_INTERVAL,
-        lambda: TASK_QUEUE.enqueue(flush_logs_and_reschedule),
-    )
-    timer.daemon = True
-    timer.start()
-
-
 def schedule_periodic_flush():
     """
-    Entry point: called once from AppConfig.ready() to start the periodic flush.
+    Entry point called from AuditlogConfig.ready(). Uses the BackgroundTaskQueue's
+    built-in periodic scheduler (immediate first run + recurring).
     """
     from core.task_queue import TASK_QUEUE
 
-    TASK_QUEUE.enqueue(flush_logs_and_reschedule)
-
-    logger.info("[AUDIT FLUSH] Periodic audit log flush registered.")
+    TASK_QUEUE.schedule_periodic(flush_logs_to_blob, FLUSH_INTERVAL)
+    logger.info("[AUDIT FLUSH] Periodic audit log flush scheduler started.")

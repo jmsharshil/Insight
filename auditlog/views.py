@@ -18,9 +18,10 @@ from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import AuditLog
-from .serializers import AuditLogSerializer
+from .serializers import AuditLogSerializer, AuditLogFilter
 from .tasks import flush_logs_to_blob
 from .blob_service import download_log_file
+from core.task_queue import TASK_QUEUE
 
 
 # ── List & Retrieve views ─────────────────────────────────────────
@@ -42,18 +43,7 @@ class AuditLogListView(generics.ListAPIView):
     serializer_class = AuditLogSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = {
-        "user": ["exact"],
-        "user_id": ["exact"],
-        "organization": ["exact"],
-        "organization_id": ["exact"],
-        "action": ["exact"],
-        "method": ["exact"],
-        "path": ["icontains"],
-        "status_code": ["exact"],
-        "flushed_to_blob": ["exact"],
-        "timestamp": ["gte", "lte", "exact"],
-    }
+    filterset_class = AuditLogFilter
     ordering_fields = ["timestamp", "action", "method"]
     ordering = ["-timestamp"]
 
@@ -82,17 +72,23 @@ class AuditLogDetailView(generics.RetrieveAPIView):
 
 class AuditLogFlushView(APIView):
     """
-    Manually trigger a flush of un-synced logs to blob storage.
-    Admin-only.
+    Manually trigger a background flush of un-synced logs to blob storage
+    (via the task scheduler/queue). Admin-only.
     """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        flush_logs_to_blob()
+        if request.user.role != "admin":
+            return Response(
+                {"detail": "Admin access required to trigger flush."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        TASK_QUEUE.enqueue(flush_logs_to_blob)
         return Response(
-            {"detail": "Flush triggered successfully."},
-            status=status.HTTP_200_OK,
+            {"detail": "Flush scheduled successfully in background."},
+            status=status.HTTP_202_ACCEPTED,
         )
 
 
@@ -131,6 +127,19 @@ class AuditLogByUserView(APIView):
         organization_name = request.query_params.get("organization_name") or str(
             request.user.organization.name if request.user.organization else "Unknown_organization"
         )
+
+        # Non-admins can only access their own organization's logs
+        if request.user.role != "admin":
+            user_org_name = str(
+                request.user.organization.name
+                if request.user.organization
+                else "Unknown_organization"
+            )
+            if organization_name != user_org_name:
+                return Response(
+                    {"detail": "You can only access logs for your own organization."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         content = download_log_file(organization_name, user_name, log_date)
 
