@@ -68,7 +68,7 @@ def _user_branch_id(user):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ExamListCreateView(APIView):
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['exam_type', 'status', 'batch_id', 'scheduled_date']
     search_fields = ['title', 'description']
@@ -331,7 +331,10 @@ class QuestionDetailView(APIView):
             exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return None, None, Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
-        if role not in ['super_admin', 'admin_senior_executive'] and not (role == 'faculty' and exam.created_by == request.user):
+        is_assigned_faculty = False
+        if role == 'faculty':
+            is_assigned_faculty = hasattr(exam, 'faculty') and exam.faculty and getattr(exam.faculty, 'user', None) == request.user
+        if role not in ['super_admin', 'admin_senior_executive'] and not (exam.created_by == request.user or is_assigned_faculty):
             return None, None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         if exam.status in ['ongoing', 'completed', 'results_published']:
             return None, None, Response({'success': False, 'message': 'Cannot modify questions in current exam status.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -349,6 +352,16 @@ class QuestionDetailView(APIView):
             if field in request.data:
                 setattr(q, field, request.data[field])
         q.save()
+        
+        if 'choices' in request.data:
+            from .models import Choice
+            q.choices.all().delete()
+            for c_data in request.data['choices']:
+                Choice.objects.create(
+                    question=q, choice_text=c_data.get('text', ''),
+                    is_correct=c_data.get('is_correct', False)
+                )
+
         exam.recalculate_total_marks()  # auto-update total_marks via signal or explicit
         return Response({'success': True, 'message': 'Question updated.', 'data': QuestionSerializer(q).data, 'total_marks': exam.total_marks})
 

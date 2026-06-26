@@ -23,7 +23,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             'remarks', 'checked_at', 'is_submitted', 'is_rechecked', 'is_absent',
             'has_open_query',
             'exam_title', 'exam_scheduled_date', 'exam_total_marks',
-            'exam_pass_marks', 'batch_name', 'subject_name',
+            'exam_pass_marks', 'batch_name', 'subject_name', 'queries',
         ]
 
     def get_student_name(self, obj):

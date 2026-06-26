@@ -18,6 +18,7 @@ urlpatterns = [
 
     # Questions
     path('exams/<uuid:exam_id>/questions/', QuestionView.as_view(), name='exam-questions'),
+    path('exams/<uuid:exam_id>/questions/<uuid:question_id>/', QuestionDetailView.as_view(), name='exam-question-detail'),
 
 
     # Seating
