@@ -106,15 +106,6 @@ def get_available_paper_checkers(exam):
             logger.info(f"Using {len(fallback_ids)} branch paper_checkers as fallback for exam {exam.id}")
             return fallback_ids
 
-        # Last-resort fallback
-        if exam.faculty and hasattr(exam.faculty, 'user') and exam.faculty.user:
-            try:
-                if getattr(exam.faculty.user, 'is_active', True):
-                    return [exam.faculty.user.id]
-            except Exception:
-                pass
-        if exam.created_by and getattr(exam.created_by, 'is_active', True):
-            return [exam.created_by.id]
         logger.error(f"No paper checkers available (even with fallback) for exam {exam.id}")
         return []
 

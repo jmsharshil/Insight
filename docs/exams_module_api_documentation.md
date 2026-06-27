@@ -309,3 +309,45 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 ### Update & Delete Malpractice Report
 **Endpoint:** `/api/v1/exams/{exam_id}/malpractice/{report_id}/`
 **Methods:** `PATCH`, `DELETE`
+
+---
+
+## 6. Exam Papers Management
+
+**Note:** Exams now support uploading multiple paper sets (e.g., Set A, Set B) for offline exams or distributed online questions. These papers can be linked to an `ExamSession` via the `assigned_paper` field.
+
+### List & Upload Exam Papers
+**Endpoint:** `/api/v1/exams/{exam_id}/papers/`
+**Methods:** `GET`, `POST`
+
+**POST Request (Form Data):**
+- `set_name`: "Set A" (String)
+- `file`: (PDF/Document upload)
+- `answer_key`: (PDF/Document upload, optional)
+
+**POST Success Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "id": "uuid-of-paper",
+        "exam": "uuid-of-exam",
+        "set_name": "Set A",
+        "file": "/media/exam_papers/set_a.pdf",
+        "answer_key": "/media/exam_papers/answer_keys/set_a_key.pdf",
+        "created_at": "2026-06-27T10:00:00Z"
+    }
+}
+```
+
+### Delete Exam Paper
+**Endpoint:** `/api/v1/exams/{exam_id}/papers/{paper_id}/`
+**Method:** `DELETE`
+
+**Success Response:**
+```json
+{
+    "success": true,
+    "message": "Paper deleted."
+}
+```

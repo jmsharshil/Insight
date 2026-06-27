@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
     SeatArrangement, MalpracticeReport, ScreenEvent,
+    ExamPaper,
 )
 
 User = get_user_model()
@@ -71,6 +72,13 @@ class QuestionInputSerializer(serializers.Serializer):
 
 
 # ═══ Exam ═════════════════════════════════════════════════════════════════════
+
+class ExamPaperSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExamPaper
+        fields = ['id', 'exam', 'set_name', 'file', 'answer_key', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
 
 class ExamListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)

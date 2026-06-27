@@ -162,6 +162,22 @@ class Choice(models.Model):
         return self.choice_text[:50]
 
 
+class ExamPaper(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='papers')
+    set_name = models.CharField(max_length=50, help_text='e.g., Set A, Morning Shift')
+    file = models.FileField(upload_to='exam_papers/')
+    answer_key = models.FileField(upload_to='exam_papers/answer_keys/', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'exam_papers'
+        unique_together = ('exam', 'set_name')
+
+    def __str__(self):
+        return f"{self.exam.title} - {self.set_name}"
+
+
 class ExamSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='sessions')
@@ -179,6 +195,8 @@ class ExamSession(models.Model):
 
     # v2 NEW: periodic geo-check tracking (FRD §4.6.1)
     last_geo_check_at = models.DateTimeField(null=True, blank=True)
+    
+    assigned_paper = models.ForeignKey(ExamPaper, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
 
     class Meta:
         db_table = 'exam_sessions'
