@@ -67,7 +67,7 @@ class AttendanceListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['date', 'batch_id', 'student_id', 'status']
-    search_fields = ['student__first_name', 'student__surname']
+    search_fields = ['student__first_name', 'student__surname','student__fullname']
     ordering_fields = '__all__'
 
     def get(self, request):
@@ -101,7 +101,8 @@ class AttendanceListCreateView(APIView):
                 Q(student__first_name__icontains=search_query) |
                 Q(student__surname__icontains=search_query) |
                 Q(student__roll_number__icontains=search_query) |
-                Q(student__admission_number__icontains=search_query)
+                Q(student__admission_number__icontains=search_query) |
+                Q(student__fullname__icontains=search_query)
             )
 
         qs = apply_filters(self, request, qs)
