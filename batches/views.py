@@ -1160,6 +1160,9 @@ class AcademicDropdownsView(APIView):
         classrooms_qs = Classroom.objects.all()
         chapters_qs = Chapter.objects.all()
 
+        from exams.models import SubjectPaper
+        papers_qs = SubjectPaper.objects.all()
+
         if org_id:
             courses_qs = courses_qs.filter(organization_id=org_id)
             levels_qs = levels_qs.filter(organization_id=org_id)
@@ -1168,6 +1171,7 @@ class AcademicDropdownsView(APIView):
             branches_qs = branches_qs.filter(organization_id=org_id)
             classrooms_qs = classrooms_qs.filter(organization_id=org_id)
             chapters_qs = chapters_qs.filter(subject__organization_id=org_id)
+            papers_qs = papers_qs.filter(subject__organization_id=org_id)
         
         branch_id = request.GET.get('branch_id')
         if branch_id:
@@ -1176,6 +1180,7 @@ class AcademicDropdownsView(APIView):
  
         subjects = list(subjects_qs.values('id', 'name', 'level_id'))
         chapters = list(chapters_qs.values('id', 'name', 'subject_id', 'order'))
+        papers = list(papers_qs.values('id', 'set_name', 'subject_id', 'file', 'answer_key'))
 
         chapters_by_subject = {}
         for chapter in chapters:
@@ -1187,9 +1192,22 @@ class AcademicDropdownsView(APIView):
                 'name': chapter['name'],
                 'order': chapter['order']
             })
+            
+        papers_by_subject = {}
+        for paper in papers:
+            subj_id = paper['subject_id']
+            if subj_id not in papers_by_subject:
+                papers_by_subject[subj_id] = []
+            papers_by_subject[subj_id].append({
+                'id': paper['id'],
+                'set_name': paper['set_name'],
+                'file': paper['file'],
+                'answer_key': paper['answer_key']
+            })
         
         for subject in subjects:
             subject['chapters'] = chapters_by_subject.get(subject['id'], [])
+            subject['papers'] = papers_by_subject.get(subject['id'], [])
 
         return Response({
             "success": True,
