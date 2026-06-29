@@ -277,8 +277,13 @@ class SubjectPaperListCreateView(APIView):
         data['subject'] = str(subject_id)
         serializer = SubjectPaperSerializer(data=data)
         if serializer.is_valid():
-            serializer.save()
-            return Response({'success': True, 'data': serializer.data}, status=status.HTTP_201_CREATED)
+            paper = serializer.save()
+            # Auto-set set_name from the uploaded filename if left blank
+            if not paper.set_name and paper.file:
+                import os
+                paper.set_name = os.path.splitext(os.path.basename(paper.file.name))[0]
+                paper.save(update_fields=['set_name'])
+            return Response({'success': True, 'data': SubjectPaperSerializer(paper).data}, status=status.HTTP_201_CREATED)
         return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 

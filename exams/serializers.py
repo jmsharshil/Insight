@@ -75,6 +75,10 @@ class QuestionInputSerializer(serializers.Serializer):
 
 class SubjectPaperSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True)
+    set_name = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default='',
+        help_text='Optional label, e.g. "Set A". Auto-derived from filename if omitted.'
+    )
 
     class Meta:
         model = SubjectPaper

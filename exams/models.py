@@ -168,17 +168,22 @@ class Choice(models.Model):
 class SubjectPaper(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     subject = models.ForeignKey('batches.Subject', on_delete=models.CASCADE, related_name='papers')
-    set_name = models.CharField(max_length=50, help_text='e.g., Set A, Morning Shift')
+    set_name = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        help_text='e.g., Set A, Morning Shift. Auto-derived from filename if left blank.'
+    )
     file = models.FileField(upload_to='subject_papers/')
     answer_key = models.FileField(upload_to='subject_papers/answer_keys/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'subject_papers'
-        unique_together = ('subject', 'set_name')
 
     def __str__(self):
-        return f"{self.subject.name} - {self.set_name}"
+        label = self.set_name or (self.file.name.split('/')[-1] if self.file else str(self.id))
+        return f"{self.subject.name} - {label}"
 
 
 class ExamSession(models.Model):
