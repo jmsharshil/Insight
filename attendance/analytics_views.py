@@ -1803,3 +1803,163 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
             response_data['date_to'] = date_to_parsed.strftime('%Y-%m-%d')
 
         return Response(response_data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 15. GET /api/attendance/employee/{user_id}/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EmployeeAttendanceDetailAPIView(SafeAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id):
+        user = request.user
+        role = getattr(user, 'role', None)
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        try:
+            employee = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'success': False, 'message': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Scoping check
+        if role not in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']:
+            # Non-admins can only view their own attendance detail
+            if str(employee.id) != str(user.id):
+                return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+                
+        user_org_id = getattr(user, 'organization_id', None)
+        if user_org_id and getattr(employee, 'organization_id', None) and getattr(employee, 'organization_id', None) != user_org_id:
+            return Response({'success': False, 'message': 'Access denied (Organization mismatch).'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Attendance data
+        from attendance.models import EmployeeAttendanceRecord
+        records = EmployeeAttendanceRecord.objects.filter(user=employee)
+        
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        date_filter = request.GET.get('date')
+        status_filter = request.GET.get('status')
+        
+        if start_date:
+            records = records.filter(date__gte=start_date)
+        if end_date:
+            records = records.filter(date__lte=end_date)
+        if date_filter:
+            records = records.filter(date=date_filter)
+        if status_filter:
+            records = records.filter(status=status_filter)
+
+        total_days = records.exclude(status='on_leave').count()
+        present_count = records.filter(status__in=['present', 'late', 'half_day']).count()
+        absent_count = records.filter(status='absent').count()
+        late_count = records.filter(status='late').count()
+        pct = round((present_count / total_days) * 100, 2) if total_days > 0 else 0.0
+
+        # Check-in and check-out logs
+        check_in_history = []
+        check_out_history = []
+        day_wise_attendance = []
+        for r in records.order_by('-date'):
+            day_wise_attendance.append({
+                'date': r.date,
+                'status': r.status
+            })
+            if r.checked_in_at:
+                check_in_history.append({
+                    'date': r.date,
+                    'time': r.checked_in_at,
+                    'status': r.status
+                })
+            if r.checked_out_at:
+                check_out_history.append({
+                    'date': r.date,
+                    'time': r.checked_out_at
+                })
+
+        # Recent absences
+        recent_absences = []
+        for r in records.filter(status='absent').order_by('-date')[:5]:
+            recent_absences.append({
+                'date': r.date,
+                'formatted_date': r.date.strftime('%d %b %Y'),
+                'status': 'Absent'
+            })
+
+        # Monthly trends
+        monthly_trend = []
+        today = timezone.now().date()
+        creation_date = employee.date_joined.date() if hasattr(employee, 'date_joined') and employee.date_joined else timezone.datetime(2000, 1, 1).date()
+
+        first_attendance_record = EmployeeAttendanceRecord.objects.filter(user=employee).order_by('date').first()
+        first_attendance_date = first_attendance_record.date if first_attendance_record else None
+
+        for i in range(5, -1, -1):
+            m = today.month - i
+            y = today.year
+            if m <= 0:
+                m += 12
+                y -= 1
+            month_str = f"{y}-{m:02d}"
+
+            if timezone.datetime(year=y, month=m, day=1).date() < creation_date and (first_attendance_date is None or first_attendance_date.month != m or first_attendance_date.year != y):
+                continue
+
+            m_records = EmployeeAttendanceRecord.objects.filter(user=employee, date__year=y, date__month=m).exclude(status='on_leave')
+            m_total = m_records.count()
+            m_present = m_records.filter(status__in=['present', 'late', 'half_day']).count()
+            m_pct = round((m_present / m_total) * 100, 2) if m_total > 0 else 0.0
+
+            import calendar
+            monthly_trend.append({
+                'month': month_str,
+                'month_name': calendar.month_abbr[m],
+                'percentage': m_pct
+            })
+
+        page = request.GET.get('page', 1)
+        page_size = request.GET.get('page_size', 50)
+        try:
+            page = int(page)
+            page_size = int(page_size)
+        except ValueError:
+            page = 1
+            page_size = 50
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        branch_name = None
+        if hasattr(employee, 'branch') and employee.branch:
+            branch_name = employee.branch.name
+        elif hasattr(employee, 'profile') and hasattr(employee.profile, 'branch') and employee.profile.branch:
+            branch_name = employee.profile.branch.name
+
+        return Response({
+            'success': True,
+            'count': len(day_wise_attendance),
+            'page_size': page_size,
+            'data': {
+                'employee_profile': {
+                    'id': str(employee.id),
+                    'name': employee.name if hasattr(employee, 'name') else f"{employee.first_name} {employee.last_name}",
+                    'email': employee.email,
+                    'role': getattr(employee, 'role', 'Employee'),
+                    'branch_name': branch_name,
+                },
+                'attendance_percentage': pct,
+                'summary': {
+                    'total_days': total_days,
+                    'present_count': present_count,
+                    'absent_count': absent_count,
+                    'late_count': late_count,
+                },
+                'day_wise_attendance': day_wise_attendance[start:end],
+                'recent_absences': recent_absences,
+                'check_in_history': check_in_history[start:end],
+                'check_out_history': check_out_history[start:end],
+                'monthly_trend': monthly_trend,
+            }
+        })

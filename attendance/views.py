@@ -8,6 +8,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Q
 from core.utils import apply_filters
 
 from .models import AttendanceRecord, QRScanLog, AlertLog, ViolationRecord
@@ -917,6 +918,13 @@ class EmployeeAttendanceListCreateView(APIView):
             qs = qs.filter(date__lte=to_date)
         if status_filter:
             qs = qs.filter(status=status_filter)
+        # Search by employee name or email
+        search_query = request.GET.get('search')
+        if search_query:
+            qs = qs.filter(
+                Q(user__name__icontains=search_query) |
+                Q(user__email__icontains=search_query)
+            )
         if user_id and role in EMPLOYEE_ATTENDANCE_ADMIN_ROLES:
             qs = qs.filter(user_id=user_id)
 
