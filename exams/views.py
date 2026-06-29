@@ -623,15 +623,19 @@ class ExamStartView(APIView):
             return Response({'success': False, 'message': 'Session already exists'}, status=status.HTTP_409_CONFLICT)
 
         if exam.geo_radius_meters > 0:
-            if not lat or not lon:
+            if lat is None or lon is None:
                 return Response({'success': False, 'message': 'Location required for geo check'}, status=status.HTTP_400_BAD_REQUEST)
-            allowed, dist = check_geo_boundary(exam, lat, lon)
-            if not allowed:
-                return Response({
-                    'success': False,
-                    'message': 'You are outside the allowed exam zone.',
-                    'distance_m': dist, 'allowed_m': exam.geo_radius_meters,
-                }, status=status.HTTP_403_FORBIDDEN)
+            try:
+                allowed, dist = check_geo_boundary(exam, lat, lon)
+                if not allowed:
+                    return Response({
+                        'success': False,
+                        'message': 'You are outside the allowed exam zone.',
+                        'distance_m': dist, 'allowed_m': exam.geo_radius_meters,
+                    }, status=status.HTTP_403_FORBIDDEN)
+            except Exception as e:
+                logger.error(f"Geo check failed for exam {exam_id}: {e}")
+                # Continue without blocking (fail-open for geo to prevent 502 crashes)
 
         session = ExamSession.objects.create(
             exam=exam, student=student,
@@ -867,7 +871,12 @@ class GeoCheckView(APIView):
 
         lat = ser.validated_data['student_lat']
         lon = ser.validated_data['student_lon']
-        allowed, dist = check_geo_boundary(exam, lat, lon)
+        try:
+            allowed, dist = check_geo_boundary(exam, lat, lon)
+        except Exception as e:
+            logger.error(f"Periodic geo check failed for exam {exam_id}, session {session_id}: {e}")
+            allowed = True  # fail-open
+            dist = 0.0
 
         session.last_geo_check_at = timezone.now()
         session.student_lat = lat
