@@ -1,4 +1,3 @@
-from exams.serializers import SubjectPaperSerializer
 from datetime import datetime, timedelta
 
 from rest_framework import serializers
@@ -140,7 +139,8 @@ class SubjectListSerializer(serializers.ModelSerializer):
         return ChapterSerializer(qs, many=True).data
 
     def get_papers(self, obj):
-        qs = obj.subject_papers.all()
+        from exams.serializers import SubjectPaperSerializer
+        qs = obj.papers.all()
         return SubjectPaperSerializer(qs, many=True).data
 
 
@@ -410,6 +410,12 @@ class ExamDataSerializer(serializers.Serializer):
     duration_minutes = serializers.IntegerField(required=False)
     instructions = serializers.CharField(required=False, allow_blank=True)
     result_release_mode = serializers.CharField(max_length=20, default='instant')
+    selected_papers = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        allow_empty=True,
+        help_text='List of SubjectPaper UUIDs to link to the exam.'
+    )
 
 
 class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
@@ -591,10 +597,17 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             )
             slot.exam = exam
             slot.save(update_fields=['exam'])
-            
+
             # Sync paper checkers from slot to exam
             if slot.paper_checkers.exists():
                 exam.paper_checkers.set(slot.paper_checkers.all())
+
+            # Sync selected_papers from exam_data to exam
+            selected_paper_ids = exam_data.get('selected_papers', [])
+            if selected_paper_ids:
+                from exams.models import SubjectPaper
+                papers = SubjectPaper.objects.filter(id__in=selected_paper_ids)
+                exam.selected_papers.set(papers)
         else:
             exam = slot.exam
             exam.title = title
@@ -612,6 +625,13 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             
             # Sync paper checkers from slot to exam
             exam.paper_checkers.set(slot.paper_checkers.all())
+
+            # Sync selected_papers from exam_data to exam (only if provided)
+            selected_paper_ids = exam_data.get('selected_papers')
+            if selected_paper_ids is not None:
+                from exams.models import SubjectPaper
+                papers = SubjectPaper.objects.filter(id__in=selected_paper_ids)
+                exam.selected_papers.set(papers)
 
     def create(self, validated_data):
         exam_data = validated_data.pop('exam_data', None)
