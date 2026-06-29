@@ -414,11 +414,12 @@ class StudentRecheckRequestView(APIView):
         if not pr_qs.exists():
             return Response({'success': False, 'message': 'Results not published yet. Cannot request recheck.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # NEW: Answer key must be uploaded
+        # NEW: Answer key must be uploaded or distributed
         try:
             exam = Exam.objects.get(id=exam_id)
-            if not exam.answer_key:
-                return Response({'success': False, 'message': 'Answer key has not been uploaded yet. Recheck not allowed.'}, status=status.HTTP_400_BAD_REQUEST)
+            has_answer_key = bool(exam.answer_key) or exam.answer_key_logs.exists()
+            if not has_answer_key:
+                return Response({'success': False, 'message': 'Answer key has not been uploaded or distributed yet. Recheck not allowed.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -580,8 +581,9 @@ class BulkRecheckRequestView(APIView):
 
         try:
             exam = Exam.objects.get(id=exam_id)
-            if not getattr(exam, 'answer_key', None):
-                return Response({'success': False, 'message': 'Answer key must be uploaded first for rechecks.'}, status=status.HTTP_400_BAD_REQUEST)
+            has_answer_key = bool(getattr(exam, 'answer_key', None)) or exam.answer_key_logs.exists()
+            if not has_answer_key:
+                return Response({'success': False, 'message': 'Answer key must be uploaded or distributed first for rechecks.'}, status=status.HTTP_400_BAD_REQUEST)
             if not exam.batch:
                 return Response({'success': False, 'message': 'Exam has no associated batch for bulk operation.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exam.DoesNotExist:
