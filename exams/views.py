@@ -232,6 +232,26 @@ class ExamDetailView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
         return Response({'success': True, 'message': 'Exam updated.', 'data': ExamListSerializer(exam).data})
+        
+    def put(self, request, exam_id):
+        # Handle PUT as a full update or alias to patch to be forgiving
+        role = _user_role(request.user)
+        if role not in EXAM_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        exam = self._get_exam(request, exam_id)
+        if exam is None:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if exam.status in ['ongoing', 'completed', 'results_published']:
+            return Response({'success': False, 'message': 'Cannot edit exam in current status.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Using partial=True here as well to be forgiving to clients that use PUT for partial updates
+        serializer = ExamCreateSerializer(exam, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response({'success': True, 'message': 'Exam updated.', 'data': ExamListSerializer(exam).data})
 
     def delete(self, request, exam_id):
         role = _user_role(request.user)
