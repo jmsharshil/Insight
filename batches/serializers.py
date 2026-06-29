@@ -585,6 +585,10 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             )
             slot.exam = exam
             slot.save(update_fields=['exam'])
+            
+            # Sync paper checkers from slot to exam
+            if slot.paper_checkers.exists():
+                exam.paper_checkers.set(slot.paper_checkers.all())
         else:
             exam = slot.exam
             exam.title = title
@@ -599,6 +603,9 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             exam.start_time = slot.start_time
             exam.end_time = slot.end_time
             exam.save()
+            
+            # Sync paper checkers from slot to exam
+            exam.paper_checkers.set(slot.paper_checkers.all())
 
     def create(self, validated_data):
         exam_data = validated_data.pop('exam_data', None)
