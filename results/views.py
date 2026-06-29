@@ -397,6 +397,33 @@ class StudentRecheckRequestView(APIView):
     """
     # permission_classes = [IsAuthenticated]
 
+    def get(self, request, exam_id):
+        if _user_role(request.user) != 'student':
+            return Response({'success': False, 'message': 'Only students can view their recheck requests.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            from students.models import Student
+            student = Student.objects.get(user=request.user)
+        except Exception:
+            return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        rechecks = RecheckRequest.objects.filter(
+            marksheet__exam_id=exam_id,
+            requested_by=student
+        ).select_related('marksheet')
+        
+        data = RecheckRequestSerializer(rechecks, many=True).data
+        # Do not show paper checker info to the student
+        for item in data:
+            item.pop('new_checker', None)
+            item.pop('new_checker_name', None)
+            
+        return Response({
+            'success': True,
+            'count': len(data),
+            'data': data
+        })
+
     def post(self, request, exam_id):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Only students can request recheck.'}, status=status.HTTP_403_FORBIDDEN)
