@@ -86,6 +86,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 },
             )
 
+        # Mark all messages as read when user joins/opens the chat room.
+        # This removes them from the unread count (see ChatRoom.get_unread_count).
+        await self._mark_all_messages_read(self.room_id, self.user)
+        new_count = await self._get_unread_count(self.room_id, self.user)
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":         "chat.all_read",
+                "user_id":      str(self.user.id),
+                "room_id":      self.room_id,
+                "unread_count": new_count,
+            },
+        )
+
+        # Also broadcast unread_update so sidebar/room-list can refresh badge immediately
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":        "chat.unread_update",
+                "room_id":     self.room_id,
+                "user_id":     str(self.user.id),
+                "unread_count": new_count,
+            },
+        )
+
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
@@ -116,12 +142,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         event_type = data.get("type")
         handler_map = {
-            "send_message":  self._handle_send_message,
-            "typing_start":  self._handle_typing_start,
-            "typing_stop":   self._handle_typing_stop,
-            "mark_read":     self._handle_mark_read,
+            "send_message":   self._handle_send_message,
+            "typing_start":   self._handle_typing_start,
+            "typing_stop":    self._handle_typing_stop,
+            "mark_read":      self._handle_mark_read,
+            "mark_all_read":  self._handle_mark_all_read,
             "edit_message":   self._handle_edit_message,
-            "delete_message": self._handle_delete_message, 
+            "delete_message": self._handle_delete_message,
         }
 
         handler = handler_map.get(event_type)
@@ -289,13 +316,55 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if receipt is None:
             return  # already read — silently succeed
 
+        # Compute new unread count so frontend can update badges immediately
+        new_count = await self._get_unread_count(self.room_id, self.user)
+
         await self.channel_layer.group_send(
             self.room_group_name,
             {
-                "type":       "chat.read_receipt",
-                "message_id": str(message_id),
-                "user_id":    str(self.user.id),
-                "read_at":    receipt.read_at.isoformat(),
+                "type":         "chat.read_receipt",
+                "message_id":   str(message_id),
+                "user_id":      str(self.user.id),
+                "read_at":      receipt.read_at.isoformat(),
+                "unread_count": new_count,          # update on mark_read
+            },
+        )
+
+        # Also send dedicated unread_update for room-list components
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":        "chat.unread_update",
+                "room_id":     self.room_id,
+                "user_id":     str(self.user.id),
+                "unread_count": new_count,
+            },
+        )
+
+    async def _handle_mark_all_read(self, data: dict):
+        """Handle explicit request from frontend to mark all messages in room as read."""
+        await self._mark_all_messages_read(self.room_id, self.user)
+        new_count = await self._get_unread_count(self.room_id, self.user)
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":         "chat.all_read",
+                "user_id":      str(self.user.id),
+                "room_id":      self.room_id,
+                "unread_count": new_count,
+            },
+        )
+
+        # Also broadcast a dedicated unread_update so room-list components
+        # can react uniformly (whether single or bulk read).
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type":        "chat.unread_update",
+                "room_id":     self.room_id,
+                "user_id":     str(self.user.id),
+                "unread_count": new_count,
             },
         )
 
@@ -401,11 +470,33 @@ class ChatConsumer(AsyncWebsocketConsumer):
         }))
 
     async def chat_read_receipt(self, event):
+        """Send read receipt + updated unread count (so frontend can update badges on mark_read)."""
         await self.send(text_data=json.dumps({
-            "type":       "read_receipt",
-            "message_id": event["message_id"],
-            "user_id":    event["user_id"],
-            "read_at":    event["read_at"],
+            "type":         "read_receipt",
+            "message_id":   event["message_id"],
+            "user_id":      event["user_id"],
+            "read_at":      event["read_at"],
+            "unread_count": event.get("unread_count", 0),
+        }))
+
+    async def chat_all_read(self, event):
+        """Broadcast that a user has marked all messages in this room as read.
+        Frontend can use this to clear unread badge/count for the room.
+        """
+        await self.send(text_data=json.dumps({
+            "type":         "all_messages_read",
+            "user_id":      event["user_id"],
+            "room_id":      event.get("room_id"),
+            "unread_count": event.get("unread_count", 0),
+        }))
+
+    async def chat_unread_update(self, event):
+        """Send real-time update of unread count for this room (used by room list/sidebar)."""
+        await self.send(text_data=json.dumps({
+            "type":         "unread_update",
+            "room_id":      event["room_id"],
+            "user_id":      event["user_id"],
+            "unread_count": event["unread_count"],
         }))
 
     # ITEM-2 — new outbound handler
@@ -528,6 +619,57 @@ class ChatConsumer(AsyncWebsocketConsumer):
             defaults={"read_at": timezone.now()},
         )
         return receipt if created else None
+
+    @database_sync_to_async
+    def _mark_all_messages_read(self, room_id: str, user):
+        """
+        Bulk mark all *visible* unread messages in the room as read for this user.
+        Called automatically on WebSocket connect() — opening a chat clears its
+        unread count (see ChatRoom.get_unread_count() and get_visible_messages_qs()).
+        Uses bulk_create for performance with many unread messages.
+        """
+        from .models import ChatRoom, MessageReadReceipt
+        from django.utils import timezone
+        from django.db.models import Q
+
+        try:
+            room = ChatRoom.objects.get(id=room_id, is_active=True)
+        except ChatRoom.DoesNotExist:
+            return 0
+
+        # Reuse the model's visibility logic (respects targeted messages, soft deletes, etc.)
+        visible_qs = room.get_visible_messages_qs(user)
+        unread_qs = visible_qs.filter(
+            ~Q(read_receipts__user=user),
+            ~Q(sender=user),
+        ).only("id")
+
+        messages = list(unread_qs)
+        if not messages:
+            return 0
+
+        now = timezone.now()
+        receipts = [
+            MessageReadReceipt(
+                message_id=msg.id,
+                user=user,
+                read_at=now,
+            )
+            for msg in messages
+        ]
+        # ignore_conflicts=True prevents errors if receipt created concurrently by another connection
+        MessageReadReceipt.objects.bulk_create(receipts, ignore_conflicts=True)
+        return len(messages)  # number of messages we marked read
+
+    @database_sync_to_async
+    def _get_unread_count(self, room_id: str, user):
+        """Return current unread count for this user in the room (uses model logic)."""
+        from .models import ChatRoom
+        try:
+            room = ChatRoom.objects.get(id=room_id, is_active=True)
+            return room.get_unread_count(user)
+        except ChatRoom.DoesNotExist:
+            return 0
 
     # ITEM-2 — new delivered helpers
     @database_sync_to_async

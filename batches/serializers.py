@@ -1,3 +1,4 @@
+from exams.serializers import SubjectPaperSerializer
 from datetime import datetime, timedelta
 
 from rest_framework import serializers
@@ -127,6 +128,7 @@ class SubjectListSerializer(serializers.ModelSerializer):
     level_name = serializers.CharField(source='level.name', read_only=True)
     course_name = serializers.CharField(source='level.course.name', read_only=True)
     chapters    = serializers.SerializerMethodField()
+    papers = serializers.SerializerMethodField()
 
     class Meta:
         model = Subject
@@ -136,6 +138,10 @@ class SubjectListSerializer(serializers.ModelSerializer):
     def get_chapters(self, obj):
         qs = obj.chapters.filter(is_active=True)
         return ChapterSerializer(qs, many=True).data
+
+    def get_papers(self, obj):
+        qs = obj.subject_papers.all()
+        return SubjectPaperSerializer(qs, many=True).data
 
 
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):

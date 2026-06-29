@@ -1,6 +1,6 @@
-# Chat Module — Full Walkthrough & Realtime API Reference Guide (Updated with Targeted Messages)
+# Chat Module — Full Walkthrough & Realtime API Reference Guide
 
-> **Last Updated:** Targeted private messages for student-faculty discussions in group chats (visible only to sender + target faculty + super_admin).
+> **Last Updated:** Soft-delete everywhere, automatic unread clearing on room open (`mark_all_read` on connect), real-time unread count updates on `mark_read`/`all_read`, delivered receipts, targeted messages (M2M), visibility filtering, and bulk read receipts.
 
 > **Base URL:** `https://api.example.com/api/v1/`  
 > **Auth Header:** `Authorization: Bearer <access_token>`  
@@ -16,30 +16,60 @@
 Client (Web/Mobile) ── REST (rooms/messages/upload) ──► Views/Serializers
           │
           ▼
-Django ORM (ChatRoom + Message w/ targets M2M + ReadReceipt) + Soft-delete (is_active/is_deleted)
+Django ORM (ChatRoom + Message w/ targets M2M + ReadReceipt + soft-delete)
           │
-          ├─► **Targeted message visibility** (M2M `targets`): filtered in views (annotate+ Q), consumers (per-user check), 
-          │     notifications.py (targeted push filtering). Supports multiple targets; normal msgs (empty targets) visible to all.
-          ├─► notifications.py for push (FCM v1 with service account); respects targets + super_admin only.
-          │
-          ▼
-WebSocket Consumers (consumers.py) ──► Group broadcast (room_id) + Redis layer
-          │     (with per-user privacy filter in `chat_new_message` for targeted messages; `_save_message` handles list)
+          ├─► **Visibility**: `get_visible_messages_qs()` (Count("targets") + Q filter). Super-admin bypass.
+          ├─► **Unread**: `get_unread_count()` excludes messages with receipt for user.
+          ├─► **Auto-clear**: `_mark_all_messages_read()` on WS connect() + bulk receipts.
+          ├─► Notifications (`notify_new_message`): respects targets, runs in background.
           │
           ▼
-Frontend receives: new_message, message_read, user_typing, delivery_status
+WebSocket Consumers (`consumers.py`) ──► InMemory/Redis group broadcast
+          │   • JWT + participant check + faculty-direct block (BR-011)
+          │   • `_handle_mark_read()` + `_handle_mark_all_read()` → create receipt + broadcast `read_receipt`/`all_read` + `unread_update`
+          │   • `connect()` auto-calls mark-all-read + delivered receipts
+          │   • Privacy filter on `chat_new_message` (sender/target/super_admin only)
           │
-          └─► Read receipts (MessageReadReceipt) update tick_status (sent/delivered/read)
+          ▼
+Frontend receives: `new_message`, `read_receipt` (with `unread_count`), `unread_update`, `all_messages_read`, `delivered_receipt`, `message_updated`, `message_deleted`, `typing`
+          │
+          └─► `tick_status` property on Message (read/delivered/sent based on receipts)
 ```
 
-**Key Features:**
-- Direct rooms use deterministic `direct_hash` (sorted user UUIDs) for 1:1 uniqueness.
-- **Group rooms now support targeted messages**: Students can ask questions to a *specific faculty*. These are visible **only to the sender, the target faculty, and `super_admin`** (while staying in the same group room). Normal messages remain visible to all participants.
-- Group rooms support avatar, name, multiple participants.
-- Messages support text + file attachments (S3 URLs).
-- Soft deletes preserve history.
-- Realtime via Channels + Redis (with per-user visibility filtering for targeted messages).
-- Notifications for unread counts, mentions.
+**Key Features (All Changes Incorporated):**
+- **Soft-delete everywhere**: `ChatRoom.is_active`, `Message.is_deleted`. All querysets/views filter accordingly.
+- **Targeted messages** (M2M `targets`): Visible only to sender + listed targets + super_admin. Normal messages (no targets) visible to all. Supports multiple targets. Filtered in views, consumers, notifications.
+- Direct rooms use `direct_hash`. Group management (add/remove/delete via `is_active=False`).
+- Messages support text + files (10MB validation via `FileUploadView`).
+- Delivered receipts (`delivered_at`, `_mark_messages_delivered` on connect).
+- `tick_status` property on Message.
+- Notifications use FCM v1 (service account), background thread, respect targets.
+- CHANNEL_LAYERS = InMemory (dev); WS route `ws/chat/<uuid:room_id>/`.
+- `get_last_visible_message()`, `RoomListView`/`ChatRoomListSerializer` delegate to model helpers (respects visibility).
+
+### Unread Count Mechanism (Updated)
+
+A message is removed from a user's unread count when a `MessageReadReceipt` row exists for that `(message, user)` pair.
+
+**How it works:**
+1. `ChatRoom.get_unread_count(user)`:
+   - Calls `get_visible_messages_qs(user)` (filters `is_deleted=False`, uses `Count("targets")` + `Q(num_targets=0) | sender | targets`).
+   - Further filters: `~Q(read_receipts__user_id=user_id) & ~Q(sender=user)`.
+   - Super-admin bypasses visibility.
+
+2. **On `mark_read`** (`_handle_mark_read` in consumer):
+   - `get_or_create` a `MessageReadReceipt`.
+   - Computes new count via `_get_unread_count()`.
+   - Broadcasts `read_receipt` **with `unread_count`** + dedicated `unread_update`.
+
+3. **On room open / `mark_all_read`**:
+   - `connect()` automatically calls `_mark_all_messages_read()` (bulk_create of receipts for all visible unread messages).
+   - `_handle_mark_all_read` does the same for explicit frontend requests.
+   - Broadcasts `all_messages_read` + `unread_update` (count usually drops to 0).
+
+4. **Frontend impact**: Listen to `unread_update` or the `unread_count` field in `read_receipt`/`all_messages_read` to refresh sidebar badges instantly. No polling needed.
+
+**Models involved**: `MessageReadReceipt` (unique on `(message, user)`), `Message.read_receipts` reverse relation.
 
 ---
 
@@ -62,15 +92,19 @@ Frontend receives: new_message, message_read, user_typing, delivery_status
 
 ---
 
-## Data Models Summary
+## Data Models Summary (Updated)
 
 | Model | Purpose | Key Behaviors |
 |-------|---------|---------------|
-| `ChatRoom` | Container for conversations | `direct_hash` for uniqueness; M2M participants; soft-delete via `is_active` |
-| `Message` | Individual chat entry | Supports `content` + `file_url`; **targets** (ManyToManyField to User, blank=True) for private multi-faculty questions in groups; `tick_status` computed from receipts; soft-delete. Visibility filtering enforced in views/consumers/notifications. |
-| `MessageReadReceipt` | Delivery tracking | Unique (message, user); updates status to "read" |
+| `ChatRoom` | Container for conversations | `direct_hash`, M2M `participants`, `is_active` (soft-delete). **New:** `get_visible_messages_qs(user)`, `get_unread_count(user)`, `get_last_visible_message(user)` (all respect targets/soft-delete). |
+| `Message` | Individual chat entry | `content` + `file_url`/`file_name`/`file_size`, M2M `targets`, `is_deleted`, `delivered_at`. **New:** `tick_status` property (read/delivered/sent based on receipts). |
+| `MessageReadReceipt` | Read tracking | Unique `(message, user)`; `read_at`. Bulk creation used for `mark_all_read`. |
 
-**Utils:** `utils.py` for room lookup, `notifications.py` for in-app/push, `tasks.py` for async unread counts.
+**Core files:**
+- `models.py` — visibility + unread helpers.
+- `consumers.py` — auth, `_handle_mark_read`, `_handle_mark_all_read`, auto-clear on connect, privacy filters, delivered receipts.
+- `views.py` / `serializers.py` — visibility on GET, PATCH/DELETE for edit/soft-delete, unread in room list.
+- `notifications.py` — targeted push (FCM v1).
 
 ---
 
@@ -302,23 +336,37 @@ Paginated (newest first), supports `?page=1`.
 
 ---
 
-## Realtime WebSocket
+## Realtime WebSocket (Updated)
 
-**Endpoint:** `ws://api.example.com/ws/chat/<room_id>/`
+**Endpoint:** `ws://api.example.com/ws/chat/<room_id>/` (JWT via `?token=...` query param)
+
+**Connection Flow (`connect()`):**
+1. JWT auth + participant check.
+2. Faculty blocked from direct rooms (BR-011).
+3. Join `room_{room_id}` group.
+4. `_mark_messages_delivered()` (bulk update `delivered_at`).
+5. Broadcast delivered receipts.
+6. `_mark_all_messages_read()` (bulk receipts for visible unread messages) → auto-clears unread count.
+7. Broadcast `all_messages_read` + `unread_update` with new count.
 
 **Events Sent by Client:**
-- `send_message` — `{content, file_url?, target_user_ids?: string[] }` (supports array for multiple targets; also accepts legacy `target_user_id`)
-- `typing` — `{is_typing: true}`
-- `mark_read` — `{message_id}`
-- `edit_message`, `delete_message`
+- `send_message` — `{content, file_url?, target_user_ids?: string[] }` (multi-target support).
+- `typing_start` / `typing_stop`.
+- `mark_read` — `{ "type": "mark_read", "message_id": "..." }` → triggers receipt + unread count update.
+- `mark_all_read` — `{ "type": "mark_all_read" }` (explicit bulk clear).
+- `edit_message`, `delete_message` (soft delete).
 
 **Events from Server:**
-- `new_message` — includes `targets` array (may be empty); **server filters delivery per-user** so only authorized users (sender, any target, or super_admin) receive targeted messages. Sender does not receive echo.
-- `message_updated`, `message_deleted`
-- `read_receipt`, `delivered_receipt`
-- `typing`
+- `new_message` — includes `targets`; **per-user privacy filter** (sender/target/super_admin only). No echo to sender.
+- `read_receipt` — now includes `"unread_count"` (updated on every `mark_read`).
+- `all_messages_read` / `unread_update` — real-time badge updates (`{ "unread_count": 0, "room_id": "...", "user_id": "..." }`).
+- `delivered_receipt`.
+- `message_updated`, `message_deleted` (soft `is_deleted=True` + broadcast).
+- `typing`.
 
-Authentication via query param `token=...` or middleware.
+**Outbound handlers** in consumer apply visibility filters and convert internal `chat.*` events to clean frontend payloads.
+
+Authentication + DB helpers are `@database_sync_to_async`.
 
 ---
 
@@ -333,12 +381,17 @@ Authentication via query param `token=...` or middleware.
 
 ## Related Modules & Notes
 
-- **Notifications:** `notifications.py` for unread counts, push (Celery tasks).
-- **Exams/Results:** Perfect for **student-faculty private queries** inside batch/exam group chats (targeted messages integrate with `CheckerQuery`/`RecheckRequest` workflows).
-- **Storage:** Files go to S3; URLs stored in Message.
-- **Soft Delete:** All list views filter `is_active=True` / `is_deleted=False`.
-- **Roles:** Leverages `super_admin`, `faculty`/`paper_checker`, `student` roles for visibility.
+- **Unread handling**: Automatic on room open (`connect()` → `_mark_all_messages_read()`). Real-time updates via `read_receipt` (with `unread_count`) and `unread_update` events on every `mark_read`.
+- **Notifications:** `notifications.py` respects `target_user_ids` (only targets + super_admin, excludes sender). Uses FCM v1 with service account, runs in background.
+- **Exams/Results:** Ideal for student-faculty private queries inside batch groups using targeted messages.
+- **Storage:** Files validated (≤10 MB, allowed MIME types) via `FileUploadView`; URLs stored in `Message`.
+- **Soft Delete:** All querysets/views filter `is_active=True` / `is_deleted=False`. Group delete sets `is_active=False`.
+- **Roles:** `super_admin` bypasses visibility; faculty blocked from direct rooms (BR-011).
 
-**WebSocket Consumers** in `consumers.py` handle auth, room joining, broadcasting.
+**WebSocket Consumers** (`consumers.py`) now fully support:
+- Auto mark-all-read + delivered receipts on connect.
+- Real-time unread count updates on `mark_read` / `mark_all_read`.
+- Privacy filtering for targeted messages.
+- Edit/delete (soft) with broadcasts.
 
-This updated documentation brings the chat module in line with the full walkthrough style of `faculty_module_api_documentation.md`, `timetable_procedure_guide.md`, and `results_module_api_documentation.md`. Includes realtime details, soft-delete logic, and exact request/response examples from current implementation.
+This documentation has been updated with **all recent changes** (soft-delete, visibility helpers, unread mechanism, auto-clear on open, real-time count updates, delivered receipts, bulk operations, etc.). It follows the style of other module docs and includes exact steps for the unread flow.
