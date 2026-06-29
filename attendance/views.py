@@ -883,6 +883,10 @@ class EmployeeAttendanceListCreateView(APIView):
     GET  — list employee attendance records (admin: by branch; staff: own)
     POST — bulk mark attendance for employees (admin only)
     """
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'date']
+    search_fields = ['user__name', 'user__email']
+    ordering_fields = '__all__'
 
     def get(self, request):
         role = _user_role(request.user)
