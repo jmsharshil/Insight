@@ -25,6 +25,7 @@ Usage:
 import logging
 import threading
 from datetime import timedelta
+from typing import Optional
 
 from django.utils import timezone
 
@@ -63,10 +64,10 @@ class TaskScheduler:
     def schedule(
         cls,
         task_type: str,
-        task_kwargs: dict | None = None,
+        task_kwargs: Optional[dict] = None,
         delay_seconds: int = 0,
         is_recurring: bool = False,
-        interval_seconds: int | None = None,
+        interval_seconds: Optional[int] = None,
         max_retries: int = 3,
     ):
         """
@@ -121,7 +122,7 @@ class TaskScheduler:
     # ── Cancellation ─────────────────────────────────────────────
 
     @classmethod
-    def cancel(cls, task_type: str, task_kwargs_filter: dict | None = None):
+    def cancel(cls, task_type: str, task_kwargs_filter: Optional[dict] = None):
         """
         Cancel all *pending* tasks that match *task_type*.
 
