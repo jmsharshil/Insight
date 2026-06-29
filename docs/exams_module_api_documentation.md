@@ -23,6 +23,8 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 
 **Note:** `total_marks` in `exam_data` is accepted for initial validation but will be recalculated once questions are added.
 
+**Note:** `paper_checkers` specified in the timetable slot are **automatically synced** to the generated `Exam.paper_checkers` M2M field. No separate step is required.
+
 **POST Request Body Example:**
 ```json
 {
@@ -312,18 +314,27 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 
 ---
 
-## 6. Exam Papers Management
+## 6. Subject Papers (Reusable Paper Library)
 
-**Note:** Exams now support uploading multiple paper sets (e.g., Set A, Set B) for offline exams or distributed online questions. These papers can be linked to an `ExamSession` via the `assigned_paper` field.
+Papers are now managed at the **Subject** level rather than per-exam, making them reusable across multiple exams. An exam admin links one or more subject papers to an exam via `selected_papers`. When a student starts the exam, a paper is automatically assigned using a **round-robin** strategy to ensure even distribution.
 
-### List & Upload Exam Papers
-**Endpoint:** `/api/v1/exams/{exam_id}/papers/`
-**Methods:** `GET`, `POST`
+---
 
-**POST Request (Form Data):**
-- `set_name`: "Set A" (String)
-- `file`: (PDF/Document upload)
-- `answer_key`: (PDF/Document upload, optional)
+### 6.1 Upload / List Subject Papers
+
+**Endpoint:** `POST /api/v1/subjects/{subject_id}/papers/`  
+**Endpoint:** `GET  /api/v1/subjects/{subject_id}/papers/`  
+**Permission:** Admin / Senior Executive roles
+
+**POST Request (multipart/form-data):**
+
+| Field        | Type     | Required | Description                         |
+|--------------|----------|----------|-------------------------------------|
+| `set_name`   | string   | Yes      | e.g., `"Set A"`, `"Morning Shift"` |
+| `file`       | file     | Yes      | PDF / document to upload            |
+| `answer_key` | file     | No       | Answer key PDF (optional)           |
+
+> `subject` is inferred from the URL — do not pass it in the body.
 
 **POST Success Response:**
 ```json
@@ -331,23 +342,94 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
     "success": true,
     "data": {
         "id": "uuid-of-paper",
-        "exam": "uuid-of-exam",
+        "subject": "uuid-of-subject",
+        "subject_name": "Company Law",
         "set_name": "Set A",
-        "file": "/media/exam_papers/set_a.pdf",
-        "answer_key": "/media/exam_papers/answer_keys/set_a_key.pdf",
-        "created_at": "2026-06-27T10:00:00Z"
+        "file": "/media/subject_papers/set_a.pdf",
+        "answer_key": "/media/subject_papers/answer_keys/set_a_key.pdf",
+        "created_at": "2026-06-29T10:00:00Z"
     }
 }
 ```
 
-### Delete Exam Paper
-**Endpoint:** `/api/v1/exams/{exam_id}/papers/{paper_id}/`
-**Method:** `DELETE`
+---
 
-**Success Response:**
+### 6.2 Retrieve / Update / Delete a Subject Paper
+
+**Endpoint:** `/api/v1/subjects/{subject_id}/papers/{paper_id}/`  
+**Methods:** `GET`, `PATCH`, `DELETE`
+
+`PATCH` accepts any subset of `set_name`, `file`, `answer_key`.
+
+---
+
+### 6.3 Link Papers to an Exam (`selected_papers`)
+
+When creating or updating an exam, pass `selected_papers` as a list of `SubjectPaper` UUIDs to associate them with the exam. These must belong to any subject (no subject restriction enforced at this layer).
+
+**PATCH `/api/v1/exams/{exam_id}/`:**
 ```json
 {
-    "success": true,
-    "message": "Paper deleted."
+    "selected_papers": ["uuid-of-paper-1", "uuid-of-paper-2"]
 }
 ```
+
+**GET `/api/v1/exams/{exam_id}/` response now includes:**
+```json
+{
+    "selected_papers": [
+        {
+            "id": "uuid-of-paper-1",
+            "subject": "uuid-of-subject",
+            "subject_name": "Company Law",
+            "set_name": "Set A",
+            "file": "/media/subject_papers/set_a.pdf",
+            "answer_key": null,
+            "created_at": "2026-06-29T10:00:00Z"
+        }
+    ]
+}
+```
+
+---
+
+### 6.4 Round-Robin Paper Assignment at Exam Start
+
+When a student hits `POST /api/v1/exams/{exam_id}/start/`, the system:
+
+1. Retrieves all `selected_papers` for the exam (ordered by `set_name`).
+2. Counts how many sessions already have each paper assigned.
+3. Assigns the paper with the **lowest assignment count** to the new session.
+
+This guarantees even distribution across all paper sets for the duration of the exam.
+
+**Start Exam Response now includes `assigned_paper_id`:**
+```json
+{
+    "session_id": "uuid-of-session",
+    "remaining_seconds": 3600,
+    "autosave_interval_seconds": 30,
+    "geo_check_interval_minutes": 5,
+    "exam_title": "Midterm",
+    "total_marks": 100,
+    "questions": [ "..." ]
+}
+```
+
+> `ExamSession.assigned_paper` stores the paper assigned to the student. Use this to show/download the correct paper file during the exam session.
+
+---
+
+### 6.5 Workflow Summary
+
+```
+1. Upload papers to a subject:
+   POST /api/v1/subjects/<subject_id>/papers/
+
+2. Link papers to an exam:
+   PATCH /api/v1/exams/<exam_id>/  { "selected_papers": ["uuid-1", "uuid-2"] }
+
+3. Student starts exam → paper auto-assigned (round-robin):
+   POST /api/v1/exams/<exam_id>/start/
+```
+

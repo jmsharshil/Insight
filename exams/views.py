@@ -18,7 +18,7 @@ from core.utils import apply_filters
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
     SeatArrangement, MalpracticeReport, ScreenEvent,
-    AnswerKeyDistributionLog, CheckerToken, ExamPaper,
+    AnswerKeyDistributionLog, CheckerToken, SubjectPaper,
 )
 from .serializers import (
     ExamListSerializer, ExamCreateSerializer, QuestionSerializer,
@@ -26,7 +26,7 @@ from .serializers import (
     ExamSubmitSerializer, AutosaveSerializer, ScreenEventSerializer,
     SeatInputSerializer, SeatArrangementSerializer, MalpracticeInputSerializer,
     MalpracticeSerializer, MarksInputSerializer, GeoCheckSerializer,
-    ExamPaperSerializer,
+    SubjectPaperSerializer,
 )
 from .utils import (
     auto_submit_session, check_geo_boundary, assign_papers_to_checker,
@@ -250,61 +250,73 @@ class ExamDetailView(APIView):
         return Response({'success': True, 'message': 'Exam deleted.'})
 
 
-class ExamPaperListCreateView(APIView):
-    def _get_exam(self, request, exam_id):
+class SubjectPaperListCreateView(APIView):
+    """GET/POST /api/v1/subjects/<subject_id>/papers/ — Manage reusable subject papers."""
+
+    def get(self, request, subject_id):
+        from batches.models import Subject
         try:
-            qs = Exam.objects.filter(is_deleted=False)
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(branch__organization=request.user.organization)
-            return qs.get(id=exam_id)
-        except Exam.DoesNotExist:
-            return None
+            subject = Subject.objects.get(id=subject_id)
+        except Subject.DoesNotExist:
+            return Response({'success': False, 'message': 'Subject not found.'}, status=status.HTTP_404_NOT_FOUND)
+        papers = SubjectPaper.objects.filter(subject=subject)
+        return Response({'success': True, 'data': SubjectPaperSerializer(papers, many=True).data})
 
-    def get(self, request, exam_id):
-        exam = self._get_exam(request, exam_id)
-        if not exam:
-            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
-        papers = ExamPaper.objects.filter(exam=exam)
-        return Response({'success': True, 'data': ExamPaperSerializer(papers, many=True).data})
-
-    def post(self, request, exam_id):
-        exam = self._get_exam(request, exam_id)
-        if not exam:
-            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+    def post(self, request, subject_id):
+        from batches.models import Subject
+        try:
+            subject = Subject.objects.get(id=subject_id)
+        except Subject.DoesNotExist:
+            return Response({'success': False, 'message': 'Subject not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         role = _user_role(request.user)
-        is_assigned_faculty = hasattr(exam, 'faculty') and exam.faculty and getattr(exam.faculty, 'user', None) == request.user
-        if role not in EXAM_EDIT_ROLES and not (exam.created_by == request.user or is_assigned_faculty):
+        if role not in EXAM_EDIT_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-            
-        serializer = ExamPaperSerializer(data=request.data)
+
+        data = request.data.copy()
+        data['subject'] = str(subject_id)
+        serializer = SubjectPaperSerializer(data=data)
         if serializer.is_valid():
-            serializer.save(exam=exam)
+            serializer.save()
             return Response({'success': True, 'data': serializer.data}, status=status.HTTP_201_CREATED)
         return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ExamPaperDetailView(APIView):
-    def _get_paper(self, request, exam_id, paper_id):
+class SubjectPaperDetailView(APIView):
+    """GET/PATCH/DELETE /api/v1/subjects/<subject_id>/papers/<paper_id>/"""
+
+    def _get_paper(self, subject_id, paper_id):
         try:
-            qs = ExamPaper.objects.filter(exam_id=exam_id)
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(exam__branch__organization=request.user.organization)
-            return qs.get(id=paper_id)
-        except ExamPaper.DoesNotExist:
+            return SubjectPaper.objects.get(id=paper_id, subject_id=subject_id)
+        except SubjectPaper.DoesNotExist:
             return None
 
-    def delete(self, request, exam_id, paper_id):
-        paper = self._get_paper(request, exam_id, paper_id)
+    def get(self, request, subject_id, paper_id):
+        paper = self._get_paper(subject_id, paper_id)
         if not paper:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-            
+        return Response({'success': True, 'data': SubjectPaperSerializer(paper).data})
+
+    def patch(self, request, subject_id, paper_id):
+        paper = self._get_paper(subject_id, paper_id)
+        if not paper:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         role = _user_role(request.user)
-        exam = paper.exam
-        is_assigned_faculty = hasattr(exam, 'faculty') and exam.faculty and getattr(exam.faculty, 'user', None) == request.user
-        if role not in EXAM_EDIT_ROLES and not (exam.created_by == request.user or is_assigned_faculty):
+        if role not in EXAM_EDIT_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-            
+        serializer = SubjectPaperSerializer(paper, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'success': True, 'data': serializer.data})
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, subject_id, paper_id):
+        paper = self._get_paper(subject_id, paper_id)
+        if not paper:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        role = _user_role(request.user)
+        if role not in EXAM_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         paper.delete()
         return Response({'success': True, 'message': 'Paper deleted.'})
 
@@ -624,7 +636,21 @@ class ExamStartView(APIView):
             student_lon=lon,
             last_geo_check_at=timezone.now() if exam.geo_radius_meters > 0 else None,
         )
-        
+
+        # Round-robin paper assignment from exam's selected_papers
+        papers = list(exam.selected_papers.order_by('set_name').values_list('id', flat=True))
+        if papers:
+            # Count how many sessions already have each paper assigned
+            from django.db.models import Count
+            sessions_count = ExamSession.objects.filter(
+                exam=exam, assigned_paper__isnull=False
+            ).values('assigned_paper').annotate(cnt=Count('id'))
+            paper_counts = {str(row['assigned_paper']): row['cnt'] for row in sessions_count}
+            # Pick the paper with the lowest assignment count (round-robin)
+            chosen_paper_id = min(papers, key=lambda pid: paper_counts.get(str(pid), 0))
+            session.assigned_paper_id = chosen_paper_id
+            session.save(update_fields=['assigned_paper_id'])
+
         # update exam status if first student
         if exam.status == 'scheduled':
             exam.status = 'ongoing'

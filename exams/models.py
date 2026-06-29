@@ -63,6 +63,9 @@ class Exam(models.Model):
     # v2 NEW: "instant" = auto-publish MCQ results on submit; "manual" = admin triggers
     result_release_mode = models.CharField(max_length=20, choices=RESULT_RELEASE_CHOICES, default='instant')
 
+    # Selected papers from the Subject's uploaded papers
+    selected_papers = models.ManyToManyField('SubjectPaper', blank=True, related_name='assigned_exams')
+
     # Paper checkers assignment (NEW: auto-assign to marksheets from available checkers in exam time slot)
     # Allows selecting possible assignable paper_checkers (role='paper_checker') for this exam.
     # Used by assign_papers_to_checker() to filter by availability matching exam.scheduled_date + start/end_time
@@ -162,20 +165,20 @@ class Choice(models.Model):
         return self.choice_text[:50]
 
 
-class ExamPaper(models.Model):
+class SubjectPaper(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='papers')
+    subject = models.ForeignKey('batches.Subject', on_delete=models.CASCADE, related_name='papers')
     set_name = models.CharField(max_length=50, help_text='e.g., Set A, Morning Shift')
-    file = models.FileField(upload_to='exam_papers/')
-    answer_key = models.FileField(upload_to='exam_papers/answer_keys/', null=True, blank=True)
+    file = models.FileField(upload_to='subject_papers/')
+    answer_key = models.FileField(upload_to='subject_papers/answer_keys/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'exam_papers'
-        unique_together = ('exam', 'set_name')
+        db_table = 'subject_papers'
+        unique_together = ('subject', 'set_name')
 
     def __str__(self):
-        return f"{self.exam.title} - {self.set_name}"
+        return f"{self.subject.name} - {self.set_name}"
 
 
 class ExamSession(models.Model):
@@ -196,7 +199,7 @@ class ExamSession(models.Model):
     # v2 NEW: periodic geo-check tracking (FRD §4.6.1)
     last_geo_check_at = models.DateTimeField(null=True, blank=True)
     
-    assigned_paper = models.ForeignKey(ExamPaper, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
+    assigned_paper = models.ForeignKey(SubjectPaper, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
 
     class Meta:
         db_table = 'exam_sessions'

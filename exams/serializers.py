@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
     SeatArrangement, MalpracticeReport, ScreenEvent,
-    ExamPaper,
+    SubjectPaper,
 )
 
 User = get_user_model()
@@ -73,11 +73,13 @@ class QuestionInputSerializer(serializers.Serializer):
 
 # ═══ Exam ═════════════════════════════════════════════════════════════════════
 
-class ExamPaperSerializer(serializers.ModelSerializer):
+class SubjectPaperSerializer(serializers.ModelSerializer):
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+
     class Meta:
-        model = ExamPaper
-        fields = ['id', 'exam', 'set_name', 'file', 'answer_key', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        model = SubjectPaper
+        fields = ['id', 'subject', 'subject_name', 'set_name', 'file', 'answer_key', 'created_at']
+        read_only_fields = ['id', 'created_at', 'subject_name']
 
 
 class ExamListSerializer(serializers.ModelSerializer):
@@ -92,6 +94,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
     paper_checkers = serializers.SerializerMethodField()
+    selected_papers = SubjectPaperSerializer(many=True, read_only=True)
     can_start_exam = serializers.SerializerMethodField()
     questions_count = serializers.SerializerMethodField()
 
@@ -109,6 +112,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'result_release_mode',
             'exam_type_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
+            'selected_papers',
             'can_start_exam', 'questions_count']
 
     def get_questions_count(self, obj):
@@ -205,6 +209,10 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         queryset=User.objects.filter(role='paper_checker', is_active=True),
         many=True, required=False, allow_empty=True, write_only=True
     )
+    selected_papers = serializers.PrimaryKeyRelatedField(
+        queryset=SubjectPaper.objects.all(),
+        many=True, required=False, allow_empty=True
+    )
 
     class Meta:
         model = Exam
@@ -217,7 +225,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
-            'result_release_mode', 'paper_checkers',
+            'result_release_mode', 'paper_checkers', 'selected_papers',
         ]
 
     def validate(self, data):
@@ -240,16 +248,22 @@ class ExamCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         paper_checkers = validated_data.pop('paper_checkers', [])
+        selected_papers = validated_data.pop('selected_papers', [])
         exam = super().create(validated_data)
         if paper_checkers:
             exam.paper_checkers.set(paper_checkers)
+        if selected_papers:
+            exam.selected_papers.set(selected_papers)
         return exam
 
     def update(self, instance, validated_data):
         paper_checkers = validated_data.pop('paper_checkers', None)
+        selected_papers = validated_data.pop('selected_papers', None)
         exam = super().update(instance, validated_data)
         if paper_checkers is not None:
             exam.paper_checkers.set(paper_checkers)
+        if selected_papers is not None:
+            exam.selected_papers.set(selected_papers)
         return exam
 
 
