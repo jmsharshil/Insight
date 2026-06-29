@@ -238,17 +238,32 @@ def calculate_ranks(exam_id):
 
 
 def check_geo_boundary(exam, student_lat, student_lon):
-    """Haversine check. Returns (is_allowed, distance_meters)."""
+    """Haversine check. Returns (is_allowed, distance_meters).
+    Safely handles missing geo coords on exam (prevents TypeError/float(None)
+    that was causing 500→502 errors for misconfigured 'strat' exams).
+    """
     if exam.geo_radius_meters == 0:
         return True, 0.0
 
-    R = 6371000
-    lat1, lat2 = math.radians(float(exam.geo_lat)), math.radians(float(student_lat))
-    dlat = math.radians(float(student_lat) - float(exam.geo_lat))
-    dlon = math.radians(float(student_lon) - float(exam.geo_lon))
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    distance = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return distance <= exam.geo_radius_meters, round(distance, 2)
+    if exam.geo_lat is None or exam.geo_lon is None:
+        logger.warning(
+            f"Exam {getattr(exam, 'id', 'unknown')} has geo_radius_meters={exam.geo_radius_meters} "
+            f"but missing geo_lat/lon. Treating as no geo restriction."
+        )
+        return True, 0.0
+
+    try:
+        R = 6371000
+        lat1 = math.radians(float(exam.geo_lat))
+        lat2 = math.radians(float(student_lat))
+        dlat = math.radians(float(student_lat) - float(exam.geo_lat))
+        dlon = math.radians(float(student_lon) - float(exam.geo_lon))
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+        distance = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return distance <= exam.geo_radius_meters, round(distance, 2)
+    except (TypeError, ValueError) as e:
+        logger.error(f"Geo boundary calculation failed for exam {getattr(exam, 'id', 'unknown')}: {e}")
+        return True, 0.0
 
 
 def generate_checker_token(marksheet):
