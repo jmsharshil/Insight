@@ -44,6 +44,7 @@ class AuditLog(models.Model):
     method = models.CharField(max_length=10, help_text="HTTP method (GET, POST, etc.)")
     path = models.TextField(help_text="Full request path")
     endpoint_name = models.CharField(max_length=255, blank=True, default="", help_text="DRF view name if available")
+    event = models.CharField(max_length=255, blank=True, default="", help_text="Human readable event based on API")
     status_code = models.PositiveIntegerField(null=True, blank=True, help_text="HTTP response status code")
 
     # Request / Response metadata

@@ -22,6 +22,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "organization",
             "organization_name",
             "action",
+            "event",
             "method",
             "path",
             "endpoint_name",
@@ -47,6 +48,7 @@ class AuditLogFilterSerializer(serializers.Serializer):
     action = serializers.ChoiceField(
         choices=AuditLog.ACTION_CHOICES, required=False
     )
+    event = serializers.CharField(required=False)
     method = serializers.CharField(required=False)
     path = serializers.CharField(required=False)
     date_from = serializers.DateTimeField(required=False)
@@ -62,6 +64,7 @@ class AuditLogFilter(filters.FilterSet):
     user_id = filters.UUIDFilter(field_name="user_id")
     organization_id = filters.UUIDFilter(field_name="organization_id")
     path = filters.CharFilter(field_name="path", lookup_expr="icontains")
+    event = filters.CharFilter(field_name="event", lookup_expr="icontains")
 
     class Meta:
         model = AuditLog
