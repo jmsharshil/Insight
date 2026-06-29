@@ -101,10 +101,10 @@ class AdmissionListView(APIView):
                 # Fallback to any active bank
                 eligible_banks = list(BankAccount.objects.filter(is_active=True))
             assigned_bank = eligible_banks[0]
-            admission.assigned_bank_id = assigned_bank.id
+            admission.bank_account = assigned_bank
             admission.status = 'payment_pending'
             admission.note = 'Form submitted. Waiting for fee payment.'
-            admission.save(update_fields=['assigned_bank_id', 'status', 'note', 'updated_at'])
+            admission.save(update_fields=['bank_account', 'status', 'note', 'updated_at'])
 
             AdmissionStatusHistory.objects.create(
                 admission=admission,

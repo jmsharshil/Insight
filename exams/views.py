@@ -924,13 +924,6 @@ class AnswerKeyDistributeView(APIView):
         if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
             
-        from results.models import MarkSheet
-        checkers = set(MarkSheet.objects.filter(exam_id=exam_id, paper_checker__isnull=False).values_list('paper_checker_id', flat=True))
-        
-        if not checkers:
-            return Response({'success': False, 'message': 'No checkers assigned'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        sent = []
         try:
             qs = Exam.objects.all()
             if getattr(request.user, 'organization', None):
@@ -938,6 +931,19 @@ class AnswerKeyDistributeView(APIView):
             exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get checkers from the exam's M2M relation
+        checkers = set(exam.paper_checkers.values_list('id', flat=True))
+        
+        # Also include any assigned via MarkSheets (just in case)
+        from results.models import MarkSheet
+        marksheet_checkers = set(MarkSheet.objects.filter(exam_id=exam_id, paper_checker__isnull=False).values_list('paper_checker_id', flat=True))
+        checkers.update(marksheet_checkers)
+        
+        if not checkers:
+            return Response({'success': False, 'message': 'No checkers assigned'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        sent = []
         for cid in checkers:
             checker = get_user_model().objects.get(id=cid)
             log = AnswerKeyDistributionLog.objects.create(

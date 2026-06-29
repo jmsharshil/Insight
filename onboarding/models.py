@@ -181,7 +181,14 @@ class Admission(models.Model):
     updated_at   = models.DateTimeField(auto_now=True)
 
     # ── Fee Payment Tracking ──────────────────────────────────────────────────
-    assigned_bank_id      = models.CharField(max_length=50, null=True, blank=True, help_text="ID of the bank from BANK_ACCOUNTS assigned to this student.")
+    bank_account = models.ForeignKey(
+        'fees.BankAccount',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='admissions',
+        help_text="Bank account assigned for this admission's fee payment (threshold-aware selection).",
+    )
     payment_screenshot    = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     transaction_id        = models.CharField(max_length=100, blank=True, help_text="UPI / Bank transaction reference number.")
     payment_note          = models.TextField(blank=True, help_text="Optional note from student regarding payment.")
@@ -195,6 +202,7 @@ class Admission(models.Model):
             models.Index(fields=['status']),
             models.Index(fields=['course']),
             models.Index(fields=['submitted_at']),
+            models.Index(fields=['bank_account']),
         ]
 
     def __str__(self):
