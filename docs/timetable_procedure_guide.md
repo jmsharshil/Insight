@@ -45,17 +45,25 @@
            └──────────────┴──────────────┴───────────────┴──────────────┘
                                               │
                                               ▼
-                            ┌─────────────────────────────────────┐
-                            │    Clash Detection (Faculty +        │
-                            │    Classroom overlap check)          │
-                            └─────────────────────────────────────┘
+                              ┌─────────────────────────────────────┐
+                              │    Clash Detection (Faculty +        │
+                              │    Classroom overlap check)          │
+                              └─────────────────────────────────────┘
                                               │
                                               ▼
                                 ┌─────────────────────────┐
                                 │  201 Created — Slot +   │
-                                │  Exam UUID in response  │
+                                │  Exam (w/ proctoring   │
+                                │  config, paper_checkers)│
                                 └─────────────────────────┘
-```
+                                              │
+                                              ▼
+                            ┌─────────────────────────────────────┐
+                            │ ensure_paper_checkers_for_exam()    │
+                            │ (early M2M sync; delayed assignment │
+                            │  post-exam via Celery task)         │
+                            └─────────────────────────────────────┘
+
 
 ---
 
@@ -64,11 +72,11 @@
 ### A.1 Session Types (`session_type`)
 | Value | Display | Exam Auto-Created? | Notes |
 | :--- | :--- | :--- | :--- |
-| `regular` | Regular | ❌ No | Requires `slot_code` + `day_of_week` |
-| `class_test` | Class Test | ✅ Yes (forced) | Chapters ≤ Order 2 only |
-| `prelim` | Prelim | ✅ Yes (forced) | Manual `end_time` required |
-| `practice` | Practice | ❌ No | No `paper_checkers` allowed |
-| `custom` | Custom | ⚙️ Optional | Pass `exam_data` to create exam |
+| `regular` | Regular | ❌ No | Requires `slot_code` + `day_of_week`. No exam linkage. |
+| `class_test` | Class Test | ✅ Yes (forced) | Chapters with `order ≤ 2` only. Creates Exam with proctoring config. `paper_checkers` synced to `Exam.paper_checkers` (M2M). |
+| `prelim` | Prelim | ✅ Yes (forced) | Manual `end_time`. Full proctoring (geo/screen). Delayed paper-to-checker assignment post-exam. |
+| `practice` | Practice | ❌ No | No `paper_checkers` or exam. |
+| `custom` | Custom | ⚙️ Optional | Pass `exam_data` (incl. geo coords, screen thresholds, `result_release_mode`). `ensure_paper_checkers_for_exam()` runs on create. |
 
 ### A.2 Day of Week (`day_of_week`)
 | Value | Display |
@@ -115,6 +123,23 @@
 | `full_time` | Full Time |
 | `part_time` | Part Time |
 | `contract` | Contract |
+
+### A.8 Exam Proctoring Fields (in `exam_data`)
+| Field | Type | Default/Notes |
+| :--- | :--- | :--- |
+| `geo_lat` / `geo_lon` | float | Center of allowed area (required if `geo_radius_meters > 0`) |
+| `geo_radius_meters` | int | 0 = disabled. Periodic geo-checks during exam. |
+| `screen_lock_threshold` | int | Violations before action (e.g. 3) |
+| `split_screen_threshold` | int | Violations before action |
+| `screen_action` | string | `flag_only` or `auto_submit` |
+| `result_release_mode` | string | `instant` (auto-grade MCQ + publish) or `manual` |
+| `allow_split_screen` | bool | Configures monitoring |
+
+**Logic Notes:**
+- `ensure_paper_checkers_for_exam()` populates `Exam.paper_checkers` M2M from timetable or branch fallback **early**.
+- `assign_papers_to_checker()` is **delayed** (Celery task) until exam completion (`auto_mark_absent` runs, all `MarkSheet`s exist).
+- Round-robin paper assignment (from `selected_papers`) happens at `/start/`.
+- Signals on Question CRUD auto-run `recalculate_total_marks()`.
 
 ---
 
@@ -508,7 +533,12 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "total_marks": 50,
     "pass_marks": 18,
     "instructions": "Attempt all questions. Time: 90 minutes.",
-    "result_release_mode": "manual"
+    "result_release_mode": "manual",
+    "geo_lat": 23.0225,
+    "geo_lon": 72.5714,
+    "geo_radius_meters": 500,
+    "screen_lock_threshold": 3,
+    "screen_action": "flag_only"
   }
 }
 ```
@@ -604,7 +634,13 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "total_marks": 100,
     "pass_marks": 35,
     "instructions": "All questions carry equal marks. Duration: 3 hours.",
-    "result_release_mode": "manual"
+    "result_release_mode": "instant",
+    "geo_lat": 23.0225,
+    "geo_lon": 72.5714,
+    "geo_radius_meters": 1000,
+    "screen_lock_threshold": 2,
+    "split_screen_threshold": 3,
+    "screen_action": "auto_submit"
   }
 }
 ```
@@ -715,7 +751,10 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "exam_type": "online",
     "total_marks": 20,
     "pass_marks": 10,
-    "result_release_mode": "instant"
+    "result_release_mode": "instant",
+    "geo_radius_meters": 0,
+    "screen_lock_threshold": 5,
+    "screen_action": "flag_only"
   }
 }
 ```
@@ -1106,7 +1145,32 @@ Use this to retrieve which subjects a faculty member currently teaches across al
 
 ---
 
-## SECTION 7 — Migrations Required
+## SECTION 8 — Proctoring, Geo-Fencing, Screen Monitoring & Delayed Checker Assignment
+
+Timetable-created Exams now support full **Exam v2** proctoring:
+
+### Key Behaviors (Synced from `exam_data`)
+- **Geo-fencing**: If `geo_radius_meters > 0`, `check_geo_boundary()` validates student location on `/start/` and periodic `/geo-check/`. Violations logged; configurable action on threshold.
+- **Screen Monitoring**: `ScreenEventView` tracks `lock_breach` / `split_screen`. Uses thresholds + `screen_action` (`flag_only` vs `auto_submit_session()`).
+- **Result Release**: `instant` → auto-grades MCQs via `auto_grade_mcq()`, creates `PublishedResult`. `manual` defers to checker.
+- **Paper Checkers**:
+  - `ensure_paper_checkers_for_exam()` runs on slot/exam create: copies from `TimetableSlot.paper_checkers` M2M or falls back to branch-level checkers.
+  - **Delayed Assignment**: `assign_papers_to_checker()` (via Celery task) runs **only after exam ends** (`auto_mark_absent()`, all `MarkSheet` records created, `selected_papers` distributed). Uses round-robin on `Exam.selected_papers`.
+- **ExamSession**: Stores `assigned_paper`, geo violations, screen violations, `status`.
+- **Signals**: Question CRUD → `recalculate_total_marks()` on parent Exam.
+
+**Related Endpoints** (see `exams_module_api_documentation.md`):
+- `/exams/{id}/start/` (with lat/lon)
+- `/sessions/{session_id}/geo-check/`
+- `/sessions/{session_id}/screen-event/`
+- `/exams/{id}/submit/`
+- Malpractice, Answer Key (token-based), Subject Papers (`selected_papers`).
+
+**can_start_exam** logic (in serializer): time window, no duplicate session, batch match, geo pre-check.
+
+---
+
+## SECTION 9 — Migrations Required
 
 > **⚠️ Action Required**
 >
@@ -1114,8 +1178,12 @@ Use this to retrieve which subjects a faculty member currently teaches across al
 >
 > ```bash
 > python manage.py migrate batches
+> python manage.py migrate exams
 > ```
 >
-> This applies:
-> - `0016` — `exam` (OneToOneField → `exams.Exam`) on `TimetableSlot`
-> - `0017` — `session_name` (CharField max 200) on `TimetableSlot`
+> This applies recent changes for:
+> - `TimetableSlot`: `session_type`, `session_date`, M2M `chapters`/`examiners`/`paper_checkers`, OneToOne `exam`
+> - `Batch`: auto-naming via `BatchSequenceCounter`, QR code
+> - `Exam` v2: `geo_*` fields, screen thresholds/actions, `result_release_mode`, M2M `paper_checkers` + `selected_papers`, `assigned_paper` on `ExamSession`
+> - Signals for `recalculate_total_marks()`
+> - `CourseLevel`, `Chapter`, `BatchFaculty` enhancements
