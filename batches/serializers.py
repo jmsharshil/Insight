@@ -133,7 +133,7 @@ class SubjectListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
         fields = ['id', 'level', 'level_name', 'course_name', 'name', 'code',
-                  'total_hours', 'is_active', 'chapters']
+                  'total_hours', 'is_active', 'chapters','papers']
 
     def get_chapters(self, obj):
         qs = obj.chapters.filter(is_active=True)
