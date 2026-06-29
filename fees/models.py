@@ -387,7 +387,7 @@ class BankAccount(models.Model):
             end_date = now.replace(month=4, day=1, hour=0, minute=0, second=0, microsecond=0)
             
         total_paid = Payment.objects.filter(
-            student__admission__assigned_bank_id=str(self.id),
+            student__admission__bank_account=self,
             payment_date__gte=start_date.date(),
             payment_date__lt=end_date.date(),
             status='verified'
