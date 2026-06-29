@@ -95,6 +95,15 @@ class AttendanceListCreateView(APIView):
             if val:
                 qs = qs.filter(**{field: val})
 
+        search_query = request.GET.get('search')
+        if search_query:
+            qs = qs.filter(
+                Q(student__first_name__icontains=search_query) |
+                Q(student__surname__icontains=search_query) |
+                Q(student__roll_number__icontains=search_query) |
+                Q(student__admission_number__icontains=search_query)
+            )
+
         qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, AttendanceRecordListSerializer)
