@@ -7,6 +7,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
+from typing import Optional
 from urllib.parse import parse_qs
 from .notifications import notify_new_message
 
@@ -601,7 +602,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 # Module-level helpers
 # ======================================================================
 
-def _parse_token(query_string: str) -> str | None:
+def _parse_token(query_string: str) -> Optional[str]:
     params = parse_qs(query_string)
     tokens = params.get("token")
     return tokens[0] if tokens else None

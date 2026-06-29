@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import threading
+from typing import Optional
 
 import requests
 from django.conf import settings
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 _FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 
 
-def _get_access_token() -> str | None:
+def _get_access_token() -> Optional[str]:
     """
     Obtain a short-lived OAuth2 access token from the service account credentials.
     Uses google-auth library (pip install google-auth).
@@ -67,7 +68,7 @@ def _get_access_token() -> str | None:
         return None
 
 
-def _get_project_id() -> str | None:
+def _get_project_id() -> Optional[str]:
     """Read project_id from the service account JSON file."""
     sa_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH', None) or \
               os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')

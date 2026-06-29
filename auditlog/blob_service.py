@@ -17,6 +17,7 @@ Format per line:
 
 import logging
 from datetime import date
+from typing import Optional
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ def upload_log_file(organization_name, user_name, log_date: date, log_entries: l
 
 # ── Download helper (useful for API endpoints) ─────────────────────
 
-def download_log_file(organization_name, user_name, log_date: date) -> str | None:
+def download_log_file(organization_name, user_name, log_date: date) -> Optional[str]:
     """
     Download a log file from blob storage.
 
