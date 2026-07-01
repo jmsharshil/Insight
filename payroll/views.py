@@ -293,6 +293,32 @@ class PayrollDetailView(APIView):
         pr, err = self._get_payroll(request, payroll_id)
         if err:
             return err
+            
+        if pr.status == 'draft':
+            try:
+                from faculty.models import FacultyProfile
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                
+                faculty_list = FacultyProfile.objects.filter(branch_id=pr.branch_id, is_active=True)
+                faculty_user_ids = set(faculty_list.values_list('user_id', flat=True))
+                staff_users = User.objects.filter(
+                    branch_id=pr.branch_id, role__in=EMPLOYEE_ROLES, is_active=True
+                ).exclude(id__in=faculty_user_ids)
+                
+                pr.payslips.all().delete()
+                total = Decimal(0)
+                for fp in faculty_list:
+                    ps = compute_payslip_for_faculty(fp, pr.month, pr.year, pr)
+                    total += ps.net_salary
+                for u in staff_users:
+                    ps = compute_payslip_for_user(u, pr.month, pr.year, pr)
+                    total += ps.net_salary
+                pr.total_amount = total
+                pr.save(update_fields=['total_amount'])
+            except Exception as e:
+                logger.error(f"Error regenerating draft payroll in detail view: {e}")
+
         return Response({'success': True, 'data': PayrollRunDetailSerializer(pr).data})
 
     def patch(self, request, payroll_id):
@@ -345,10 +371,62 @@ class PayrollPayslipsView(APIView):
         role = _user_role(request.user)
         if role not in PAYROLL_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        from django.shortcuts import get_object_or_404
+        pr = get_object_or_404(PayrollRun, id=payroll_id)
+        if getattr(request.user, 'organization', None) and pr.branch.organization != request.user.organization:
+            return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if pr.status == 'draft':
+            try:
+                from faculty.models import FacultyProfile
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                
+                faculty_list = FacultyProfile.objects.filter(branch_id=pr.branch_id, is_active=True)
+                faculty_user_ids = set(faculty_list.values_list('user_id', flat=True))
+                staff_users = User.objects.filter(
+                    branch_id=pr.branch_id, role__in=EMPLOYEE_ROLES, is_active=True
+                ).exclude(id__in=faculty_user_ids)
+                
+                pr.payslips.all().delete()
+                total = Decimal(0)
+                for fp in faculty_list:
+                    ps = compute_payslip_for_faculty(fp, pr.month, pr.year, pr)
+                    total += ps.net_salary
+                for u in staff_users:
+                    ps = compute_payslip_for_user(u, pr.month, pr.year, pr)
+                    total += ps.net_salary
+                pr.total_amount = total
+                pr.save(update_fields=['total_amount'])
+            except Exception as e:
+                logger.error(f"Error regenerating draft payroll in payslips view: {e}")
+                
         slips = PaySlip.objects.filter(payroll_run_id=payroll_id).select_related('faculty__user').prefetch_related('late_logs')
         if getattr(request.user, 'organization', None):
             slips = slips.filter(payroll_run__branch__organization=request.user.organization)
-        return Response({'success': True, 'count': slips.count(), 'data': PaySlipSerializer(slips, many=True).data})
+            
+        serialized_data = PaySlipSerializer(slips, many=True).data
+        
+        # Calculate expected total salary across all profiles
+        total_salary_sum = Decimal('0.00')
+        for slip in serialized_data:
+            sal = Decimal(slip.get('salary', '0.00'))
+            if sal > 0:
+                total_salary_sum += sal
+            else:
+                emp_type = slip.get('employment_type', '')
+                if emp_type in ['part_time', 'visiting']:
+                    hr = Decimal(slip.get('hourly_rate', '0.00'))
+                    sh = Decimal(slip.get('session_hours', '0.00'))
+                    total_salary_sum += (hr * sh)
+                    
+        return Response({
+            'success': True, 
+            'count': slips.count(), 
+            'total_salary_sum': str(total_salary_sum),
+            'data': serialized_data
+        })
 
 
 class PayslipAdjustView(APIView):

@@ -87,31 +87,6 @@ class MarkSheetSerializer(serializers.ModelSerializer):
         return CheckerQuerySerializer(queries, many=True).data
 
 
-class PublishedResultSerializer(serializers.ModelSerializer):
-    student_name = serializers.SerializerMethodField()
-    roll_number = serializers.SerializerMethodField()
-
-    class Meta:
-        model = PublishedResult
-        fields = [
-            'id', 'exam', 'student', 'student_name', 'roll_number',
-            'marks_obtained', 'total_marks', 'percentage', 'is_pass',
-            'rank', 'published_at',
-        ]
-
-    def get_student_name(self, obj):
-        try:
-            return obj.student.user.name
-        except Exception:
-            return str(obj.student_id)
-
-    def get_roll_number(self, obj):
-        try:
-            return obj.student.roll_number
-        except Exception:
-            return ''
-
-
 # v2 NEW: Recheck Request serializers (FRD §4.6.2 + upload/bulk/answerkey support)
 class RecheckRequestSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -152,6 +127,38 @@ class RecheckRequestSerializer(serializers.ModelSerializer):
         if obj.uploaded_marksheet:
             return obj.uploaded_marksheet.url
         return None
+
+class PublishedResultSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    roll_number = serializers.SerializerMethodField()
+    recheck_requests = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PublishedResult
+        fields = [
+            'id', 'exam', 'student', 'student_name', 'roll_number',
+            'marks_obtained', 'total_marks', 'percentage', 'is_pass',
+            'rank', 'published_at', 'recheck_requests'
+        ]
+
+    def get_student_name(self, obj):
+        try:
+            return obj.student.user.name
+        except Exception:
+            return str(obj.student_id)
+
+    def get_roll_number(self, obj):
+        try:
+            return obj.student.roll_number
+        except Exception:
+            return ''
+
+    def get_recheck_requests(self, obj):
+        rechecks = RecheckRequest.objects.filter(
+            marksheet__exam=obj.exam,
+            requested_by=obj.student
+        ).order_by('-created_at')
+        return RecheckRequestSerializer(rechecks, many=True).data
 
 
 class RecheckRequestCreateSerializer(serializers.ModelSerializer):

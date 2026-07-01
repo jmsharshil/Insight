@@ -38,7 +38,8 @@ class QuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'image', 'choices', 'question_type_display']
+        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'image',
+                  'paragraph_text', 'choices', 'question_type_display']
 
 
 class QuestionStudentSerializer(serializers.ModelSerializer):
@@ -48,26 +49,29 @@ class QuestionStudentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ['id', 'question_text', 'question_type', 'marks', 'order', 'choices', 'question_type_display']
+        fields = ['id', 'question_text', 'question_type', 'marks', 'order',
+                  'paragraph_text', 'choices', 'question_type_display']
 
 
 class QuestionInputSerializer(serializers.Serializer):
     question_text = serializers.CharField()
-    question_type = serializers.ChoiceField(choices=['mcq', 'subjective', 'true_false'])
+    question_type = serializers.ChoiceField(choices=['mcq', 'paragraph_mcq', 'subjective', 'true_false'])
     marks = serializers.IntegerField(min_value=1)
     order = serializers.IntegerField(min_value=1)
     choices = ChoiceInputSerializer(many=True, required=False, default=[])
+    # For paragraph_mcq: the comprehension passage
+    paragraph_text = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate(self, data):
         qt = data['question_type']
         choices = data.get('choices', [])
-        if qt in ('mcq', 'true_false'):
+        if qt in ('mcq', 'true_false', 'paragraph_mcq'):
             if not choices:
-                raise serializers.ValidationError("MCQ/True-False questions require at least one choice.")
+                raise serializers.ValidationError("MCQ/True-False/Paragraph MCQ questions require at least one choice.")
             if not any(c['is_correct'] for c in choices):
                 raise serializers.ValidationError("At least one choice must be marked correct.")
-        # marks are summed automatically at Exam level via signals/recalculate_total_marks();
-        # no strict upper-bound against exam.total_marks (removed per updated spec)
+        if qt == 'paragraph_mcq' and not data.get('paragraph_text', '').strip():
+            raise serializers.ValidationError("Paragraph MCQ questions require paragraph_text.")
         return data
 
 
@@ -101,6 +105,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     selected_papers = SubjectPaperSerializer(many=True, read_only=True)
     can_start_exam = serializers.SerializerMethodField()
     questions_count = serializers.SerializerMethodField()
+    is_upcoming = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
@@ -117,7 +122,23 @@ class ExamListSerializer(serializers.ModelSerializer):
             'exam_type_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
             'selected_papers',
-            'can_start_exam', 'questions_count']
+            'can_start_exam', 'questions_count', 'is_upcoming']
+
+    def get_is_upcoming(self, obj):
+        from django.utils import timezone
+        import datetime
+        now = timezone.now()
+        
+        if not obj.scheduled_date or not obj.start_time:
+            return False
+            
+        dt_start_naive = datetime.datetime.combine(obj.scheduled_date, obj.start_time)
+        if timezone.is_naive(dt_start_naive):
+            dt_start = timezone.make_aware(dt_start_naive)
+        else:
+            dt_start = dt_start_naive
+            
+        return now < dt_start
 
     def get_questions_count(self, obj):
         return obj.questions.count()

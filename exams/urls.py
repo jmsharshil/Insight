@@ -6,6 +6,7 @@ from .views import (
     GeoCheckView, AnswerKeyDistributeView, AnswerKeyView,
     MalpracticeView, MalpracticeDetailView, ExamScheduleView,
     SubjectPaperListCreateView, SubjectPaperDetailView,
+    SubjectQuestionBankView, SubjectQuestionBankDetailView, ExamImportQuestionsView,
 )
 
 urlpatterns = [
@@ -24,6 +25,11 @@ urlpatterns = [
     # Questions
     path('exams/<uuid:exam_id>/questions/', QuestionView.as_view(), name='exam-questions'),
     path('exams/<uuid:exam_id>/questions/<uuid:question_id>/', QuestionDetailView.as_view(), name='exam-question-detail'),
+    path('exams/<uuid:exam_id>/import-questions/', ExamImportQuestionsView.as_view(), name='exam-import-questions'),
+
+    # Subject Question Bank
+    path('subjects/<uuid:subject_id>/questions/', SubjectQuestionBankView.as_view(), name='subject-question-bank'),
+    path('subjects/<uuid:subject_id>/questions/<uuid:question_id>/', SubjectQuestionBankDetailView.as_view(), name='subject-question-bank-detail'),
 
 
     # Seating

@@ -30,10 +30,15 @@ def get_subject_hourly_rate(faculty_profile, subject, month, year):
 
     if rate_record:
         return rate_record.hourly_rate
-    return faculty_profile.hourly_rate
+    if faculty_profile.hourly_rate > 0:
+        return faculty_profile.hourly_rate
+    return faculty_profile.user.hourly_rate
 
 
 def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
+    fac_hourly_rate = faculty_profile.hourly_rate if faculty_profile.hourly_rate > 0 else faculty_profile.user.hourly_rate
+    fac_session_hours = faculty_profile.session_hours if faculty_profile.session_hours > 0 else faculty_profile.user.session_hours
+    fac_salary = faculty_profile.salary if faculty_profile.salary > 0 else faculty_profile.user.salary
     """
     FRD §4.8.4 — Hour-Based Payroll Computation.
     Reconciles SessionReport hours with QR attendance hours.
@@ -180,7 +185,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
-    total_hours = faculty_profile.session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
+    total_hours = fac_session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
 
     # 4. Compute hour_based_amount per subject
     hour_based_amount = Decimal(0)
@@ -190,15 +195,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             subject = Subject.objects.get(id=subject_id)
         except Subject.DoesNotExist:
             subject = None
-        rate = get_subject_hourly_rate(faculty_profile, subject, month, year) if subject else faculty_profile.hourly_rate
+        rate = get_subject_hourly_rate(faculty_profile, subject, month, year) if subject else fac_hourly_rate
         hour_based_amount += hours * rate
 
     # Add QR-only hours at default rate
     qr_extra_hours = qr_extra_minutes / Decimal(60)
-    hour_based_amount += qr_extra_hours * faculty_profile.hourly_rate
+    hour_based_amount += qr_extra_hours * fac_hourly_rate
     
     # Add profile base session hours at default rate
-    hour_based_amount += faculty_profile.session_hours * faculty_profile.hourly_rate
+    hour_based_amount += fac_session_hours * fac_hourly_rate
 
     sessions_count = sessions.count()
 
@@ -209,9 +214,9 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # Calculate implicit deduction per minute based on salary/hourly_rate
     if faculty_profile.employment_type == 'full_time':
         # Assuming 8 hours a day, 30 days a month
-        implicit_deduction_per_minute = (faculty_profile.salary / Decimal(30)) / Decimal(8) / Decimal(60) if faculty_profile.salary else Decimal(0)
+        implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
     else:
-        implicit_deduction_per_minute = faculty_profile.hourly_rate / Decimal(60) if faculty_profile.hourly_rate else Decimal(0)
+        implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
     deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
     grace = policy.grace_period_minutes if policy else 5
@@ -254,12 +259,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     late_penalty = Decimal(0)
     late_half_days = 0
     days_late_15_mins = 0
+    late_dates = []
+    half_day_dates = []
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
             # Sunday — attendance counts as full day, no penalty
             continue
         if d_delay >= 60:
             late_half_days += 1
+            half_day_dates.append(d_date.strftime('%Y-%m-%d'))
             # Per user request: late time should not be counted if marked as half-day
         else:
             if d_delay >= 15:
@@ -268,6 +276,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             if d_delay > grace:
                 penalty_min = d_delay - grace
                 late_penalty += min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                late_dates.append(d_date.strftime('%Y-%m-%d'))
 
     late_half_days += (days_late_15_mins // 3)
 
@@ -280,10 +289,13 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         leave_type='unpaid',
     )
     leave_days = sum(l.total_days for l in approved_leaves)
-    if faculty_profile.hourly_rate != Decimal(0):
+    leave_dates = []
+    for l in approved_leaves:
+        leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
+    if fac_hourly_rate != Decimal(0):
         daily_rate = Decimal(0)
     else:
-        daily_rate = faculty_profile.salary / Decimal(30) if faculty_profile.salary else Decimal(0)
+        daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = Decimal(leave_days) * daily_rate
 
     # 7. Working days
@@ -294,6 +306,22 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # Sundays that have any QR/session attendance count as full day present
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
     absent_days = Decimal(max(0, working_days - days_with_attendance))
+    attended_dates = session_dates | set(qr_by_date.keys())
+    absent_dates = []
+    from datetime import date
+    today = date.today()
+    if year < today.year or (year == today.year and month < today.month):
+        last_day = calendar.monthrange(year, month)[1]
+    elif year == today.year and month == today.month:
+        last_day = min(today.day, calendar.monthrange(year, month)[1])
+    else:
+        last_day = 0
+    for d in range(1, last_day + 1):
+        if calendar.weekday(year, month, d) < 5:
+            curr_date = date(year, month, d)
+            if curr_date not in attended_dates:
+                absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+
     
     # Add late half days
     absent_days += Decimal(late_half_days) * Decimal('0.5')
@@ -308,7 +336,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         if attendance_percentage > Decimal(80):
             attendance_bonus = daily_rate
 
-    basic_salary = faculty_profile.salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
+    basic_salary = fac_salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
     retention_deduction = Decimal(0)
     if faculty_profile.salary_retention_percentage > 0:
         gross_salary = basic_salary + hour_based_amount
@@ -339,6 +367,21 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     net = max(net, Decimal(0))
 
+    notes = []
+    if late_penalty > 0:
+        ld_str = f" on {', '.join(late_dates)}" if late_dates else ""
+        notes.append(f"Late{ld_str}: -{round(late_penalty, 2)}")
+    if absence_deductions > 0:
+        ad_str = f" on {', '.join(absent_dates)}" if absent_dates else ""
+        hd_str = f" (Half days: {', '.join(half_day_dates)})" if half_day_dates else ""
+        notes.append(f"Absent{ad_str}{hd_str}: -{round(absence_deductions, 2)}")
+    if applied_leave_deductions > 0:
+        lv_str = f" ({', '.join(leave_dates)})" if leave_dates else ""
+        notes.append(f"Leave{lv_str}: -{round(applied_leave_deductions, 2)}")
+    if retention_deduction > 0:
+        notes.append(f"Retention ({faculty_profile.salary_retention_percentage}%): -{round(retention_deduction, 2)}")
+    deduction_note_str = ", ".join(notes)
+
     # 10. Create PaySlip
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
@@ -352,6 +395,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         retention_deduction=retention_deduction,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
+        deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
         working_days=working_days,
@@ -395,6 +439,9 @@ def generate_employee_id(branch_code):
 
 
 def preview_payslip_for_faculty(faculty_profile, month, year):
+    fac_hourly_rate = faculty_profile.hourly_rate if faculty_profile.hourly_rate > 0 else faculty_profile.user.hourly_rate
+    fac_session_hours = faculty_profile.session_hours if faculty_profile.session_hours > 0 else faculty_profile.user.session_hours
+    fac_salary = faculty_profile.salary if faculty_profile.salary > 0 else faculty_profile.user.salary
     """
     Computes and returns a preview of the payslip calculation for a given month/year
     without creating any database records.
@@ -441,7 +488,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             diff_minutes = Decimal((last_out - first_in).total_seconds()) / Decimal(60)
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
-    total_hours = faculty_profile.session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
+    total_hours = fac_session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
 
     hour_based_amount = Decimal(0)
     for subject_id, hours in subject_hours.items():
@@ -450,12 +497,12 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             subject = Subject.objects.get(id=subject_id)
         except Subject.DoesNotExist:
             subject = None
-        rate = get_subject_hourly_rate(faculty_profile, subject, month, year) if subject else faculty_profile.hourly_rate
+        rate = get_subject_hourly_rate(faculty_profile, subject, month, year) if subject else fac_hourly_rate
         hour_based_amount += hours * rate
 
     qr_extra_hours = qr_extra_minutes / Decimal(60)
-    hour_based_amount += qr_extra_hours * faculty_profile.hourly_rate
-    hour_based_amount += faculty_profile.session_hours * faculty_profile.hourly_rate
+    hour_based_amount += qr_extra_hours * fac_hourly_rate
+    hour_based_amount += fac_session_hours * fac_hourly_rate
 
     sessions_count = sessions.count()
 
@@ -470,10 +517,13 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         leave_type='unpaid',
     )
     leave_days = sum(l.total_days for l in approved_leaves)
-    if faculty_profile.hourly_rate != Decimal(0):
+    leave_dates = []
+    for l in approved_leaves:
+        leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
+    if fac_hourly_rate != Decimal(0):
         daily_rate = Decimal(0)
     else:
-        daily_rate = faculty_profile.salary / Decimal(30) if faculty_profile.salary else Decimal(0)
+        daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = Decimal(leave_days) * daily_rate
 
     working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
@@ -507,9 +557,9 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     days_late_15_mins = 0
     
     if faculty_profile.employment_type == 'full_time':
-        implicit_deduction_per_minute = (faculty_profile.salary / Decimal(30)) / Decimal(8) / Decimal(60) if faculty_profile.salary else Decimal(0)
+        implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
     else:
-        implicit_deduction_per_minute = faculty_profile.hourly_rate / Decimal(60) if faculty_profile.hourly_rate else Decimal(0)
+        implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
     deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
     grace = policy.grace_period_minutes if policy else 5
@@ -532,7 +582,18 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     late_half_days += (days_late_15_mins // 3)
 
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
-    absent_days = Decimal(max(0, working_days - days_with_attendance))
+    
+    from datetime import date
+    today = date.today()
+    if year < today.year or (year == today.year and month < today.month):
+        working_days_passed = working_days
+    elif year == today.year and month == today.month:
+        last_day = min(today.day, calendar.monthrange(year, month)[1])
+        working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
+    else:
+        working_days_passed = 0
+        
+    absent_days = Decimal(max(0, working_days_passed - days_with_attendance))
     absent_days += Decimal(late_half_days) * Decimal('0.5')
 
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
@@ -544,7 +605,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         if attendance_percentage > Decimal(80):
             attendance_bonus = daily_rate
 
-    basic_salary = faculty_profile.salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
+    basic_salary = fac_salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
     retention_deduction = Decimal(0)
     if faculty_profile.salary_retention_percentage > 0:
         gross_salary = basic_salary + hour_based_amount
@@ -765,6 +826,9 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         leave_type='unpaid',
     )
     leave_days = sum(l.total_days for l in approved_leaves)
+    leave_dates = []
+    for l in approved_leaves:
+        leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
     leave_deductions = Decimal(leave_days) * daily_rate if user.employment_type == 'full_time' else Decimal(0)
 
     # 5. Late penalty (from LateEntryRecord)
@@ -789,13 +853,33 @@ def compute_payslip_for_user(user, month, year, payroll_run):
 
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
 
+    late_dates = []
     for entry in late_entries:
         if entry.late_minutes > grace:
             penalty_min = entry.late_minutes - grace
             late_penalty += min(Decimal(penalty_min) * deduction_per_minute, max_deduction)
+            late_dates.append(entry.date.strftime('%Y-%m-%d'))
 
-    # 6. Absence deductions
-    absent_days = Decimal(max(0, working_days - days_attended))
+    from datetime import date
+    today = date.today()
+    if year < today.year or (year == today.year and month < today.month):
+        working_days_passed = working_days
+    elif year == today.year and month == today.month:
+        last_day = min(today.day, calendar.monthrange(year, month)[1])
+        working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
+    else:
+        working_days_passed = 0
+        last_day = 0
+
+    attended_dates = set(attendance_records.values_list('date', flat=True))
+    absent_dates = []
+    for d in range(1, last_day + 1):
+        if calendar.weekday(year, month, d) < 5:
+            curr_date = date(year, month, d)
+            if curr_date not in attended_dates:
+                absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+
+    absent_days = Decimal(max(0, working_days_passed - days_attended))
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
     absence_deductions = absent_days * absence_deduction_rate
     absence_deductions += sunday_deduction  # include Sunday shortfall deduction for HK/security
@@ -839,6 +923,22 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     # Delete existing payslip for this user in this payroll run (for regeneration)
     PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
 
+    notes = []
+    if late_penalty > 0:
+        ld_str = f" on {', '.join(late_dates)}" if late_dates else ""
+        notes.append(f"Late{ld_str}: -{round(late_penalty, 2)}")
+    if absence_deductions > 0:
+        ad_str = f" on {', '.join(absent_dates)}" if absent_dates else ""
+        notes.append(f"Absent{ad_str}: -{round(absence_deductions, 2)}")
+    if leave_deductions > 0:
+        lv_str = f" ({', '.join(leave_dates)})" if leave_dates else ""
+        notes.append(f"Leave{lv_str}: -{round(leave_deductions, 2)}")
+    if retention_deduction > 0:
+        notes.append(f"Retention ({user.salary_retention_percentage}%): -{round(retention_deduction, 2)}")
+    if sunday_deduction > 0:
+        notes.append(f"Sunday Shortfall: -{round(sunday_deduction, 2)}")
+    deduction_note_str = ", ".join(notes)
+
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=None,
@@ -852,6 +952,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         retention_deduction=retention_deduction,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
+        deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
         working_days=working_days,

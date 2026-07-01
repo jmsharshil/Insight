@@ -48,7 +48,52 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'retention_deduction', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary',
         ]
+
+    hourly_rate = serializers.SerializerMethodField()
+    per_paper_rate = serializers.SerializerMethodField()
+    employment_type = serializers.SerializerMethodField()
+    session_hours = serializers.SerializerMethodField()
+    salary = serializers.SerializerMethodField()
+
+    def get_hourly_rate(self, obj):
+        if obj.faculty and obj.faculty.hourly_rate > 0:
+            return str(obj.faculty.hourly_rate)
+        if obj.user:
+            return str(obj.user.hourly_rate)
+        return "0.00"
+        return "0.00"
+
+    def get_per_paper_rate(self, obj):
+        if obj.user:
+            return str(obj.user.per_paper_rate)
+        if obj.faculty and obj.faculty.user:
+            return str(obj.faculty.user.per_paper_rate)
+        return "0.00"
+
+    def get_employment_type(self, obj):
+        if obj.faculty:
+            return obj.faculty.employment_type
+        if obj.user:
+            return obj.user.employment_type
+        return ""
+
+    def get_salary(self, obj):
+        if obj.faculty and obj.faculty.salary > 0:
+            return str(obj.faculty.salary)
+        if obj.user:
+            return str(obj.user.salary)
+        return "0.00"
+
+    def get_session_hours(self, obj):
+        if obj.faculty and obj.faculty.session_hours > 0:
+            return str(obj.faculty.session_hours)
+        if obj.user:
+            return str(obj.user.session_hours)
+        return "0.00"
+
+
 
     def get_faculty_name(self, obj):
         if obj.faculty:
@@ -171,5 +216,6 @@ class MyPaySlipSerializer(serializers.ModelSerializer):
             'retention_deduction', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours',
         ]
 

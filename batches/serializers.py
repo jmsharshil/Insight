@@ -27,7 +27,7 @@ class CourseLevelSerializer(serializers.ModelSerializer):
 
     def get_subjects(self, obj):
         qs = Subject.objects.filter(level=obj, is_active=True)
-        return SubjectListSerializer(qs, many=True).data
+        return SubjectListSerializer(qs, many=True, context=self.context).data
 
     def validate(self, data):
         # Duplicate order check (create only)
@@ -68,11 +68,11 @@ class CourseDetailSerializer(serializers.ModelSerializer):
     def get_subjects(self, obj):
         from batches.models import Subject
         qs = Subject.objects.filter(level__course=obj, is_active=True)
-        return SubjectListSerializer(qs, many=True).data
+        return SubjectListSerializer(qs, many=True, context=self.context).data
 
     def get_levels(self, obj):
         qs = obj.levels.filter(is_active=True)
-        return CourseLevelSerializer(qs, many=True).data
+        return CourseLevelSerializer(qs, many=True, context=self.context).data
 
 
 class CourseCreateUpdateSerializer(serializers.ModelSerializer):
@@ -128,11 +128,12 @@ class SubjectListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='level.course.name', read_only=True)
     chapters    = serializers.SerializerMethodField()
     papers = serializers.SerializerMethodField()
+    exams = serializers.SerializerMethodField()
 
     class Meta:
         model = Subject
         fields = ['id', 'level', 'level_name', 'course_name', 'name', 'code',
-                  'total_hours', 'is_active', 'chapters','papers']
+                  'total_hours', 'is_active', 'chapters','papers', 'exams']
 
     def get_chapters(self, obj):
         qs = obj.chapters.filter(is_active=True)
@@ -142,6 +143,11 @@ class SubjectListSerializer(serializers.ModelSerializer):
         from exams.serializers import SubjectPaperSerializer
         qs = obj.papers.all()
         return SubjectPaperSerializer(qs, many=True).data
+
+    def get_exams(self, obj):
+        from exams.serializers import ExamListSerializer
+        qs = obj.exams.filter(is_deleted=False)
+        return ExamListSerializer(qs, many=True, context=self.context).data
 
 
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):

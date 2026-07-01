@@ -349,7 +349,6 @@ class SubjectPaperDetailView(APIView):
 class QuestionView(APIView):
     # permission_classes = [IsAuthenticated]
 
-
     def get(self, request, exam_id):
         role = _user_role(request.user)
         try:
@@ -366,20 +365,21 @@ class QuestionView(APIView):
             try:
                 from students.models import Student
                 sp = Student.objects.get(user=request.user)
-                # Only allow question fetch if student has an active session for this exam
-                if not ExamSession.objects.filter(exam=exam, student=sp).exists() or exam.status not in ('ongoing', 'completed'):
+                # Only allow question fetch if student has an active session for THIS exam
+                active_sessions = ExamSession.objects.filter(exam=exam, student=sp, status__in=['ongoing', 'completed'])
+                if not active_sessions.exists():
                     return Response({'success': False, 'message': 'Exam session not active'}, status=status.HTTP_403_FORBIDDEN)
-                return Response(QuestionStudentSerializer(questions, many=True).data)
+                from .utils import group_questions
+                return Response(group_questions(QuestionStudentSerializer(questions, many=True).data))
             except Student.DoesNotExist:
                 logger.error(f"No Student profile for user {request.user.email} trying to access questions")
                 return Response({'success': False, 'message': 'Student profile not found'}, status=status.HTTP_403_FORBIDDEN)
             except Exception as e:
                 logger.error(f"Student question access error: {e}")
                 return Response({'success': False, 'message': 'Student profile error'}, status=status.HTTP_403_FORBIDDEN)
-        elif role in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']:
-            return Response(QuestionSerializer(questions, many=True).data)
-        elif role == 'faculty' and exam.created_by == request.user:
-            return Response(QuestionSerializer(questions, many=True).data)
+        elif role in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'faculty']:
+            from .utils import group_questions
+            return Response(group_questions(QuestionSerializer(questions, many=True).data))
         
         return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -394,13 +394,8 @@ class QuestionView(APIView):
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        is_assigned_faculty = False
-        if role == 'faculty':
-            is_assigned_faculty = hasattr(exam, 'faculty') and exam.faculty and getattr(exam.faculty, 'user', None) == request.user
- 
-        if role not in ['super_admin', 'admin_senior_executive'] and not (exam.created_by == request.user or is_assigned_faculty):
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
- 
 
         serializer = QuestionInputSerializer(data=request.data, many=True)
         if not serializer.is_valid():
@@ -412,7 +407,8 @@ class QuestionView(APIView):
                 q = Question.objects.create(
                     exam=exam, question_text=q_data['question_text'],
                     question_type=q_data['question_type'], marks=q_data['marks'],
-                    order=q_data['order']
+                    order=q_data['order'],
+                    paragraph_text=q_data.get('paragraph_text', ''),
                 )
                 for c_data in q_data.get('choices', []):
                     Choice.objects.create(
@@ -420,13 +416,11 @@ class QuestionView(APIView):
                         is_correct=c_data['is_correct']
                     )
                 created_qs.append(q)
-            # Signals will auto-trigger, but explicitly recalculate once at end for efficiency
-            exam.recalculate_total_marks()
+            # recalculate_total_marks is handled by signals
         
         return Response({
             'success': True, 
             'message': 'Questions added. total_marks auto-updated.',
-            'total_marks': exam.total_marks,
             'questions_count': len(created_qs)
         }, status=status.HTTP_201_CREATED)
 
@@ -444,13 +438,10 @@ class QuestionDetailView(APIView):
             exam = qs.get(id=exam_id)
         except Exam.DoesNotExist:
             return None, None, Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
-        is_assigned_faculty = False
-        if role == 'faculty':
-            is_assigned_faculty = hasattr(exam, 'faculty') and exam.faculty and getattr(exam.faculty, 'user', None) == request.user
-        if role not in ['super_admin', 'admin_senior_executive'] and not (exam.created_by == request.user or is_assigned_faculty):
+
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
             return None, None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-        if exam.status in ['ongoing', 'completed', 'results_published']:
-            return None, None, Response({'success': False, 'message': 'Cannot modify questions in current exam status.'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             q = Question.objects.get(id=question_id, exam=exam)
         except Question.DoesNotExist:
@@ -461,7 +452,7 @@ class QuestionDetailView(APIView):
         exam, q, err = self._get_question(request, exam_id, question_id)
         if err:
             return err
-        for field in ['question_text', 'question_type', 'marks', 'order']:
+        for field in ['question_text', 'question_type', 'marks', 'order', 'paragraph_text']:
             if field in request.data:
                 setattr(q, field, request.data[field])
         q.save()
@@ -475,20 +466,155 @@ class QuestionDetailView(APIView):
                     is_correct=c_data.get('is_correct', False)
                 )
 
-        exam.recalculate_total_marks()  # auto-update total_marks via signal or explicit
-        return Response({'success': True, 'message': 'Question updated.', 'data': QuestionSerializer(q).data, 'total_marks': exam.total_marks})
+        return Response({'success': True, 'message': 'Question updated.', 'data': QuestionSerializer(q).data})
 
     def delete(self, request, exam_id, question_id):
         exam, q, err = self._get_question(request, exam_id, question_id)
         if err:
             return err
         q.delete()
-        exam.recalculate_total_marks()  # trigger via signal or explicit after delete
         return Response({
             'success': True, 
-            'message': 'Question deleted. total_marks auto-updated.',
-            'total_marks': exam.total_marks
+            'message': 'Question deleted. total_marks auto-updated.'
         }, status=status.HTTP_200_OK)
+
+
+class SubjectQuestionBankView(APIView):
+    def get(self, request, subject_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'faculty']:
+            return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        
+        from batches.models import Subject
+        try:
+            subject = Subject.objects.get(id=subject_id)
+        except Subject.DoesNotExist:
+            return Response({'success': False, 'message': 'Subject not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        questions = Question.objects.filter(subject=subject).prefetch_related('choices')
+        from .utils import group_questions
+        return Response(group_questions(QuestionSerializer(questions, many=True).data))
+
+    def post(self, request, subject_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
+            return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        from batches.models import Subject
+        try:
+            subject = Subject.objects.get(id=subject_id)
+        except Subject.DoesNotExist:
+            return Response({'success': False, 'message': 'Subject not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = QuestionInputSerializer(data=request.data, many=True)
+        if not serializer.is_valid():
+            return Response({'success': False, 'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            created_qs = []
+            for q_data in serializer.validated_data:
+                q = Question.objects.create(
+                    subject=subject, question_text=q_data['question_text'],
+                    question_type=q_data['question_type'], marks=q_data['marks'],
+                    order=q_data['order'],
+                    paragraph_text=q_data.get('paragraph_text', ''),
+                )
+                for c_data in q_data.get('choices', []):
+                    Choice.objects.create(
+                        question=q, choice_text=c_data['text'],
+                        is_correct=c_data['is_correct']
+                    )
+                created_qs.append(q)
+        
+        return Response({
+            'success': True, 
+            'message': 'Questions added to subject bank.',
+            'questions_count': len(created_qs)
+        }, status=status.HTTP_201_CREATED)
+
+
+class SubjectQuestionBankDetailView(APIView):
+    def _get_question(self, request, subject_id, question_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
+            return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            q = Question.objects.get(id=question_id, subject_id=subject_id)
+        except Question.DoesNotExist:
+            return None, Response({'success': False, 'message': 'Question not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return q, None
+
+    def patch(self, request, subject_id, question_id):
+        q, err = self._get_question(request, subject_id, question_id)
+        if err:
+            return err
+        for field in ['question_text', 'question_type', 'marks', 'order', 'paragraph_text']:
+            if field in request.data:
+                setattr(q, field, request.data[field])
+        q.save()
+        
+        if 'choices' in request.data:
+            from .models import Choice
+            q.choices.all().delete()
+            for c_data in request.data['choices']:
+                Choice.objects.create(
+                    question=q, choice_text=c_data.get('text', ''),
+                    is_correct=c_data.get('is_correct', False)
+                )
+
+        return Response({'success': True, 'message': 'Bank question updated.', 'data': QuestionSerializer(q).data})
+
+    def delete(self, request, subject_id, question_id):
+        q, err = self._get_question(request, subject_id, question_id)
+        if err:
+            return err
+        q.delete()
+        return Response({'success': True, 'message': 'Bank question deleted.'}, status=status.HTTP_200_OK)
+
+
+class ExamImportQuestionsView(APIView):
+    def post(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
+            return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        question_ids = request.data.get('question_ids', [])
+        if not question_ids:
+            return Response({'success': False, 'message': 'Please provide a list of question_ids to import.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        questions_to_copy = Question.objects.filter(id__in=question_ids, subject__isnull=False)
+        
+        with transaction.atomic():
+            created_count = 0
+            for bank_q in questions_to_copy:
+                new_q = Question.objects.create(
+                    exam=exam,
+                    question_text=bank_q.question_text,
+                    question_type=bank_q.question_type,
+                    marks=bank_q.marks,
+                    order=bank_q.order,
+                    paragraph_text=bank_q.paragraph_text
+                )
+                for c in bank_q.choices.all():
+                    Choice.objects.create(
+                        question=new_q, choice_text=c.choice_text, is_correct=c.is_correct
+                    )
+                created_count += 1
+
+        return Response({
+            'success': True, 
+            'message': f'{created_count} questions imported into the exam.',
+            'questions_count': created_count
+        }, status=status.HTTP_201_CREATED)
 
 
 class SeatingView(APIView):
@@ -686,6 +812,7 @@ class ExamStartView(APIView):
             exam.save(update_fields=['status'])
 
         questions = Question.objects.filter(exam=exam).prefetch_related('choices')
+        from .utils import group_questions
         
         return Response({
             'session_id': session.id,
@@ -694,7 +821,7 @@ class ExamStartView(APIView):
             'geo_check_interval_minutes': exam.geo_check_interval_minutes,
             'exam_title': exam.title,
             'total_marks': exam.total_marks,
-            'questions': QuestionStudentSerializer(questions, many=True).data,
+            'questions': group_questions(QuestionStudentSerializer(questions, many=True).data),
         })
 
 
@@ -739,7 +866,7 @@ class ExamSubmitView(APIView):
             session.auto_submitted = True
 
         from .utils import auto_grade_mcq
-        has_subj = Question.objects.filter(exam_id=exam_id, question_type='subjective').exists()
+        has_subj = Question.objects.filter(exam=session.exam, question_type='subjective').exists()
         
         session.is_submitted = True
         session.submitted_at = now
@@ -979,8 +1106,9 @@ class AnswerKeyView(APIView):
         if timezone.now() > log.link_expires:
             return Response({'success': False, 'message': 'Link expired'}, status=status.HTTP_403_FORBIDDEN)
             
-        questions = Question.objects.filter(exam_id=exam_id).prefetch_related('choices')
-        return Response(QuestionSerializer(questions, many=True).data)
+        questions = Question.objects.filter(exam=log.exam).prefetch_related('choices')
+        from .utils import group_questions
+        return Response(group_questions(QuestionSerializer(questions, many=True).data))
 
 
 class MalpracticeView(APIView):

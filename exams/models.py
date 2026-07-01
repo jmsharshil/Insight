@@ -6,12 +6,20 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
-EXAM_TYPE_CHOICES = [('online', 'Online'), ('offline', 'Offline')]
+EXAM_TYPE_CHOICES = [
+    ('online', 'Online'), ('offline', 'Offline'),
+    ('mcq', 'MCQ'), ('subjective', 'Subjective'),
+]
 EXAM_STATUS_CHOICES = [
     ('draft', 'Draft'), ('scheduled', 'Scheduled'), ('ongoing', 'Ongoing'),
     ('completed', 'Completed'), ('results_published', 'Results Published'),
 ]
-QUESTION_TYPE_CHOICES = [('mcq', 'MCQ'), ('subjective', 'Subjective'), ('true_false', 'True/False')]
+QUESTION_TYPE_CHOICES = [
+    ('mcq', 'MCQ'),
+    ('paragraph_mcq', 'Paragraph MCQ'),
+    ('subjective', 'Subjective'),
+    ('true_false', 'True/False'),
+]
 SCAN_EVENT_CHOICES = [('lock_breach', 'Lock Breach'), ('split_screen', 'Split Screen')]
 EVENT_ACTION_CHOICES = [
     ('logged', 'Logged'), ('warning_issued', 'Warning Issued'),
@@ -137,12 +145,18 @@ class Exam(models.Model):
 
 class Question(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='questions')
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='questions', null=True, blank=True)
+    subject = models.ForeignKey('batches.Subject', on_delete=models.CASCADE, related_name='bank_questions', null=True, blank=True)
     question_text = models.TextField()
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES)
     marks = models.IntegerField()
     order = models.IntegerField()
     image = models.ImageField(upload_to='exam_questions/', null=True, blank=True)
+    # Paragraph MCQ: the shared passage from which sub-questions are derived
+    paragraph_text = models.TextField(
+        blank=True, default='',
+        help_text='For paragraph_mcq type: the comprehension passage that sub-questions refer to.'
+    )
 
     class Meta:
         db_table = 'exam_questions'

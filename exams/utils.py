@@ -14,6 +14,36 @@ def notify(recipient_user_id, title, body, metadata=None):
     logger.info(f"NOTIFY [{recipient_user_id}] {title}: {body}")
 
 
+def group_questions(serialized_questions):
+    """
+    Groups paragraph_mcq questions that share the same paragraph_text.
+    Other questions remain standalone in the array.
+    """
+    grouped_data = []
+    paragraph_groups = {}
+
+    for q in serialized_questions:
+        if q.get('question_type') == 'paragraph_mcq' and q.get('paragraph_text'):
+            p_text = q['paragraph_text'].strip()
+            if p_text not in paragraph_groups:
+                group_obj = {
+                    'paragraph_text': p_text,
+                    'question_type': 'paragraph_mcq',
+                    'questions': []
+                }
+                paragraph_groups[p_text] = group_obj
+                grouped_data.append(group_obj)
+            
+            # Make a copy and remove paragraph_text to avoid redundancy
+            q_copy = dict(q)
+            q_copy.pop('paragraph_text', None)
+            paragraph_groups[p_text]['questions'].append(q_copy)
+        else:
+            grouped_data.append(q)
+
+    return grouped_data
+
+
 def auto_grade_mcq(session_id):
     """
     Auto-grade MCQ exam. Returns (marks_obtained, percentage, is_pass).

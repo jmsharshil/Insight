@@ -730,9 +730,18 @@ class FeeReportView(APIView):
         if year:
             payment_qs = payment_qs.filter(payment_date__year=int(year))
 
+        from .models import Refund
+        refund_qs = Refund.objects.filter(status='completed', payment__in=payment_qs)
+        refunds_by_mode = {}
+        for row in refund_qs.values('payment__payment_mode').annotate(total=Sum('amount')):
+            refunds_by_mode[row['payment__payment_mode']] = row['total']
+
         collection_by_mode = {}
         for row in payment_qs.values('payment_mode').annotate(total=Sum('amount')):
-            collection_by_mode[row['payment_mode']] = row['total']
+            mode = row['payment_mode']
+            net = row['total'] - refunds_by_mode.get(mode, 0)
+            if net > 0:
+                collection_by_mode[mode] = net
 
         # Monthly trend (last 6 months)
         from django.db.models.functions import TruncMonth
@@ -742,10 +751,28 @@ class FeeReportView(APIView):
         ).values('month_group').annotate(
             collected=Sum('amount')
         ).order_by('month_group')
+        monthly_trend_dict = {}
         for row in trend_qs:
+            month_str = row['month_group'].strftime('%Y-%m') if row['month_group'] else None
+            if month_str:
+                monthly_trend_dict[month_str] = row['collected']
+
+        trend_refunds = refund_qs.annotate(
+            month_group=TruncMonth('payment__payment_date')
+        ).values('month_group').annotate(
+            refunded=Sum('amount')
+        )
+        for row in trend_refunds:
+            month_str = row['month_group'].strftime('%Y-%m') if row['month_group'] else None
+            if month_str and month_str in monthly_trend_dict:
+                monthly_trend_dict[month_str] -= row['refunded']
+                if monthly_trend_dict[month_str] < 0:
+                    monthly_trend_dict[month_str] = 0
+                    
+        for month_str, collected in sorted(monthly_trend_dict.items()):
             monthly_trend.append({
-                'month': row['month_group'].strftime('%Y-%m') if row['month_group'] else None,
-                'collected': row['collected'],
+                'month': month_str,
+                'collected': collected,
             })
 
         data = {
