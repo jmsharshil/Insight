@@ -192,14 +192,15 @@ class ExamListSerializer(serializers.ModelSerializer):
             dt_start = dt_start_naive
             dt_end = dt_end_naive
 
-        # can_start_exam becomes True exactly when the scheduled time is reached
-        if not (dt_start <= now <= dt_end):
-            print(f"can_start_exam=False: Time out of bounds. dt_start={dt_start}, now={now}, dt_end={dt_end}")
+        # can_start_exam becomes True exactly when the scheduled time is reached,
+        # OR if the exam status has been explicitly set to 'ongoing'
+        if not (dt_start <= now <= dt_end) and obj.status != 'ongoing':
+            print(f"can_start_exam=False: Time out of bounds and not ongoing. dt_start={dt_start}, now={now}, dt_end={dt_end}")
             return False
 
         from .models import ExamSession
-        if ExamSession.objects.filter(exam=obj, student=student).exists():
-            print("can_start_exam=False: ExamSession already exists for this student.")
+        if ExamSession.objects.filter(exam=obj, student=student, is_submitted=True).exists():
+            print("can_start_exam=False: ExamSession already submitted for this student.")
             return False
 
         return True
@@ -229,7 +230,7 @@ class ExamListSerializer(serializers.ModelSerializer):
 
 
 class ExamCreateSerializer(serializers.ModelSerializer):
-    total_marks = serializers.IntegerField(read_only=True, required=False)
+    total_marks = serializers.IntegerField(required=False, default=0)
     paper_checkers = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='paper_checker', is_active=True),
         many=True, required=False, allow_empty=True, write_only=True

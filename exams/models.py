@@ -111,6 +111,9 @@ class Exam(models.Model):
         Questions (MCQ, subjective, true_false) can have independent/varying marks.
         Called automatically from exams/signals.py receivers on Question create/update/delete.
         """
+        if self.exam_type == 'offline':
+            return self.total_marks
+            
         from django.db.models import Sum
         total = self.questions.aggregate(Sum('marks'))['marks__sum'] or 0
         if self.total_marks != total:

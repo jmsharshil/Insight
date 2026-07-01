@@ -411,7 +411,7 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
 class ExamDataSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=200, required=False)
     exam_type = serializers.CharField(max_length=20, default='offline')
-    total_marks = serializers.IntegerField(required=True)
+    total_marks = serializers.IntegerField(required=False, default=0)
     pass_marks = serializers.IntegerField(required=True)
     duration_minutes = serializers.IntegerField(required=False)
     instructions = serializers.CharField(required=False, allow_blank=True)
