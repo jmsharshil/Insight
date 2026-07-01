@@ -366,7 +366,7 @@ class QuestionView(APIView):
                 from students.models import Student
                 sp = Student.objects.get(user=request.user)
                 # Only allow question fetch if student has an active session for THIS exam
-                active_sessions = ExamSession.objects.filter(exam=exam, student=sp, status__in=['ongoing', 'completed'])
+                active_sessions = ExamSession.objects.filter(exam=exam, student=sp)
                 if not active_sessions.exists():
                     return Response({'success': False, 'message': 'Exam session not active'}, status=status.HTTP_403_FORBIDDEN)
                 from .utils import group_questions
