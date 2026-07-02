@@ -102,10 +102,10 @@ class FeeStructure(models.Model):
         (Removed conditional to prevent NOT NULL errors on creation when
         components sum to 0; legacy records will be updated on next save.)
         """
-        reg = self.icsi_registration_fees or 0
-        exam = self.icsi_exam_fees or 0
-        token = self.token_amount or 0
-        self.total_amount = reg + exam + token
+        # reg = self.icsi_registration_fees or 0
+        # exam = self.icsi_exam_fees or 0
+        # token = self.token_amount or 0
+        # self.total_amount = reg + exam + token
         super().save(*args, **kwargs)
 
 

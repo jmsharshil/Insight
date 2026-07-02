@@ -55,10 +55,10 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         component_sum = reg + exam + token
 
         provided_total = data.get('total_amount')
-        if provided_total is not None and provided_total != component_sum:
-            raise serializers.ValidationError({
-                'total_amount': f'Total must equal sum of components ({component_sum}) or be omitted.'
-            })
+        # if provided_total is not None and provided_total != component_sum:
+        #     raise serializers.ValidationError({
+        #         'total_amount': f'Total must equal sum of components ({component_sum}) or be omitted.'
+        #     })
         # Always ensure total_amount in data for serializer (model will override anyway)
         if 'total_amount' not in data or data['total_amount'] is None:
             data['total_amount'] = component_sum
