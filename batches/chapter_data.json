@@ -1,0 +1,1266 @@
+{
+  "CSEET": [
+    {
+      "name": "BUSINESS COMMUNICATION",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "Essentials of Good English"
+        },
+        {
+          "order": 2,
+          "name": "Communication"
+        },
+        {
+          "order": 3,
+          "name": "Business Correspondence"
+        },
+        {
+          "order": 4,
+          "name": "Common Business Terminologies"
+        }
+      ]
+    },
+    {
+      "name": "FUNDAMENTS OF ACCOUNTS",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "Basics Concept and Principles of Accounting"
+        },
+        {
+          "order": 2,
+          "name": "Accounting Process"
+        },
+        {
+          "order": 3,
+          "name": "Bank Reconciliation Statement"
+        },
+        {
+          "order": 4,
+          "name": "Depreciation and Amortization"
+        },
+        {
+          "order": 5,
+          "name": "Preparation of Final Accounts for Sole Proprietorship"
+        },
+        {
+          "order": 6,
+          "name": "Partnership and LLP Accounts"
+        },
+        {
+          "order": 7,
+          "name": "Introduction to Company Accounts"
+        },
+        {
+          "order": 8,
+          "name": "Accounting for Non-Profit Organizations"
+        }
+      ]
+    },
+    {
+      "name": "ECONOMICS AND BUSINESS ENVIROMENT",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "Basics of Demand and Supply and Forms of Market Competition"
+        },
+        {
+          "order": 2,
+          "name": "National Income Accounting and Related Concepts"
+        },
+        {
+          "order": 3,
+          "name": "Indian Union Budget"
+        },
+        {
+          "order": 4,
+          "name": "Indian Financial Markets"
+        },
+        {
+          "order": 5,
+          "name": "Indian Economy"
+        },
+        {
+          "order": 6,
+          "name": "Entrepreneurship Scenario"
+        },
+        {
+          "order": 7,
+          "name": "Business Environment"
+        },
+        {
+          "order": 8,
+          "name": "Key Government Institutions"
+        },
+        {
+          "order": 9,
+          "name": "Global Environment"
+        },
+        {
+          "order": 10,
+          "name": "Environmental Governance"
+        },
+        {
+          "order": 11,
+          "name": "AI and Business Environment"
+        },
+        {
+          "order": 12,
+          "name": "Elements of Corporate Governance"
+        }
+      ]
+    },
+    {
+      "name": "BUSINESS LAW AND MANAGEMENT",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "Introduction to Law"
+        },
+        {
+          "order": 2,
+          "name": "Elements of Company Law"
+        },
+        {
+          "order": 3,
+          "name": "Elements of Law of Contracts"
+        },
+        {
+          "order": 4,
+          "name": "Elements of Law relating to Partnership and Limited Liability Partnership"
+        },
+        {
+          "order": 5,
+          "name": "Elements of Law relating to Sale of Goods"
+        },
+        {
+          "order": 6,
+          "name": "Elements of Law relating to Negotiable Instruments"
+        },
+        {
+          "order": 7,
+          "name": "Introduction to Management"
+        },
+        {
+          "order": 8,
+          "name": "Functions of Management"
+        },
+        {
+          "order": 9,
+          "name": "Principles of Management and Modern Approaches"
+        },
+        {
+          "order": 10,
+          "name": "Management Knowledge for Company Secretaries"
+        }
+      ]
+    }
+  ],
+  "CS Executive": [
+    {
+      "name": "Jurisprudence, Interpretation and General Laws",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "SOURCES OF LAW"
+        },
+        {
+          "order": 2,
+          "name": "CONSTITUTION OF INDIA"
+        },
+        {
+          "order": 3,
+          "name": "INTERPRETATION OF STATUES"
+        },
+        {
+          "order": 4,
+          "name": "ADMINISTRATIVE LAWS"
+        },
+        {
+          "order": 5,
+          "name": "LAW OF TORTS"
+        },
+        {
+          "order": 6,
+          "name": "LAW RELATING TO CIVIL PROCEDURE"
+        },
+        {
+          "order": 7,
+          "name": "LAWS RELATING TO CRIME AND ITS PROCEDURE"
+        },
+        {
+          "order": 8,
+          "name": "LAW RELATING TO EVIDENCE"
+        },
+        {
+          "order": 9,
+          "name": "LAW RELATING TO SPECIFIC RELIEF"
+        },
+        {
+          "order": 10,
+          "name": "LAW RELATING TO LIMITATION"
+        },
+        {
+          "order": 11,
+          "name": "LAW RELATING TO ARBITRATION, MEDITATION AND CONCILATION"
+        },
+        {
+          "order": 12,
+          "name": "INDIAN STAMP LAW"
+        },
+        {
+          "order": 13,
+          "name": "LAW RELATING TO REGISTRATION OF DOCUMENTS"
+        },
+        {
+          "order": 14,
+          "name": "RIGHT TO INFORMATION LAW"
+        },
+        {
+          "order": 15,
+          "name": "LAW RELATING TO INFORMATION TECHNOLOGY"
+        },
+        {
+          "order": 16,
+          "name": "CONTRACT LAW"
+        },
+        {
+          "order": 17,
+          "name": "LAW RELATING TO SALE OF GOODS"
+        },
+        {
+          "order": 18,
+          "name": "LAW RELATING TO NEGOTIABLE INSTRUMENTS"
+        }
+      ]
+    },
+    {
+      "name": "COMPANY LAW",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "INTRODUCTION TO COMPANY LAW"
+        },
+        {
+          "order": 2,
+          "name": "LEGAL STATUS AND TYPES OF REGISTERED COMPANIES"
+        },
+        {
+          "order": 3,
+          "name": "MEMORANDUM AND ARTICLES OF ASSOCIATIONS AND ITS ALTERATION"
+        },
+        {
+          "order": 4,
+          "name": "SHARE AND SHARE CAPITAL-CONCEPTS"
+        },
+        {
+          "order": 5,
+          "name": "MEMBERS AND SHAREHOLDERS"
+        },
+        {
+          "order": 6,
+          "name": "DEBT INSTRUMENTS-CONCEPTS"
+        },
+        {
+          "order": 7,
+          "name": "CHARGES"
+        },
+        {
+          "order": 8,
+          "name": "DISTRIBUTION OF PROFITS"
+        },
+        {
+          "order": 9,
+          "name": "ACCOUNTS AND AUDITORS"
+        },
+        {
+          "order": 10,
+          "name": "COMPROMISE, ARRANGEMENT AND AMALGAMATIONS-CONCEPTS"
+        },
+        {
+          "order": 11,
+          "name": "DORMANT COMPANY"
+        },
+        {
+          "order": 12,
+          "name": "INSPECTION, INQUIRY AND INVESTIGATION"
+        },
+        {
+          "order": 13,
+          "name": "GENERAL MEETINGS"
+        },
+        {
+          "order": 14,
+          "name": "DIRECTORS"
+        },
+        {
+          "order": 15,
+          "name": "BOARD COMPOSITION AND POWERS OF THE BOARD"
+        },
+        {
+          "order": 16,
+          "name": "MEETINGS OF BOARD AND ITS COMMITTEES"
+        },
+        {
+          "order": 17,
+          "name": "CORPORATE SOCIAL RESPONSIBILITY-CONCEPTS"
+        },
+        {
+          "order": 18,
+          "name": "ANNUAL REPORT-CONCEPTS"
+        }
+      ]
+    },
+    {
+      "name": "Setting Up of Business and Industrial & Labour Laws",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "SELECTION OF BUSINESS ORGANIZATION"
+        },
+        {
+          "order": 2,
+          "name": "CORPORATE ENTITIES-COMPANIES"
+        },
+        {
+          "order": 3,
+          "name": "LIMITED LIABILITY PARTNERSHIP"
+        },
+        {
+          "order": 4,
+          "name": "STARTUPS AND ITS REGISTRATION"
+        },
+        {
+          "order": 5,
+          "name": "MICRO, SMALL AND MEDIUM ENTERPRISES"
+        },
+        {
+          "order": 6,
+          "name": "CONVERSION OF BUSINESS ENTITIES"
+        },
+        {
+          "order": 7,
+          "name": "NON-CORPORATE ENTITIES"
+        },
+        {
+          "order": 8,
+          "name": "FINANCIAL SERVICES ORGANIZATION"
+        },
+        {
+          "order": 9,
+          "name": "BUSINESS COLLABRATIONS"
+        },
+        {
+          "order": 10,
+          "name": "SETTING UP OF BRANCH OFFICE/LIASIAN OFFICE/WHOLLY OWNED SUBSIDIARY BY FOREIGN COMPANY"
+        },
+        {
+          "order": 11,
+          "name": "SETTING UP OF BUSINESS OUTSIDE INDIA AND ISSUE RELATING THERETO"
+        },
+        {
+          "order": 12,
+          "name": "IDENTIFYING LAWS APPLICABLE TO VARIOUS INDUSTRIES AND THEIR INITIAL COMPLIANCES"
+        },
+        {
+          "order": 13,
+          "name": "VARIOUS INITIAL REGISTRATION AND LICENSES"
+        },
+        {
+          "order": 14,
+          "name": "CONSTITUTION AND LABOUR LAWS"
+        },
+        {
+          "order": 15,
+          "name": "EVALUTION OF LABOUR LEGISLATION AND NEED OF LABOUR CODE"
+        },
+        {
+          "order": 16,
+          "name": "LAW OF WELFARE & WORKING CONDITION"
+        },
+        {
+          "order": 17,
+          "name": "LAW OF INDUSTRIAL RELATIONS"
+        },
+        {
+          "order": 18,
+          "name": "LAW OF WAGES"
+        },
+        {
+          "order": 19,
+          "name": "SOCIAL SECURITY LEGISLATIONS"
+        },
+        {
+          "order": 20,
+          "name": "SEXUAL HARASSMENT OF WOMEN AT WORKPLACE (PREVENTION, PROHIBITION AND REDRESSAL) ACT, 2013"
+        }
+      ]
+    },
+    {
+      "name": "Corporate Accounting and Financial Management",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "INTRODUCTION TO ACCOUNTING"
+        },
+        {
+          "order": 2,
+          "name": "INTRODUCTION TO CORPORATE ACCOUNTING"
+        },
+        {
+          "order": 3,
+          "name": "ACCOUNTING STANDARDS(AS)"
+        },
+        {
+          "order": 4,
+          "name": "ACCOUNTING FOR SHARE CAPITAL"
+        },
+        {
+          "order": 5,
+          "name": "ACCOUNTING FOR DEBENTURES"
+        },
+        {
+          "order": 6,
+          "name": "RELATED ASPECTS OF COMPANY ACCOUNTS"
+        },
+        {
+          "order": 7,
+          "name": "CONSOLIDATION OF ACCOUNTS"
+        },
+        {
+          "order": 8,
+          "name": "FINANCIAL STATEMENTS ANALYSIS"
+        },
+        {
+          "order": 9,
+          "name": "CASH FLOWS"
+        },
+        {
+          "order": 10,
+          "name": "FORECASTING FINANCIAL STATEMENTS"
+        },
+        {
+          "order": 11,
+          "name": "INTRODUCTION"
+        },
+        {
+          "order": 12,
+          "name": "TIME VALUE OF MONEY"
+        },
+        {
+          "order": 13,
+          "name": "CAPITAL BUDGETING"
+        },
+        {
+          "order": 14,
+          "name": "COST OF CAPITAL"
+        },
+        {
+          "order": 15,
+          "name": "CAPITAL STRUCTURE"
+        },
+        {
+          "order": 16,
+          "name": "DIVIDEND DECISIONS"
+        },
+        {
+          "order": 17,
+          "name": "WORKING CAPITAL MANAGEMENT"
+        },
+        {
+          "order": 18,
+          "name": "SECURITY ANALYSIS"
+        },
+        {
+          "order": 19,
+          "name": "OPERATIONAL APPROACH TO FINANCIAL DECISION"
+        }
+      ]
+    },
+    {
+      "name": "Capital Markets and Securities Laws",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "BASICS OF CAPITAL MARKET"
+        },
+        {
+          "order": 2,
+          "name": "SECONDARY MARKET IN INDIA"
+        },
+        {
+          "order": 3,
+          "name": "SECURITIES CONTRACTS (REGULATION) ACT, 1956"
+        },
+        {
+          "order": 4,
+          "name": "SECURITIES AND EXCHANGE BOARD OF INDIA"
+        },
+        {
+          "order": 5,
+          "name": "LAWS GOVERNING TO DEPOSITORIES AND DEPOSITORY PARTICIPANTS"
+        },
+        {
+          "order": 6,
+          "name": "SECURITIES MARKET INTERMEDIARIES"
+        },
+        {
+          "order": 7,
+          "name": "INTERNATIONAL FINANCIAL SERVICES CENTRES AUTHORITY (IFSCA)"
+        },
+        {
+          "order": 8,
+          "name": "ISSUE OF CAPITAL & DISCLOSURE REQUIREMENTS"
+        },
+        {
+          "order": 9,
+          "name": "SHARE BASED EMPLOYEE BENEFITS AND SWEAT EQUITY"
+        },
+        {
+          "order": 10,
+          "name": "ISSUE AND LISTING OF NON-CONVERTIBLE SECURITIES"
+        },
+        {
+          "order": 11,
+          "name": "LISTING OBLIGATIONS AND DISCLOSURE REQUIREMENTS"
+        },
+        {
+          "order": 12,
+          "name": "ACQUISITION OF SHARES AND TAKEOVERS – CONCEPTS"
+        },
+        {
+          "order": 13,
+          "name": "PROHIBITION OF INSIDER TRADING"
+        },
+        {
+          "order": 14,
+          "name": "PROHIBITION OF FRAUDULENT AND UNFAIR TRADE PRACTICES RELATING TO SECURITIES MARKET"
+        },
+        {
+          "order": 15,
+          "name": "DELISTING OF EQUITY SHARES"
+        },
+        {
+          "order": 16,
+          "name": "BUY-BACK OF SECURITIES"
+        },
+        {
+          "order": 17,
+          "name": "MUTUAL FUNDS"
+        },
+        {
+          "order": 18,
+          "name": "COLLECTIVE INVESTMENT SCHEMES"
+        }
+      ]
+    },
+    {
+      "name": "Economic, Commercial and Intellectual Property Laws",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "LAW RELATING FOREIGN EXCHANGE MANAGEMENT"
+        },
+        {
+          "order": 2,
+          "name": "FOREIGN DIRECT INVESTMENTS – REGULATIONS & POLICY"
+        },
+        {
+          "order": 3,
+          "name": "OVERSEAS DIRECT INVESTMENT"
+        },
+        {
+          "order": 4,
+          "name": "EXTERNAL COMMERCIAL BORROWINGS (ECB)"
+        },
+        {
+          "order": 5,
+          "name": "FOREIGN TRADE POLICY & PROCEDURE"
+        },
+        {
+          "order": 6,
+          "name": "LAW RELATING TO SPECIAL ECONOMIC ZONES"
+        },
+        {
+          "order": 7,
+          "name": "LAW RELATING TO FOREIGN CONTRIBUTION REGULATION"
+        },
+        {
+          "order": 8,
+          "name": "PREVENTION OF MONEY LAUNDERING"
+        },
+        {
+          "order": 9,
+          "name": "LAW RELATING TO FUGITIVE ECONOMIC OFFENDERS"
+        },
+        {
+          "order": 10,
+          "name": "LAW RELATING TO BENAMI TRANSACTIONS & PROHIBITION"
+        },
+        {
+          "order": 11,
+          "name": "COMPETITION LAW"
+        },
+        {
+          "order": 12,
+          "name": "LAW RELATING TO CONSUMER PROTECTION"
+        },
+        {
+          "order": 13,
+          "name": "LEGAL METROLOGY"
+        },
+        {
+          "order": 14,
+          "name": "REAL ESTATE REGULATION AND DEVELOPMENT LAW"
+        },
+        {
+          "order": 15,
+          "name": "INTELLECTUAL PROPERTY RIGHTS"
+        },
+        {
+          "order": 16,
+          "name": "LAW RELATING TO PATENTS"
+        },
+        {
+          "order": 17,
+          "name": "LAW RELATING TO TRADE MARKS"
+        },
+        {
+          "order": 18,
+          "name": "LAW RELATING TO COPYRIGHT"
+        },
+        {
+          "order": 19,
+          "name": "LAW RELATING TO GEOGRAPHICAL INDICATIONS OF GOODS"
+        },
+        {
+          "order": 20,
+          "name": "LAW RELATING TO DESIGNS"
+        }
+      ]
+    },
+    {
+      "name": "Tax Laws and Practice",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "DIRECT TAXES – AT A GLANCE"
+        },
+        {
+          "order": 2,
+          "name": "BASIC CONCEPT OF INCOME TAX"
+        },
+        {
+          "order": 3,
+          "name": "INCOMES WHICH DO NOT FORM PART OF TOTAL INCOME"
+        },
+        {
+          "order": 4,
+          "name": "INCOME UNDER THE HEAD HOUSE PROPERTY"
+        },
+        {
+          "order": 5,
+          "name": "PROFITS AND GAINS FROM BUSINESS AND PROFESSION"
+        },
+        {
+          "order": 6,
+          "name": "CAPITAL GAINS"
+        },
+        {
+          "order": 7,
+          "name": "INCOME FROM OTHER SOURCES"
+        },
+        {
+          "order": 8,
+          "name": "CLUBBING PROVISIONS AND SET OFF AND / OR CARRY FORWARD OF LOSSES"
+        },
+        {
+          "order": 9,
+          "name": "DEDUCTIONS"
+        },
+        {
+          "order": 10,
+          "name": "COMPUTATION OF TOTAL INCOME AND TAX LIABILITY OF VARIOUS ENTITIES"
+        },
+        {
+          "order": 11,
+          "name": "CLASSIFICATION AND TAX INCIDENCE ON COMPANIES"
+        },
+        {
+          "order": 12,
+          "name": "PROCEDURAL COMPLIANCE"
+        },
+        {
+          "order": 13,
+          "name": "CONCEPT OF INDIRECT TAXES AT A GLANCE"
+        },
+        {
+          "order": 14,
+          "name": "BASICS OF GOODS AND SERVICES TAX ‘GST’"
+        },
+        {
+          "order": 15,
+          "name": "LEVY AND COLLECTION OF GST"
+        },
+        {
+          "order": 16,
+          "name": "TIME, VALUE & PLACE OF SUPPLY"
+        },
+        {
+          "order": 17,
+          "name": "INPUT TAX CREDIT & COMPUTATION OF GST LIABILITY"
+        },
+        {
+          "order": 18,
+          "name": "PROCEDURAL COMPLIANCE UNDER GST"
+        },
+        {
+          "order": 19,
+          "name": "OVERVIEW OF CUSTOMS ACT"
+        }
+      ]
+    }
+  ],
+  "CS Professional": [
+    {
+      "name": "ESG (Environment, Social & Governance)",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "CONCEPTUAL FRAMEWORK OF CORPORATE GOVERNANCE"
+        },
+        {
+          "order": 2,
+          "name": "LEGISLATIVE FRAMEWORK OF CORPORATE GOVERNANCE IN INDIA"
+        },
+        {
+          "order": 3,
+          "name": "BOARD EFFECTIVENESS/BUILDING BETTER BOARDS"
+        },
+        {
+          "order": 4,
+          "name": "BOARD PROCESSES THROUGH SECRETARIAL STANDARDS"
+        },
+        {
+          "order": 5,
+          "name": "BOARD COMMITTEES"
+        },
+        {
+          "order": 6,
+          "name": "(THIS LESSON HAS BEEN MERGED WITH LESSON 3)"
+        },
+        {
+          "order": 7,
+          "name": "CONCEPT OF GOVERNANCE IN PROFESSIONAL MANAGED COMPANY & PROMOTERS DRIVEN COMPANY"
+        },
+        {
+          "order": 8,
+          "name": "BOARD DISCLOSURES AND WEBSITE DISCLOSURES"
+        },
+        {
+          "order": 9,
+          "name": "DATA GOVERNANCE"
+        },
+        {
+          "order": 10,
+          "name": "STAKEHOLDERS RIGHTS"
+        },
+        {
+          "order": 11,
+          "name": "BUSINESS ETHICS, CODE OF CONDUCT AND ANTI-BRIBERY"
+        },
+        {
+          "order": 12,
+          "name": "BOARD’S ACCOUNTABILITY ON ESG"
+        },
+        {
+          "order": 13,
+          "name": "ENVIRONMENT"
+        },
+        {
+          "order": 14,
+          "name": "CORPORATE SOCIAL RESPONSIBILITY (CSR)"
+        },
+        {
+          "order": 15,
+          "name": "GREEN INITIATIVES"
+        },
+        {
+          "order": 16,
+          "name": "GOVERNANCE INFLUENCERS"
+        },
+        {
+          "order": 17,
+          "name": "EMPOWERMENT OF THE COMPANY SECRETARY PROFESSION"
+        },
+        {
+          "order": 18,
+          "name": "RISK MANAGEMENT"
+        },
+        {
+          "order": 19,
+          "name": "SUSTAINABILITY AUDIT; ESG RATING; EMERGING MANDATES FROM GOVERNMENT AND REGULATORS"
+        },
+        {
+          "order": 20,
+          "name": "INTEGRATED REPORTING FRAMEWORK; GLOBAL REPORTING INITIATIVE FRAMEWORK; BUSINESS RESPONSIBILITY & SUSTAINABILITY REPORTING"
+        }
+      ]
+    },
+    {
+      "name": "Drafting, Appearances and Pleadings",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "TYPES OF DOCUMENTS"
+        },
+        {
+          "order": 2,
+          "name": "GENERAL PRINCIPLES OF DRAFTING"
+        },
+        {
+          "order": 3,
+          "name": "LAWS RELATING TO DRAFTING AND CONVEYANCING"
+        },
+        {
+          "order": 4,
+          "name": "DRAFTING OF AGREEMENTS, DEEDS AND DOCUMENTS"
+        },
+        {
+          "order": 5,
+          "name": "DRAFTING OF COMMERCIAL CONTRACTS"
+        },
+        {
+          "order": 6,
+          "name": "DOCUMENTS UNDER COMPANIES ACT, 2013"
+        },
+        {
+          "order": 7,
+          "name": "ART OF OPINION WRITING"
+        },
+        {
+          "order": 8,
+          "name": "COMMERCIAL CONTRACT MANAGEMENT"
+        },
+        {
+          "order": 9,
+          "name": "JUDICIAL & ADMINISTRATIVE FRAMEWORK"
+        },
+        {
+          "order": 10,
+          "name": "PLEADINGS"
+        },
+        {
+          "order": 11,
+          "name": "ART OF ADVOCACY AND APPEARANCES"
+        },
+        {
+          "order": 12,
+          "name": "APPLICATIONS, PETITIONS AND APPEALS UNDER COMPANIES ACT, 2013"
+        },
+        {
+          "order": 13,
+          "name": "ADJUDICATIONS AND APPEALS UNDER SEBI LAWS"
+        },
+        {
+          "order": 14,
+          "name": "APPEARANCE BEFORE OTHER REGULATORY AND QUASI-JUDICIAL AUTHORITIES"
+        }
+      ]
+    },
+    {
+      "name": "Compliance Management, Audit and Due Diligence",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "COMPLIANCE FRAMEWORK"
+        },
+        {
+          "order": 2,
+          "name": "DOCUMENTATION & MAINTENANCE OF RECORDS"
+        },
+        {
+          "order": 3,
+          "name": "SIGNING AND CERTIFICATION"
+        },
+        {
+          "order": 4,
+          "name": "LEGAL FRAMEWORK GOVERNING COMPANY SECRETARIES"
+        },
+        {
+          "order": 5,
+          "name": "VALUES, ETHICS AND PROFESSIONAL CONDUCT"
+        },
+        {
+          "order": 6,
+          "name": "NON-COMPLIANCES, PENALTIES AND ADJUDICATIONS"
+        },
+        {
+          "order": 7,
+          "name": "RELIEFS AND REMEDIES"
+        },
+        {
+          "order": 8,
+          "name": "CONCEPTS OF VARIOUS AUDITS"
+        },
+        {
+          "order": 9,
+          "name": "AUDIT ENGAGEMENT"
+        },
+        {
+          "order": 10,
+          "name": "AUDIT PRINCIPLES AND TECHNIQUES"
+        },
+        {
+          "order": 11,
+          "name": "AUDIT PROCESS AND DOCUMENTATION"
+        },
+        {
+          "order": 12,
+          "name": "FORMING AN OPINION & REPORTING"
+        },
+        {
+          "order": 13,
+          "name": "SECRETARIAL AUDIT"
+        },
+        {
+          "order": 14,
+          "name": "INTERNAL AUDIT & PERFORMANCE AUDIT"
+        },
+        {
+          "order": 15,
+          "name": "PEER REVIEW AND QUALITY REVIEW"
+        },
+        {
+          "order": 16,
+          "name": "DUE DILIGENCE"
+        }
+      ]
+    },
+    {
+      "name": "Intellectual Property Rights",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "INTRODUCTION"
+        },
+        {
+          "order": 2,
+          "name": "TYPES OF INTELLECTUAL PROPERTY"
+        },
+        {
+          "order": 3,
+          "name": "ROLE OF INTERNATIONAL INSTITUTIONS"
+        },
+        {
+          "order": 4,
+          "name": "INDIAN PATENT LAW AND ITS DEVELOPMENTS"
+        },
+        {
+          "order": 5,
+          "name": "PATENT DATABASES & PATENT INFORMATION SYSTEM"
+        },
+        {
+          "order": 6,
+          "name": "PATENT DOCUMENTATION, EXAMINATION AND INFRINGEMENT"
+        },
+        {
+          "order": 7,
+          "name": "TRADEMARKS"
+        },
+        {
+          "order": 8,
+          "name": "COPYRIGHTS"
+        },
+        {
+          "order": 9,
+          "name": "INDUSTRIAL DESIGNS"
+        },
+        {
+          "order": 10,
+          "name": "GEOGRAPHICAL INDICATIONS"
+        },
+        {
+          "order": 11,
+          "name": "LAYOUT- DESIGNS OF INTEGRATED CIRCUITS"
+        },
+        {
+          "order": 12,
+          "name": "PROTECTION OF TRADE SECRETS"
+        },
+        {
+          "order": 13,
+          "name": "BIOLOGICAL DIVERSITY"
+        },
+        {
+          "order": 14,
+          "name": "PROTECTION OF PLANT VARIETIES"
+        },
+        {
+          "order": 15,
+          "name": "BUSINESS CONCERNS IN COMMERCIALIZING INTELLECTUAL PROPERTY RIGHTS"
+        }
+      ]
+    },
+    {
+      "name": "Strategic Management and Corporate Finance",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "INTRODUCTION TO STRATEGIC MANAGEMENT"
+        },
+        {
+          "order": 2,
+          "name": "ANALYZING THE EXTERNAL AND INTERNAL ENVIRONMENT"
+        },
+        {
+          "order": 3,
+          "name": "BUSINESS POLICY AND FORMULATION OF FUNCTIONAL STRATEGY"
+        },
+        {
+          "order": 4,
+          "name": "STRATEGIC ANALYSIS AND PLANNING"
+        },
+        {
+          "order": 5,
+          "name": "COMPETITIVE POSITIONING"
+        },
+        {
+          "order": 6,
+          "name": "MANAGING THE MULTI-BUSINESS FIRM AND ANALYZING STRATEGIC EDGE"
+        },
+        {
+          "order": 7,
+          "name": "SOURCES OF CORPORATE FUNDING"
+        },
+        {
+          "order": 8,
+          "name": "RAISING OF FUNDS FROM EQUITY AND PROCEDURAL ASPECTS – PUBLIC FUNDING"
+        },
+        {
+          "order": 9,
+          "name": "REAL ESTATE INVESTMENT TRUSTS"
+        },
+        {
+          "order": 10,
+          "name": "INFRASTRUCTURE INVESTMENT TRUSTS"
+        },
+        {
+          "order": 11,
+          "name": "RAISING OF FUNDS – PRIVATE FUNDING"
+        },
+        {
+          "order": 12,
+          "name": "RAISING OF FUNDS – NON FUND BASED"
+        },
+        {
+          "order": 13,
+          "name": "AN OVERVIEW ON LISTING AND ISSUANCE OF SECURITIES IN INTERNATIONAL FINANCIAL SERVICES CENTRE"
+        },
+        {
+          "order": 14,
+          "name": "RAISING OF FUNDS FROM DEBT AND PROCEDURAL ASPECTS"
+        },
+        {
+          "order": 15,
+          "name": "FOREIGN FUNDING-INSTITUTIONS"
+        },
+        {
+          "order": 16,
+          "name": "FOREIGN FUNDING-INSTRUMENTS, LAWS AND PROCEDURES"
+        },
+        {
+          "order": 17,
+          "name": "ROLE OF INTERMEDIARIES IN FUND RAISING"
+        },
+        {
+          "order": 18,
+          "name": "PROJECT EVALUATION"
+        }
+      ]
+    },
+    {
+      "name": "Corporate Restructuring, Valuation and Insolvency",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "TYPES OF CORPORATE RESTRUCTURING"
+        },
+        {
+          "order": 2,
+          "name": "ACQUISITION OF COMPANY/BUSINESS"
+        },
+        {
+          "order": 3,
+          "name": "PLANNING & STRATEGY"
+        },
+        {
+          "order": 4,
+          "name": "PROCESS OF M&A TRANSACTIONS"
+        },
+        {
+          "order": 5,
+          "name": "DOCUMENTATION-MERGER & AMALGAMATION"
+        },
+        {
+          "order": 6,
+          "name": "ACCOUNTING IN CORPORATE RESTRUCTURING: CONCEPT AND ACCOUNTING TREATMENT"
+        },
+        {
+          "order": 7,
+          "name": "TAXATION & STAMP DUTY ASPECTS OF CORPORATE RESTRUCTURING"
+        },
+        {
+          "order": 8,
+          "name": "REGULATION OF COMBINATIONS"
+        },
+        {
+          "order": 9,
+          "name": "REGULATORY APPROVALS OF SCHEME"
+        },
+        {
+          "order": 10,
+          "name": "FAST TRACK MERGERS"
+        },
+        {
+          "order": 11,
+          "name": "CROSS BORDER MERGERS"
+        },
+        {
+          "order": 12,
+          "name": "OVERVIEW OF BUSINESS VALUATION"
+        },
+        {
+          "order": 13,
+          "name": "VALUATION OF BUSINESS AND ASSETS FOR CORPORATE RESTRUCTURING"
+        },
+        {
+          "order": 14,
+          "name": "INSOLVENCY"
+        },
+        {
+          "order": 15,
+          "name": "APPLICATION FOR CORPORATE INSOLVENCY RESOLUTION PROCESS"
+        },
+        {
+          "order": 16,
+          "name": "ROLE, FUNCTIONS AND DUTIES OF IP/IRP/RP"
+        },
+        {
+          "order": 17,
+          "name": "RESOLUTION STRATEGIES"
+        },
+        {
+          "order": 18,
+          "name": "CONVENING AND CONDUCT OF MEETINGS OF COMMITTEE OF CREDITORS"
+        },
+        {
+          "order": 19,
+          "name": "PREPARATION & APPROVAL OF RESOLUTION PLAN"
+        },
+        {
+          "order": 20,
+          "name": "PRE-PACKAGED INSOLVENCY RESOLUTION PROCESS"
+        },
+        {
+          "order": 21,
+          "name": "CROSS BORDER INSOLVENCY"
+        },
+        {
+          "order": 22,
+          "name": "LIQUIDATION ON OR AFTER FAILING OF RESOLUTION PLAN"
+        },
+        {
+          "order": 23,
+          "name": "VOLUNTARY LIQUIDATION"
+        },
+        {
+          "order": 24,
+          "name": "DEBT RECOVERY & SARFAESI"
+        },
+        {
+          "order": 25,
+          "name": "WINDING-UP BY TRIBUNAL UNDER THE COMPANIES ACT, 2013"
+        },
+        {
+          "order": 26,
+          "name": "STRIKE OFF AND RESTORATION OF NAME OF THE COMPANY AND LLP"
+        }
+      ]
+    },
+    {
+      "name": "Insolvency and Bankruptcy Code",
+      "chapters": [
+        {
+          "order": 1,
+          "name": "INTRODUCTION TO INSOLVENCY AND BANKRUPTCY CODE"
+        },
+        {
+          "order": 2,
+          "name": "CORPORATE INSOLVENCY RESOLUTION PROCESS"
+        },
+        {
+          "order": 3,
+          "name": "RESOLUTION STRATEGIES"
+        },
+        {
+          "order": 4,
+          "name": "FAST TRACK CORPORATE INSOLVENCY RESOLUTION PROCESS"
+        },
+        {
+          "order": 5,
+          "name": "LIQUIDATION OF CORPORATE PERSON"
+        },
+        {
+          "order": 6,
+          "name": "VOLUNTARY LIQUIDATION OF COMPANIES"
+        },
+        {
+          "order": 7,
+          "name": "ADJUDICATION AND APPEALS FOR CORPORATE PERSONS"
+        },
+        {
+          "order": 8,
+          "name": "PRE-PACKAGED INSOLVENCY RESOLUTION PROCESS"
+        },
+        {
+          "order": 9,
+          "name": "DEBT RECOVERY & SECURITIZATION"
+        },
+        {
+          "order": 10,
+          "name": "WINDING-UP BY TRIBUNAL"
+        },
+        {
+          "order": 11,
+          "name": "INSOLVENCY RESOLUTION OF INDIVIDUAL AND PARTNERSHIP FIRMS"
+        },
+        {
+          "order": 12,
+          "name": "BANKRUPTCY ORDER FOR INDIVIDUALS AND PARTNERSHIP FIRMS"
+        },
+        {
+          "order": 13,
+          "name": "BANKRUPTCY FOR INDIVIDUALS AND PARTNERSHIP FIRMS"
+        },
+        {
+          "order": 14,
+          "name": "FRESH START PROCESS"
+        },
+        {
+          "order": 15,
+          "name": "PROFESSIONAL AND ETHICAL PRACTICES FOR INSOLVENCY PRACTITIONERS"
+        },
+        {
+          "order": 16,
+          "name": "GROUP INSOLVENCY"
+        },
+        {
+          "order": 17,
+          "name": "CROSS BORDER INSOLVENCY"
+        }
+      ]
+    }
+  ]
+}

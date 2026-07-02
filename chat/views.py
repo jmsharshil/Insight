@@ -589,8 +589,8 @@ class MessageDetailAPIView(APIView):
         if message.is_deleted:
             return Response({"detail": "Message is already deleted."}, status=status.HTTP_400_BAD_REQUEST)
 
-        message.is_deleted = True
-        message.save(update_fields=['is_deleted', 'updated_at'])
+        # message.is_deleted = True
+        # message.save(update_fields=['is_deleted', 'updated_at'])
 
         # Broadcast delete to room via Channels
         self._broadcast_event(message.room_id, {
@@ -905,7 +905,7 @@ class GroupDeleteView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        room.is_active = False
-        room.save(update_fields=["is_active"])
+        # room.is_active = False
+        # room.save(update_fields=['is_active'])
 
         return Response(status=status.HTTP_204_NO_CONTENT)

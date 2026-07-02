@@ -29,7 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost','*','insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net']
 
@@ -119,7 +119,7 @@ ASGI_APPLICATION = 'insight.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-CONNECTION_STRING = os.environ['AZURE_POSTGRESQL_CONNECTIONSTRING']
+CONNECTION_STRING = os.environ.get('AZURE_POSTGRESQL_CONNECTIONSTRING')
 
 if not CONNECTION_STRING:
     DATABASES = {
@@ -347,7 +347,7 @@ if not DEBUG:
             'file': {
                 'level': 'ERROR',
                 'class': 'logging.FileHandler',
-                'filename': '/home/site/wwwroot/django_errors.log',
+                'filename': os.getenv('DJANGO_LOG_FILE', os.path.join(BASE_DIR, 'django_errors.log')),
                 'formatter': 'verbose',
             },
         },

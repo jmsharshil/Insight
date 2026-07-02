@@ -265,8 +265,8 @@ class ExamDetailView(APIView):
         if ExamSession.objects.filter(exam=exam).exists():
             return Response({'success': False, 'message': 'Cannot delete exam with active sessions.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        exam.is_deleted = True
-        exam.save()
+        # exam.is_deleted = True
+        # exam.save()
         return Response({'success': True, 'message': 'Exam deleted.'})
 
 
