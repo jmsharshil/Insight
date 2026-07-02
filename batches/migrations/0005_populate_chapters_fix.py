@@ -422,6 +422,16 @@ def populate_chapters_smart(apps, schema_editor):
         
     print(f"\n  🎯 Using Course: {course.code} - {course.name}")
 
+    # Find the current max sequence for Subject code
+    last_subject = Subject.objects.filter(code__startswith='SUB-').order_by('-code').first()
+    if last_subject and last_subject.code:
+        try:
+            seq = int(last_subject.code.split('-')[-1])
+        except Exception:
+            seq = 0
+    else:
+        seq = 0
+
     for idx, (level_name, subjects_data) in enumerate(CHAPTER_DATA.items(), start=1):
         level, created = CourseLevel.objects.get_or_create(
             course=course, 
@@ -436,13 +446,19 @@ def populate_chapters_smart(apps, schema_editor):
             print(f"  ✨ Created CourseLevel '{level_name}'")
 
         for subj_data in subjects_data:
-            subject, created = Subject.objects.get_or_create(
-                level=level,
-                name=subj_data["name"],
-                defaults={
-                    "organization": course.organization,
-                },
-            )
+            subject = Subject.objects.filter(level=level, name=subj_data["name"]).first()
+            if not subject:
+                seq += 1
+                new_code = f"SUB-{seq:04d}"
+                subject = Subject.objects.create(
+                    level=level,
+                    name=subj_data["name"],
+                    organization=course.organization,
+                    code=new_code
+                )
+                print(f"  ✨ Created subject: {subject.name}")
+            else:
+                print(f"  📌 Exists subject: {subject.name}")
             
             for order, ch_name in enumerate(subj_data["chapters"], start=1):
                 Chapter.objects.get_or_create(
