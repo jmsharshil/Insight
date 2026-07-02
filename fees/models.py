@@ -60,7 +60,10 @@ class FeeStructure(models.Model):
         'batches.CourseLevel', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
     )
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    total_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text='Auto-calculated as sum of components below'
+    )
     # Fee type breakdown (total_amount is auto-calculated as sum of these)
     icsi_registration_fees = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
@@ -95,17 +98,14 @@ class FeeStructure(models.Model):
         return f"{self.name} — ₹{self.total_amount}"
 
     def save(self, *args, **kwargs):
-        """Auto-calculate total_amount as sum of fee components.
-        For backward compatibility with existing records, only override
-        if at least one component fee is non-zero.
+        """Always auto-calculate total_amount as sum of fee components.
+        (Removed conditional to prevent NOT NULL errors on creation when
+        components sum to 0; legacy records will be updated on next save.)
         """
         reg = self.icsi_registration_fees or 0
         exam = self.icsi_exam_fees or 0
         token = self.token_amount or 0
-        component_sum = reg + exam + token
-        if component_sum > 0:
-            self.total_amount = component_sum
-        # else: keep existing total_amount for legacy records
+        self.total_amount = reg + exam + token
         super().save(*args, **kwargs)
 
 

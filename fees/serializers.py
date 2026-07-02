@@ -46,27 +46,30 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
                   'icsi_exam_fees', 'token_amount', 'description', 'is_active']
 
     def validate(self, data):
-        """Ensure total_amount is consistent with fee breakdown components."""
+        """Ensure total_amount is consistent with fee breakdown components.
+        total_amount is now always auto-set by model (defaults to 0).
+        """
         reg = data.get('icsi_registration_fees') or 0
         exam = data.get('icsi_exam_fees') or 0
         token = data.get('token_amount') or 0
         component_sum = reg + exam + token
-        if component_sum > 0:
-            if data.get('total_amount') and data['total_amount'] != component_sum:
-                raise serializers.ValidationError({
-                    'total_amount': f'Total must equal sum of components ({component_sum}) or be omitted.'
-                })
-            # If no total provided, it will be set by model.save()
-            if 'total_amount' not in data:
-                data['total_amount'] = component_sum
+
+        provided_total = data.get('total_amount')
+        if provided_total is not None and provided_total != component_sum:
+            raise serializers.ValidationError({
+                'total_amount': f'Total must equal sum of components ({component_sum}) or be omitted.'
+            })
+        # Always ensure total_amount in data for serializer (model will override anyway)
+        if 'total_amount' not in data or data['total_amount'] is None:
+            data['total_amount'] = component_sum
         return data
 
     def create(self, validated_data):
-        # Remove total if it was set by validate (to let model compute in save)
-        validated_data.pop('total_amount', None)
+        # Do not pop total_amount; let serializer pass it, but model.save() will
+        # recompute it from components to ensure consistency.
         fee_structure = super().create(validated_data)
         
-        # Refresh to ensure computed total_amount from model.save() is loaded
+        # Refresh to get final computed values
         fee_structure.refresh_from_db()
         
         # Auto-assign the fee to students. Use level name mapping (CSEET, CSExecutive,

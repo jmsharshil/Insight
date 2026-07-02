@@ -820,6 +820,10 @@ class ExamStartView(APIView):
             'autosave_interval_seconds': 30,
             'geo_check_interval_minutes': exam.geo_check_interval_minutes,
             'exam_title': exam.title,
+            'exam_type': exam.exam_type,
+            'exam_mode': exam.exam_mode,
+            'exam_type_display': exam.get_exam_type_display(),
+            'exam_mode_display': exam.get_exam_mode_display(),
             'total_marks': exam.total_marks,
             'questions': group_questions(QuestionStudentSerializer(questions, many=True).data),
         })
