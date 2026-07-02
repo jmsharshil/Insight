@@ -11,28 +11,4 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterModelOptions(
-            name='subject',
-            options={'ordering': ['name']},
-        ),
-        migrations.AlterUniqueTogether(
-            name='subject',
-            unique_together={('course', 'code')},
-        ),
-        migrations.AddField(
-            model_name='subject',
-            name='course',
-            field=models.ForeignKey(default=None, on_delete=django.db.models.deletion.CASCADE, related_name='subjects', to='batches.course'),
-            preserve_default=False,
-        ),
-        migrations.AddField(
-            model_name='subject',
-            name='total_hours',
-            field=models.PositiveIntegerField(default=0),
-        ),
-        migrations.AlterField(
-            model_name='subject',
-            name='code',
-            field=models.CharField(max_length=30),
-        ),
     ]
