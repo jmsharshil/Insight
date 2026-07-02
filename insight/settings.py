@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "students",
     'branch',
     'core',
+    'scheduler',
     'auditlog',
     'reports',
     'chat',

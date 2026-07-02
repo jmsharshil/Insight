@@ -14,7 +14,7 @@ from payroll.models import LateEntryPolicy, PAYROLL_STATUS_CHOICES
 from students.models import STUDENT_STATUS_CHOICES, GENDER_CHOICES, INVENTORY_ITEM_CHOICES, BLOOD_GROUP_CHOICES, RELATIONSHIP_CHOICES
 from faculty.models import LEVEL_CHOICES, EMPLOYMENT_TYPE_CHOICES, SCAN_TYPE_CHOICES, SESSION_STATUS_CHOICES
 from batches.models import COURSE_TYPE_CHOICES, DAY_CHOICES, SESSION_CHOICES
-from exams.models import EXAM_TYPE_CHOICES, EXAM_STATUS_CHOICES
+from exams.models import EXAM_MODE_CHOICES, EXAM_TYPE_CHOICES, EXAM_STATUS_CHOICES
 
 class PublicDropdownsView(APIView):
     """
@@ -96,7 +96,7 @@ class AuthenticatedDropdownsView(APIView):
         subjects = list(subjects_qs.values('id', 'name', 'level__course_id', 'code'))
         batches = list(batches_qs.values('id', 'name', 'course_id', 'organization_id'))
         classrooms = list(classrooms_qs.values('id', 'name', 'capacity', 'organization_id'))
-        exams = list(exams_qs.values('id', 'title', 'exam_type', 'status', 'branch_id'))
+        exams = list(exams_qs.values('id', 'title', 'exam_mode', 'exam_type', 'status', 'branch_id'))
         leave_policies = list(leave_policies_qs.values('id', 'leave_type', 'annual_quota', 'branch_id'))
         fee_structures = list(fee_structures_qs.values('id', 'name', 'course_id', 'total_amount'))
         late_policies = list(late_policies_qs.values('id', 'branch_id', 'grace_period_minutes'))
@@ -135,6 +135,7 @@ class AuthenticatedDropdownsView(APIView):
                     "installment_status": [{"value": r[0], "label": r[1]} for r in INSTALLMENT_PLAN_STATUS_CHOICES],
                     "payroll_status": [{"value": r[0], "label": r[1]} for r in PAYROLL_STATUS_CHOICES],
                     "leave_status": [{"value": r[0], "label": r[1]} for r in LEAVE_STATUS_CHOICES],
+                    "exam_mode": [{"value": r[0], "label": r[1]} for r in EXAM_MODE_CHOICES],
                     "exam_type": [{"value": r[0], "label": r[1]} for r in EXAM_TYPE_CHOICES],
                     "exam_status": [{"value": r[0], "label": r[1]} for r in EXAM_STATUS_CHOICES],
                 }

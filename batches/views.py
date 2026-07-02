@@ -969,6 +969,7 @@ class TimetableDuplicateSlotView(APIView):
         # 3. Validate inputs
         slot_code = request.data.get('slot_code')
         day_of_week = request.data.get('day_of_week')
+        session_date = request.data.get('session_date')
 
         from batches.constants import FIXED_SLOTS
         from batches.models import SLOT_CODE_CHOICES, DAY_CHOICES

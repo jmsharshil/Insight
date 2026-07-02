@@ -15,8 +15,8 @@ class SchedulerConfig(AppConfig):
     _started = False  # Class-level flag to prevent duplicate starts
 
     def ready(self):
-        # Prevent during tests
-        if "test" in sys.argv:
+        # Prevent during tests or management commands that run before DB is ready
+        if any(cmd in sys.argv for cmd in ("test", "makemigrations", "migrate", "check", "showmigrations")):
             return
 
         # Prevent duplicate starts
@@ -77,10 +77,18 @@ class SchedulerConfig(AppConfig):
 
         # register the scheduled tasks here
         from leave.tasks import accrue_monthly_leaves_task
+        from exams.tasks import (
+            update_exam_statuses,
+            send_pending_submission_reminders,
+            auto_expire_exam_sessions,
+        )
         TaskScheduler.register(
             "accrue_monthly_leaves",
             lambda: accrue_monthly_leaves_task()
         )
+        TaskScheduler.register("update_exam_statuses", update_exam_statuses)
+        TaskScheduler.register("send_pending_submission_reminders", send_pending_submission_reminders)
+        TaskScheduler.register("auto_expire_exam_sessions", auto_expire_exam_sessions)
         print("[SCHEDULER APP] All task types registered.")
 
     def _ensure_recurring_tasks(self):
@@ -96,6 +104,24 @@ class SchedulerConfig(AppConfig):
                 "interval_seconds": 86400,       # 24 hours (daily)
                 "delay_seconds": 60,             # first run after 60s
                 "max_retries": 3,
+            },
+            {
+                "task_type": "update_exam_statuses",
+                "interval_seconds": 60,          # every minute
+                "delay_seconds": 30,
+                "max_retries": 3,
+            },
+            {
+                "task_type": "auto_expire_exam_sessions",
+                "interval_seconds": 60,          # every minute
+                "delay_seconds": 45,
+                "max_retries": 3,
+            },
+            {
+                "task_type": "send_pending_submission_reminders",
+                "interval_seconds": 86400,       # daily
+                "delay_seconds": 300,            # 5 min after startup
+                "max_retries": 5,
             },
         ]
 
