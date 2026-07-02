@@ -291,7 +291,7 @@ class AdmissionDetailView(APIView):
                     eligible_banks = list(BankAccount.objects.filter(is_active=True))
                 assigned_bank = eligible_banks[0]
 
-                admission.bank_account = str(assigned_bank.id)
+                admission.bank_account = assigned_bank
                 admission.status = 'payment_pending'
                 admission.note = 'Form submitted. Waiting for fee payment.'
                 admission.save(update_fields=['bank_account', 'status', 'note', 'updated_at'])
