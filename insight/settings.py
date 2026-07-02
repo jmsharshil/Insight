@@ -119,7 +119,9 @@ ASGI_APPLICATION = 'insight.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-if DEBUG:
+CONNECTION_STRING = os.environ['AZURE_POSTGRESQL_CONNECTIONSTRING']
+
+if not CONNECTION_STRING:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -127,7 +129,6 @@ if DEBUG:
         }
     }
 else:
-    CONNECTION_STRING = os.environ['AZURE_POSTGRESQL_CONNECTIONSTRING']
     conn_str_params = {pair.split('=')[0]: pair.split('=')[1] for pair in CONNECTION_STRING.split(' ')}
     DATABASES = {
         'default': {
