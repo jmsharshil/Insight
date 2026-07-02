@@ -119,7 +119,7 @@ ASGI_APPLICATION = 'insight.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-CONNECTION_STRING = os.environ['AZURE_POSTGRESQL_CONNECTIONSTRING']
+CONNECTION_STRING = os.environ.get('AZURE_POSTGRESQL_CONNECTIONSTRING')
 
 if not CONNECTION_STRING:
     DATABASES = {
@@ -347,7 +347,7 @@ if not DEBUG:
             'file': {
                 'level': 'ERROR',
                 'class': 'logging.FileHandler',
-                'filename': '/home/site/wwwroot/django_errors.log',
+                'filename': os.getenv('DJANGO_LOG_FILE', os.path.join(BASE_DIR, 'django_errors.log')),
                 'formatter': 'verbose',
             },
         },
