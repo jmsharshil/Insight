@@ -99,11 +99,17 @@
 | `P5` | P5 (Custom Time) | *(manual)* | *(manual)* |
 | `P6` | P6 (Custom Time) | *(manual)* | *(manual)* |
 
-### A.4 Exam Type (`exam_type` inside `exam_data`)
-| Value | Display |
-| :--- | :--- |
-| `offline` | Offline |
-| `online` | Online |
+### A.4 Exam Mode & Type (inside `exam_data`)
+**Note:** The legacy `exam_type` field has been split per the v2 refactor:
+- `exam_mode`: `online` (digital proctored with geo/screen checks) or `offline` (paper-based with uploaded papers; bypasses auto total_marks recalculation).
+- `exam_type`: now narrowed to `mcq` (default, supports auto-grading) or `subjective` (manual checking).
+
+| Field | Value | Display | Notes |
+|------|-------|---------|-------|
+| `exam_mode` | `online` | Online | Default. Uses proctoring, geo-fencing, screen events, auto-grade for MCQ. |
+| `exam_mode` | `offline` | Offline | Paper-based. `total_marks` set manually from papers. No online flow. |
+| `exam_type` | `mcq` | MCQ | Default for most tests. |
+| `exam_type` | `subjective` | Subjective | Requires paper checker review. |
 
 ### A.5 Result Release Mode (`result_release_mode` inside `exam_data`)
 | Value | Display |
@@ -529,7 +535,8 @@ Exam types are reference records that categorize what kind of exam a timetable s
   "timetable_exam_type": "aaa00001-0000-0000-0000-000000000001",
   "exam_data": {
     "title": "Company Law — Ch 1 & 2 Class Test",
-    "exam_type": "offline",
+    "exam_mode": "offline",
+    "exam_type": "mcq",
     "total_marks": 50,
     "pass_marks": 18,
     "instructions": "Attempt all questions. Time: 90 minutes.",
@@ -537,8 +544,8 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "geo_lat": 23.0225,
     "geo_lon": 72.5714,
     "geo_radius_meters": 500,
-    "screen_lock_threshold": 3,
-    "screen_action": "flag_only"
+    "screen_lock_max_violations": 3,
+    "screen_lock_action": "flag_only"
   }
 }
 ```
@@ -630,7 +637,8 @@ Exam types are reference records that categorize what kind of exam a timetable s
   "timetable_exam_type": "aaa00002-0000-0000-0000-000000000002",
   "exam_data": {
     "title": "Company Law — June 2026 Prelim",
-    "exam_type": "offline",
+    "exam_mode": "offline",
+    "exam_type": "subjective",
     "total_marks": 100,
     "pass_marks": 35,
     "instructions": "All questions carry equal marks. Duration: 3 hours.",
@@ -638,9 +646,10 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "geo_lat": 23.0225,
     "geo_lon": 72.5714,
     "geo_radius_meters": 1000,
-    "screen_lock_threshold": 2,
-    "split_screen_threshold": 3,
-    "screen_action": "auto_submit"
+    "screen_lock_max_violations": 2,
+    "split_screen_max_warnings": 3,
+    "screen_lock_action": "auto_submit",
+    "split_screen_action": "auto_submit"
   }
 }
 ```

@@ -3,12 +3,49 @@ from exams.models import *
 
 @admin.register(Exam)
 class ExamAdmin(admin.ModelAdmin):
-    list_display = ('id', 'branch', 'batch', 'subject', 'title', 'exam_type', 'total_marks', 'pass_marks', 'duration_minutes', 'scheduled_date', 'status')
+    list_display = ('id', 'branch', 'batch', 'subject', 'title', 'exam_mode_display', 'exam_type', 'total_marks', 'pass_marks', 'duration_minutes', 'scheduled_date', 'status')
     search_fields = ('title',)
-    list_filter = ('is_deleted', 'exam_type', 'status', 'screen_lock_action', 'branch', 'subject', 'created_by', 'scheduled_date',)
+    list_filter = ('exam_mode', 'exam_type', 'status', 'screen_lock_action', 'branch', 'subject', 'created_by', 'scheduled_date',)
     filter_horizontal = ('paper_checkers',)
     raw_id_fields = ('faculty', 'batch', 'subject', 'created_by')
     readonly_fields = ('total_marks',)
+    actions = ['hard_delete_selected']
+
+    def exam_mode_display(self, obj):
+        return obj.get_exam_mode_display()
+    exam_mode_display.short_description = 'Exam Mode'
+    exam_mode_display.admin_order_field = 'exam_mode'
+
+    def get_queryset(self, request):
+        """Hide soft-deleted exams by default (consistent with API views)."""
+        qs = super().get_queryset(request)
+        return qs.filter(is_deleted=False)
+
+    def delete_model(self, request, obj):
+        """Use soft delete to match API behavior and prevent cascade issues."""
+        obj.is_deleted = True
+        obj.save(update_fields=['is_deleted'])
+        # Note: If you need to trigger signals or cleanup, do it here
+
+    def delete_queryset(self, request, queryset):
+        """Bulk soft delete for the admin action 'Delete selected ...'."""
+        queryset.update(is_deleted=True)
+
+    def hard_delete_selected(self, request, queryset):
+        """Permanently (hard) delete selected exams.
+        Use ONLY for test/experimental data. This triggers full cascades,
+        post_delete signals, and removes related Questions, Sessions, MarkSheets, etc.
+        """
+        count = queryset.count()
+        for exam in queryset:
+            exam.delete()  # Full hard delete (not soft)
+        self.message_user(
+            request,
+            f"Successfully hard-deleted {count} test exam(s) and all related data.",
+            level='WARNING'
+        )
+    hard_delete_selected.short_description = "🗑️ Permanently delete selected exams (HARD DELETE - test data only)"
+    hard_delete_selected.allowed_permissions = ('delete',)
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):

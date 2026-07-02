@@ -142,7 +142,7 @@ class EmailOTP(models.Model):
     is_verified = models.BooleanField(default=False)
 
     def is_expired(self):
-        return timezone.now() > self.created_at + timedelta(minutes=5)
+        return timezone.now() > self.created_at + timedelta(minutes=10)
 
     @staticmethod
     def generate_otp():

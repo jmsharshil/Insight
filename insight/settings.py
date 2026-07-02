@@ -29,7 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost','*','insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net']
 
@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "students",
     'branch',
     'core',
+    'scheduler',
     'auditlog',
     'reports',
     'chat',
@@ -118,7 +119,9 @@ ASGI_APPLICATION = 'insight.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-if DEBUG:
+CONNECTION_STRING = os.environ['AZURE_POSTGRESQL_CONNECTIONSTRING']
+
+if not CONNECTION_STRING:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -126,7 +129,6 @@ if DEBUG:
         }
     }
 else:
-    CONNECTION_STRING = os.environ['AZURE_POSTGRESQL_CONNECTIONSTRING']
     conn_str_params = {pair.split('=')[0]: pair.split('=')[1] for pair in CONNECTION_STRING.split(' ')}
     DATABASES = {
         'default': {
@@ -295,6 +297,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.29.226:5173",
     'http://192.168.1.226:5173',
     'https://034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app',
+    "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -362,6 +365,7 @@ CSRF_TRUSTED_ORIGINS = [
     'https://034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app',
     'https://kdcpk8rj-8000.inc1.devtunnels.ms',
     'https://kdcpk8rj-5173.inc1.devtunnels.ms',
+    "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net"
 ]
 
 # Only enable secure cookies in production (HTTPS).

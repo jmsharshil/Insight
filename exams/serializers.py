@@ -98,6 +98,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     faculty_name = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     exam_type_display = serializers.CharField(source="get_exam_type_display", read_only=True)
+    exam_mode_display = serializers.CharField(source="get_exam_mode_display", read_only=True)
     screen_lock_action_display = serializers.CharField(source="get_screen_lock_action_display", read_only=True)
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
@@ -110,7 +111,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exam
         fields = [
-            'id', 'title', 'exam_type', 'total_marks', 'pass_marks',
+            'id', 'title', 'exam_type', 'exam_mode', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'status', 'status_display', 'batch', 'batch_name', 'subject', 'subject_name',
             'faculty', 'faculty_id', 'faculty_name', 'branch', 'created_by', 'created_by_name', 'created_at',
@@ -119,7 +120,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
-            'exam_type_display', 'status_display', 'screen_lock_action_display',
+            'exam_type_display', 'exam_mode_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
             'selected_papers',
             'can_start_exam', 'questions_count', 'is_upcoming']
@@ -243,7 +244,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exam
         fields = [
-            'title', 'exam_type', 'batch', 'subject', 'faculty', 'total_marks', 'pass_marks',
+            'title', 'exam_type', 'exam_mode', 'batch', 'subject', 'faculty', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'instructions', 'geo_lat', 'geo_lon', 'geo_radius_meters',
             'status',
