@@ -6,9 +6,13 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
+EXAM_MODE_CHOICES = [
+    ('online', 'Online'),
+    ('offline', 'Offline'),
+]
 EXAM_TYPE_CHOICES = [
-    ('online', 'Online'), ('offline', 'Offline'),
-    ('mcq', 'MCQ'), ('subjective', 'Subjective'),
+    ('mcq', 'MCQ'),
+    ('subjective', 'Subjective'),
 ]
 EXAM_STATUS_CHOICES = [
     ('draft', 'Draft'), ('scheduled', 'Scheduled'), ('ongoing', 'Ongoing'),
@@ -38,6 +42,12 @@ class Exam(models.Model):
     faculty = models.ForeignKey('faculty.FacultyProfile', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_exams')
     title = models.CharField(max_length=200)
     exam_type = models.CharField(max_length=20, choices=EXAM_TYPE_CHOICES)
+    exam_mode = models.CharField(
+        max_length=10,
+        choices=EXAM_MODE_CHOICES,
+        default='online',
+        help_text='Mode of exam (online = digital proctored, offline = paper-based with uploaded question papers)'
+    )
     total_marks = models.IntegerField(
         default=0,
         help_text='Auto-calculated as sum of all questions.marks (questions including MCQs can have varying marks per question). Updated automatically via signals.'
@@ -110,8 +120,9 @@ class Exam(models.Model):
         """Auto-calculate and update total_marks based on sum of all associated questions' marks.
         Questions (MCQ, subjective, true_false) can have independent/varying marks.
         Called automatically from exams/signals.py receivers on Question create/update/delete.
+        For offline exams, total_marks is manually set (from uploaded papers).
         """
-        if self.exam_type == 'offline':
+        if self.exam_mode == 'offline':
             return self.total_marks
             
         from django.db.models import Sum

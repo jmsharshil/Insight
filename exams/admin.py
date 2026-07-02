@@ -3,13 +3,18 @@ from exams.models import *
 
 @admin.register(Exam)
 class ExamAdmin(admin.ModelAdmin):
-    list_display = ('id', 'branch', 'batch', 'subject', 'title', 'exam_type', 'total_marks', 'pass_marks', 'duration_minutes', 'scheduled_date', 'status')
+    list_display = ('id', 'branch', 'batch', 'subject', 'title', 'exam_mode_display', 'exam_type', 'total_marks', 'pass_marks', 'duration_minutes', 'scheduled_date', 'status')
     search_fields = ('title',)
-    list_filter = ('exam_type', 'status', 'screen_lock_action', 'branch', 'subject', 'created_by', 'scheduled_date',)
+    list_filter = ('exam_mode', 'exam_type', 'status', 'screen_lock_action', 'branch', 'subject', 'created_by', 'scheduled_date',)
     filter_horizontal = ('paper_checkers',)
     raw_id_fields = ('faculty', 'batch', 'subject', 'created_by')
     readonly_fields = ('total_marks',)
     actions = ['hard_delete_selected']
+
+    def exam_mode_display(self, obj):
+        return obj.get_exam_mode_display()
+    exam_mode_display.short_description = 'Exam Mode'
+    exam_mode_display.admin_order_field = 'exam_mode'
 
     def get_queryset(self, request):
         """Hide soft-deleted exams by default (consistent with API views)."""
