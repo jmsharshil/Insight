@@ -13,8 +13,8 @@ class AuditlogConfig(AppConfig):
         import os
         import sys
 
-        # Prevent during tests
-        if 'test' in sys.argv:
+        # Prevent during tests and migrations
+        if any(cmd in sys.argv for cmd in ('test', 'migrate', 'makemigrations', 'collectstatic')):
             return
 
         # Prevent duplicate starts
