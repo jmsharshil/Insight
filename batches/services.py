@@ -133,9 +133,9 @@ def auto_assign_batch(student):
                 branch_prefix = 'BXX'
 
         if branch_prefix:
-            batch_name = f"{branch_prefix} {course_type.upper()} {batch_attempt.upper()}'{year_suffix} {sequence}"
+            batch_name = f"{branch_prefix}_{course_type.upper()}_{batch_attempt.upper()}_{year_suffix}_{sequence}"
         else:
-            batch_name = f"{course_type.upper()} {batch_attempt.upper()}'{year_suffix} {sequence}"
+            batch_name = f"{course_type.upper()}_{batch_attempt.upper()}_{year_suffix}_{sequence}"
 
         today = timezone.now().date()
 

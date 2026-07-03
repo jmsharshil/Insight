@@ -147,7 +147,7 @@ class BatchSequenceCounter(models.Model):
 
     def __str__(self):
         branch_str = f" branch={self.branch_id}" if self.branch_id else ""
-        return f"{self.course_type}_{self.batch_attempt}_{self.attempt_year}{branch_str}: seq={self.last_sequence}"
+        return f"{self.course_type}_{self.batch_attempt}_{self.attempt_year}_{branch_str}_seq={self.last_sequence}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -246,9 +246,9 @@ class Batch(models.Model):
                     parts = self.branch.name.split('-')
                     if len(parts) >= 2:
                         bseq = parts[-1]  # last segment
-                        branch_prefix = f"B{bseq.lstrip('0') or '0'}"
+                        branch_prefix = f"{bseq.lstrip('0') or '0'}".upper()
                     else:
-                        branch_prefix = f"B{self.branch.name[:4]}"
+                        branch_prefix = f"{self.branch.name[:4]}".upper()
                 except Exception:
                     branch_prefix = 'BXX'
 
@@ -257,11 +257,11 @@ class Batch(models.Model):
             year_str = str(year)[-2:] if year else ""
 
             if branch_prefix:
-                self.name = f"{branch_prefix} {ct_upper} {attempt_upper}'{year_str} {seq}"
+                self.name = f"{branch_prefix}_{ct_upper}_{attempt_upper}_{year_str}_{seq}"
             elif attempt_upper:
-                self.name = f"{ct_upper} {attempt_upper}'{year_str} {seq}"
+                self.name = f"{ct_upper}_{attempt_upper}_{year_str}_{seq}"
             else:
-                self.name = f"{ct_upper} '{year_str} {seq}"
+                self.name = f"{ct_upper}_{year_str}_{seq}"
             self.is_auto_created = True
 
         # Generate QR code for the batch using its ID (which is pre-assigned via uuid4 default)
