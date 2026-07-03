@@ -1068,7 +1068,7 @@ class EmployeeCheckInOutView(APIView):
                     'success': False,
                     'message': 'Already checked in today.',
                     'data': EmployeeAttendanceRecordSerializer(record).data,
-                }, status=status.HTTP_409_CONFLICT)
+                }, status=status.HTTP_200_OK)
             record.checked_in_at = now
             record.status = 'checkout_pending'
             record.save(update_fields=['checked_in_at', 'status'])
@@ -1083,7 +1083,7 @@ class EmployeeCheckInOutView(APIView):
                     'success': False,
                     'message': 'Already checked out today.',
                     'data': EmployeeAttendanceRecordSerializer(record).data,
-                }, status=status.HTTP_409_CONFLICT)
+                }, status=status.HTTP_200_OK)
             record.checked_out_at = now
             record.status = 'present'
             record.save(update_fields=['checked_out_at', 'status'])
