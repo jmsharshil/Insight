@@ -132,6 +132,24 @@ class Subject(models.Model):
         return total
 
 
+# E1 ─ Sequence counter for auto batch naming (branch-aware)
+class BatchSequenceCounter(models.Model):
+    id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    course_type   = models.CharField(max_length=20)   # 'cseet' / 'cs_executive' / 'cs_professional'
+    batch_attempt = models.CharField(max_length=10)   # 'june' / 'oct' / 'feb' / 'dec'
+    attempt_year  = models.PositiveSmallIntegerField()
+    branch        = models.ForeignKey('branch.Branch', null=True, blank=True, on_delete=models.CASCADE, related_name='sequence_counters')
+    last_sequence = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        db_table = 'batch_sequence_counters'
+        unique_together = ('course_type', 'batch_attempt', 'attempt_year', 'branch')
+
+    def __str__(self):
+        branch_str = f" branch={self.branch_id}" if self.branch_id else ""
+        return f"{self.course_type}_{self.batch_attempt}_{self.attempt_year}{branch_str}: seq={self.last_sequence}"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Batch
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -201,12 +219,17 @@ class Batch(models.Model):
 
             attempt = self.batch_attempt or 'unknown'
 
-            # Use BatchSequenceCounter to maintain sequence per (course_type, batch_attempt, year)
+            # Use BatchSequenceCounter
             try:
+                counter_kwargs = {
+                    'course_type': course_type,
+                    'batch_attempt': attempt,
+                    'attempt_year': year,
+                }
+                if self.branch:
+                    counter_kwargs['branch'] = self.branch
                 counter, created = BatchSequenceCounter.objects.get_or_create(
-                    course_type=course_type,
-                    batch_attempt=attempt,
-                    attempt_year=year,
+                    **counter_kwargs,
                     defaults={'last_sequence': 100},
                 )
                 counter.last_sequence = (counter.last_sequence or 100) + 1
@@ -214,14 +237,28 @@ class Batch(models.Model):
                 seq = counter.last_sequence
             except Exception:
                 # Fallback: compute sequence by counting existing similar names
-                # Count for old format and new format just in case
                 seq = (Batch.objects.filter(name__icontains=course_type).count() + 101)
+
+            # Compute branch prefix for name differentiation
+            branch_prefix = ''
+            if self.branch and getattr(self.branch, 'name', None):
+                try:
+                    parts = self.branch.name.split('-')
+                    if len(parts) >= 2:
+                        bseq = parts[-1]  # last segment
+                        branch_prefix = f"B{bseq.lstrip('0') or '0'}"
+                    else:
+                        branch_prefix = f"B{self.branch.name[:4]}"
+                except Exception:
+                    branch_prefix = 'BXX'
 
             ct_upper = str(course_type).upper() if course_type else ""
             attempt_upper = str(attempt).upper() if attempt and attempt != 'unknown' else ""
             year_str = str(year)[-2:] if year else ""
-            
-            if attempt_upper:
+
+            if branch_prefix:
+                self.name = f"{branch_prefix} {ct_upper} {attempt_upper}'{year_str} {seq}"
+            elif attempt_upper:
                 self.name = f"{ct_upper} {attempt_upper}'{year_str} {seq}"
             else:
                 self.name = f"{ct_upper} '{year_str} {seq}"
@@ -268,22 +305,8 @@ class BatchStudent(models.Model):
     def __str__(self):
         return f"{self.student.full_name} → {self.batch.batch_code}"
 
+
 from faculty.models import FacultyProfile
-
-# E1 ─ Sequence counter for auto batch naming
-class BatchSequenceCounter(models.Model):
-    id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    course_type   = models.CharField(max_length=20)   # 'cseet' / 'cs_executive' / 'cs_professional'
-    batch_attempt = models.CharField(max_length=10)   # 'june' / 'oct' / 'feb' / 'dec'
-    attempt_year  = models.PositiveSmallIntegerField()
-    last_sequence = models.PositiveIntegerField(default=100)
-
-    class Meta:
-        db_table = 'batch_sequence_counters'
-        unique_together = ('course_type', 'batch_attempt', 'attempt_year')
-
-    def __str__(self):
-        return f"{self.course_type}_{self.batch_attempt}_{self.attempt_year}: seq={self.last_sequence}"
 
 class BatchFaculty(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
