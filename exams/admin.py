@@ -23,14 +23,13 @@ class ExamAdmin(admin.ModelAdmin):
 
     def delete_model(self, request, obj):
         """Use soft delete to match API behavior and prevent cascade issues."""
-        # obj.is_deleted = True
-        # obj.save(update_fields=['is_deleted'])
+        obj.is_deleted = True
+        obj.save(update_fields=['is_deleted'])
         # Note: If you need to trigger signals or cleanup, do it here
 
     def delete_queryset(self, request, queryset):
         """Bulk soft delete for the admin action 'Delete selected ...'."""
-        # queryset.update(is_deleted=True)
-        pass
+        queryset.update(is_deleted=True)
 
     def hard_delete_selected(self, request, queryset):
         """Permanently (hard) delete selected exams.

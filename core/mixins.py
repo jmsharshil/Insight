@@ -23,9 +23,8 @@ class SoftDeleteMixin(models.Model):
         abstract = True
 
     def soft_delete(self):
-        # self.is_deleted = True
-        # self.save(update_fields=['is_deleted'])
-        pass
+        self.is_deleted = True
+        self.save(update_fields=['is_deleted'])
 
 
 class UUIDPrimaryKeyMixin(models.Model):

@@ -237,11 +237,11 @@ class FacultyDetailView(APIView):
         if fp is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # fp.is_active = False
-        # fp.save(update_fields=['is_active'])
+        fp.is_active = False
+        fp.save(update_fields=['is_active'])
         # Also deactivate the user account
-        # fp.user.is_active = False
-        # fp.user.save(update_fields=['is_active'])
+        fp.user.is_active = False
+        fp.user.save(update_fields=['is_active'])
         return Response({'success': True, 'message': 'Faculty deactivated.'}, status=status.HTTP_200_OK)
 
 

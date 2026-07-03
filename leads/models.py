@@ -21,6 +21,7 @@ GROUP_MODULE_CHOICES = [
     ('both', 'Both Modules'),
     ('module_1', '1st Module'),
     ('module_2', '2nd Module'),
+    ('module_3', '3rd Module'),
 ]
 
 ATTEMPT_TYPE_CHOICES = [

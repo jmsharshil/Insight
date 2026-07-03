@@ -576,8 +576,8 @@ class LeavePolicyDetailView(APIView):
         except LeavePolicy.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # policy.is_active = False
-        # policy.save(update_fields=['is_active'])
+        policy.is_active = False
+        policy.save(update_fields=['is_active'])
         return Response({'success': True, 'message': 'Leave policy deactivated.'})
 
 

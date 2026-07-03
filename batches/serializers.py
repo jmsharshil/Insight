@@ -220,6 +220,9 @@ class BatchDetailSerializer(serializers.ModelSerializer):
 
 
 class BatchCreateUpdateSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    batch_code = serializers.CharField(max_length=30, required=False, allow_blank=True)
+
     class Meta:
         model = Batch
         fields = ['course', 'name', 'batch_code', 'group_module',
