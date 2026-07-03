@@ -35,7 +35,6 @@ ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','
 
 
 # Application definition
-
 INSTALLED_APPS = [
     'daphne',                     # must be first — provides ASGI server
     'django.contrib.admin',
