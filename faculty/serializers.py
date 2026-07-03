@@ -40,11 +40,12 @@ class FacultyListSerializer(serializers.ModelSerializer):
         return obj.branch.name if obj.branch else ''
 
     def get_photo_url(self, obj):
-        if obj.photo and hasattr(obj.photo, 'url'):
+        photo = obj.photo if obj.photo else (obj.user.profile_pic if obj.user and hasattr(obj.user, 'profile_pic') else None)
+        if photo and hasattr(photo, 'url'):
             request = self.context.get('request')
             if request:
-                return request.build_absolute_uri(obj.photo.url)
-            return obj.photo.url
+                return request.build_absolute_uri(photo.url)
+            return photo.url
         return None
 
     def get_batch_name(self, obj):
@@ -78,6 +79,9 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
     level_display = serializers.CharField(source="get_level_display", read_only=True)
     employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
     batch_name = serializers.SerializerMethodField()
+    bank_account = serializers.SerializerMethodField()
+    ifsc_code = serializers.SerializerMethodField()
+    pan_number = serializers.SerializerMethodField()
 
     hour_based_amount = serializers.SerializerMethodField()
     
@@ -106,11 +110,12 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
         return getattr(obj.user, 'phone', '') if obj.user else ''
 
     def get_photo_url(self, obj):
-        if obj.photo and hasattr(obj.photo, 'url'):
+        photo = obj.photo if obj.photo else (obj.user.profile_pic if obj.user and hasattr(obj.user, 'profile_pic') else None)
+        if photo and hasattr(photo, 'url'):
             request = self.context.get('request')
             if request:
-                return request.build_absolute_uri(obj.photo.url)
-            return obj.photo.url
+                return request.build_absolute_uri(photo.url)
+            return photo.url
         return None
 
     def get_qr_code_url(self, obj):
@@ -140,6 +145,15 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
             if name not in unique_names:
                 unique_names.append(name)
         return ", ".join(unique_names)
+
+    def get_bank_account(self, obj):
+        return obj.bank_account or (obj.user.bank_account if obj.user and hasattr(obj.user, 'bank_account') else '')
+
+    def get_ifsc_code(self, obj):
+        return obj.ifsc_code or (obj.user.ifsc_code if obj.user and hasattr(obj.user, 'ifsc_code') else '')
+
+    def get_pan_number(self, obj):
+        return obj.pan_number or (obj.user.pan_number if obj.user and hasattr(obj.user, 'pan_number') else '')
 
     def get_hour_based_amount(self, obj):
         from django.utils import timezone
