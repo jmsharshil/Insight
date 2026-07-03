@@ -907,6 +907,15 @@ class StudentLeaveListCreateView(APIView):
                 qs = StudentLeaveApplication.objects.filter(student=student).select_related('reviewed_by', 'received_by')
             except Exception:
                 return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        elif role == 'parents':
+            try:
+                from students.models import Student
+                students = Student.objects.filter(parent_links__parent=request.user)
+                if not students.exists():
+                    return Response({'success': False, 'message': 'No linked students found.'}, status=status.HTTP_404_NOT_FOUND)
+                qs = StudentLeaveApplication.objects.filter(student__in=students).select_related('reviewed_by', 'received_by')
+            except Exception:
+                return Response({'success': False, 'message': 'Parent profile not found.'}, status=status.HTTP_404_NOT_FOUND)
         else:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -954,6 +963,15 @@ class StudentLeaveListCreateView(APIView):
                 student = Student.objects.get(id=student_id)
             except Exception:
                 return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+        elif role == 'parents':
+            student_id = request.data.get('student_id')
+            if not student_id:
+                return Response({'success': False, 'message': 'student_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                from students.models import Student
+                student = Student.objects.get(id=student_id, parent_links__parent=request.user)
+            except Exception:
+                return Response({'success': False, 'message': 'Student not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
         else:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -991,15 +1009,23 @@ class StudentLeaveDetailView(APIView):
             return None
 
     def _is_own(self, request, app):
-        """Check if the requesting student owns this leave."""
-        if _user_role(request.user) != 'student':
-            return False
-        try:
-            from students.models import Student
-            student = Student.objects.filter(user=request.user).first()
-            return student and app.student_id == student.id
-        except Exception:
-            return False
+        """Check if the requesting student or parent owns this leave."""
+        role = _user_role(request.user)
+        if role == 'student':
+            try:
+                from students.models import Student
+                student = Student.objects.filter(user=request.user).first()
+                return student and app.student_id == student.id
+            except Exception:
+                return False
+        elif role == 'parents':
+            try:
+                from students.models import Student
+                students = Student.objects.filter(parent_links__parent=request.user)
+                return students.filter(id=app.student_id).exists()
+            except Exception:
+                return False
+        return False
 
     def get(self, request, leave_id):
         app = self._get_leave(request, leave_id)
