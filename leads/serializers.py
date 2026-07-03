@@ -35,7 +35,7 @@ VALID_COMBINATIONS = {
         'batch_attempt': ['june', 'dec'],
     },
     'cs_professional': {
-        'group_module':  ['both', 'module_1', 'module_2'],
+        'group_module':  ['both', 'module_1', 'module_2', 'module_3'],
         'batch_attempt': ['june', 'dec'],
     },
 }

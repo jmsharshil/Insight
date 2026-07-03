@@ -381,6 +381,97 @@ class SubjectRateDetailView(APIView):
 class FacultyQRCheckinView(APIView):
     # permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        from django.utils import timezone
+        
+        role = _user_role(request.user)
+        if role != 'faculty':
+            return Response({'success': False, 'message': 'Faculty only.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        try:
+            fp = FacultyProfile.objects.get(user=request.user)
+        except FacultyProfile.DoesNotExist:
+            return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get active check-in time if checked in today
+        from .models import FacultyQRScanLog
+        today = timezone.now().date()
+        last_log = FacultyQRScanLog.objects.filter(faculty=fp, scanned_at__date=today).order_by('-scanned_at').first()
+        start_time = None
+        if last_log and last_log.scan_type == 'check_in':
+            start_time = last_log.scanned_at.strftime('%H:%M')
+
+        # Get assigned batches, subjects, and chapters based on today's timetable slots
+        from batches.models import TimetableSlot, Chapter
+        from django.db.models import Q
+        
+        now = timezone.now()
+        dow = now.weekday()
+        
+        slots = TimetableSlot.objects.filter(
+            Q(day_of_week=dow) | Q(session_date=now.date()),
+            faculty=fp, batch__is_active=True
+        ).select_related('batch', 'subject')
+        
+        batches_dict = {}
+        for slot in slots:
+            if not slot.batch:
+                continue
+            b_id = str(slot.batch.id)
+            if b_id not in batches_dict:
+                batches_dict[b_id] = {
+                    'id': b_id,
+                    'name': slot.batch.name,
+                    'subjects': []
+                }
+            if slot.subject:
+                # Avoid duplicate subjects if multiple slots have the same subject today
+                subject_exists = any(s['id'] == str(slot.subject.id) for s in batches_dict[b_id]['subjects'])
+                if not subject_exists:
+                    chapters = Chapter.objects.filter(subject=slot.subject, is_active=True).order_by('order')
+                    chapters_data = [{'id': str(c.id), 'name': c.name, 'order': c.order} for c in chapters]
+                    batches_dict[b_id]['subjects'].append({
+                        'id': str(slot.subject.id),
+                        'name': slot.subject.name,
+                        'chapters': chapters_data
+                    })
+
+        # FALLBACK: If there are no timetable slots today, fallback to all static assignments
+        if not batches_dict:
+            from batches.models import BatchFaculty
+            bf_qs = BatchFaculty.objects.filter(faculty=fp, batch__is_active=True).select_related('batch', 'subject')
+            for bf in bf_qs:
+                if not bf.batch:
+                    continue
+                b_id = str(bf.batch.id)
+                if b_id not in batches_dict:
+                    batches_dict[b_id] = {
+                        'id': b_id,
+                        'name': bf.batch.name,
+                        'subjects': []
+                    }
+                if bf.subject:
+                    subject_exists = any(s['id'] == str(bf.subject.id) for s in batches_dict[b_id]['subjects'])
+                    if not subject_exists:
+                        chapters = Chapter.objects.filter(subject=bf.subject, is_active=True).order_by('order')
+                        chapters_data = [{'id': str(c.id), 'name': c.name, 'order': c.order} for c in chapters]
+                        batches_dict[b_id]['subjects'].append({
+                            'id': str(bf.subject.id),
+                            'name': bf.subject.name,
+                            'chapters': chapters_data
+                        })
+
+        data = {
+            'faculty_id': str(fp.id),
+            'faculty_name': fp.user.name,
+            'date': today.strftime('%d-%m-%Y'),
+            'start_time': start_time,
+            'end_time': timezone.now().strftime('%H:%M'),
+            'batches': list(batches_dict.values())
+        }
+
+        return Response({'success': True, 'data': data})
+
     def post(self, request):
         role = _user_role(request.user)
         if role != 'faculty':

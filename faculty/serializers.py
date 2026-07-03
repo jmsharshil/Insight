@@ -5,14 +5,24 @@ from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHour
 # ═══ Faculty Profile ══════════════════════════════════════════════════════════
 
 class FacultyListSerializer(serializers.ModelSerializer):
+
+    level = serializers.CharField(source='user.level', read_only=True)
+    employment_type = serializers.CharField(source='user.employment_type', read_only=True)
+    specialization = serializers.CharField(source='user.specialization', read_only=True)
+    subject_expertise = serializers.CharField(source='user.subject_expertise', read_only=True)
+    joining_date = serializers.DateField(source='user.joining_date', read_only=True)
+    work_start_time = serializers.TimeField(source='user.work_start_time', read_only=True)
+    work_end_time = serializers.TimeField(source='user.work_end_time', read_only=True)
+    salary_retention_percentage = serializers.DecimalField(source='user.salary_retention_percentage', max_digits=5, decimal_places=2, read_only=True)
+
     full_name = serializers.SerializerMethodField()
     email = serializers.SerializerMethodField()
     phone = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     batch_count = serializers.IntegerField(read_only=True, default=0)
-    level_display = serializers.CharField(source="get_level_display", read_only=True)
-    employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
+    level_display = serializers.SerializerMethodField()
+    employment_type_display = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     subjects = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
@@ -38,6 +48,12 @@ class FacultyListSerializer(serializers.ModelSerializer):
 
     def get_branch_name(self, obj):
         return obj.branch.name if obj.branch else ''
+
+    def get_level_display(self, obj):
+        return obj.user.get_level_display() if obj.user else obj.get_level_display()
+        
+    def get_employment_type_display(self, obj):
+        return obj.user.get_employment_type_display() if obj.user else obj.get_employment_type_display()
 
     def get_photo_url(self, obj):
         photo = obj.photo if obj.photo else (obj.user.profile_pic if obj.user and hasattr(obj.user, 'profile_pic') else None)
@@ -71,13 +87,27 @@ class FacultyListSerializer(serializers.ModelSerializer):
 
 
 class FacultyDetailSerializer(serializers.ModelSerializer):
+
+    qualification = serializers.CharField(source='user.qualification', read_only=True)
+    specialization = serializers.CharField(source='user.specialization', read_only=True)
+    subject_expertise = serializers.CharField(source='user.subject_expertise', read_only=True)
+    level = serializers.CharField(source='user.level', read_only=True)
+    employment_type = serializers.CharField(source='user.employment_type', read_only=True)
+    joining_date = serializers.DateField(source='user.joining_date', read_only=True)
+    salary = serializers.DecimalField(source='user.salary', max_digits=10, decimal_places=2, read_only=True)
+    hourly_rate = serializers.DecimalField(source='user.hourly_rate', max_digits=8, decimal_places=2, read_only=True)
+    salary_retention_percentage = serializers.DecimalField(source='user.salary_retention_percentage', max_digits=5, decimal_places=2, read_only=True)
+    work_start_time = serializers.TimeField(source='user.work_start_time', read_only=True)
+    work_end_time = serializers.TimeField(source='user.work_end_time', read_only=True)
+    session_hours = serializers.DecimalField(source='user.session_hours', max_digits=5, decimal_places=2, read_only=True)
+
     full_name = serializers.SerializerMethodField()
     email = serializers.SerializerMethodField()
     phone = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     qr_code_url = serializers.SerializerMethodField()
-    level_display = serializers.CharField(source="get_level_display", read_only=True)
-    employment_type_display = serializers.CharField(source="get_employment_type_display", read_only=True)
+    level_display = serializers.SerializerMethodField()
+    employment_type_display = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     bank_account = serializers.SerializerMethodField()
     ifsc_code = serializers.SerializerMethodField()
@@ -108,6 +138,12 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
 
     def get_phone(self, obj):
         return getattr(obj.user, 'phone', '') if obj.user else ''
+
+    def get_level_display(self, obj):
+        return obj.user.get_level_display() if obj.user else obj.get_level_display()
+        
+    def get_employment_type_display(self, obj):
+        return obj.user.get_employment_type_display() if obj.user else obj.get_employment_type_display()
 
     def get_photo_url(self, obj):
         photo = obj.photo if obj.photo else (obj.user.profile_pic if obj.user and hasattr(obj.user, 'profile_pic') else None)
@@ -340,22 +376,55 @@ class SessionReportCreateSerializer(serializers.Serializer):
     batch_id = serializers.UUIDField()
     subject_id = serializers.UUIDField()
     timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)
-    session_date = serializers.DateField()
-    chapter_covered = serializers.CharField(max_length=300)
-    topics_covered = serializers.CharField()
-    completion_percentage = serializers.IntegerField(default=100, min_value=0, max_value=100)
-    # NEW (FRD §4.8.3): completion percentage 0-100
-    status = serializers.ChoiceField(choices=['in_progress', 'completed'], default='completed')
-    start_time = serializers.TimeField()
-    end_time = serializers.TimeField()
-    notes = serializers.CharField(required=False, default='')
+    session_date = serializers.DateField(input_formats=['iso-8601', '%Y-%m-%d', '%d-%m-%Y'], required=False, allow_null=True)
+    chapter_covered = serializers.JSONField(required=False, allow_null=True)
+    topics_covered = serializers.JSONField(required=False, allow_null=True)
+    completion_percentage = serializers.IntegerField(default=100, min_value=0, max_value=100, required=False)
+    status = serializers.ChoiceField(choices=['in_progress', 'completed'], default='completed', required=False)
+    start_time = serializers.TimeField(input_formats=['iso-8601', '%H:%M:%S', '%H:%M'], required=False, allow_null=True)
+    end_time = serializers.TimeField(input_formats=['iso-8601', '%H:%M:%S', '%H:%M'], required=False, allow_null=True)
+    notes = serializers.CharField(required=False, default='', allow_blank=True)
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else data
+        
+        # Ensure chapter_covered is string
+        cc = data.get('chapter_covered')
+        if isinstance(cc, list):
+            data['chapter_covered'] = ", ".join(str(x) for x in cc)
+        elif isinstance(cc, dict):
+            data['chapter_covered'] = str(cc.get('id', cc.get('name', '')))
+            
+        # Ensure topics_covered is string
+        tc = data.get('topics_covered')
+        if isinstance(tc, list):
+            data['topics_covered'] = ", ".join(str(x) for x in tc)
+        elif not tc:
+            data['topics_covered'] = "General"
+            
+        return super().to_internal_value(data)
 
     def validate(self, data):
-        if data['end_time'] <= data['start_time']:
-            raise serializers.ValidationError({'end_time': 'Must be after start_time.'})
         from django.utils import timezone
+        
+        if not data.get('session_date'):
+            data['session_date'] = timezone.now().date()
+            
+        if not data.get('start_time'):
+            data['start_time'] = timezone.now().time()
+            
+        if not data.get('end_time'):
+            data['end_time'] = timezone.now().time()
+            
+        if data['end_time'] <= data['start_time']:
+            data['end_time'] = (timezone.now() + timezone.timedelta(hours=1)).time()
+            
         if data['session_date'] > timezone.now().date():
-            raise serializers.ValidationError({'session_date': 'Cannot be a future date.'})
+            data['session_date'] = timezone.now().date()
+            
+        if not data.get('chapter_covered'):
+            data['chapter_covered'] = "General"
+            
         return data
 
 
