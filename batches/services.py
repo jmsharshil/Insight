@@ -59,6 +59,8 @@ def auto_assign_batch(student):
             "Please create a Course (with matching CourseLevel) before enrolling students."
         )
 
+    group_module = admission.group_module or ''
+
     # ── Step 1: find an existing batch with room (now uses exact course_obj) ──
     existing_batches = (
         Batch.objects
@@ -66,6 +68,7 @@ def auto_assign_batch(student):
             course=course_obj,
             batch_attempt=batch_attempt,
             attempt_year=attempt_year,
+            group_module=group_module,
             is_active=True,
         )
         .distinct()
@@ -113,6 +116,7 @@ def auto_assign_batch(student):
             name=batch_name,
             batch_attempt=batch_attempt,
             attempt_year=attempt_year,
+            group_module=group_module,
             auto_sequence=sequence,
             is_auto_created=True,
             is_active=True,
