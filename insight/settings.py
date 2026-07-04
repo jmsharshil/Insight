@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'reports',
     'chat',
     'inventory',
+    'dashboard',
     'django_filters',
 ]
 
