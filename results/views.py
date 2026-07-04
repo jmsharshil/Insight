@@ -67,17 +67,24 @@ def build_exam_export_workbook(rows):
 
     for row_index, row in enumerate(rows, start=2):
         sheet.append(row)
+        marks_obtained = row[2]
         percentage_value = row[4]
+        is_absent = row[9] if len(row) > 9 else False
         try:
             numeric_percentage = float(percentage_value) if percentage_value is not None else None
         except (TypeError, ValueError):
             numeric_percentage = None
 
-        if numeric_percentage is not None:
-            if numeric_percentage < 40:
-                sheet.cell(row=row_index, column=3).fill = red_fill
-            elif highest_percentage is not None and numeric_percentage == highest_percentage:
-                sheet.cell(row=row_index, column=3).fill = green_fill
+        if is_absent:
+            sheet.cell(row=row_index, column=3).value = 'AB'
+            sheet.cell(row=row_index, column=3).fill = red_fill
+        else:
+            sheet.cell(row=row_index, column=3).value = marks_obtained
+            if numeric_percentage is not None:
+                if numeric_percentage < 40:
+                    sheet.cell(row=row_index, column=3).fill = red_fill
+                elif highest_percentage is not None and numeric_percentage == highest_percentage:
+                    sheet.cell(row=row_index, column=3).fill = green_fill
 
     for column in sheet.columns:
         non_empty_values = [cell.value for cell in column if cell.value is not None]

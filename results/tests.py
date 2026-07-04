@@ -25,3 +25,15 @@ class ExamExportWorkbookTests(SimpleTestCase):
         self.assertEqual(sheet["C3"].fill.patternType, "solid")
         self.assertNotEqual(sheet["C2"].fill.fgColor.rgb, None)
         self.assertNotEqual(sheet["C3"].fill.fgColor.rgb, None)
+
+    def test_absent_students_render_ab_and_red(self):
+        rows = [
+            ("Charlie", "R3", None, 100, None, 3, False, timezone.now(), "Math", True),
+        ]
+
+        workbook = build_exam_export_workbook(rows)
+        sheet = workbook.active
+
+        self.assertEqual(sheet["C2"].value, "AB")
+        self.assertEqual(sheet["C2"].fill.patternType, "solid")
+        self.assertEqual(sheet["C2"].fill.fgColor.rgb, "00FFC7CE")
