@@ -162,3 +162,44 @@ def has_overdue_installment(student_id):
         due_date__lt=threshold,
         plan__status__in=['approved', 'active'],
     ).exists()
+
+
+def get_refund_policy(payment, requested_amount=None):
+    """Return refund eligibility and the capped amount based on payment age."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    payment_date = getattr(payment, 'payment_date', None) or getattr(payment, 'created_at', None)
+    if payment_date is None:
+        return {
+            'eligible': False,
+            'reason': 'Payment date is unavailable.',
+            'max_refundable_amount': Decimal('0'),
+            'deduction_percent': Decimal('100'),
+        }
+
+    age_days = (timezone.now().date() - payment_date.date()).days
+    cap = Decimal('0')
+    deduction_percent = Decimal('100')
+
+    if age_days > 7:
+        return {
+            'eligible': False,
+            'reason': 'Refund not allowed after 7 days from payment date.',
+            'max_refundable_amount': cap,
+            'deduction_percent': deduction_percent,
+        }
+
+    if age_days <= 7:
+        deduction_percent = Decimal('10')
+        cap = (Decimal(str(getattr(payment, 'amount', 0))) * (Decimal('100') - deduction_percent)) / Decimal('100')
+
+    requested = Decimal(str(requested_amount if requested_amount is not None else getattr(payment, 'amount', 0)))
+    max_refundable = min(requested, cap)
+
+    return {
+        'eligible': True,
+        'reason': 'Refund allowed with 10% deduction within 7 days.',
+        'max_refundable_amount': max_refundable,
+        'deduction_percent': deduction_percent,
+    }

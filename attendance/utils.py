@@ -1,6 +1,6 @@
 import calendar
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from django.db.models import Avg, Count, Q, F
 from django.db.models.functions import ExtractHour, ExtractMinute
@@ -340,6 +340,33 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
          + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2)
     c = 2 * math.asin(math.sqrt(a))
     return R * c
+
+
+def get_attendance_buffer_minutes(timetable_slot, scan_time, is_first_class_of_day=False):
+    """Return the allowed grace window in minutes for a check-in scan."""
+    if is_first_class_of_day:
+        return 15
+    return 5
+
+
+def get_attendance_entry_status(timetable_slot, scan_time, is_first_class_of_day=False):
+    """Return 'on_time' or 'late_entry' based on the configured grace buffer."""
+    if timetable_slot is None:
+        return 'on_time'
+
+    start_time = getattr(timetable_slot, 'start_time', None)
+    if start_time is None:
+        return 'on_time'
+
+    buffer_minutes = get_attendance_buffer_minutes(timetable_slot, scan_time, is_first_class_of_day=is_first_class_of_day)
+    scan_dt = scan_time
+    if hasattr(scan_dt, 'date'):
+        scan_dt = datetime.combine(scan_dt.date(), scan_dt.time())
+
+    slot_dt = datetime.combine(scan_dt.date(), start_time)
+    if scan_dt <= slot_dt + timedelta(minutes=buffer_minutes):
+        return 'on_time'
+    return 'late_entry'
 
 
 def validate_qr_scan(scan_lat, scan_lng, branch, timetable_slot, scan_time) -> dict:
