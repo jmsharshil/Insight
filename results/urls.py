@@ -5,6 +5,7 @@ from .views import (
     PublishResultView, ResultView, ResultDeleteView,
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
     MarkAbsentView, MarkAllAbsentView, BulkRecheckRequestView, PaperCheckerQueryView,
+    SubjectWiseResultView, FacultyWiseResultView, BatchWiseResultView, ResultAnalyticsView,
 )
 
 urlpatterns = [
@@ -29,5 +30,12 @@ urlpatterns = [
     # NEW: Paper checker query option
     path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/query/', PaperCheckerQueryView.as_view(), name='paper-checker-query'),
     path('exams/<uuid:exam_id>/queries/<uuid:query_id>/resolve/', PaperCheckerQueryView.as_view(), name='query-resolve'),
+    
+    # Subject-wise, Faculty-wise, Batch-wise & Summary APIs (on-the-fly via PublishedResult + Exam relations; no extra models)
+    path('subject-wise/', SubjectWiseResultView.as_view(), name='subject-wise-results'),
+    path('faculty-wise/', FacultyWiseResultView.as_view(), name='faculty-wise-results'),
+    path('batch-wise/', BatchWiseResultView.as_view(), name='batch-wise-results'),
+    path('summary/', ResultAnalyticsView.as_view(), name='result-summary'),
+    path('analytics/', ResultAnalyticsView.as_view(), name='result-analytics'),
 ]
 

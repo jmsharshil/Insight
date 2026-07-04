@@ -726,21 +726,126 @@ Standard for missing `Exam`, `MarkSheet`, `RecheckRequest`, or `CheckerQuery`.
 
 ---
 
+## SECTION 5 — Result Analytics & Aggregation APIs (On-the-Fly)
+
+These **read-only** endpoints compute all aggregates, pass percentages, ranks, and top-performer lists **directly from `PublishedResult`** (with `select_related` joins to `Exam.subject`, `Exam.faculty`, `Exam.batch`). 
+
+**No new models, no signals, no materialized views** — uses `annotate()`, `values()`, `Count`/`Avg`/`Max`/`Min`, `ExpressionWrapper(F('passed_students')*100.0/Coalesce(...))`, `F()` for grouping, and `Q()` filters. Matches the "no new models" directive from the core update.
+
+All endpoints:
+- Require roles: `super_admin`, `admin_senior_executive`, or `branch_manager`.
+- Apply organization scoping via `exam__branch__organization`.
+- Support query params: `?batch_id=...&subject_id=...&faculty_id=...&exam_id=...` (UUIDs).
+- Return consistent fields: `total_students`, `passed_students`, `pass_percentage` (float), `average_marks`, `highest_marks`, `lowest_marks`, etc.
+- Order by `-pass_percentage`, `-average_marks` by default.
+
+**Base paths:** `/api/v1/results/subject-wise/`, `/faculty-wise/`, `/batch-wise/`, `/summary/`, `/analytics/` (see `results/urls.py`).
+
+### 5.1 Subject-Wise Results
+
+**`GET /api/v1/results/subject-wise/`**
+
+**Query Params (optional):** `subject_id`, `batch_id`, `exam_id`
+
+**Response Example (200 OK)**
+```json
+{
+  "success": true,
+  "count": 12,
+  "data": [
+    {
+      "subject_id": "sub-uuid-001",
+      "subject_name": "Company Law",
+      "batch_id": "batch-uuid-001",
+      "batch_name": "CS_Executive_June_2026",
+      "exam_id": "exam-uuid-001",
+      "exam_title": "June Prelim 2026",
+      "total_students": 45,
+      "appeared_students": 45,
+      "passed_students": 38,
+      "pass_percentage": 84.44,
+      "average_marks": 72.5,
+      "highest_marks": 98.0,
+      "lowest_marks": 42.0
+    },
+    ...
+  ]
+}
+```
+
+### 5.2 Faculty-Wise Results
+
+**`GET /api/v1/results/faculty-wise/`**
+
+Groups by `faculty` + `subject`. Returns `faculty_id`, `faculty_name`, `subject_name`, etc. (same aggregate fields).
+
+**Example use:** `?faculty_id=...&subject_id=...`
+
+### 5.3 Batch-Wise Results
+
+**`GET /api/v1/results/batch-wise/`**
+
+Groups by `batch` (optionally + subject). Ideal for batch performance reports.
+
+### 5.4 Overall Summary & Top-5 Lists
+
+**`GET /api/v1/results/summary/`** or **`GET /api/v1/results/analytics/`** (`ResultAnalyticsView`)
+
+Combines overall stats with top-5 lists (subjects, faculty, batches) using separate annotated querysets limited to `[:5]`.
+
+**Response Example**
+```json
+{
+  "success": true,
+  "data": {
+    "overall": {
+      "total_students": 1250,
+      "passed_students": 1025,
+      "pass_percentage": 82.0,
+      "average_percentage": 71.25,
+      "average_marks": 71.25
+    },
+    "top_subjects": [
+      {
+        "exam__subject__id": "sub-001",
+        "exam__subject__name": "Company Law",
+        "total": 120,
+        "passed": 105,
+        "pass_pct": 87.5,
+        "avg_marks": 78.4
+      },
+      ...
+    ],
+    "top_faculty": [ ... ],
+    "top_batches": [ ... ],
+    "total_published_results": 1250
+  }
+}
+```
+
+**Technical Note:** Uses `base_qs.values('exam__subject__id', ...).annotate(...)` for top lists; `Coalesce` prevents division-by-zero on pass_percentage. Fully compatible with existing publish/recheck/query flows (ranks computed in `calculate_ranks()` on publish/recheck).
+
+Update your frontend dashboards to call these instead of legacy model-based endpoints (old `SubjectWiseResult`/`FacultyWiseResult` models have been removed).
+
+---
+
 ## Related Modules & Migrations (Updated)
 
 **Integrations (per current `views.py`, `models.py`):**
-- **`exams`**: `Exam` (requires `answer_key` for rechecks), `CheckerToken`, `calculate_ranks()`, `generate_checker_token()`, emails (`send_checker_assignment_email`, `send_recheck_request_notification`).
-- **`timetable`**: `ExamSession` used for auto-absent marking logic.
-- **`students`**: Student profiles, linked_parents for visibility, batch for bulk operations.
-- **`payroll`**: `CheckerQuery` integrates with `compute_payslip_for_user()` to exclude papers with open queries on rechecks.
-- **Core**: Consistent `_user_role()`, organization filtering, `apply_filters()`, pagination patterns (mirrors `attendance/views.py` updates).
+- **`exams`**: `Exam` (requires `answer_key` for rechecks, now also used for subject/faculty/batch FKs in aggregates), `CheckerToken`, `calculate_ranks()`, `generate_checker_token()`, emails.
+- **`timetable`**: `ExamSession` for auto-absent; timetable slots now drive many Exams used in analytics.
+- **`students`**: Visibility, batch links for bulk recheck/analytics.
+- **`payroll`**: `CheckerQuery` (open status excludes from `compute_payslip_for_user()`); new analytics do not affect payroll.
+- **Core**: `_user_role()`, `apply_filters()`, `F()`/`ExpressionWrapper` patterns now used in analytics views.
+- **No new models**: All subject/faculty/batch/summary aggregates computed live from `PublishedResult` (see `SubjectWiseResultView`, `ResultAnalyticsView` etc.).
 
-**After code/model updates, run:**
+**After pulling latest code, run:**
 ```bash
 python manage.py makemigrations results
 python manage.py migrate results
+python manage.py migrate exams  # for any Exam FK updates
 ```
 
-**Note on Code Style:** The `results/views.py` has been updated to match the robust, consistent patterns from `attendance/views.py` (role constants at top, helper functions, detailed permission/organization guards in every method, comprehensive error handling, support for new FRD features like queries and bulk operations). The documentation now fully reflects the **updated code**.
+**Note on Code Style:** `results/views.py` now uses consistent role constants, organization guards, and annotation-based aggregation (no legacy model views). This documentation has been updated to reflect **all current endpoints**, removal of dedicated aggregate models, and the new on-the-fly analytics (matching style of `timetable_procedure_guide.md`).
 
-This guide matches the style and depth of other module docs (`timetable_procedure_guide.md`, `faculty_module_api_documentation.md`, `fees_module_api_documentation.md`).
+This completes the results module reference.
