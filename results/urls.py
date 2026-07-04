@@ -25,6 +25,7 @@ urlpatterns = [
     
     # v2 NEW: FRD §4.6.2 Recheck Requests
     path('exams/<uuid:exam_id>/results/recheck-request/', StudentRecheckRequestView.as_view(), name='student-recheck-request'),
+    path('exams/<uuid:exam_id>/results/recheck-request/bulk/', BulkRecheckRequestView.as_view(), name='bulk-recheck-request'),
     path('exams/<uuid:exam_id>/recheck-requests/', RecheckRequestListView.as_view(), name='recheck-request-list'),
     path('exams/<uuid:exam_id>/recheck-requests/<uuid:request_id>/', RecheckRequestActionView.as_view(), name='recheck-request-action'),
     
