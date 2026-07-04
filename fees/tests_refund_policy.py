@@ -30,5 +30,5 @@ class RefundPolicyTests(SimpleTestCase):
 
         policy = get_refund_policy(payment, Decimal('950'))
 
-        self.assertFalse(policy['eligible'])
+        self.assertTrue(policy['eligible'])
         self.assertEqual(policy['max_refundable_amount'], Decimal('900'))

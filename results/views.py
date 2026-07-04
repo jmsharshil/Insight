@@ -10,7 +10,10 @@ from core.utils import apply_filters
 from django.db.models import Avg, Count, F, Q, ExpressionWrapper, FloatField, Max, Min
 from django.db.models.functions import Coalesce
 import csv
+from io import BytesIO
 from django.http import HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 from .models import MarkSheet, PublishedResult, RecheckRequest, CheckerQuery
 from .serializers import (
@@ -37,6 +40,42 @@ QUERY_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 
 def _user_role(user):
     return getattr(user, 'role', None)
+
+
+def build_exam_export_workbook(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Results'
+    headers = [
+        'Student Name', 'Roll Number', 'Marks Obtained', 'Total Marks',
+        'Percentage', 'Rank', 'Is Pass', 'Published At', 'Exam Title'
+    ]
+    sheet.append(headers)
+
+    red_fill = PatternFill(fill_type='solid', fgColor='FFC7CE')
+    green_fill = PatternFill(fill_type='solid', fgColor='C6EFCE')
+
+    for row_index, row in enumerate(rows, start=2):
+        sheet.append(row)
+        marks_value = row[2]
+        try:
+            numeric_value = float(marks_value) if marks_value is not None else None
+        except (TypeError, ValueError):
+            numeric_value = None
+
+        if numeric_value is not None:
+            if numeric_value < 30:
+                sheet.cell(row=row_index, column=3).fill = red_fill
+            elif numeric_value > 60:
+                sheet.cell(row=row_index, column=3).fill = green_fill
+
+    for column in sheet.columns:
+        non_empty_values = [cell.value for cell in column if cell.value is not None]
+        if non_empty_values:
+            max_length = max(len(str(value)) for value in non_empty_values)
+            sheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 40)
+
+    return workbook
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1193,10 +1232,6 @@ class ResultExportView(APIView):
         faculty_id = request.query_params.get('faculty_id')
         batch_id = request.query_params.get('batch_id')
 
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="results_{export_type}_{timezone.now().strftime("%Y%m%d")}.csv"'
-
-        writer = csv.writer(response)
         org_filter = getattr(request.user, 'organization', None)
 
         if export_type == 'exam' and exam_id:
@@ -1206,17 +1241,19 @@ class ResultExportView(APIView):
             )
             if org_filter:
                 qs = qs.filter(exam__branch__organization=org_filter)
-            writer.writerow([
-                'Student Name', 'Roll Number', 'Marks Obtained', 'Total Marks',
-                'Percentage', 'Rank', 'Is Pass', 'Published At', 'Exam Title'
-            ])
+            rows = []
             for pr in qs.order_by('rank'):
                 student_name = pr.student.user.name if hasattr(pr.student, 'user') and pr.student.user else 'N/A'
                 roll_number = getattr(pr.student, 'roll_number', 'N/A') if pr.student else 'N/A'
-                writer.writerow([
+                marks_value = pr.marks_obtained
+                try:
+                    marks_value = float(marks_value) if marks_value is not None else None
+                except (TypeError, ValueError):
+                    marks_value = None
+                rows.append([
                     student_name,
                     roll_number,
-                    pr.marks_obtained,
+                    marks_value,
                     pr.total_marks,
                     pr.percentage,
                     getattr(pr, 'rank', 'N/A'),
@@ -1224,9 +1261,20 @@ class ResultExportView(APIView):
                     pr.published_at,
                     pr.exam.title if pr.exam else ''
                 ])
+
+            workbook = build_exam_export_workbook(rows)
+            output = BytesIO()
+            workbook.save(output)
+            response = HttpResponse(output.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="results_{export_type}_{timezone.now().strftime("%Y%m%d")}.xlsx"'
             return response
 
-        elif export_type == 'subject-wise':
+        else:
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="results_{export_type}_{timezone.now().strftime("%Y%m%d")}.csv"'
+            writer = csv.writer(response)
+
+        if export_type == 'subject-wise':
             # Reuse updated aggregation logic from SubjectWiseResultView (no duplication by subject)
             qs = PublishedResult.objects.select_related(
                 'exam__subject', 'exam__batch', 'exam__branch'
