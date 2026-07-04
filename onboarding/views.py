@@ -18,6 +18,64 @@ from .utils import AdmissionService
 
 logger = logging.getLogger(__name__)
 
+
+def _get_bank_selection_amount(admission):
+    from decimal import Decimal
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    fee_amount = None
+
+    if getattr(admission, 'fee_structure_id', None):
+        from fees.models import FeeStructure
+        fee_struct = FeeStructure.objects.filter(id=admission.fee_structure_id).first()
+        if fee_struct:
+            fee_amount = fee_struct.total_amount
+
+    try:
+        from fees.models import StudentFee, InstallmentItem
+
+        student_fee = StudentFee.objects.filter(student__admission=admission).order_by('-created_at').first()
+        if student_fee:
+            now = timezone.now().date()
+            if now.month >= 4:
+                start_date = now.replace(year=now.year, month=4, day=1)
+                end_date = now.replace(year=now.year + 1, month=4, day=1)
+            else:
+                start_date = now.replace(year=now.year - 1, month=4, day=1)
+                end_date = now.replace(year=now.year, month=4, day=1)
+
+            current_year_installments = InstallmentItem.objects.filter(
+                plan__student_fee=student_fee,
+                is_paid=False,
+                due_date__gte=start_date,
+                due_date__lt=end_date,
+            )
+            if current_year_installments.exists():
+                current_year_total = current_year_installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+                return Decimal(str(current_year_total))
+
+            if student_fee.installment_plans.exists():
+                next_installment = InstallmentItem.objects.filter(
+                    plan__student_fee=student_fee,
+                    is_paid=False,
+                ).order_by('due_date', 'id').first()
+                if next_installment:
+                    return Decimal(str(next_installment.amount))
+
+            fee_amount = student_fee.total_amount
+    except Exception:
+        fee_amount = None
+
+    if fee_amount is None:
+        fee_amount = getattr(admission, 'payment_amount', None)
+
+    if fee_amount is None:
+        fee_amount = Decimal('0')
+
+    return Decimal(str(fee_amount))
+
+
 def _get_admission(request, admission_id):
     try:
         queryset = Admission.objects.select_related(
@@ -81,30 +139,16 @@ class AdmissionListView(APIView):
                 )
             serializer.save()
 
-            # Auto-assign bank based on payment amount and threshold
+            # Auto-assign bank based on the student's full fee amount for the year
             from fees.utils import select_bank_accounts_for_payment
             from fees.models import BankAccount
-            # Determine payment amount: use fee_structure total_amount if available
-            payment_amount = None
-            if admission.fee_structure_id:
-                from fees.models import FeeStructure
-                fee_struct = FeeStructure.objects.filter(id=admission.fee_structure_id).first()
-                if fee_struct:
-                    payment_amount = fee_struct.total_amount
-            # Fallback amount if unknown
-            if payment_amount is None:
-                # Use a default high amount to get all banks
-                from decimal import Decimal
-                payment_amount = Decimal('0')
+            payment_amount = _get_bank_selection_amount(admission)
             eligible_banks = select_bank_accounts_for_payment(payment_amount)
             if not eligible_banks:
                 # Fallback to any active bank
                 eligible_banks = list(BankAccount.objects.filter(is_active=True))
             assigned_bank = eligible_banks[0]
-            admission.bank_account = assigned_bank
-            admission.status = 'payment_pending'
-            admission.note = 'Form submitted. Waiting for fee payment.'
-            admission.save(update_fields=['bank_account', 'status', 'note', 'updated_at'])
+            admission.assign_payment_bank_account(assigned_bank)
 
             AdmissionStatusHistory.objects.create(
                 admission=admission,
@@ -272,29 +316,16 @@ class AdmissionDetailView(APIView):
         # Auto-assign bank and send payment email directly if form is submitted
         if admission.status == 'form_pending' and admission.dob is not None:
             try:
-                # Auto-assign bank based on payment amount and threshold
+                # Auto-assign bank based on the student's full fee amount for the year
                 from fees.utils import select_bank_accounts_for_payment
                 from fees.models import BankAccount
-                # Determine payment amount: use fee_structure total_amount if available
-                payment_amount = None
-                if admission.fee_structure_id:
-                    from fees.models import FeeStructure
-                    fee_struct = FeeStructure.objects.filter(id=admission.fee_structure_id).first()
-                    if fee_struct:
-                        payment_amount = fee_struct.total_amount
-                # Fallback amount if unknown
-                if payment_amount is None:
-                    from decimal import Decimal
-                    payment_amount = Decimal('0')
+                payment_amount = _get_bank_selection_amount(admission)
                 eligible_banks = select_bank_accounts_for_payment(payment_amount)
                 if not eligible_banks:
                     eligible_banks = list(BankAccount.objects.filter(is_active=True))
                 assigned_bank = eligible_banks[0]
 
-                admission.bank_account = assigned_bank
-                admission.status = 'payment_pending'
-                admission.note = 'Form submitted. Waiting for fee payment.'
-                admission.save(update_fields=['bank_account', 'status', 'note', 'updated_at'])
+                admission.assign_payment_bank_account(assigned_bank)
 
                 AdmissionStatusHistory.objects.create(
                     admission=admission,

@@ -7,9 +7,10 @@ Tests verify that enrolling an Admission automatically creates:
   3. A StudentFee record linked to the student (via fees.services.create_student_fee)
 """
 from django.test import TestCase
+from django.utils import timezone
 
 from onboarding.models import Admission
-from fees.models import FeeStructure, StudentFee
+from fees.models import FeeStructure, StudentFee, BankAccount, InstallmentPlan, InstallmentItem
 from students.models import Student
 from auth_user.models import User
 
@@ -55,6 +56,80 @@ def _make_admission(fee_structure=None, **overrides):
     }
     defaults.update(overrides)
     return Admission.objects.create(**defaults)
+
+
+class AdmissionBankAssignmentTest(TestCase):
+    def test_existing_bank_assignment_is_preserved(self):
+        first_bank = BankAccount.objects.create(
+            name='Bank One',
+            bank_name='SBI',
+            account_number='11111111111',
+            ifsc_code='SBIN0000001',
+            branch_name='Main Branch',
+        )
+        second_bank = BankAccount.objects.create(
+            name='Bank Two',
+            bank_name='HDFC',
+            account_number='22222222222',
+            ifsc_code='HDFC0000002',
+            branch_name='Other Branch',
+        )
+        admission = _make_admission(status='form_pending')
+
+        admission.assign_payment_bank_account(first_bank)
+        admission.refresh_from_db()
+        self.assertEqual(admission.bank_account, first_bank)
+
+        admission.assign_payment_bank_account(second_bank)
+        admission.refresh_from_db()
+        self.assertEqual(admission.bank_account, first_bank)
+        self.assertEqual(admission.bank_account_id, first_bank.id)
+
+    def test_current_year_installment_amount_is_used_for_bank_threshold(self):
+        from onboarding.views import _get_bank_selection_amount
+
+        admission = _make_admission(status='form_pending')
+        user = User.objects.create_user(
+            username='student_installment',
+            email='student_installment@example.com',
+            password='testpass123',
+            role='student',
+            name='Installment Student',
+        )
+        student = Student.objects.create(
+            admission=admission,
+            user=user,
+            first_name='Installment',
+            surname='Student',
+            father_name='Father',
+            mother_name='Mother',
+            dob='2000-01-01',
+            category='gen',
+            email='student_installment@example.com',
+            phone_student='9876543210',
+            phone_father='9876543211',
+            street='123 Main St',
+            city='Ahmedabad',
+            state='Gujarat',
+            pincode='380001',
+            course='cseet',
+            group_module='full',
+            batch_attempt='june',
+            qualification='pass_12',
+            location='Ahmedabad',
+        )
+        fee_structure = FeeStructure.objects.create(name='Installment Fee', total_amount=30000, is_active=True)
+        student_fee = StudentFee.objects.create(
+            student=student,
+            fee_structure=fee_structure,
+            total_amount=30000,
+        )
+        plan = InstallmentPlan.objects.create(student_fee=student_fee)
+        InstallmentItem.objects.create(plan=plan, amount=15000, due_date=timezone.now().date().replace(year=timezone.now().year, month=4, day=1), is_paid=False)
+        InstallmentItem.objects.create(plan=plan, amount=15000, due_date=timezone.now().date().replace(year=timezone.now().year + 1, month=4, day=1), is_paid=False)
+
+        amount = _get_bank_selection_amount(admission)
+        self.assertEqual(amount, 15000)
 
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):

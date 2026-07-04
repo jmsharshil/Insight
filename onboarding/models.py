@@ -208,6 +208,17 @@ class Admission(models.Model):
     def __str__(self):
         return f"{self.first_name} {self.surname} | {self.course} | {self.status}"
 
+    def assign_payment_bank_account(self, bank_account, *, status='payment_pending', note='Form submitted. Waiting for fee payment.'):
+        """Assign a bank account only once so subsequent updates keep the original selection."""
+        if self.bank_account:
+            return False
+
+        self.bank_account = bank_account
+        self.status = status
+        self.note = note
+        self.save(update_fields=['bank_account', 'status', 'note', 'updated_at'])
+        return True
+
 
 class AdmissionStatusHistory(models.Model):
     """Tracks every status change on an Admission."""
