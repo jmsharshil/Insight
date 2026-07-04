@@ -877,14 +877,14 @@ class ExamSubmitView(APIView):
         if now > deadline:
             session.auto_submitted = True
 
-        from .utils import auto_grade_mcq
+        from .utils import auto_grade_mcq, requires_paper_checking
         has_subj = Question.objects.filter(exam=session.exam, question_type='subjective').exists()
         
         session.is_submitted = True
         session.submitted_at = now
         session.save()
 
-        if not has_subj:
+        if not requires_paper_checking(session.exam, has_subjective_questions=has_subj):
             marks, pct, passed = auto_grade_mcq(session.id)
             if session.exam.result_release_mode == 'instant':
                 # Also call calculate_ranks for instant publish (per core decisions)

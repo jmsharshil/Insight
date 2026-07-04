@@ -1314,6 +1314,45 @@ class ResultExportView(APIView):
                 ])
             return response
 
+        elif export_type == 'batch-wise':
+            writer.writerow(['Batch ID', 'Batch Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
+            qs = PublishedResult.objects.select_related('exam__batch', 'exam__branch')
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            if batch_id:
+                qs = qs.filter(exam__batch_id=batch_id)
+            if subject_id:
+                qs = qs.filter(exam__subject_id=subject_id)
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+
+            qs = qs.annotate(
+                batch_id=F('exam__batch_id'),
+                batch_name=F('exam__batch__name'),
+            )
+            annotated = qs.values(
+                'batch_id', 'batch_name'
+            ).annotate(
+                total_students=Count('id'),
+                passed_students=Count('id', filter=Q(is_pass=True)),
+                pass_percentage=ExpressionWrapper(
+                    F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                    output_field=FloatField()
+                ),
+                average_marks=Avg('marks_obtained'),
+                highest_marks=Max('marks_obtained'),
+                lowest_marks=Min('marks_obtained'),
+            ).order_by('-pass_percentage')
+
+            for row in annotated:
+                writer.writerow([
+                    row['batch_id'], row['batch_name'],
+                    row['total_students'], row['passed_students'],
+                    round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
+                    row.get('highest_marks'), row.get('lowest_marks')
+                ])
+            return response
+
         elif export_type in ('summary', 'analytics'):
             # Export overall + top lists (flattened with sections)
             base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty')
@@ -1352,5 +1391,5 @@ class ResultExportView(APIView):
 
         return Response({
             'success': False,
-            'message': 'Invalid export type. Use: exam, subject-wise, faculty-wise, analytics.'
+            'message': 'Invalid export type. Use: exam, subject-wise, faculty-wise, batch-wise, analytics.'
         }, status=status.HTTP_400_BAD_REQUEST)
