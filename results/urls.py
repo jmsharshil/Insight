@@ -6,6 +6,7 @@ from .views import (
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
     MarkAbsentView, MarkAllAbsentView, BulkRecheckRequestView, PaperCheckerQueryView,
     SubjectWiseResultView, FacultyWiseResultView, BatchWiseResultView, ResultAnalyticsView,
+    ResultExportView,
 )
 
 urlpatterns = [
@@ -32,10 +33,13 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/queries/<uuid:query_id>/resolve/', PaperCheckerQueryView.as_view(), name='query-resolve'),
     
     # Subject-wise, Faculty-wise, Batch-wise & Summary APIs (on-the-fly via PublishedResult + Exam relations; no extra models)
-    path('subject-wise/', SubjectWiseResultView.as_view(), name='subject-wise-results'),
-    path('faculty-wise/', FacultyWiseResultView.as_view(), name='faculty-wise-results'),
-    path('batch-wise/', BatchWiseResultView.as_view(), name='batch-wise-results'),
-    path('summary/', ResultAnalyticsView.as_view(), name='result-summary'),
-    path('analytics/', ResultAnalyticsView.as_view(), name='result-analytics'),
+    path('results/subject-wise/', SubjectWiseResultView.as_view(), name='subject-wise-results'),
+    path('results/faculty-wise/', FacultyWiseResultView.as_view(), name='faculty-wise-results'),
+    path('results/batch-wise/', BatchWiseResultView.as_view(), name='batch-wise-results'),
+    path('results/summary/', ResultAnalyticsView.as_view(), name='result-summary'),
+    path('results/analytics/', ResultAnalyticsView.as_view(), name='result-analytics'),
+    
+    # NEW: Export API for results/aggregates (CSV download)
+    path('results/export/', ResultExportView.as_view(), name='results-export'),
 ]
 
