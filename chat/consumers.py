@@ -639,27 +639,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # Reuse the model's visibility logic (respects targeted messages, soft deletes, etc.)
         visible_qs = room.get_visible_messages_qs(user)
-        unread_qs = visible_qs.filter(
+        unread_ids = list(visible_qs.filter(
             ~Q(read_receipts__user=user),
             ~Q(sender=user),
-        ).only("id")
+        ).values_list("id", flat=True))
 
-        messages = list(unread_qs)
-        if not messages:
+        if not unread_ids:
             return 0
 
         now = timezone.now()
         receipts = [
             MessageReadReceipt(
-                message_id=msg.id,
+                message_id=msg_id,
                 user=user,
                 read_at=now,
             )
-            for msg in messages
+            for msg_id in unread_ids
         ]
         # ignore_conflicts=True prevents errors if receipt created concurrently by another connection
         MessageReadReceipt.objects.bulk_create(receipts, ignore_conflicts=True)
-        return len(messages)  # number of messages we marked read
+        return len(unread_ids)  # number of messages we marked read
 
     @database_sync_to_async
     def _get_unread_count(self, room_id: str, user):
