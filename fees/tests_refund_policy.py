@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -32,3 +33,20 @@ class RefundPolicyTests(SimpleTestCase):
 
         self.assertTrue(policy['eligible'])
         self.assertEqual(policy['max_refundable_amount'], Decimal('900'))
+
+    def test_refund_is_reduced_by_issued_inventory_cost(self):
+        payment = SimpleNamespace(
+            amount=Decimal('1000'),
+            payment_date=datetime.now() - timedelta(days=3),
+            created_at=datetime.now() - timedelta(days=3),
+            student_id='student-1',
+        )
+
+        with patch('inventory.models.ItemAllocation') as mock_allocation:
+            mock_allocation.objects.filter.return_value.select_related.return_value = [
+                SimpleNamespace(item=SimpleNamespace(unit_price=Decimal('200')), quantity=1)
+            ]
+            policy = get_refund_policy(payment, Decimal('950'))
+
+        self.assertTrue(policy['eligible'])
+        self.assertEqual(policy['max_refundable_amount'], Decimal('720'))

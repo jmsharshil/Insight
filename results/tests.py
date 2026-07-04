@@ -10,7 +10,7 @@ from results.views import build_exam_export_workbook
 
 
 class ExamExportWorkbookTests(SimpleTestCase):
-    def test_marks_cells_are_styled_without_text_prefixes(self):
+    def test_marks_cells_are_styled_by_percentage_thresholds(self):
         rows = [
             ("Alice", "R1", 25, 100, 25.0, 1, True, timezone.now(), "Math"),
             ("Bob", "R2", 70, 100, 70.0, 2, True, timezone.now(), "Math"),

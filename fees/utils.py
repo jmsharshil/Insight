@@ -165,7 +165,7 @@ def has_overdue_installment(student_id):
 
 
 def get_refund_policy(payment, requested_amount=None):
-    """Return refund eligibility and the capped amount based on payment age."""
+    """Return refund eligibility and the capped amount based on payment age and issued inventory."""
     from datetime import timedelta
     from decimal import Decimal
 
@@ -192,7 +192,22 @@ def get_refund_policy(payment, requested_amount=None):
 
     if age_days <= 7:
         deduction_percent = Decimal('10')
-        cap = (Decimal(str(getattr(payment, 'amount', 0))) * (Decimal('100') - deduction_percent)) / Decimal('100')
+        payment_amount = Decimal(str(getattr(payment, 'amount', 0)))
+        inventory_cost = Decimal('0')
+
+        try:
+            from inventory.models import ItemAllocation
+            student_id = getattr(payment, 'student_id', None)
+            if student_id:
+                allocations = ItemAllocation.objects.filter(student_id=student_id, status='issued')
+                for allocation in allocations.select_related('item'):
+                    unit_price = getattr(allocation.item, 'unit_price', 0) or 0
+                    inventory_cost += Decimal(str(unit_price)) * Decimal(str(getattr(allocation, 'quantity', 0) or 0))
+        except Exception:
+            inventory_cost = Decimal('0')
+
+        adjusted_payment_amount = max(payment_amount - inventory_cost, Decimal('0'))
+        cap = (adjusted_payment_amount * (Decimal('100') - deduction_percent)) / Decimal('100')
 
     requested = Decimal(str(requested_amount if requested_amount is not None else getattr(payment, 'amount', 0)))
     max_refundable = min(requested, cap)

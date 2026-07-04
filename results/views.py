@@ -55,18 +55,28 @@ def build_exam_export_workbook(rows):
     red_fill = PatternFill(fill_type='solid', fgColor='FFC7CE')
     green_fill = PatternFill(fill_type='solid', fgColor='C6EFCE')
 
+    highest_percentage = None
+    for row in rows:
+        percentage_value = row[4]
+        try:
+            numeric_percentage = float(percentage_value) if percentage_value is not None else None
+        except (TypeError, ValueError):
+            numeric_percentage = None
+        if numeric_percentage is not None and (highest_percentage is None or numeric_percentage > highest_percentage):
+            highest_percentage = numeric_percentage
+
     for row_index, row in enumerate(rows, start=2):
         sheet.append(row)
-        marks_value = row[2]
+        percentage_value = row[4]
         try:
-            numeric_value = float(marks_value) if marks_value is not None else None
+            numeric_percentage = float(percentage_value) if percentage_value is not None else None
         except (TypeError, ValueError):
-            numeric_value = None
+            numeric_percentage = None
 
-        if numeric_value is not None:
-            if numeric_value < 30:
+        if numeric_percentage is not None:
+            if numeric_percentage < 40:
                 sheet.cell(row=row_index, column=3).fill = red_fill
-            elif numeric_value > 60:
+            elif highest_percentage is not None and numeric_percentage == highest_percentage:
                 sheet.cell(row=row_index, column=3).fill = green_fill
 
     for column in sheet.columns:
