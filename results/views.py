@@ -920,7 +920,8 @@ class RecheckRequestActionView(APIView):
 
 class SubjectWiseResultView(APIView):
     """GET /results/subject-wise/?subject_id=...&batch_id=...&exam_id=...
-    Aggregates results by subject (via Exam.subject).
+    Aggregates results by subject (via Exam.subject). Groups ONLY by subject
+    to eliminate duplication (overall across exams/batches unless filtered).
     """
     def get(self, request):
         role = _user_role(request.user)
@@ -934,7 +935,7 @@ class SubjectWiseResultView(APIView):
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
 
-        # Apply filters
+        # Apply filters (narrows scope before grouping)
         subject_id = request.query_params.get('subject_id')
         batch_id = request.query_params.get('batch_id')
         exam_id = request.query_params.get('exam_id')
@@ -945,19 +946,15 @@ class SubjectWiseResultView(APIView):
         if exam_id:
             qs = qs.filter(exam_id=exam_id)
 
-        # Pre-annotate FK fields for clean grouping
+        # Pre-annotate for grouping by subject only (no dupes)
         qs = qs.annotate(
             subject_id=F('exam__subject_id'),
             subject_name=F('exam__subject__name'),
-            batch_id=F('exam__batch_id'),
-            batch_name=F('exam__batch__name'),
-            exam_id=F('exam_id'),
-            exam_title=F('exam__title'),
         )
 
-        # Aggregate by subject (and batch/exam)
+        # Aggregate by subject (overall for all exams/subjects in scope)
         annotated = qs.values(
-            'subject_id', 'subject_name', 'batch_id', 'batch_name', 'exam_id', 'exam_title'
+            'subject_id', 'subject_name'
         ).annotate(
             total_students=Count('id'),
             appeared_students=Count('id'),
@@ -981,7 +978,8 @@ class SubjectWiseResultView(APIView):
 
 class FacultyWiseResultView(APIView):
     """GET /results/faculty-wise/?faculty_id=...&subject_id=...&batch_id=...
-    Aggregates by faculty (via Exam.faculty).
+    Aggregates by faculty ONLY (via Exam.faculty) — one record per faculty
+    with overall results across all subjects/batches/exams (unless filtered).
     """
     def get(self, request):
         role = _user_role(request.user)
@@ -995,7 +993,7 @@ class FacultyWiseResultView(APIView):
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
 
-        # Apply filters
+        # Apply filters (narrows scope before grouping)
         faculty_id = request.query_params.get('faculty_id')
         subject_id = request.query_params.get('subject_id')
         batch_id = request.query_params.get('batch_id')
@@ -1009,21 +1007,14 @@ class FacultyWiseResultView(APIView):
         if exam_id:
             qs = qs.filter(exam_id=exam_id)
 
-        # Pre-annotate FK fields for clean grouping
+        # Pre-annotate for grouping by faculty only (one record per faculty)
         qs = qs.annotate(
             faculty_id=F('exam__faculty_id'),
             faculty_name=F('exam__faculty__user__name'),
-            subject_id=F('exam__subject_id'),
-            subject_name=F('exam__subject__name'),
-            batch_id=F('exam__batch_id'),
-            batch_name=F('exam__batch__name'),
-            exam_id=F('exam_id'),
-            exam_title=F('exam__title'),
         )
 
         annotated = qs.values(
-            'faculty_id', 'faculty_name', 'subject_id', 'subject_name',
-            'batch_id', 'batch_name', 'exam_id', 'exam_title'
+            'faculty_id', 'faculty_name'
         ).annotate(
             total_students=Count('id'),
             appeared_students=Count('id'),
@@ -1047,7 +1038,7 @@ class FacultyWiseResultView(APIView):
 
 class BatchWiseResultView(APIView):
     """GET /results/batch-wise/?batch_id=...&subject_id=...
-    Aggregates results by batch (via Exam.batch).
+    Aggregates overall results by batch (via Exam.batch) across ALL exams and subjects.
     """
     def get(self, request):
         role = _user_role(request.user)
@@ -1061,7 +1052,7 @@ class BatchWiseResultView(APIView):
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
 
-        # Apply filters
+        # Apply filters (narrows scope before grouping)
         batch_id = request.query_params.get('batch_id')
         subject_id = request.query_params.get('subject_id')
         exam_id = request.query_params.get('exam_id')
@@ -1072,19 +1063,15 @@ class BatchWiseResultView(APIView):
         if exam_id:
             qs = qs.filter(exam_id=exam_id)
 
-        # Pre-annotate FK fields for clean grouping
+        # Pre-annotate for grouping by batch only (overall across subjects/exams)
         qs = qs.annotate(
             batch_id=F('exam__batch_id'),
             batch_name=F('exam__batch__name'),
-            subject_id=F('exam__subject_id'),
-            subject_name=F('exam__subject__name'),
-            exam_id=F('exam_id'),
-            exam_title=F('exam__title'),
         )
 
-        # Aggregate by batch (and subject)
+        # Aggregate by batch (overall for all exams and subjects)
         annotated = qs.values(
-            'batch_id', 'batch_name', 'subject_id', 'subject_name', 'exam_id', 'exam_title'
+            'batch_id', 'batch_name'
         ).annotate(
             total_students=Count('id'),
             appeared_students=Count('id'),
@@ -1240,7 +1227,7 @@ class ResultExportView(APIView):
             return response
 
         elif export_type == 'subject-wise':
-            # Reuse aggregation logic from SubjectWiseResultView (simplified)
+            # Reuse updated aggregation logic from SubjectWiseResultView (no duplication by subject)
             qs = PublishedResult.objects.select_related(
                 'exam__subject', 'exam__batch', 'exam__branch'
             ).filter(exam__subject__isnull=False)
@@ -1256,10 +1243,9 @@ class ResultExportView(APIView):
             qs = qs.annotate(
                 subject_id=F('exam__subject_id'),
                 subject_name=F('exam__subject__name'),
-                batch_name=F('exam__batch__name'),
             )
             annotated = qs.values(
-                'subject_id', 'subject_name', 'batch_name'
+                'subject_id', 'subject_name'
             ).annotate(
                 total_students=Count('id'),
                 passed_students=Count('id', filter=Q(is_pass=True)),
@@ -1273,13 +1259,13 @@ class ResultExportView(APIView):
             ).order_by('-pass_percentage')
 
             writer.writerow([
-                'Subject ID', 'Subject Name', 'Batch Name', 'Total Students',
+                'Subject ID', 'Subject Name', 'Total Students',
                 'Passed Students', 'Pass Percentage', 'Average Marks',
                 'Highest Marks', 'Lowest Marks'
             ])
             for row in annotated:
                 writer.writerow([
-                    row['subject_id'], row['subject_name'], row.get('batch_name', ''),
+                    row['subject_id'], row['subject_name'],
                     row['total_students'], row['passed_students'],
                     round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
                     row.get('highest_marks'), row.get('lowest_marks')
@@ -1287,24 +1273,44 @@ class ResultExportView(APIView):
             return response
 
         elif export_type == 'faculty-wise':
-            # Similar for faculty (abbreviated; extend as needed)
-            writer.writerow(['Faculty Name', 'Subject', 'Total', 'Passed', 'Pass %', 'Avg Marks'])
-            qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject')
+            # Updated to match FacultyWiseResultView: one record per faculty (overall across subjects)
+            writer.writerow(['Faculty ID', 'Faculty Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
+            qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch')
             if org_filter:
                 qs = qs.filter(exam__branch__organization=org_filter)
             if faculty_id:
                 qs = qs.filter(exam__faculty_id=faculty_id)
-            # ... (add full annotation if needed; this is starter)
-            annotated = qs.values('exam__faculty__user__name', 'exam__subject__name').annotate(
-                total=Count('id'),
-                passed=Count('id', filter=Q(is_pass=True)),
-                pass_pct=ExpressionWrapper(F('passed')*100.0/Coalesce(F('total'), 1.0), output_field=FloatField()),
-                avg=Avg('marks_obtained'),
+            if subject_id:
+                qs = qs.filter(exam__subject_id=subject_id)
+            if batch_id:
+                qs = qs.filter(exam__batch_id=batch_id)
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+
+            qs = qs.annotate(
+                faculty_id=F('exam__faculty_id'),
+                faculty_name=F('exam__faculty__user__name'),
             )
+            annotated = qs.values(
+                'faculty_id', 'faculty_name'
+            ).annotate(
+                total_students=Count('id'),
+                passed_students=Count('id', filter=Q(is_pass=True)),
+                pass_percentage=ExpressionWrapper(
+                    F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                    output_field=FloatField()
+                ),
+                average_marks=Avg('marks_obtained'),
+                highest_marks=Max('marks_obtained'),
+                lowest_marks=Min('marks_obtained'),
+            ).order_by('-pass_percentage')
+
             for row in annotated:
                 writer.writerow([
-                    row['exam__faculty__user__name'], row['exam__subject__name'],
-                    row['total'], row['passed'], round(row['pass_pct'], 2), round(row['avg'] or 0, 2)
+                    row['faculty_id'], row['faculty_name'],
+                    row['total_students'], row['passed_students'],
+                    round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
+                    row.get('highest_marks'), row.get('lowest_marks')
                 ])
             return response
 

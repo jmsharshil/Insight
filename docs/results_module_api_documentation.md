@@ -730,13 +730,20 @@ Standard for missing `Exam`, `MarkSheet`, `RecheckRequest`, or `CheckerQuery`.
 
 These **read-only** endpoints compute all aggregates, pass percentages, ranks, and top-performer lists **directly from `PublishedResult`** (with `select_related` joins to `Exam.subject`, `Exam.faculty`, `Exam.batch`). 
 
+**Fixes applied:** 
+- `SubjectWise`: No duplication per subject — now groups **only by subject** (overall across exams/batches in filtered scope).
+- `BatchWise`: Provides **overall results for ALL exams and subjects** in the batch (groups only by batch).
+- `FacultyWise`: One record **per faculty only** (overall across subjects/batches/exams; groups only by faculty).
+- Updated export CSV to match (simplified columns, consistent aggregation).
+- `ResultAnalyticsView` / summary remains unchanged (already uses top-level aggregates).
+
 **No new models, no signals, no materialized views** — uses `annotate()`, `values()`, `Count`/`Avg`/`Max`/`Min`, `ExpressionWrapper(F('passed_students')*100.0/Coalesce(...))`, `F()` for grouping, and `Q()` filters. Matches the "no new models" directive from the core update.
 
 All endpoints:
 - Require roles: `super_admin`, `admin_senior_executive`, or `branch_manager`.
 - Apply organization scoping via `exam__branch__organization`.
-- Support query params: `?batch_id=...&subject_id=...&faculty_id=...&exam_id=...` (UUIDs).
-- Return consistent fields: `total_students`, `passed_students`, `pass_percentage` (float), `average_marks`, `highest_marks`, `lowest_marks`, etc.
+- Support query params: `?batch_id=...&subject_id=...&faculty_id=...&exam_id=...` (UUIDs). Filters narrow the dataset before aggregation.
+- Return consistent fields: `total_students`, `appeared_students`, `passed_students`, `pass_percentage` (float), `average_marks`, `highest_marks`, `lowest_marks`, etc.
 - Order by `-pass_percentage`, `-average_marks` by default.
 
 **Base paths:** `/api/v1/results/subject-wise/`, `/faculty-wise/`, `/batch-wise/`, `/summary/`, `/analytics/` (see `results/urls.py`).
@@ -751,18 +758,14 @@ All endpoints:
 ```json
 {
   "success": true,
-  "count": 12,
+  "count": 8,
   "data": [
     {
       "subject_id": "sub-uuid-001",
       "subject_name": "Company Law",
-      "batch_id": "batch-uuid-001",
-      "batch_name": "CS_Executive_June_2026",
-      "exam_id": "exam-uuid-001",
-      "exam_title": "June Prelim 2026",
-      "total_students": 45,
-      "appeared_students": 45,
-      "passed_students": 38,
+      "total_students": 180,
+      "appeared_students": 180,
+      "passed_students": 152,
       "pass_percentage": 84.44,
       "average_marks": 72.5,
       "highest_marks": 98.0,
@@ -777,15 +780,17 @@ All endpoints:
 
 **`GET /api/v1/results/faculty-wise/`**
 
-Groups by `faculty` + `subject`. Returns `faculty_id`, `faculty_name`, `subject_name`, etc. (same aggregate fields).
+Groups **only by faculty** (overall stats across all subjects taught). Returns `faculty_id`, `faculty_name` + aggregates. No per-subject duplication.
 
-**Example use:** `?faculty_id=...&subject_id=...`
+**Example use:** `?faculty_id=...` or with `subject_id` to narrow.
 
-### 5.3 Batch-Wise Results
+**Response shape:** Similar to subject-wise but keyed by faculty (e.g. one row per faculty with overall pass % across their exams).
+
+### 5.3 Batch-Wise Results (Overall for All Exams/Subjects)
 
 **`GET /api/v1/results/batch-wise/`**
 
-Groups by `batch` (optionally + subject). Ideal for batch performance reports.
+Now provides **overall aggregate for the batch across ALL exams and subjects** (groups only by batch). Use `?subject_id=...` to narrow if needed. Ideal for batch performance overview.
 
 ### 5.4 Overall Summary & Top-5 Lists
 
@@ -829,34 +834,33 @@ Combines overall stats with top-5 lists (subjects, faculty, batches) using separ
 
 **`GET /api/v1/results/export/?type=<type>&exam_id=...`**
 
-**Supported `type` values:** `exam` (per-exam student list), `subject-wise`, `faculty-wise`, `analytics`/`summary`.
+**Supported `type` values:** `exam` (per-exam student list with ranks), `subject-wise` (deduplicated by subject), `faculty-wise` (one per faculty), `analytics`/`summary`.
 
-**Query Params:** Same as aggregate views + `format=csv` (default; only CSV supported for now).
+**Query Params:** Same as aggregate views (`subject_id`, `faculty_id`, `batch_id`, etc.).
 
 **Response:** CSV file download with `Content-Disposition: attachment; filename="results_....csv"`.
 
-**Example (exam results):**
+**Updated Examples:**
+
+- **subject-wise** (matches fixed view — no batch dupes):
 ```
-Student Name,Roll Number,Marks Obtained,Total Marks,Percentage,Rank,Is Pass,Published At,Exam Title
-Priya Shah,101,85.5,100,85.5,1,True,2026-06-22,...
+Subject ID,Subject Name,Total Students,Passed Students,Pass Percentage,Average Marks,Highest Marks,Lowest Marks
+sub-uuid-001,Company Law,180,152,84.44,72.5,98.0,42.0
 ...
 ```
 
-**Example (analytics summary):**
+- **faculty-wise** (one record per faculty overall):
 ```
-Overall Summary
-Total Students,Passed Students,Pass Percentage,Avg Percentage,Avg Marks
-1250,1025,82.0,71.25,71.25
-
-Top Subjects
-Subject Name,Total,Passed,Pass %,Avg Marks
-Company Law,120,105,87.5,78.4
+Faculty ID,Faculty Name,Total Students,Passed Students,Pass Percentage,Average Marks,Highest Marks,Lowest Marks
+fac-uuid-001,Dr. Anil Sharma,320,275,85.94,76.2,99.0,35.0
 ...
 ```
 
-**Use cases:** Download for reports, Excel import, or admin dashboards. Ties into the on-the-fly aggregates (no extra DB load beyond the annotated queries). Extendable to PDF/Excel via libraries like openpyxl (add to requirements if needed).
+- **exam** and **analytics** unchanged (see previous).
 
-Update frontend to add export buttons calling this endpoint (e.g., with `type=analytics` for summary reports).
+**Use cases:** Download for reports, Excel import, or admin dashboards. Now fully aligned with fixed aggregation logic (overall batch/subject/faculty views). Ties into the on-the-fly aggregates (no extra DB load).
+
+Update frontend to add export buttons calling this endpoint (e.g., with `type=subject-wise&batch_id=xxx` for batch reports).
 
 ---
 
