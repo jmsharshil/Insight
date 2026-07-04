@@ -31,5 +31,6 @@ class AuditlogConfig(AppConfig):
         )
 
         if is_main_process:
-            from .tasks import schedule_periodic_flush
+            from .tasks import schedule_periodic_flush, schedule_audit_log_cleanup
             schedule_periodic_flush()
+            schedule_audit_log_cleanup()

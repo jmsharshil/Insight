@@ -22,7 +22,7 @@ from .utils import (
     compute_attendance_percentage, get_batch_attendance_sheet,
     resolve_qr_data, should_block_qr, get_active_violations_count,
     compute_avg_times, get_violations_breakdown, haversine_distance,
-    validate_qr_scan,
+    validate_qr_scan, get_attendance_entry_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -265,6 +265,12 @@ class QRScanView(APIView):
         existing_record = AttendanceRecord.objects.filter(
             student=student, batch_id=batch.id, date=now.date()
         ).first()
+        has_prior_same_day_checkin = AttendanceRecord.objects.filter(
+            student=student,
+            batch_id=batch.id,
+            date=now.date(),
+            checked_in_at__lt=now,
+        ).exists()
 
         if scan_type == 'check_in':
             if existing_record and existing_record.checked_in_at:
@@ -316,6 +322,26 @@ class QRScanView(APIView):
                 record.checked_in_at = now
                 record.status = 'checkout_pending'
                 record.save(update_fields=['checked_in_at', 'status'])
+
+            entry_status = get_attendance_entry_status(
+                timetable_slot_obj,
+                now,
+                is_first_class_of_day=not has_prior_same_day_checkin,
+            )
+            if entry_status == 'late_entry':
+                record.status = 'late'
+                ViolationRecord.objects.create(
+                    student=student,
+                    violation_type='late_entry',
+                    date=now.date(),
+                    description=f'Check-in was later than the allowed buffer for the class slot.',
+                    created_by=user,
+                )
+            else:
+                record.status = 'checkout_pending'
+            record.checked_in_at = now
+            record.save(update_fields=['checked_in_at', 'status'])
+
             attendance_status = 'already_scanned' if (not created and record.checked_in_at and record.checked_in_at != now) else record.status
             checked_in_at = record.checked_in_at
             checked_out_at = record.checked_out_at
