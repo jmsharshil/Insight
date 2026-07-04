@@ -9,6 +9,8 @@ from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 from django.db.models import Avg, Count, F, Q, ExpressionWrapper, FloatField, Max, Min
 from django.db.models.functions import Coalesce
+import csv
+from django.http import HttpResponse
 
 from .models import MarkSheet, PublishedResult, RecheckRequest, CheckerQuery
 from .serializers import (
@@ -1178,3 +1180,171 @@ class ResultAnalyticsView(APIView):
                 'total_published_results': total_results,
             }
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13. Result Export API (CSV download for results or aggregates)
+# Supports ?type=exam&exam_id=... or type=subject-wise etc. for analytics integration.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ResultExportView(APIView):
+    """GET /results/export/ — Export results or aggregates as CSV.
+    Examples:
+      - ?type=exam&exam_id=xxx → per-exam student results CSV
+      - ?type=subject-wise&subject_id=... → subject-wise aggregates
+      - ?type=analytics → overall summary + top lists (flattened)
+    Uses same role checks and scoping as analytics views. No new models.
+    """
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        export_type = request.query_params.get('type', 'exam')
+        exam_id = request.query_params.get('exam_id')
+        subject_id = request.query_params.get('subject_id')
+        faculty_id = request.query_params.get('faculty_id')
+        batch_id = request.query_params.get('batch_id')
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="results_{export_type}_{timezone.now().strftime("%Y%m%d")}.csv"'
+
+        writer = csv.writer(response)
+        org_filter = getattr(request.user, 'organization', None)
+
+        if export_type == 'exam' and exam_id:
+            # Export detailed student results for specific exam (ties to ResultView)
+            qs = PublishedResult.objects.filter(exam_id=exam_id).select_related(
+                'student__user', 'exam'
+            )
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            writer.writerow([
+                'Student Name', 'Roll Number', 'Marks Obtained', 'Total Marks',
+                'Percentage', 'Rank', 'Is Pass', 'Published At', 'Exam Title'
+            ])
+            for pr in qs.order_by('rank'):
+                student_name = pr.student.user.name if hasattr(pr.student, 'user') and pr.student.user else 'N/A'
+                roll_number = getattr(pr.student, 'roll_number', 'N/A') if pr.student else 'N/A'
+                writer.writerow([
+                    student_name,
+                    roll_number,
+                    pr.marks_obtained,
+                    pr.total_marks,
+                    pr.percentage,
+                    getattr(pr, 'rank', 'N/A'),
+                    pr.is_pass,
+                    pr.published_at,
+                    pr.exam.title if pr.exam else ''
+                ])
+            return response
+
+        elif export_type == 'subject-wise':
+            # Reuse aggregation logic from SubjectWiseResultView (simplified)
+            qs = PublishedResult.objects.select_related(
+                'exam__subject', 'exam__batch', 'exam__branch'
+            ).filter(exam__subject__isnull=False)
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            if subject_id:
+                qs = qs.filter(exam__subject_id=subject_id)
+            if batch_id:
+                qs = qs.filter(exam__batch_id=batch_id)
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+
+            qs = qs.annotate(
+                subject_id=F('exam__subject_id'),
+                subject_name=F('exam__subject__name'),
+                batch_name=F('exam__batch__name'),
+            )
+            annotated = qs.values(
+                'subject_id', 'subject_name', 'batch_name'
+            ).annotate(
+                total_students=Count('id'),
+                passed_students=Count('id', filter=Q(is_pass=True)),
+                pass_percentage=ExpressionWrapper(
+                    F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                    output_field=FloatField()
+                ),
+                average_marks=Avg('marks_obtained'),
+                highest_marks=Max('marks_obtained'),
+                lowest_marks=Min('marks_obtained'),
+            ).order_by('-pass_percentage')
+
+            writer.writerow([
+                'Subject ID', 'Subject Name', 'Batch Name', 'Total Students',
+                'Passed Students', 'Pass Percentage', 'Average Marks',
+                'Highest Marks', 'Lowest Marks'
+            ])
+            for row in annotated:
+                writer.writerow([
+                    row['subject_id'], row['subject_name'], row.get('batch_name', ''),
+                    row['total_students'], row['passed_students'],
+                    round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
+                    row.get('highest_marks'), row.get('lowest_marks')
+                ])
+            return response
+
+        elif export_type == 'faculty-wise':
+            # Similar for faculty (abbreviated; extend as needed)
+            writer.writerow(['Faculty Name', 'Subject', 'Total', 'Passed', 'Pass %', 'Avg Marks'])
+            qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject')
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            if faculty_id:
+                qs = qs.filter(exam__faculty_id=faculty_id)
+            # ... (add full annotation if needed; this is starter)
+            annotated = qs.values('exam__faculty__user__name', 'exam__subject__name').annotate(
+                total=Count('id'),
+                passed=Count('id', filter=Q(is_pass=True)),
+                pass_pct=ExpressionWrapper(F('passed')*100.0/Coalesce(F('total'), 1.0), output_field=FloatField()),
+                avg=Avg('marks_obtained'),
+            )
+            for row in annotated:
+                writer.writerow([
+                    row['exam__faculty__user__name'], row['exam__subject__name'],
+                    row['total'], row['passed'], round(row['pass_pct'], 2), round(row['avg'] or 0, 2)
+                ])
+            return response
+
+        elif export_type in ('summary', 'analytics'):
+            # Export overall + top lists (flattened with sections)
+            base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty')
+            if org_filter:
+                base_qs = base_qs.filter(exam__branch__organization=org_filter)
+
+            overall = base_qs.aggregate(
+                total_students=Count('id'),
+                passed=Count('id', filter=Q(is_pass=True)),
+                avg_percentage=Avg('percentage'),
+                avg_marks=Avg('marks_obtained'),
+            )
+            pass_pct = round((overall['passed'] / overall['total_students'] * 100), 2) if overall.get('total_students', 0) > 0 else 0
+
+            writer.writerow(['Overall Summary'])
+            writer.writerow(['Total Students', 'Passed Students', 'Pass Percentage', 'Avg Percentage', 'Avg Marks'])
+            writer.writerow([
+                overall['total_students'], overall['passed'], pass_pct,
+                round(overall['avg_percentage'] or 0, 2), round(overall['avg_marks'] or 0, 2)
+            ])
+            writer.writerow([])  # separator
+            writer.writerow(['Top Subjects'])
+            writer.writerow(['Subject Name', 'Total', 'Passed', 'Pass %', 'Avg Marks'])
+            subject_summary = base_qs.values('exam__subject__name').annotate(
+                total=Count('id'), passed=Count('id', filter=Q(is_pass=True)),
+                pass_pct=ExpressionWrapper(F('passed')*100.0/Coalesce(F('total'),1.0), output_field=FloatField()),
+                avg_marks=Avg('marks_obtained')
+            ).order_by('-pass_pct')[:5]
+            for s in subject_summary:
+                writer.writerow([s['exam__subject__name'], s['total'], s['passed'], round(s['pass_pct'],2), round(s['avg_marks'] or 0,2)])
+
+            # Add similar rows for top_faculty, top_batches if desired
+            writer.writerow([])
+            writer.writerow(['Note: Full top-faculty/top-batches included in JSON API. CSV focuses on key metrics.'])
+            return response
+
+        return Response({
+            'success': False,
+            'message': 'Invalid export type. Use: exam, subject-wise, faculty-wise, analytics.'
+        }, status=status.HTTP_400_BAD_REQUEST)

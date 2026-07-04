@@ -825,7 +825,38 @@ Combines overall stats with top-5 lists (subjects, faculty, batches) using separ
 
 **Technical Note:** Uses `base_qs.values('exam__subject__id', ...).annotate(...)` for top lists; `Coalesce` prevents division-by-zero on pass_percentage. Fully compatible with existing publish/recheck/query flows (ranks computed in `calculate_ranks()` on publish/recheck).
 
-Update your frontend dashboards to call these instead of legacy model-based endpoints (old `SubjectWiseResult`/`FacultyWiseResult` models have been removed).
+### 5.5 Results Export API (NEW)
+
+**`GET /api/v1/results/export/?type=<type>&exam_id=...`**
+
+**Supported `type` values:** `exam` (per-exam student list), `subject-wise`, `faculty-wise`, `analytics`/`summary`.
+
+**Query Params:** Same as aggregate views + `format=csv` (default; only CSV supported for now).
+
+**Response:** CSV file download with `Content-Disposition: attachment; filename="results_....csv"`.
+
+**Example (exam results):**
+```
+Student Name,Roll Number,Marks Obtained,Total Marks,Percentage,Rank,Is Pass,Published At,Exam Title
+Priya Shah,101,85.5,100,85.5,1,True,2026-06-22,...
+...
+```
+
+**Example (analytics summary):**
+```
+Overall Summary
+Total Students,Passed Students,Pass Percentage,Avg Percentage,Avg Marks
+1250,1025,82.0,71.25,71.25
+
+Top Subjects
+Subject Name,Total,Passed,Pass %,Avg Marks
+Company Law,120,105,87.5,78.4
+...
+```
+
+**Use cases:** Download for reports, Excel import, or admin dashboards. Ties into the on-the-fly aggregates (no extra DB load beyond the annotated queries). Extendable to PDF/Excel via libraries like openpyxl (add to requirements if needed).
+
+Update frontend to add export buttons calling this endpoint (e.g., with `type=analytics` for summary reports).
 
 ---
 
