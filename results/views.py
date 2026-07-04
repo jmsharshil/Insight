@@ -951,7 +951,6 @@ class SubjectWiseResultView(APIView):
             subject_name=F('exam__subject__name'),
             batch_id=F('exam__batch_id'),
             batch_name=F('exam__batch__name'),
-            exam_id=F('exam_id'),
             exam_title=F('exam__title'),
         )
 
@@ -1017,7 +1016,6 @@ class FacultyWiseResultView(APIView):
             subject_name=F('exam__subject__name'),
             batch_id=F('exam__batch_id'),
             batch_name=F('exam__batch__name'),
-            exam_id=F('exam_id'),
             exam_title=F('exam__title'),
         )
 
@@ -1078,7 +1076,6 @@ class BatchWiseResultView(APIView):
             batch_name=F('exam__batch__name'),
             subject_id=F('exam__subject_id'),
             subject_name=F('exam__subject__name'),
-            exam_id=F('exam_id'),
             exam_title=F('exam__title'),
         )
 
