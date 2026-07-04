@@ -234,6 +234,14 @@ class ExamSession(models.Model):
     
     assigned_paper = models.ForeignKey(SubjectPaper, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
 
+    # Support for subjective/offline exam answer sheet upload (per user request)
+    uploaded_answer_sheet = models.FileField(
+        upload_to='student_answers/',
+        null=True,
+        blank=True,
+        help_text='Scanned or PDF answer sheet uploaded by student for subjective exams.'
+    )
+
     class Meta:
         db_table = 'exam_sessions'
         unique_together = ('exam', 'student')

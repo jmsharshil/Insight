@@ -326,6 +326,7 @@ class AnswerInputSerializer(serializers.Serializer):
 class ExamSubmitSerializer(serializers.Serializer):
     session_id = serializers.UUIDField()
     answers = AnswerInputSerializer(many=True, required=False, default=[])
+    answer_sheet = serializers.FileField(required=False, allow_null=True)
 
 
 class AutosaveSerializer(serializers.Serializer):
