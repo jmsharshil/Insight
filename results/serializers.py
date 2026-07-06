@@ -132,13 +132,14 @@ class PublishedResultSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     recheck_requests = serializers.SerializerMethodField()
+    mcq_breakdown = serializers.SerializerMethodField()
 
     class Meta:
         model = PublishedResult
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'marks_obtained', 'total_marks', 'percentage', 'is_pass',
-            'rank', 'published_at', 'recheck_requests'
+            'rank', 'published_at', 'recheck_requests', 'mcq_breakdown'
         ]
 
     def get_student_name(self, obj):
@@ -159,6 +160,38 @@ class PublishedResultSerializer(serializers.ModelSerializer):
             requested_by=obj.student
         ).order_by('-created_at')
         return RecheckRequestSerializer(rechecks, many=True).data
+
+    def get_mcq_breakdown(self, obj):
+        if obj.exam.exam_type != 'mcq':
+            return []
+            
+        from exams.models import ExamSession, StudentAnswer
+        try:
+            session = ExamSession.objects.get(exam=obj.exam, student=obj.student)
+            answers = StudentAnswer.objects.filter(
+                session=session,
+                question__question_type__in=['mcq', 'paragraph_mcq', 'true_false']
+            ).select_related('question', 'selected_choice').prefetch_related('question__choices')
+            
+            breakdown = []
+            for ans in answers:
+                choices = ans.question.choices.all()
+                correct_choice = next((c for c in choices if c.is_correct), None)
+                marks_awarded = ans.question.marks if (ans.selected_choice and ans.selected_choice.is_correct) else 0
+                
+                breakdown.append({
+                    'question_id': ans.question.id,
+                    'question_text': ans.question.question_text,
+                    'question_image': ans.question.image.url if ans.question.image else None,
+                    'question_marks': ans.question.marks,
+                    'student_answer': ans.selected_choice.choice_text if ans.selected_choice else None,
+                    'is_student_correct': ans.selected_choice.is_correct if ans.selected_choice else False,
+                    'correct_answer': correct_choice.choice_text if correct_choice else None,
+                    'marks_awarded': marks_awarded
+                })
+            return breakdown
+        except Exception:
+            return []
 
 
 class RecheckRequestCreateSerializer(serializers.ModelSerializer):
