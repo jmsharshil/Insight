@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('batches', '0002_initial'),
+        ('batches', '0001_initial'),
         ('branch', '0001_initial'),
         ('exams', '0001_initial'),
         ('faculty', '0001_initial'),
