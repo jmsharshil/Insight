@@ -14,6 +14,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     subject_name = serializers.SerializerMethodField()
     has_open_query = serializers.SerializerMethodField()
     queries = serializers.SerializerMethodField()
+    uploaded_answer_sheet_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
@@ -24,6 +25,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             'has_open_query',
             'exam_title', 'exam_scheduled_date', 'exam_total_marks',
             'exam_pass_marks', 'batch_name', 'subject_name', 'queries',
+            'uploaded_answer_sheet_url',
         ]
 
     def get_student_name(self, obj):
@@ -86,6 +88,19 @@ class MarkSheetSerializer(serializers.ModelSerializer):
         queries = obj.queries.all()
         return CheckerQuerySerializer(queries, many=True).data
 
+    def get_uploaded_answer_sheet_url(self, obj):
+        from exams.models import ExamSession
+        try:
+            session = ExamSession.objects.get(exam=obj.exam, student=obj.student)
+            if session.uploaded_answer_sheet:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(session.uploaded_answer_sheet.url)
+                return session.uploaded_answer_sheet.url
+        except Exception:
+            pass
+        return None
+
 
 # v2 NEW: Recheck Request serializers (FRD §4.6.2 + upload/bulk/answerkey support)
 class RecheckRequestSerializer(serializers.ModelSerializer):
@@ -132,13 +147,14 @@ class PublishedResultSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
     recheck_requests = serializers.SerializerMethodField()
+    mcq_breakdown = serializers.SerializerMethodField()
 
     class Meta:
         model = PublishedResult
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'marks_obtained', 'total_marks', 'percentage', 'is_pass',
-            'rank', 'published_at', 'recheck_requests'
+            'rank', 'published_at', 'recheck_requests', 'mcq_breakdown'
         ]
 
     def get_student_name(self, obj):
@@ -159,6 +175,38 @@ class PublishedResultSerializer(serializers.ModelSerializer):
             requested_by=obj.student
         ).order_by('-created_at')
         return RecheckRequestSerializer(rechecks, many=True).data
+
+    def get_mcq_breakdown(self, obj):
+        if obj.exam.exam_type != 'mcq':
+            return []
+            
+        from exams.models import ExamSession, StudentAnswer
+        try:
+            session = ExamSession.objects.get(exam=obj.exam, student=obj.student)
+            answers = StudentAnswer.objects.filter(
+                session=session,
+                question__question_type__in=['mcq', 'paragraph_mcq', 'true_false']
+            ).select_related('question', 'selected_choice').prefetch_related('question__choices')
+            
+            breakdown = []
+            for ans in answers:
+                choices = ans.question.choices.all()
+                correct_choice = next((c for c in choices if c.is_correct), None)
+                marks_awarded = ans.question.marks if (ans.selected_choice and ans.selected_choice.is_correct) else 0
+                
+                breakdown.append({
+                    'question_id': ans.question.id,
+                    'question_text': ans.question.question_text,
+                    'question_image': ans.question.image.url if ans.question.image else None,
+                    'question_marks': ans.question.marks,
+                    'student_answer': ans.selected_choice.choice_text if ans.selected_choice else None,
+                    'is_student_correct': ans.selected_choice.is_correct if ans.selected_choice else False,
+                    'correct_answer': correct_choice.choice_text if correct_choice else None,
+                    'marks_awarded': marks_awarded
+                })
+            return breakdown
+        except Exception:
+            return []
 
 
 class RecheckRequestCreateSerializer(serializers.ModelSerializer):

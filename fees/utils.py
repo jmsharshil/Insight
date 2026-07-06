@@ -162,3 +162,59 @@ def has_overdue_installment(student_id):
         due_date__lt=threshold,
         plan__status__in=['approved', 'active'],
     ).exists()
+
+
+def get_refund_policy(payment, requested_amount=None):
+    """Return refund eligibility and the capped amount based on payment age and issued inventory."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    payment_date = getattr(payment, 'payment_date', None) or getattr(payment, 'created_at', None)
+    if payment_date is None:
+        return {
+            'eligible': False,
+            'reason': 'Payment date is unavailable.',
+            'max_refundable_amount': Decimal('0'),
+            'deduction_percent': Decimal('100'),
+        }
+
+    age_days = (timezone.now().date() - payment_date.date()).days
+    cap = Decimal('0')
+    deduction_percent = Decimal('100')
+
+    if age_days > 7:
+        return {
+            'eligible': False,
+            'reason': 'Refund not allowed after 7 days from payment date.',
+            'max_refundable_amount': cap,
+            'deduction_percent': deduction_percent,
+        }
+
+    if age_days <= 7:
+        deduction_percent = Decimal('10')
+        payment_amount = Decimal(str(getattr(payment, 'amount', 0)))
+        inventory_cost = Decimal('0')
+
+        try:
+            from inventory.models import ItemAllocation
+            student_id = getattr(payment, 'student_id', None)
+            if student_id:
+                allocations = ItemAllocation.objects.filter(student_id=student_id, status='issued')
+                for allocation in allocations.select_related('item'):
+                    unit_price = getattr(allocation.item, 'unit_price', 0) or 0
+                    inventory_cost += Decimal(str(unit_price)) * Decimal(str(getattr(allocation, 'quantity', 0) or 0))
+        except Exception:
+            inventory_cost = Decimal('0')
+
+        adjusted_payment_amount = max(payment_amount - inventory_cost, Decimal('0'))
+        cap = (adjusted_payment_amount * (Decimal('100') - deduction_percent)) / Decimal('100')
+
+    requested = Decimal(str(requested_amount if requested_amount is not None else getattr(payment, 'amount', 0)))
+    max_refundable = min(requested, cap)
+
+    return {
+        'eligible': True,
+        'reason': 'Refund allowed with 10% deduction within 7 days.',
+        'max_refundable_amount': max_refundable,
+        'deduction_percent': deduction_percent,
+    }

@@ -1,13 +1,19 @@
 import logging
 from django.conf import settings
-from core.email import send_email
+from core.sender import send_email
+from chat.notifications import send_system_notification
 
 logger = logging.getLogger(__name__)
 
-
-def _notify(user_id, title, body, metadata=None):
-    """Stub: in-app notification."""
-    logger.info(f"NOTIFY [{user_id}] {title}: {body}")
+def _notify(user_id, title, body, metadata=None, email_template=None, email_context=None):
+    """Stub: in-app notification replaced with real."""
+    if user_id:
+        send_system_notification(
+            user_id=str(user_id),
+            title=title,
+            body=body,
+            metadata=metadata,
+        )
 
 
 def send_checker_assignment_email(marksheet):

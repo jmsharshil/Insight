@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
@@ -30,6 +31,7 @@ from .serializers import (
 )
 from .utils import (
     auto_submit_session, check_geo_boundary, assign_papers_to_checker,
+    calculate_ranks,
 )
 from .emails import send_answer_key_email
 
@@ -830,6 +832,7 @@ class ExamStartView(APIView):
 
 
 class ExamSubmitView(APIView):
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
     # permission_classes = [IsAuthenticated]
 
 
@@ -837,9 +840,27 @@ class ExamSubmitView(APIView):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Only students can submit'}, status=status.HTTP_403_FORBIDDEN)
 
-        ser = ExamSubmitSerializer(data=request.data)
+        # Make a mutable copy of the data
+        if hasattr(request.data, 'copy'):
+            data = request.data.copy()
+        else:
+            data = dict(request.data)
+
+        # Parse answers if sent as JSON string (happens in multipart/form-data for offline exams)
+        if 'answers' in data and isinstance(data['answers'], str):
+            import json
+            val = data['answers'].strip()
+            if not val:
+                data['answers'] = []
+            else:
+                try:
+                    data['answers'] = json.loads(val)
+                except json.JSONDecodeError:
+                    return Response({'success': False, 'message': 'Invalid answers format', 'errors': {'answers': ['Must be valid JSON.']}}, status=status.HTTP_400_BAD_REQUEST)
+
+        ser = ExamSubmitSerializer(data=data)
         if not ser.is_valid():
-            return Response({'success': False, 'message': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'message': 'Invalid data', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             qs = ExamSession.objects.all()
@@ -854,7 +875,12 @@ class ExamSubmitView(APIView):
         if session.is_submitted:
             return Response({'success': False, 'message': 'Already submitted'}, status=status.HTTP_409_CONFLICT)
 
-        # Upsert answers
+        # Handle subjective file upload (supports offline/subjective per FRD)
+        answer_sheet = request.FILES.get('answer_sheet') or ser.validated_data.get('answer_sheet')
+        if answer_sheet:
+            session.uploaded_answer_sheet = answer_sheet
+
+        # Upsert answers (for MCQ + text answers; subjective may use file instead)
         for ans in ser.validated_data.get('answers', []):
             StudentAnswer.objects.update_or_create(
                 session=session, question_id=ans['question_id'],
@@ -869,30 +895,33 @@ class ExamSubmitView(APIView):
         if now > deadline:
             session.auto_submitted = True
 
-        from .utils import auto_grade_mcq
+        from .utils import auto_grade_mcq, requires_paper_checking
         has_subj = Question.objects.filter(exam=session.exam, question_type='subjective').exists()
         
         session.is_submitted = True
         session.submitted_at = now
         session.save()
 
-        if not has_subj:
+        if not requires_paper_checking(session.exam, has_subjective_questions=has_subj):
             marks, pct, passed = auto_grade_mcq(session.id)
             if session.exam.result_release_mode == 'instant':
+                # Also call calculate_ranks for instant publish (per core decisions)
+                calculate_ranks(session.exam.id)
                 return Response({'submitted': True, 'marks_obtained': marks, 'percentage': pct, 'is_pass': passed})
             else:
                 return Response({'submitted': True, 'message': 'Answers submitted. Results will be released by the faculty.'})
         else:
             from results.models import MarkSheet
             # Create MarkSheet but delay paper_checker assignment until exam completion
-            # (all marksheets submitted/absent-marked). This matches user request.
+            # (all marksheets submitted/absent-marked via Celery task). Matches summary.
             MarkSheet.objects.get_or_create(
                 exam=session.exam,
                 student=session.student,
-                defaults={'is_submitted': True, 'checked_at': timezone.now()}
+                defaults={'is_submitted': True, 'checked_at': timezone.now(), 'is_absent': False}
             )
-            assign_papers_to_checker(session.exam.id)
-            return Response({'submitted': True, 'message': 'Answers submitted. Results pending review by assigned checker.'})
+            # assign_papers_to_checker.delay(session.exam.id)
+            # Do NOT call assign_papers_to_checker() here — delayed to update_exam_statuses task
+            return Response({'submitted': True, 'message': 'Answers submitted (with optional answer sheet). Results pending review by assigned checker.'})
 
 
 class AutosaveView(APIView):

@@ -5,6 +5,8 @@ from .views import (
     PublishResultView, ResultView, ResultDeleteView,
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
     MarkAbsentView, MarkAllAbsentView, BulkRecheckRequestView, PaperCheckerQueryView,
+    SubjectWiseResultView, FacultyWiseResultView, BatchWiseResultView, ResultAnalyticsView,
+    ResultExportView,
 )
 
 urlpatterns = [
@@ -23,11 +25,22 @@ urlpatterns = [
     
     # v2 NEW: FRD §4.6.2 Recheck Requests
     path('exams/<uuid:exam_id>/results/recheck-request/', StudentRecheckRequestView.as_view(), name='student-recheck-request'),
+    path('exams/<uuid:exam_id>/results/recheck-request/bulk/', BulkRecheckRequestView.as_view(), name='bulk-recheck-request'),
     path('exams/<uuid:exam_id>/recheck-requests/', RecheckRequestListView.as_view(), name='recheck-request-list'),
     path('exams/<uuid:exam_id>/recheck-requests/<uuid:request_id>/', RecheckRequestActionView.as_view(), name='recheck-request-action'),
     
     # NEW: Paper checker query option
     path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/query/', PaperCheckerQueryView.as_view(), name='paper-checker-query'),
     path('exams/<uuid:exam_id>/queries/<uuid:query_id>/resolve/', PaperCheckerQueryView.as_view(), name='query-resolve'),
+    
+    # Subject-wise, Faculty-wise, Batch-wise & Summary APIs (on-the-fly via PublishedResult + Exam relations; no extra models)
+    path('results/subject-wise/', SubjectWiseResultView.as_view(), name='subject-wise-results'),
+    path('results/faculty-wise/', FacultyWiseResultView.as_view(), name='faculty-wise-results'),
+    path('results/batch-wise/', BatchWiseResultView.as_view(), name='batch-wise-results'),
+    path('results/summary/', ResultAnalyticsView.as_view(), name='result-summary'),
+    path('results/analytics/', ResultAnalyticsView.as_view(), name='result-analytics'),
+    
+    # NEW: Export API for results/aggregates (CSV download)
+    path('results/export/', ResultExportView.as_view(), name='results-export'),
 ]
 

@@ -82,6 +82,8 @@ class SchedulerConfig(AppConfig):
             send_pending_submission_reminders,
             auto_expire_exam_sessions,
         )
+        from auditlog.tasks import cleanup_old_audit_logs
+        from auth_user.tasks import cleanup_old_notifications
         TaskScheduler.register(
             "accrue_monthly_leaves",
             lambda: accrue_monthly_leaves_task()
@@ -89,6 +91,8 @@ class SchedulerConfig(AppConfig):
         TaskScheduler.register("update_exam_statuses", update_exam_statuses)
         TaskScheduler.register("send_pending_submission_reminders", send_pending_submission_reminders)
         TaskScheduler.register("auto_expire_exam_sessions", auto_expire_exam_sessions)
+        TaskScheduler.register("cleanup_old_audit_logs", cleanup_old_audit_logs)
+        TaskScheduler.register("cleanup_old_notifications", cleanup_old_notifications)
         print("[SCHEDULER APP] All task types registered.")
 
     def _ensure_recurring_tasks(self):
@@ -122,6 +126,18 @@ class SchedulerConfig(AppConfig):
                 "interval_seconds": 86400,       # daily
                 "delay_seconds": 300,            # 5 min after startup
                 "max_retries": 5,
+            },
+            {
+                "task_type": "cleanup_old_audit_logs",
+                "interval_seconds": 86400,       # daily
+                "delay_seconds": 1800,           # 30 min after startup
+                "max_retries": 3,
+            },
+            {
+                "task_type": "cleanup_old_notifications",
+                "interval_seconds": 86400,       # daily
+                "delay_seconds": 1800,           # 30 min after startup
+                "max_retries": 3,
             },
         ]
 

@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('batches', '0002_initial'),
+        ('batches', '0001_initial'),
         ('branch', '0001_initial'),
         ('onboarding', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

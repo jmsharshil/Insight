@@ -2,8 +2,7 @@ from django.conf import settings
 from urllib.parse import urlencode
 import secrets
 import string
-from core.email import send_email
-
+from core.sender import send_email
 
 def generate_temporary_password(length=12):
     """Generate a secure temporary password"""

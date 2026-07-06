@@ -1,6 +1,5 @@
 import logging
 from django.utils import timezone
-from django.db.models import Count, Q, Max
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -8,6 +7,13 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
+from django.db.models import Avg, Count, F, Q, ExpressionWrapper, FloatField, Max, Min
+from django.db.models.functions import Coalesce
+import csv
+from io import BytesIO
+from django.http import HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 from .models import MarkSheet, PublishedResult, RecheckRequest, CheckerQuery
 from .serializers import (
@@ -34,6 +40,59 @@ QUERY_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 
 def _user_role(user):
     return getattr(user, 'role', None)
+
+
+def build_exam_export_workbook(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Results'
+    headers = [
+        'Student Name', 'Roll Number', 'Marks Obtained', 'Total Marks',
+        'Percentage', 'Rank', 'Is Pass', 'Published At', 'Exam Title'
+    ]
+    sheet.append(headers)
+
+    red_fill = PatternFill(fill_type='solid', fgColor='FFC7CE')
+    green_fill = PatternFill(fill_type='solid', fgColor='C6EFCE')
+
+    highest_percentage = None
+    for row in rows:
+        percentage_value = row[4]
+        try:
+            numeric_percentage = float(percentage_value) if percentage_value is not None else None
+        except (TypeError, ValueError):
+            numeric_percentage = None
+        if numeric_percentage is not None and (highest_percentage is None or numeric_percentage > highest_percentage):
+            highest_percentage = numeric_percentage
+
+    for row_index, row in enumerate(rows, start=2):
+        sheet.append(row)
+        marks_obtained = row[2]
+        percentage_value = row[4]
+        is_absent = row[9] if len(row) > 9 else False
+        try:
+            numeric_percentage = float(percentage_value) if percentage_value is not None else None
+        except (TypeError, ValueError):
+            numeric_percentage = None
+
+        if is_absent:
+            sheet.cell(row=row_index, column=3).value = 'AB'
+            sheet.cell(row=row_index, column=3).fill = red_fill
+        else:
+            sheet.cell(row=row_index, column=3).value = marks_obtained
+            if numeric_percentage is not None:
+                if numeric_percentage < 40:
+                    sheet.cell(row=row_index, column=3).fill = red_fill
+                elif highest_percentage is not None and numeric_percentage == highest_percentage:
+                    sheet.cell(row=row_index, column=3).fill = green_fill
+
+    for column in sheet.columns:
+        non_empty_values = [cell.value for cell in column if cell.value is not None]
+        if non_empty_values:
+            max_length = max(len(str(value)) for value in non_empty_values)
+            sheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 40)
+
+    return workbook
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -902,9 +961,502 @@ class RecheckRequestActionView(APIView):
                         title='Recheck Request Rejected',
                         body='Your request for recheck has been reviewed and rejected.',
                         metadata={"exam_id": str(exam_id), "recheck_id": str(rr.id)},
+                        email_template='emails/recheck_rejected.html',
+                        email_context={'exam_title': ms.exam.title, 'reason': getattr(rr, 'reason', '')}
                     )
             except Exception:
                 logger.warning('Could not send rejection notification')
 
             return Response({'success': True, 'message': 'Recheck request has been rejected.'})
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12. Subject-wise / Faculty-wise / Batch / Summary APIs (using PublishedResult + annotations)
+# Anchored to Exam.subject, Exam.faculty, Exam.batch relations. No extra models.
+# Supports query params: subject_id, faculty_id, batch_id, exam_id
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SubjectWiseResultView(APIView):
+    """GET /results/subject-wise/?subject_id=...&batch_id=...&exam_id=...
+    Aggregates results by subject (via Exam.subject). Groups ONLY by subject
+    to eliminate duplication (overall across exams/batches unless filtered).
+    """
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = PublishedResult.objects.select_related(
+            'exam__subject', 'exam__batch', 'exam__branch'
+        ).filter(exam__subject__isnull=False)
+
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(exam__branch__organization=request.user.organization)
+
+        # Apply filters (narrows scope before grouping)
+        subject_id = request.query_params.get('subject_id')
+        batch_id = request.query_params.get('batch_id')
+        exam_id = request.query_params.get('exam_id')
+        if subject_id:
+            qs = qs.filter(exam__subject_id=subject_id)
+        if batch_id:
+            qs = qs.filter(exam__batch_id=batch_id)
+        if exam_id:
+            qs = qs.filter(exam_id=exam_id)
+
+        # Pre-annotate for grouping by subject only (no dupes)
+        qs = qs.annotate(
+            subject_id=F('exam__subject_id'),
+            subject_name=F('exam__subject__name'),
+        )
+
+        # Aggregate by subject (overall for all exams/subjects in scope)
+        annotated = qs.values(
+            'subject_id', 'subject_name'
+        ).annotate(
+            total_students=Count('id'),
+            appeared_students=Count('id'),
+            passed_students=Count('id', filter=Q(is_pass=True)),
+            pass_percentage=ExpressionWrapper(
+                F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                output_field=FloatField()
+            ),
+            average_marks=Avg('marks_obtained'),
+            highest_marks=Max('marks_obtained'),
+            lowest_marks=Min('marks_obtained'),
+        ).order_by('-pass_percentage', '-average_marks')
+
+        data = list(annotated)
+        return Response({
+            'success': True,
+            'count': len(data),
+            'data': data
+        })
+
+
+class FacultyWiseResultView(APIView):
+    """GET /results/faculty-wise/?faculty_id=...&subject_id=...&batch_id=...
+    Aggregates by faculty ONLY (via Exam.faculty) — one record per faculty
+    with overall results across all subjects/batches/exams (unless filtered).
+    """
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = PublishedResult.objects.select_related(
+            'exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch'
+        ).filter(exam__faculty__isnull=False)
+
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(exam__branch__organization=request.user.organization)
+
+        # Apply filters (narrows scope before grouping)
+        faculty_id = request.query_params.get('faculty_id')
+        subject_id = request.query_params.get('subject_id')
+        batch_id = request.query_params.get('batch_id')
+        exam_id = request.query_params.get('exam_id')
+        if faculty_id:
+            qs = qs.filter(exam__faculty_id=faculty_id)
+        if subject_id:
+            qs = qs.filter(exam__subject_id=subject_id)
+        if batch_id:
+            qs = qs.filter(exam__batch_id=batch_id)
+        if exam_id:
+            qs = qs.filter(exam_id=exam_id)
+
+        # Pre-annotate for grouping by faculty only (one record per faculty)
+        qs = qs.annotate(
+            faculty_id=F('exam__faculty_id'),
+            faculty_name=F('exam__faculty__user__name'),
+        )
+
+        annotated = qs.values(
+            'faculty_id', 'faculty_name'
+        ).annotate(
+            total_students=Count('id'),
+            appeared_students=Count('id'),
+            passed_students=Count('id', filter=Q(is_pass=True)),
+            pass_percentage=ExpressionWrapper(
+                F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                output_field=FloatField()
+            ),
+            average_marks=Avg('marks_obtained'),
+            highest_marks=Max('marks_obtained'),
+            lowest_marks=Min('marks_obtained'),
+        ).order_by('-pass_percentage', '-average_marks')
+
+        data = list(annotated)
+        return Response({
+            'success': True,
+            'count': len(data),
+            'data': data
+        })
+
+
+class BatchWiseResultView(APIView):
+    """GET /results/batch-wise/?batch_id=...&subject_id=...
+    Aggregates overall results by batch (via Exam.batch) across ALL exams and subjects.
+    """
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = PublishedResult.objects.select_related(
+            'exam__batch', 'exam__subject', 'exam__branch'
+        ).filter(exam__batch__isnull=False)
+
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(exam__branch__organization=request.user.organization)
+
+        # Apply filters (narrows scope before grouping)
+        batch_id = request.query_params.get('batch_id')
+        subject_id = request.query_params.get('subject_id')
+        exam_id = request.query_params.get('exam_id')
+        if batch_id:
+            qs = qs.filter(exam__batch_id=batch_id)
+        if subject_id:
+            qs = qs.filter(exam__subject_id=subject_id)
+        if exam_id:
+            qs = qs.filter(exam_id=exam_id)
+
+        # Pre-annotate for grouping by batch only (overall across subjects/exams)
+        qs = qs.annotate(
+            batch_id=F('exam__batch_id'),
+            batch_name=F('exam__batch__name'),
+        )
+
+        # Aggregate by batch (overall for all exams and subjects)
+        annotated = qs.values(
+            'batch_id', 'batch_name'
+        ).annotate(
+            total_students=Count('id'),
+            appeared_students=Count('id'),
+            passed_students=Count('id', filter=Q(is_pass=True)),
+            pass_percentage=ExpressionWrapper(
+                F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                output_field=FloatField()
+            ),
+            average_marks=Avg('marks_obtained'),
+            highest_marks=Max('marks_obtained'),
+            lowest_marks=Min('marks_obtained'),
+        ).order_by('-pass_percentage', '-average_marks')
+
+        data = list(annotated)
+        return Response({
+            'success': True,
+            'count': len(data),
+            'data': data
+        })
+
+
+class ResultAnalyticsView(APIView):
+    """GET /results/analytics/ or /results/summary/ — Overall summary + top performers by category.
+    Uses default PublishedResult model with annotations (no extra models).
+    """
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty')
+        if getattr(request.user, 'organization', None):
+            base_qs = base_qs.filter(exam__branch__organization=request.user.organization)
+
+        # Overall summary
+        total_results = base_qs.count()
+        overall = base_qs.aggregate(
+            total_students=Count('id'),
+            passed=Count('id', filter=Q(is_pass=True)),
+            avg_percentage=Avg('percentage'),
+            avg_marks=Avg('marks_obtained'),
+        )
+        overall_pass_pct = round((overall['passed'] / overall['total_students'] * 100), 2) if overall.get('total_students', 0) > 0 else 0
+
+        # Top 5 subjects by pass %
+        subject_summary = base_qs.values(
+            'exam__subject__id', 'exam__subject__name'
+        ).annotate(
+            total=Count('id'),
+            passed=Count('id', filter=Q(is_pass=True)),
+            pass_pct=ExpressionWrapper(
+                F('passed') * 100.0 / Coalesce(F('total'), 1.0), output_field=FloatField()
+            ),
+            avg_marks=Avg('marks_obtained'),
+        ).order_by('-pass_pct')[:5]
+
+        # Top 5 faculty
+        faculty_summary = base_qs.values(
+            'exam__faculty__id', 'exam__faculty__user__name'
+        ).annotate(
+            total=Count('id'),
+            passed=Count('id', filter=Q(is_pass=True)),
+            pass_pct=ExpressionWrapper(
+                F('passed') * 100.0 / Coalesce(F('total'), 1.0), output_field=FloatField()
+            ),
+            avg_marks=Avg('marks_obtained'),
+        ).order_by('-pass_pct')[:5]
+
+        # Batch summary
+        batch_summary = base_qs.values(
+            'exam__batch__id', 'exam__batch__name'
+        ).annotate(
+            total=Count('id'),
+            passed=Count('id', filter=Q(is_pass=True)),
+            pass_pct=ExpressionWrapper(
+                F('passed') * 100.0 / Coalesce(F('total'), 1.0), output_field=FloatField()
+            ),
+        ).order_by('-pass_pct')[:5]
+
+        return Response({
+            'success': True,
+            'data': {
+                'overall': {
+                    'total_students': overall['total_students'],
+                    'passed_students': overall['passed'],
+                    'pass_percentage': overall_pass_pct,
+                    'average_percentage': round(overall['avg_percentage'] or 0, 2),
+                    'average_marks': round(overall['avg_marks'] or 0, 2),
+                },
+                'top_subjects': list(subject_summary),
+                'top_faculty': list(faculty_summary),
+                'top_batches': list(batch_summary),
+                'total_published_results': total_results,
+            }
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13. Result Export API (CSV download for results or aggregates)
+# Supports ?type=exam&exam_id=... or type=subject-wise etc. for analytics integration.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ResultExportView(APIView):
+    """GET /results/export/ — Export results or aggregates as CSV.
+    Examples:
+      - ?type=exam&exam_id=xxx → per-exam student results CSV
+      - ?type=subject-wise&subject_id=... → subject-wise aggregates
+      - ?type=analytics → overall summary + top lists (flattened)
+    Uses same role checks and scoping as analytics views. No new models.
+    """
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        export_type = request.query_params.get('type', 'exam')
+        exam_id = request.query_params.get('exam_id')
+        subject_id = request.query_params.get('subject_id')
+        faculty_id = request.query_params.get('faculty_id')
+        batch_id = request.query_params.get('batch_id')
+
+        org_filter = getattr(request.user, 'organization', None)
+
+        if export_type == 'exam' and exam_id:
+            # Export detailed student results for specific exam (ties to ResultView)
+            qs = PublishedResult.objects.filter(exam_id=exam_id).select_related(
+                'student__user', 'exam'
+            )
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            rows = []
+            for pr in qs.order_by('rank'):
+                student_name = pr.student.user.name if hasattr(pr.student, 'user') and pr.student.user else 'N/A'
+                roll_number = getattr(pr.student, 'roll_number', 'N/A') if pr.student else 'N/A'
+                marks_value = pr.marks_obtained
+                try:
+                    marks_value = float(marks_value) if marks_value is not None else None
+                except (TypeError, ValueError):
+                    marks_value = None
+                rows.append([
+                    student_name,
+                    roll_number,
+                    marks_value,
+                    pr.total_marks,
+                    pr.percentage,
+                    getattr(pr, 'rank', 'N/A'),
+                    pr.is_pass,
+                    pr.published_at,
+                    pr.exam.title if pr.exam else ''
+                ])
+
+            workbook = build_exam_export_workbook(rows)
+            output = BytesIO()
+            workbook.save(output)
+            response = HttpResponse(output.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="results_{export_type}_{timezone.now().strftime("%Y%m%d")}.xlsx"'
+            return response
+
+        else:
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="results_{export_type}_{timezone.now().strftime("%Y%m%d")}.csv"'
+            writer = csv.writer(response)
+
+        if export_type == 'subject-wise':
+            # Reuse updated aggregation logic from SubjectWiseResultView (no duplication by subject)
+            qs = PublishedResult.objects.select_related(
+                'exam__subject', 'exam__batch', 'exam__branch'
+            ).filter(exam__subject__isnull=False)
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            if subject_id:
+                qs = qs.filter(exam__subject_id=subject_id)
+            if batch_id:
+                qs = qs.filter(exam__batch_id=batch_id)
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+
+            qs = qs.annotate(
+                subject_id=F('exam__subject_id'),
+                subject_name=F('exam__subject__name'),
+            )
+            annotated = qs.values(
+                'subject_id', 'subject_name'
+            ).annotate(
+                total_students=Count('id'),
+                passed_students=Count('id', filter=Q(is_pass=True)),
+                pass_percentage=ExpressionWrapper(
+                    F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                    output_field=FloatField()
+                ),
+                average_marks=Avg('marks_obtained'),
+                highest_marks=Max('marks_obtained'),
+                lowest_marks=Min('marks_obtained'),
+            ).order_by('-pass_percentage')
+
+            writer.writerow([
+                'Subject ID', 'Subject Name', 'Total Students',
+                'Passed Students', 'Pass Percentage', 'Average Marks',
+                'Highest Marks', 'Lowest Marks'
+            ])
+            for row in annotated:
+                writer.writerow([
+                    row['subject_id'], row['subject_name'],
+                    row['total_students'], row['passed_students'],
+                    round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
+                    row.get('highest_marks'), row.get('lowest_marks')
+                ])
+            return response
+
+        elif export_type == 'faculty-wise':
+            # Updated to match FacultyWiseResultView: one record per faculty (overall across subjects)
+            writer.writerow(['Faculty ID', 'Faculty Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
+            qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch')
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            if faculty_id:
+                qs = qs.filter(exam__faculty_id=faculty_id)
+            if subject_id:
+                qs = qs.filter(exam__subject_id=subject_id)
+            if batch_id:
+                qs = qs.filter(exam__batch_id=batch_id)
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+
+            qs = qs.annotate(
+                faculty_id=F('exam__faculty_id'),
+                faculty_name=F('exam__faculty__user__name'),
+            )
+            annotated = qs.values(
+                'faculty_id', 'faculty_name'
+            ).annotate(
+                total_students=Count('id'),
+                passed_students=Count('id', filter=Q(is_pass=True)),
+                pass_percentage=ExpressionWrapper(
+                    F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                    output_field=FloatField()
+                ),
+                average_marks=Avg('marks_obtained'),
+                highest_marks=Max('marks_obtained'),
+                lowest_marks=Min('marks_obtained'),
+            ).order_by('-pass_percentage')
+
+            for row in annotated:
+                writer.writerow([
+                    row['faculty_id'], row['faculty_name'],
+                    row['total_students'], row['passed_students'],
+                    round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
+                    row.get('highest_marks'), row.get('lowest_marks')
+                ])
+            return response
+
+        elif export_type == 'batch-wise':
+            writer.writerow(['Batch ID', 'Batch Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
+            qs = PublishedResult.objects.select_related('exam__batch', 'exam__branch')
+            if org_filter:
+                qs = qs.filter(exam__branch__organization=org_filter)
+            if batch_id:
+                qs = qs.filter(exam__batch_id=batch_id)
+            if subject_id:
+                qs = qs.filter(exam__subject_id=subject_id)
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+
+            qs = qs.annotate(
+                batch_id=F('exam__batch_id'),
+                batch_name=F('exam__batch__name'),
+            )
+            annotated = qs.values(
+                'batch_id', 'batch_name'
+            ).annotate(
+                total_students=Count('id'),
+                passed_students=Count('id', filter=Q(is_pass=True)),
+                pass_percentage=ExpressionWrapper(
+                    F('passed_students') * 100.0 / Coalesce(F('total_students'), 1.0),
+                    output_field=FloatField()
+                ),
+                average_marks=Avg('marks_obtained'),
+                highest_marks=Max('marks_obtained'),
+                lowest_marks=Min('marks_obtained'),
+            ).order_by('-pass_percentage')
+
+            for row in annotated:
+                writer.writerow([
+                    row['batch_id'], row['batch_name'],
+                    row['total_students'], row['passed_students'],
+                    round(row['pass_percentage'], 2), round(row.get('average_marks') or 0, 2),
+                    row.get('highest_marks'), row.get('lowest_marks')
+                ])
+            return response
+
+        elif export_type in ('summary', 'analytics'):
+            # Export overall + top lists (flattened with sections)
+            base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty')
+            if org_filter:
+                base_qs = base_qs.filter(exam__branch__organization=org_filter)
+
+            overall = base_qs.aggregate(
+                total_students=Count('id'),
+                passed=Count('id', filter=Q(is_pass=True)),
+                avg_percentage=Avg('percentage'),
+                avg_marks=Avg('marks_obtained'),
+            )
+            pass_pct = round((overall['passed'] / overall['total_students'] * 100), 2) if overall.get('total_students', 0) > 0 else 0
+
+            writer.writerow(['Overall Summary'])
+            writer.writerow(['Total Students', 'Passed Students', 'Pass Percentage', 'Avg Percentage', 'Avg Marks'])
+            writer.writerow([
+                overall['total_students'], overall['passed'], pass_pct,
+                round(overall['avg_percentage'] or 0, 2), round(overall['avg_marks'] or 0, 2)
+            ])
+            writer.writerow([])  # separator
+            writer.writerow(['Top Subjects'])
+            writer.writerow(['Subject Name', 'Total', 'Passed', 'Pass %', 'Avg Marks'])
+            subject_summary = base_qs.values('exam__subject__name').annotate(
+                total=Count('id'), passed=Count('id', filter=Q(is_pass=True)),
+                pass_pct=ExpressionWrapper(F('passed')*100.0/Coalesce(F('total'),1.0), output_field=FloatField()),
+                avg_marks=Avg('marks_obtained')
+            ).order_by('-pass_pct')[:5]
+            for s in subject_summary:
+                writer.writerow([s['exam__subject__name'], s['total'], s['passed'], round(s['pass_pct'],2), round(s['avg_marks'] or 0,2)])
+
+            # Add similar rows for top_faculty, top_batches if desired
+            writer.writerow([])
+            writer.writerow(['Note: Full top-faculty/top-batches included in JSON API. CSV focuses on key metrics.'])
+            return response
+
+        return Response({
+            'success': False,
+            'message': 'Invalid export type. Use: exam, subject-wise, faculty-wise, batch-wise, analytics.'
+        }, status=status.HTTP_400_BAD_REQUEST)

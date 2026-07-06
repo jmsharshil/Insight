@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Leave Request Pending Approval</h2>
+
+<p>Hello,</p>
+
+<p><strong>{{ applicant_name }}</strong> has applied for <strong>{{ leave_type }}</strong> leave.</p>
+
+<div class="info-box">
+    <ul>
+        <li><strong>From Date:</strong> {{ from_date }}</li>
+        <li><strong>To Date:</strong> {{ to_date }}</li>
+        <li><strong>Reason:</strong> {{ reason }}</li>
+    </ul>
+</div>
+
+<p>Please log in to the {{ org_name|default:"Insight" }} portal to review and approve or reject this request.</p>
+
+<p>Thank you.</p>
+{% endblock %}

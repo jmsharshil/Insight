@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/v1/', include('scheduler.urls')),
     path('api/v1/', include('chat.urls')),
     path('api/v1/inventory/', include('inventory.urls')),
+    path('api/v1/dashboard/', include('dashboard.urls')),
 ]
 
 if settings.DEBUG:

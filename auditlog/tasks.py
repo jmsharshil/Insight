@@ -5,7 +5,10 @@ for scheduling (no direct threading.Timer in this module).
 """
 
 import logging
+from datetime import timedelta
 from collections import defaultdict
+
+from django.utils import timezone
 
 from .models import AuditLog
 from .blob_service import upload_log_file
@@ -101,6 +104,27 @@ def flush_logs_to_blob():
         logger.exception("[AUDIT FLUSH] Error during flush: %s", exc)
 
 
+def cleanup_old_audit_logs(retention_days=21):
+    """Delete audit logs older than the retention window while keeping blob copies intact."""
+    cutoff = timezone.now() - timedelta(days=retention_days)
+    deleted, _ = AuditLog.objects.filter(timestamp__lt=cutoff).delete()
+    logger.info("[AUDIT RETENTION] Deleted %d audit logs older than %d days.", deleted, retention_days)
+    return deleted
+
+
+def schedule_audit_log_cleanup():
+    """Create a recurring scheduler task for deleting stale audit logs."""
+    from scheduler.services import TaskScheduler
+
+    TaskScheduler.schedule(
+        task_type="cleanup_old_audit_logs",
+        delay_seconds=3600,
+        is_recurring=True,
+        interval_seconds=86400,
+        max_retries=3,
+    )
+
+
 def schedule_periodic_flush():
     """
     Entry point called from AuditlogConfig.ready(). Uses the BackgroundTaskQueue's
@@ -109,4 +133,5 @@ def schedule_periodic_flush():
     from core.task_queue import TASK_QUEUE
 
     TASK_QUEUE.schedule_periodic(flush_logs_to_blob, FLUSH_INTERVAL)
+    TASK_QUEUE.schedule_periodic(cleanup_old_audit_logs, 86400)
     logger.info("[AUDIT FLUSH] Periodic audit log flush scheduler started.")

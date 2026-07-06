@@ -9,9 +9,18 @@ logger = logging.getLogger(__name__)
 
 # ── Stub notification helper ──────────────────────────────────────────────────
 
-def notify(recipient_user_id, title, body, metadata=None):
-    """Stub: push/in-app notification. Replace with real implementation."""
-    logger.info(f"NOTIFY [{recipient_user_id}] {title}: {body}")
+def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
+    from chat.notifications import send_system_notification
+    if recipient_user_id:
+        send_system_notification(
+            user_id=str(recipient_user_id),
+            title=title,
+            body=body,
+            metadata=metadata,
+            email_template=email_template,
+            email_context=email_context,
+            email_subject=email_subject,
+        )
 
 
 def group_questions(serialized_questions):
@@ -93,7 +102,7 @@ def auto_submit_session(session):
     exam = session.exam
     has_subjective = Question.objects.filter(exam=exam, question_type='subjective').exists()
 
-    if not has_subjective:
+    if not requires_paper_checking(exam, has_subjective_questions=has_subjective):
         auto_grade_mcq(session.id)
     else:
         # Create MarkSheet but DO NOT assign paper_checker yet.
@@ -107,6 +116,16 @@ def auto_submit_session(session):
         # Note: assign_papers_to_checker() is now ONLY called from completion task
 
     return session
+
+
+def requires_paper_checking(exam, has_subjective_questions=False):
+    """Return True when an exam should be reviewed by paper checkers."""
+    exam_mode = getattr(exam, 'exam_mode', None)
+    exam_type = getattr(exam, 'exam_type', None)
+
+    if exam_mode == 'online' and exam_type == 'mcq':
+        return False
+    return True
 
 
 def get_available_paper_checkers(exam):
@@ -210,6 +229,10 @@ def assign_papers_to_checker(exam_id, checker_ids=None):
     from .emails import send_checker_assignment_email
 
     exam = Exam.objects.select_related('branch').get(id=exam_id)
+
+    if not requires_paper_checking(exam):
+        logger.info(f"Skipping paper checker assignment for exam {exam_id} ({exam.title}) because it does not require manual review.")
+        return 0
 
     if not checker_ids:
         # Rely on M2M (populated at creation). Fallback only if somehow empty.

@@ -8,7 +8,7 @@ from .models import (
     FEE_STATUS_CHOICES, INSTALLMENT_PLAN_STATUS_CHOICES,
     REFUND_STATUS_CHOICES,
 )
-from .utils import get_installment_plan_status
+from .utils import get_installment_plan_status, get_refund_policy
 from decimal import Decimal
 
 
@@ -455,6 +455,17 @@ class RefundCreateSerializer(serializers.ModelSerializer):
             if amount > (payment.amount - already_refunded):
                 raise serializers.ValidationError(
                     {'amount': 'Refund amount exceeds payment balance.'}
+                )
+
+            policy = get_refund_policy(payment, amount)
+            if not policy['eligible']:
+                raise serializers.ValidationError(
+                    {'amount': policy['reason']}
+                )
+
+            if amount > policy['max_refundable_amount']:
+                raise serializers.ValidationError(
+                    {'amount': f'Refund amount exceeds the allowed maximum of {policy["max_refundable_amount"]}.'}
                 )
         return data
 

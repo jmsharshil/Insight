@@ -93,6 +93,7 @@ class SubjectPaperSerializer(serializers.ModelSerializer):
 class ExamListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     batch_name = serializers.SerializerMethodField()
+    subject = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
     faculty_id = serializers.SerializerMethodField()
     faculty_name = serializers.SerializerMethodField()
@@ -210,8 +211,21 @@ class ExamListSerializer(serializers.ModelSerializer):
     def get_batch_name(self, obj):
         return obj.batch.name if obj.batch else None
 
+    def get_subject(self, obj):
+        if obj.subject_id:
+            return obj.subject_id
+        paper = obj.selected_papers.first()
+        if paper and paper.subject_id:
+            return paper.subject_id
+        return None
+
     def get_subject_name(self, obj):
-        return obj.subject.name if obj.subject else None
+        if obj.subject:
+            return obj.subject.name
+        paper = obj.selected_papers.first()
+        if paper and paper.subject:
+            return paper.subject.name
+        return None
 
     def get_faculty_id(self, obj):
         return obj.faculty.id if obj.faculty else None
@@ -312,6 +326,7 @@ class AnswerInputSerializer(serializers.Serializer):
 class ExamSubmitSerializer(serializers.Serializer):
     session_id = serializers.UUIDField()
     answers = AnswerInputSerializer(many=True, required=False, default=[])
+    answer_sheet = serializers.FileField(required=False, allow_null=True)
 
 
 class AutosaveSerializer(serializers.Serializer):

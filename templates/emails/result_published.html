@@ -1,0 +1,29 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Exam Result Published</h2>
+
+<p>Hello {{ user_name }},</p>
+
+<p>The results for the exam <strong>{{ exam_title }}</strong> have been published.</p>
+
+<div class="info-box" style="margin: 20px 0; padding: 15px; border: 1px solid #ddd; background-color: #f9f9f9;">
+    {% if marks is not None %}
+        <p><strong>Marks Obtained:</strong> {{ marks }}</p>
+    {% endif %}
+    {% if total_marks is not None %}
+        <p><strong>Total Marks:</strong> {{ total_marks }}</p>
+    {% endif %}
+    {% if percentage is not None %}
+        <p><strong>Percentage:</strong> {{ percentage }}%</p>
+    {% endif %}
+    {% if rank is not None %}
+        <p><strong>Rank:</strong> {{ rank }}</p>
+    {% endif %}
+</div>
+
+<p>You can view your detailed marksheet in the student portal.</p>
+
+<p>Best Regards,</p>
+<p>{{ org_name }} Team</p>
+{% endblock %}

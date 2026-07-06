@@ -1,0 +1,18 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Leave Request {{ status }}</h2>
+
+<p>Hello {{ applicant_name }},</p>
+
+<p>Your request for <strong>{{ leave_type }}</strong> leave has been <strong>{{ status|lower }}</strong> by {{ reviewer_name }}.</p>
+
+{% if reason %}
+<div class="info-box">
+    <strong>Reason:</strong><br>
+    {{ reason }}
+</div>
+{% endif %}
+
+<p>Thank you.</p>
+{% endblock %}
