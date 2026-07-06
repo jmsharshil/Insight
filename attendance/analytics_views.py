@@ -206,8 +206,8 @@ class StudentAttendanceListAPIView(SafeAPIView):
         if role == 'student':
             student_qs = student_qs.filter(user=user)
         elif role == 'parents':
-            if user.linked_student:
-                student_qs = student_qs.filter(user=user.linked_student)
+            if user.linked_students.exists():
+                student_qs = student_qs.filter(user__in=user.linked_students.all())
             else:
                 student_qs = student_qs.none()
         elif role == 'faculty':
@@ -365,8 +365,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                 return Response({'success': False, 'message': 'Access denied (Student role mismatch).'}, status=status.HTTP_403_FORBIDDEN)
         elif role == 'parents':
             has_access = False
-            linked_profile = Student.objects.filter(user=user.linked_student).first() if getattr(user, 'linked_student', None) else None
-            if linked_profile and linked_profile.id == s.id:
+            if user.linked_students.exists() and Student.objects.filter(user__in=user.linked_students.all(), id=s.id).exists():
                 has_access = True
             else:
                 from students.models import ParentLink
@@ -638,8 +637,8 @@ class AttendanceHistoryAPIView(SafeAPIView):
         if role == 'student':
             qs = qs.filter(student__user=user)
         elif role == 'parents':
-            if user.linked_student:
-                qs = qs.filter(student__user=user.linked_student)
+            if user.linked_students.exists():
+                qs = qs.filter(student__user__in=user.linked_students.all())
             else:
                 qs = qs.none()
         elif role == 'faculty':
@@ -1339,8 +1338,8 @@ class ViolationsAPIView(SafeAPIView):
         if role == 'student':
             violation_qs = violation_qs.filter(student__user=user)
         elif role == 'parents':
-            if user.linked_student:
-                violation_qs = violation_qs.filter(student__user=user.linked_student)
+            if user.linked_students.exists():
+                violation_qs = violation_qs.filter(student__user__in=user.linked_students.all())
             else:
                 violation_qs = violation_qs.none()
         elif role == 'faculty':

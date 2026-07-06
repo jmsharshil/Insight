@@ -99,7 +99,7 @@ class StudentListSerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', default=None)
     batch_name = serializers.CharField(source='current_batch_name', default=None)
     photo_url = serializers.SerializerMethodField()
-
+    qr_image_url = serializers.SerializerMethodField()
 
     gender_display = serializers.CharField(source="get_gender_display", read_only=True)
     blood_group_display = serializers.CharField(source="get_blood_group_display", read_only=True)
@@ -112,7 +112,7 @@ class StudentListSerializer(serializers.ModelSerializer):
             'id', 'admission_number', 'full_name', 'email', 'phone_student',
             'course', 'group_module', 'batch_attempt',
             'branch', 'branch_name', 'batch_name',
-            'status', 'status_display', 'enrolled_at', 'photo_url',
+            'status', 'status_display', 'enrolled_at', 'photo_url', 'qr_image_url',
             'gender_display', 'blood_group_display', 'emergency_contact_relationship_display']
         
          
@@ -124,6 +124,17 @@ class StudentListSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if obj.photo and request:
             return request.build_absolute_uri(obj.photo.url)
+        return None
+
+    def get_qr_image_url(self, obj):
+        request = self.context.get('request')
+        try:
+            if hasattr(obj, 'id_card') and obj.id_card and obj.id_card.qr_image:
+                if request:
+                    return request.build_absolute_uri(obj.id_card.qr_image.url)
+                return obj.id_card.qr_image.url
+        except Exception:
+            pass
         return None
 
 
