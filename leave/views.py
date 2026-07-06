@@ -70,11 +70,18 @@ def _user_branch_id(user):
     return None
 
 
-def notify(recipient_user_id, title, body, metadata=None):
-    """Stub: push/in-app notification. Replace with real implementation."""
-    logger.info(f"NOTIFY [{recipient_user_id}] {title}: {body} | meta={metadata}")
-
-
+def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
+    from chat.notifications import send_system_notification
+    if recipient_user_id:
+        send_system_notification(
+            user_id=str(recipient_user_id),
+            title=title,
+            body=body,
+            metadata=metadata,
+            email_template=email_template,
+            email_context=email_context,
+            email_subject=email_subject,
+        )
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GET & POST  /api/v1/leave/
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -251,6 +258,14 @@ class LeaveListCreateView(APIView):
                 title="Leave request pending approval",
                 body=f"{request.user.name} has applied for {d['leave_type']} leave from {d['from_date']} to {d['to_date']}",
                 metadata={"leave_id": str(app.id), "approval_step": 1},
+                email_template='emails/leave_applied.html',
+                email_context={
+                    'applicant_name': request.user.name,
+                    'leave_type': d['leave_type'],
+                    'from_date': d['from_date'],
+                    'to_date': d['to_date'],
+                    'reason': d['reason']
+                }
             )
 
         return Response({
@@ -370,6 +385,13 @@ class LeaveApproveView(APIView):
                     title="Leave Approved",
                     body=f"Your leave from {app.from_date} to {app.to_date} has been approved.",
                     metadata={"leave_id": str(app.id), "status": "approved"},
+                    email_template='emails/leave_status_update.html',
+                    email_context={
+                        'applicant_name': app.applied_by.name,
+                        'leave_type': app.leave_type,
+                        'status': 'Approved',
+                        'reviewer_name': request.user.name
+                    }
                 )
                 return Response({'success': True, 'message': 'Leave approved successfully (no branch manager found).'})
 
@@ -379,6 +401,14 @@ class LeaveApproveView(APIView):
                     title="Leave awaiting your approval",
                     body=f"{app.applied_by.name} leave approved by ASE. Your approval needed.",
                     metadata={"leave_id": str(app.id), "approval_step": 2},
+                    email_template='emails/leave_applied.html',
+                    email_context={
+                        'applicant_name': app.applied_by.name,
+                        'leave_type': app.leave_type,
+                        'from_date': app.from_date,
+                        'to_date': app.to_date,
+                        'reason': app.reason
+                    }
                 )
 
             return Response({'success': True, 'message': 'First approval done. Awaiting branch manager.'})
@@ -408,6 +438,13 @@ class LeaveApproveView(APIView):
                 title="Leave Approved",
                 body=f"Your {app.leave_type} leave from {app.from_date} to {app.to_date} has been approved.",
                 metadata={"leave_id": str(app.id), "status": "approved"},
+                email_template='emails/leave_status_update.html',
+                email_context={
+                    'applicant_name': app.applied_by.name,
+                    'leave_type': app.leave_type,
+                    'status': 'Approved',
+                    'reviewer_name': request.user.name
+                }
             )
 
             return Response({'success': True, 'message': 'Leave approved.'})
@@ -435,6 +472,13 @@ class LeaveApproveView(APIView):
                 title="Leave Approved",
                 body=f"Your {app.leave_type} leave from {app.from_date} to {app.to_date} has been approved.",
                 metadata={"leave_id": str(app.id), "status": "approved"},
+                email_template='emails/leave_status_update.html',
+                email_context={
+                    'applicant_name': app.applied_by.name,
+                    'leave_type': app.leave_type,
+                    'status': 'Approved',
+                    'reviewer_name': request.user.name
+                }
             )
 
             return Response({'success': True, 'message': 'Leave approved (super_admin).'})
@@ -479,6 +523,14 @@ class LeaveRejectView(APIView):
                 "status": "rejected",
                 "rejection_reason": reason,
             },
+            email_template='emails/leave_status_update.html',
+            email_context={
+                'applicant_name': app.applied_by.name,
+                'leave_type': app.leave_type,
+                'status': 'Rejected',
+                'reviewer_name': request.user.name,
+                'reason': reason
+            }
         )
 
         return Response({'success': True, 'message': 'Leave rejected.'})

@@ -204,3 +204,63 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
 
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
+
+
+def send_system_notification(
+    user_id: str,
+    title: str,
+    body: str,
+    metadata: dict = None,
+    email_template: str = None,
+    email_context: dict = None,
+    email_subject: str = None,
+):
+    """
+    Centralized helper to send a push notification (FCM) and/or an email.
+    If email_template is provided, it will send an email.
+    If the user has an FCM token, it will send a push notification.
+    """
+    def _send_task():
+        from django.contrib.auth import get_user_model
+        from core.sender import send_email
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            logger.warning("Notification failed: User %s not found.", user_id)
+            return
+
+        # 1. Send FCM Push Notification
+        if getattr(user, 'fcm_token', None):
+            send_fcm_notification(
+                token=user.fcm_token,
+                title=title,
+                body=body,
+                data=metadata or {},
+                user_id=str(user.id)
+            )
+
+        # 2. Send Email Notification
+        if email_template and getattr(user, 'email', None):
+            subject = email_subject or title
+            ctx = email_context or {}
+            # Fallbacks for some basic context if not provided
+            if 'user_name' not in ctx:
+                ctx['user_name'] = user.name
+                
+            org = getattr(user, 'organization', None)
+            
+            try:
+                send_email(
+                    to=user.email,
+                    subject=subject,
+                    text=body,
+                    template=email_template,
+                    template_context=ctx,
+                    organization=org,
+                )
+            except Exception as e:
+                logger.error("Failed to send system email to %s: %s", user.email, e)
+
+    thread = threading.Thread(target=_send_task, daemon=True)
+    thread.start()

@@ -1,0 +1,20 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Recheck Request Rejected</h2>
+
+<p>Hello,</p>
+
+<p>Your request for a paper recheck for the exam <strong>{{ exam_title }}</strong> has been reviewed and rejected.</p>
+
+{% if reason %}
+<div class="info-box">
+    <strong>Reason for Rejection:</strong><br>
+    {{ reason }}
+</div>
+{% endif %}
+
+<p>If you have any further questions, please contact your academic coordinator.</p>
+
+<p>Thank you.</p>
+{% endblock %}

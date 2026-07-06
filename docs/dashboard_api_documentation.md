@@ -35,10 +35,10 @@ It eliminates all static/demo data, using **optimized Django ORM aggregates**, `
 
 ### 3. Student/Parent Dashboard (`student`, `parents`)
 - **KPIs**: attendance_rate, fees_due, upcoming_exams_count, avg_score.
-- **Data**: upcoming_exams (for student's batch), recent_results (PublishedResult with percentage, rank), timetable (TimetableSlot), fee_details, performance trend.
+- **Data**: upcoming_exams (for student's batch, now includes Exam v2 proctoring config, `result_release_mode`, `total_marks`), recent_results (PublishedResult with percentage, rank, from instant/manual release), timetable (TimetableSlot), fee_details, performance trend.
 - **Personalization**: For parents uses ParentLink to linked student; uses Student.linked_student proxy.
-- **Queries**: AttendanceRecord per student, StudentFee with F-expr, PublishedResult.aggregate(Avg('percentage')), TimetableSlot.filter(batch).
-- **Model Updates**: StudentProfile, BatchHistory, DigitalIDCard, StudentStatusHistory, AttendanceRecord.status/percentage, StudentFee(discount,amount_due), Payment.receipt_number, exam proctoring/recheck.
+- **Queries**: AttendanceRecord per student, StudentFee with F-expr, PublishedResult.aggregate(Avg('percentage')), TimetableSlot.filter(batch), Exam with geo/screen filters.
+- **Model Updates**: StudentProfile, BatchHistory, DigitalIDCard, StudentStatusHistory, AttendanceRecord.status/percentage, StudentFee(discount,amount_due), Payment.receipt_number, **Exam v2** (proctoring, `selected_papers`, signals for `total_marks`), recheck flows.
 
 ### 4. Sales Dashboard (`sales_*`, `counsellor`, `tele_caller`, `front_desk`)
 - **KPIs**: total_leads, new_leads_this_month, conversion_rate, active_leads.
@@ -81,7 +81,7 @@ It eliminates all static/demo data, using **optimized Django ORM aggregates**, `
 - `faculty/models.py`: FacultyProfile (qr_scans), SessionReport, FacultyQRScanLog, SubjectHourlyRate, MarkSheet updates.
 - `attendance/models.py`: AttendanceRecord (status, percentage), QRScanLog, AlertLog, ViolationRecord, EmployeeAttendanceRecord.
 - `fees/models.py`: StudentFee (discount, amount_due), Payment (receipt_number), InstallmentPlan, Refund, etc.
-- `exams/models.py`: Exam (proctoring/recheck), Question, Session, etc.
+- `exams/models.py`: Exam **v2** (proctoring/geo/screen/`result_release_mode`/`selected_papers`/`paper_checkers`, `recalculate_total_marks()`, `ensure_paper_checkers()`), Question (with per-`marks`), ExamSession, SubjectPaper.
 - `results/models.py`: MarkSheet.paper_checker/is_submitted, RecheckRequest, PublishedResult.
 - `batches/models.py`: TimetableSlot, Batch, Course/Subject/Chapter.
 - `payroll/models.py`: PayrollRun, PaySlip, LateEntryPolicy, etc.

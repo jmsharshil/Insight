@@ -60,9 +60,8 @@ class PaySlipSerializer(serializers.ModelSerializer):
     def get_hourly_rate(self, obj):
         if obj.faculty and obj.faculty.hourly_rate > 0:
             return str(obj.faculty.hourly_rate)
-        if obj.user:
+        if obj.user and obj.user.hourly_rate:
             return str(obj.user.hourly_rate)
-        return "0.00"
         return "0.00"
 
     def get_per_paper_rate(self, obj):
@@ -122,15 +121,12 @@ class PayrollRunListSerializer(serializers.ModelSerializer):
     faculty_count = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
 
-
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
-
     class Meta:
         model = PayrollRun
         fields = [
             'id', 'branch', 'branch_name', 'month', 'year', 'status', 'status_display',
             'total_amount', 'faculty_count', 'generated_at', 'approved_at', 'disbursed_at',
-         'status_display']
+        ]
 
     def get_faculty_count(self, obj):
         return obj.payslips.count()
@@ -146,15 +142,13 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
     approved_by_name = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
 
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
-
     class Meta:
         model = PayrollRun
         fields = [
             'id', 'branch', 'branch_name', 'month', 'year', 'status', 'status_display', 'total_amount',
             'generated_by', 'generated_by_name', 'approved_by', 'approved_by_name',
             'generated_at', 'approved_at', 'disbursed_at', 'notes', 'payslips',
-         'status_display']
+        ]
 
     def get_generated_by_name(self, obj):
         return obj.generated_by.name if obj.generated_by else ''

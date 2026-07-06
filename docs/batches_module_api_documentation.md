@@ -5,7 +5,7 @@
 > **Content-Type:** `application/json`  
 > All responses wrapped in `{ "success": true/false, "data": ... , "message": "..." }`.
 
-**See Also:** `timetable_procedure_guide.md` for full TimetableSlot CRUD, session types, exam auto-creation, clash detection, faculty/student personal timetables, and exam-types reference.
+**See Also:** `timetable_procedure_guide.md` for full TimetableSlot CRUD, **session_type matrix**, Exam v2 auto-creation (via `exam_data` with proctoring/geo/screen/`result_release_mode`/`selected_papers`), clash detection, M2M sync (`paper_checkers`, `ensure_paper_checkers()`), auto `total_marks` (signals), round-robin paper assignment, faculty/student personal timetables. Legacy `timetable_exam_type` removed.
 
 ---
 
@@ -21,7 +21,7 @@
 | `BatchStudent` | Enrollment link | Unique per batch+student; immutable history via `BatchHistory` |
 | `BatchFaculty` | Faculty assignment | Links faculty to batch + optional subject; unique constraint |
 | `Classroom` | Physical/Virtual rooms | Capacity, active flag; used in timetable clash detection |
-| `TimetableSlot` | Scheduled sessions | See dedicated timetable guide for session_type logic, exam auto-create, clash detection |
+| `TimetableSlot` | Scheduled sessions | See `timetable_procedure_guide.md` for `session_type` matrix (regular/class_test/prelim/practice/custom), `exam_data` → Exam v2 (proctoring, `selected_papers` M2M, `result_release_mode`, auto `total_marks` via signals + `recalculate_total_marks()`), early `paper_checkers` sync, delayed Celery round-robin assignment, clash detection on faculty/classroom. OneToOne `exam`. |
 
 **Auto Behaviors:** 
 - Batch save generates QR, name, sequence.
@@ -40,7 +40,7 @@
 5. Create **Batch** for a course/level → auto naming/QR.
 6. Assign **Students** (`/batches/<id>/assign-students/`) and **Faculty** (`/assign-faculty/`) with subjects.
 7. Create **Classrooms**.
-8. Schedule **TimetableSlots** (see timetable guide for per-session-type payloads, auto exam creation for tests/prelims, clash detection on faculty/classroom).
+8. Schedule **TimetableSlots** (see timetable guide for per-`session_type` payloads + `exam_data` for Exam v2 creation with proctoring/geo/screen config, `selected_papers`, auto `total_marks`, clash detection, early M2M sync for paper_checkers).
 
 ### Dropdowns for Forms
 Use `/batches/dropdowns/` for frontend selects (courses, levels, attempt types, days, session_types, slot_codes, etc.).
@@ -48,7 +48,7 @@ Use `/batches/dropdowns/` for frontend selects (courses, levels, attempt types, 
 **Integration Notes:**
 - Fees: CourseLevel `course_type` + `get_installment_plan_status()`.
 - Students: Batch assignment creates `BatchHistory`.
-- Timetable/Results: Chapters used in session reports and exam papers.
+- Timetable/Results/Exams: Chapters in sessions; Exam v2 integration for `total_marks` (from questions), rechecks (answer_key gate), on-the-fly analytics in results, proctoring events.
 - Faculty: Assignments used in QR check-in, payroll, session reports.
 - QR for batch used in attendance.
 
@@ -192,8 +192,8 @@ Auto-updates subject's `total_hours`.
 - Batch QR auto-generated on save (payload = batch UUID for attendance).
 - Subject hours auto-maintained via signals on chapter CRUD.
 - All list views support search, pagination, role/branch filtering.
-- Timetable creation detailed in dedicated guide (includes 5 session types, exam_data, clash detection).
+- Timetable creation detailed in dedicated guide (includes 5 session types + `exam_data` for full Exam v2 with proctoring, auto-marks, delayed assignment, legacy removal).
 
-**Migrations:** Run `python manage.py migrate batches` after updates (includes sequence counter, QR fields, session enhancements).
+**Migrations:** Run `python manage.py migrate batches exams results` after updates (sequence counter, QR fields, session enhancements, Exam v2 fields/M2Ms/signals).
 
-This guide now matches the comprehensive style of other modules. For timetable-specific flows (including exam integration), refer to `timetable_procedure_guide.md`. Updated to reflect auto-naming, QR generation, total_hours signals, and cross-module ties to fees/students/faculty.
+This guide now matches the comprehensive style of other modules. For timetable-specific flows (Exam v2 integration, session-type matrix, proctoring), refer to `timetable_procedure_guide.md`. Updated to reflect auto-naming, QR generation, `total_hours` signals, and cross-module ties to fees/students/faculty/exams/results.

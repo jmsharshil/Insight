@@ -9,9 +9,18 @@ logger = logging.getLogger(__name__)
 
 # ── Stub notification helper ──────────────────────────────────────────────────
 
-def notify(recipient_user_id, title, body, metadata=None):
-    """Stub: push/in-app notification. Replace with real implementation."""
-    logger.info(f"NOTIFY [{recipient_user_id}] {title}: {body}")
+def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
+    from chat.notifications import send_system_notification
+    if recipient_user_id:
+        send_system_notification(
+            user_id=str(recipient_user_id),
+            title=title,
+            body=body,
+            metadata=metadata,
+            email_template=email_template,
+            email_context=email_context,
+            email_subject=email_subject,
+        )
 
 
 def group_questions(serialized_questions):
