@@ -123,11 +123,9 @@ def requires_paper_checking(exam, has_subjective_questions=False):
     exam_mode = getattr(exam, 'exam_mode', None)
     exam_type = getattr(exam, 'exam_type', None)
 
-    if exam_mode == 'offline':
-        return True
-    if has_subjective_questions or exam_type == 'subjective':
-        return True
-    return False
+    if exam_mode == 'online' and exam_type == 'mcq':
+        return False
+    return True
 
 
 def get_available_paper_checkers(exam):

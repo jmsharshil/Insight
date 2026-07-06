@@ -14,6 +14,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     subject_name = serializers.SerializerMethodField()
     has_open_query = serializers.SerializerMethodField()
     queries = serializers.SerializerMethodField()
+    uploaded_answer_sheet_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
@@ -24,6 +25,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             'has_open_query',
             'exam_title', 'exam_scheduled_date', 'exam_total_marks',
             'exam_pass_marks', 'batch_name', 'subject_name', 'queries',
+            'uploaded_answer_sheet_url',
         ]
 
     def get_student_name(self, obj):
@@ -85,6 +87,19 @@ class MarkSheetSerializer(serializers.ModelSerializer):
         """Return a list of queries related to this marksheet."""
         queries = obj.queries.all()
         return CheckerQuerySerializer(queries, many=True).data
+
+    def get_uploaded_answer_sheet_url(self, obj):
+        from exams.models import ExamSession
+        try:
+            session = ExamSession.objects.get(exam=obj.exam, student=obj.student)
+            if session.uploaded_answer_sheet:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(session.uploaded_answer_sheet.url)
+                return session.uploaded_answer_sheet.url
+        except Exception:
+            pass
+        return None
 
 
 # v2 NEW: Recheck Request serializers (FRD §4.6.2 + upload/bulk/answerkey support)
