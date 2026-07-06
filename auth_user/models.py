@@ -75,7 +75,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=50,choices=ROLE_CHOICES,default='student')
     branch = models.ForeignKey('branch.Branch',null=True,blank=True,on_delete=models.SET_NULL,related_name='users',)
-    linked_student = models.ForeignKey('self',null=True,blank=True,on_delete=models.SET_NULL,related_name='linked_parents',limit_choices_to={'role': 'student'},)
+    linked_students = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='linked_parents', limit_choices_to={'role': 'student'})
     profile_pic = models.ImageField(upload_to='profile_pics/', null=True, blank=True)
     fcm_token = models.TextField(blank=True, default='', help_text="Firebase Cloud Messaging device token for push notifications.")
     # Employee-specific fields

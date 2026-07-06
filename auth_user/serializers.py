@@ -208,7 +208,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_student','organization'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','linked_students','organization'] + EMPLOYEE_FIELDS
 
     def create(self, validated_data):
         request = self.context.get('request')
@@ -418,7 +418,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_student','is_active','organization','profile_pic'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','linked_students','is_active','organization','profile_pic'] + EMPLOYEE_FIELDS
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -438,8 +438,8 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name', 'profile_pic', 'role_display'] + EMPLOYEE_FIELDS
-        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_student', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display'] + EMPLOYEE_FIELDS
+        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

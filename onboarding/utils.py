@@ -163,8 +163,9 @@ class AdmissionService:
         )
 
         try:
-            send_student_login_credentials(student_user, student_password)
-            logger.info(f"Student credentials sent for admission {admission.id}")
+            if student_password:
+                send_student_login_credentials(student_user, student_password)
+                logger.info(f"Student credentials sent for admission {admission.id}")
         except Exception as e:
             logger.error(f"Student email sending failed for admission {admission.id}: {e}")
 
@@ -187,8 +188,11 @@ class AdmissionService:
                 )
 
                 try:
-                    send_parent_login_credentials(parent_user, student_user, parent_password)
-                    logger.info(f"Parent credentials sent for admission {admission.id}")
+                    if parent_password:
+                        send_parent_login_credentials(parent_user, student_user, parent_password)
+                        logger.info(f"Parent credentials sent for admission {admission.id}")
+                    else:
+                        logger.info(f"Parent account already existed, added student link for admission {admission.id} (no new credentials sent).")
                 except Exception as e:
                     logger.error(f"Parent email sending failed for admission {admission.id}: {e}")
         else:
@@ -213,7 +217,6 @@ class AdmissionService:
         if not phone:
             raise ValueError("Phone is required to create login credentials.")
 
-        password = generate_temporary_password()
         user = User.objects.filter(email__iexact=email).first()
 
         if user:
@@ -223,14 +226,16 @@ class AdmissionService:
             user.name           = name or user.name
             user.role           = role
             user.is_active      = True
-            user.linked_student = linked_student
             if organization:
                 user.organization = organization
             if branch:
                 user.branch = branch
-            user.set_password(password)
             user.save()
+            if linked_student:
+                user.linked_students.add(linked_student)
+            return user, None
         else:
+            password = generate_temporary_password()
             user = User.objects.create_user(
                 username=AdmissionService._build_unique_username(email),
                 email=email,
@@ -239,9 +244,9 @@ class AdmissionService:
                 phone=phone,
                 name=name,
                 is_active=True,
-                linked_student=linked_student,
                 organization=organization,
                 branch=branch,
             )
-
-        return user, password
+            if linked_student:
+                user.linked_students.add(linked_student)
+            return user, password

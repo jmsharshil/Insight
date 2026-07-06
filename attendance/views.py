@@ -514,13 +514,13 @@ class StudentAttendanceView(APIView):
             except Exception:
                 return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
         elif role == 'parents':
-            linked = getattr(user, 'linked_student', None)
-            if not linked:
+            linked_students = user.linked_students.all()
+            if not linked_students.exists():
                 return Response({'success': False, 'message': 'No linked student.'}, status=status.HTTP_404_NOT_FOUND)
             try:
                 from django.apps import apps
                 SP = apps.get_model('students', 'Student')
-                if str(SP.objects.get(user=linked).id) != str(student_id):
+                if not SP.objects.filter(user__in=linked_students, id=student_id).exists():
                     return Response({'success': False, 'message': 'Not your linked child.'}, status=status.HTTP_403_FORBIDDEN)
             except Exception:
                 return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
