@@ -505,22 +505,27 @@ class StudentAttendanceView(APIView):
         user = request.user
         role = _user_role(user)
 
+        from django.apps import apps
+        SP = apps.get_model('students', 'Student')
+
+        # Fallback: if student_id is a User ID instead of Student Profile ID
+        if not SP.objects.filter(id=student_id).exists():
+            student_profile = SP.objects.filter(user_id=student_id).first()
+            if student_profile:
+                student_id = student_profile.id
+
         if role == 'student':
             try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
                 if str(SP.objects.get(user=user).id) != str(student_id):
                     return Response({'success': False, 'message': 'Own attendance only.'}, status=status.HTTP_403_FORBIDDEN)
             except Exception:
                 return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
         elif role == 'parents':
-            linked_students = user.linked_students.all()
-            if not linked_students.exists():
+            linked = getattr(user, 'linked_student', None)
+            if not linked:
                 return Response({'success': False, 'message': 'No linked student.'}, status=status.HTTP_404_NOT_FOUND)
             try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                if not SP.objects.filter(user__in=linked_students, id=student_id).exists():
+                if str(SP.objects.get(user=linked).id) != str(student_id):
                     return Response({'success': False, 'message': 'Not your linked child.'}, status=status.HTTP_403_FORBIDDEN)
             except Exception:
                 return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
