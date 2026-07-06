@@ -840,9 +840,27 @@ class ExamSubmitView(APIView):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Only students can submit'}, status=status.HTTP_403_FORBIDDEN)
 
-        ser = ExamSubmitSerializer(data=request.data)
+        # Make a mutable copy of the data
+        if hasattr(request.data, 'copy'):
+            data = request.data.copy()
+        else:
+            data = dict(request.data)
+
+        # Parse answers if sent as JSON string (happens in multipart/form-data for offline exams)
+        if 'answers' in data and isinstance(data['answers'], str):
+            import json
+            val = data['answers'].strip()
+            if not val:
+                data['answers'] = []
+            else:
+                try:
+                    data['answers'] = json.loads(val)
+                except json.JSONDecodeError:
+                    return Response({'success': False, 'message': 'Invalid answers format', 'errors': {'answers': ['Must be valid JSON.']}}, status=status.HTTP_400_BAD_REQUEST)
+
+        ser = ExamSubmitSerializer(data=data)
         if not ser.is_valid():
-            return Response({'success': False, 'message': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'message': 'Invalid data', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             qs = ExamSession.objects.all()
