@@ -11,7 +11,8 @@ class OrganizationAdmin(admin.ModelAdmin):
 class UserAdmin(admin.ModelAdmin):
     list_display = ('password', 'last_login', 'is_superuser', 'id', 'organization', 'username', 'email', 'phone', 'name', 'role',)
     search_fields = ('name', 'email', 'phone',)
-    list_filter = ('last_login', 'organization', 'branch', 'linked_student', 'is_staff', 'role', 'is_superuser', 'created_at',)
+    list_filter = ('last_login', 'organization', 'branch', 'is_staff', 'role', 'is_superuser', 'created_at',)
+    filter_horizontal = ('linked_students',)
 
 @admin.register(EmailOTP)
 class EmailOTPAdmin(admin.ModelAdmin):

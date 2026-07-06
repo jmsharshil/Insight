@@ -60,10 +60,11 @@ def _user_branch_id(user):
 
     # Fallback: check Parent
     try:
-        if getattr(user, 'role', None) in ['parent', 'parents'] and getattr(user, 'linked_student', None):
+        if getattr(user, 'role', None) in ['parent', 'parents'] and user.linked_students.exists():
             from students.models import Student
-            s = Student.objects.get(user=user.linked_student)
-            return s.branch_id
+            s = Student.objects.filter(user__in=user.linked_students.all()).first()
+            if s:
+                return s.branch_id
     except Exception:
         pass
 

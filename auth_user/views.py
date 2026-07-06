@@ -127,17 +127,16 @@ class LoginAPIView(APIView):
             if user.profile_pic and hasattr(user.profile_pic, 'url'):
                 profile_pic_url = request.build_absolute_uri(user.profile_pic.url)
 
-            # Determine the actual Student Profile ID (UUID)
+            # Determine the actual Student Profile IDs (UUIDs)
             from students.models import Student
-            actual_student_id = None
+            actual_student_ids = []
             if user.role == 'student':
                 student_profile = Student.objects.filter(user=user).first()
                 if student_profile:
-                    actual_student_id = str(student_profile.id)
-            elif user.role in ['parent', 'parents'] and getattr(user, 'linked_student', None):
-                student_profile = Student.objects.filter(user=user.linked_student).first()
-                if student_profile:
-                    actual_student_id = str(student_profile.id)
+                    actual_student_ids = [str(student_profile.id)]
+            elif user.role in ['parent', 'parents'] and user.linked_students.exists():
+                student_profiles = Student.objects.filter(user__in=user.linked_students.all())
+                actual_student_ids = [str(sp.id) for sp in student_profiles]
 
             return Response({
                 "message": "Login successful",
@@ -154,7 +153,7 @@ class LoginAPIView(APIView):
                     "profile_pic": profile_pic_url,
                     "organization": str(user.organization.id) if user.organization else None,
                     "organization_name": user.organization.name if user.organization else None,
-                    "linked_student": actual_student_id,
+                    "linked_students": actual_student_ids,
                 }
             })
         return Response(
@@ -353,7 +352,7 @@ class ParentStudentProfileAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        student_user = parent_user.linked_student
+        student_user = parent_user.linked_students.first()
         if not student_user:
             return Response(
                 {"success": False, "message": "No student is linked to this parent account."},
