@@ -148,18 +148,18 @@ class StudentQRIdentityView(APIView):
         if not student:
             return _not_found(student_id)
 
-        if not student.id_card_ready:
-            return Response(
-                {
-                    'success': False,
-                    'message': (
-                        'QR identity pass cannot be generated: '
-                        'profile photo is required. '
-                        'Please upload a photo via PATCH /api/students/<id>/documents/.'
-                    ),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # if not student.id_card_ready:
+        #     return Response(
+        #         {
+        #             'success': False,
+        #             'message': (
+        #                 'QR identity pass cannot be generated: '
+        #                 'profile photo is required. '
+        #                 'Please upload a photo via PATCH /api/students/<id>/documents/.'
+        #             ),
+        #         },
+        #         status=status.HTTP_400_BAD_REQUEST,
+        #     )
 
         try:
             data = StudentService.get_qr_identity_data(student, request=request)
@@ -183,11 +183,11 @@ class StudentRegenerateIDCardView(APIView):
         if not student:
             return _not_found(student_id)
 
-        if not student.has_photo:
-            return Response(
-                {'success': False, 'message': 'Student does not have a photo uploaded. Cannot generate ID card.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # if not student.has_photo:
+        #     return Response(
+        #         {'success': False, 'message': 'Student does not have a photo uploaded. Cannot generate ID card.'},
+        #         status=status.HTTP_400_BAD_REQUEST,
+        #     )
 
         # Delete existing card so it regenerates fresh
         from .models import DigitalIDCard
