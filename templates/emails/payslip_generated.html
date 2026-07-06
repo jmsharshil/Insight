@@ -1,0 +1,20 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Your Payslip is Ready</h2>
+
+<p>Hello {{ user_name }},</p>
+
+<p>Your payslip for the month of <strong>{{ month }}/{{ year }}</strong> has been generated and disbursed.</p>
+
+<div class="info-box">
+    <ul>
+        <li><strong>Net Salary:</strong> {{ net_salary }}</li>
+        <li><strong>Sessions Conducted:</strong> {{ sessions }}</li>
+    </ul>
+</div>
+
+<p>You can view and download your detailed payslip from the {{ org_name|default:"Insight" }} portal.</p>
+
+<p>Thank you.</p>
+{% endblock %}

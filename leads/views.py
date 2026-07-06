@@ -10,7 +10,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
-from core.email import send_email
+from core.sender import send_email
 
 from .serializers import (
     get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer,

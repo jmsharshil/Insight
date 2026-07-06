@@ -961,6 +961,8 @@ class RecheckRequestActionView(APIView):
                         title='Recheck Request Rejected',
                         body='Your request for recheck has been reviewed and rejected.',
                         metadata={"exam_id": str(exam_id), "recheck_id": str(rr.id)},
+                        email_template='emails/recheck_rejected.html',
+                        email_context={'exam_title': ms.exam.title, 'reason': getattr(rr, 'reason', '')}
                     )
             except Exception:
                 logger.warning('Could not send rejection notification')

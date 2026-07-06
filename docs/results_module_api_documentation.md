@@ -512,7 +512,7 @@ All examples use the actual serializers (`MarkSheetSerializer`, `RecheckRequestS
 }
 ```
 
-**`POST /api/v1/checker-portal/submit/?token=secure-token-here`** (`CheckerPortalSubmitView` — `AllowAny`)
+**`POST /api/v1/checker-portal/submit/?token=secure-token-here`** (`CheckerPortalSubmitView` — `AllowAny`; see section 2 for full details)
 
 **Request Body**
 ```json
@@ -867,12 +867,13 @@ Update frontend to add export buttons calling this endpoint (e.g., with `type=su
 ## Related Modules & Migrations (Updated)
 
 **Integrations (per current `views.py`, `models.py`):**
-- **`exams`**: `Exam` (requires `answer_key` for rechecks, now also used for subject/faculty/batch FKs in aggregates), `CheckerToken`, `calculate_ranks()`, `generate_checker_token()`, emails.
-- **`timetable`**: `ExamSession` for auto-absent; timetable slots now drive many Exams used in analytics.
+- **`exams`**: `Exam` v2 (with `result_release_mode`, `paper_checkers` M2M, `selected_papers`, geo/screen thresholds/actions, `answer_key` requirement for rechecks, `ensure_paper_checkers()` early sync, `recalculate_total_marks()` via signals), `CheckerToken`, `calculate_ranks()`, `generate_checker_token()`, emails. `instant` mode auto-publishes MCQ results on submit.
+- **`timetable`**: `ExamSession` for `auto_mark_absent`, geo/screen violation tracking; `TimetableSlot.exam` OneToOne drives creation.
 - **`students`**: Visibility, batch links for bulk recheck/analytics.
 - **`payroll`**: `CheckerQuery` (open status excludes from `compute_payslip_for_user()`); new analytics do not affect payroll.
 - **Core**: `_user_role()`, `apply_filters()`, `F()`/`ExpressionWrapper` patterns now used in analytics views.
 - **No new models**: All subject/faculty/batch/summary aggregates computed live from `PublishedResult` (see `SubjectWiseResultView`, `ResultAnalyticsView` etc.).
+- **Delayed flows**: Paper checker assignment (round-robin from `selected_papers`) delayed until post-exam Celery task.
 
 **After pulling latest code, run:**
 ```bash

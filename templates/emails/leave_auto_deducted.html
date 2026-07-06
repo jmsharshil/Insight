@@ -1,0 +1,17 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Leave Auto-Deducted Due to Late Entries</h2>
+
+<p>Hello {{ user_name }},</p>
+
+<p>This is to notify you that <strong>0.5 days</strong> of leave have been auto-deducted from your balance.</p>
+
+<div class="info-box">
+    <p>You have accumulated <strong>{{ late_entries_count }}</strong> late entries in <strong>{{ month }}/{{ year }}</strong>.</p>
+</div>
+
+<p>Please ensure you adhere to the organization's timing policies to avoid further deductions.</p>
+
+<p>Thank you.</p>
+{% endblock %}

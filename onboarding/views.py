@@ -159,7 +159,7 @@ class AdmissionListView(APIView):
 
             if admission.email:
                 try:
-                    from core.email import send_email
+                    from core.sender import send_email
                     payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
 
                     # Build bank details text for all eligible banks (shuffled)
@@ -335,7 +335,7 @@ class AdmissionDetailView(APIView):
                 )
 
                 if admission.email:
-                    from core.email import send_email
+                    from core.sender import send_email
                     payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
 
                     # Build bank details text for all eligible banks (shuffled)

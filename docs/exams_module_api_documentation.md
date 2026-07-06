@@ -25,7 +25,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 
 **Note:** `paper_checkers` specified in the timetable slot are **automatically synced** to the generated `Exam.paper_checkers` M2M field. No separate step is required.
 
-**POST Request Body Example:**
+**POST Request Body Example (E4 — no legacy `timetable_exam_type`):**
 ```json
 {
     "batch": "uuid-of-batch",
@@ -37,14 +37,19 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
     "chapters": ["uuid-of-chapter-1"],
     "examiners": ["uuid-of-examiner"],
     "paper_checkers": ["uuid-of-checker"],
-    "timetable_exam_type": "uuid-of-exam-type",
     "exam_data": {
         "title": "Company Law — Class Test",
-        "exam_type": "online",
-        "total_marks": 50,  // initial value; auto-updated from questions
+        "exam_type": "mcq",
+        "exam_mode": "online",
+        "total_marks": 50,  // initial; overridden by recalculate_total_marks() from questions
         "pass_marks": 18,
+        "duration_minutes": 90,
         "instructions": "Attempt all questions. Time: 90 minutes.",
-        "result_release_mode": "manual"
+        "result_release_mode": "manual",
+        "selected_papers": ["paper-uuid-1", "paper-uuid-2"],
+        "geo_radius_meters": 100,
+        "screen_lock_max_violations": 3,
+        "screen_lock_action": "flag_only"
     }
 }
 ```
@@ -432,4 +437,34 @@ This guarantees even distribution across all paper sets for the duration of the 
 3. Student starts exam → paper auto-assigned (round-robin):
    POST /api/v1/exams/<exam_id>/start/
 ```
+
+---
+
+## 7. Exam v2 Fields, Proctoring Config, Paper Checkers & Result Release Mode
+
+The `Exam` model (v2) supports full proctoring, geo-fencing, screen monitoring, configurable result release, reusable subject papers, and M2M paper_checkers. These are populated via `exam_data` from timetable slot creation (see `TimetableSlotCreateUpdateSerializer._handle_exam()` and `Exam.ensure_paper_checkers()`).
+
+### Key Model Fields (from `exams/models.py`)
+- `exam_mode`: `'online'` (proctored) or `'offline'` (paper-based with uploaded papers)
+- **Geo**: `geo_lat`, `geo_lon`, `geo_radius_meters` (0=disabled), `geo_check_interval_minutes` (for periodic checks during exam)
+- **Screen**: `screen_lock_max_violations`, `screen_lock_action` (`flag_only` or `auto_submit`), `split_screen_max_warnings`, `split_screen_action`
+- `result_release_mode`: `'instant'` (auto-grade MCQs on `/submit/`, publish if no subjective components) or `'manual'` (admin triggers via publish endpoint)
+- `selected_papers`: M2M to `SubjectPaper` (round-robin assignment at start)
+- `paper_checkers`: M2M to users with `role='paper_checker'` (early sync via `ensure_paper_checkers()` from timetable or branch fallback)
+- `answer_key`: File upload (required before student recheck requests)
+
+### Methods
+- `recalculate_total_marks()`: Sum of `Question.marks` (auto via Django signals on Question CRUD). Offline exams can override manually.
+- `ensure_paper_checkers()`: Populates `paper_checkers` M2M **early** on Exam create (called from serializer and post_save). 
+
+**Delayed Round-Robin Assignment:** Actual per-student paper assignment (to `ExamSession.assigned_paper` and `MarkSheet.paper_checker`) happens **post-exam** via Celery task after `auto_mark_absent()`. This uses availability matching timetable slot times.
+
+**Proctoring Flow:**
+- `/start/` validates geo if configured, creates `ExamSession`.
+- Periodic `/geo-check/` and `/screen-event/` log violations, trigger actions per thresholds.
+- On submit, if `result_release_mode=instant` and MCQ-only, auto-grade and publish.
+
+See `timetable_procedure_guide.md` (Appendix A.4/A.8) for `exam_data` examples, `results_module_api_documentation.md` for marking/publishing/recheck integration, and `exams/signals.py` for auto-recalculate.
+
+**Migration Note:** Run `python manage.py migrate exams` after updates to pick up new fields (geo/screen/result_release_mode, M2Ms, answer_key).
 

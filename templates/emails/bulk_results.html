@@ -1,0 +1,22 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Bulk Results Processed</h2>
+
+<p>Hello {{ user_name }},</p>
+
+<p>The bulk results upload for the exam <strong>{{ exam_title }}</strong> has been processed successfully.</p>
+
+<div class="info-box" style="margin: 20px 0; padding: 15px; border: 1px solid #ddd; background-color: #f9f9f9;">
+    <p><strong>Total Processed:</strong> {{ total_processed }}</p>
+    <p><strong>Successful:</strong> {{ successful }}</p>
+    <p><strong>Failed:</strong> {{ failed }}</p>
+</div>
+
+{% if error_file_url %}
+<p>You can download the error report for the failed records <a href="{{ error_file_url }}">here</a>.</p>
+{% endif %}
+
+<p>Best Regards,</p>
+<p>{{ org_name }} Team</p>
+{% endblock %}

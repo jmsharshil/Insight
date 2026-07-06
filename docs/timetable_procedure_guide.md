@@ -70,13 +70,13 @@
 ## Appendix A: System Choice Values & Display Mappings
 
 ### A.1 Session Types (`session_type`)
-| Value | Display | Exam Auto-Created? | Notes |
-| :--- | :--- | :--- | :--- |
-| `regular` | Regular | ❌ No | Requires `slot_code` + `day_of_week`. No exam linkage. |
-| `class_test` | Class Test | ✅ Yes (forced) | Chapters with `order ≤ 2` only. Creates Exam with proctoring config. `paper_checkers` synced to `Exam.paper_checkers` (M2M). |
-| `prelim` | Prelim | ✅ Yes (forced) | Manual `end_time`. Full proctoring (geo/screen). Delayed paper-to-checker assignment post-exam. |
-| `practice` | Practice | ❌ No | No `paper_checkers` or exam. |
-| `custom` | Custom | ⚙️ Optional | Pass `exam_data` (incl. geo coords, screen thresholds, `result_release_mode`). `ensure_paper_checkers_for_exam()` runs on create. |
+| Value | Display | Exam Auto-Created? | Required Fields | Forbidden Fields | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `regular` | Regular | ❌ No | `slot_code`, `day_of_week` (or `session_date` for P5/P6), `faculty` | `exam_data`, `examiners`, `paper_checkers` | Auto `start_time`/`end_time` from `FIXED_SLOTS`. Clash detection on faculty/classroom. Chapters optional (not typically used). |
+| `class_test` | Class Test | ✅ Yes | `session_date`, `start_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `exam_data` | `slot_code` | Auto `end_time` = start + 90min (`SESSION_DURATIONS`). Chapters limited to subject's early ones. Links to created `Exam`. |
+| `prelim` | Prelim | ✅ Yes | `session_date`, `start_time`, `end_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `exam_data` | `slot_code` | Manual `end_time` (typically 180min). Full Exam v2 with proctoring. |
+| `practice` | Practice | ❌ No | `session_date`, `start_time`, `faculty`, `examiners` | `slot_code`, `paper_checkers`, `exam_data` | Auto `end_time` = start + 90min. No exam linkage. |
+| `custom` | Custom | ⚙️ If `exam_data` provided | `session_date`, `start_time`, `end_time` | `slot_code` | Optional `exam_data` to auto-create linked Exam. Supports `selected_papers`. |
 
 ### A.2 Day of Week (`day_of_week`)
 | Value | Display |
@@ -99,17 +99,24 @@
 | `P5` | P5 (Custom Time) | *(manual)* | *(manual)* |
 | `P6` | P6 (Custom Time) | *(manual)* | *(manual)* |
 
-### A.4 Exam Mode & Type (inside `exam_data`)
-**Note:** The legacy `exam_type` field has been split per the v2 refactor:
-- `exam_mode`: `online` (digital proctored with geo/screen checks) or `offline` (paper-based with uploaded papers; bypasses auto total_marks recalculation).
-- `exam_type`: now narrowed to `mcq` (default, supports auto-grading) or `subjective` (manual checking).
+### A.4 Exam Data Fields (inside `exam_data` for exam-creating sessions)
+The `exam_data` object is passed to `_handle_exam()` which creates or updates the linked `Exam` (OneToOne on TimetableSlot). Supports Exam v2 fields.
 
-| Field | Value | Display | Notes |
-|------|-------|---------|-------|
-| `exam_mode` | `online` | Online | Default. Uses proctoring, geo-fencing, screen events, auto-grade for MCQ. |
-| `exam_mode` | `offline` | Offline | Paper-based. `total_marks` set manually from papers. No online flow. |
-| `exam_type` | `mcq` | MCQ | Default for most tests. |
-| `exam_type` | `subjective` | Subjective | Requires paper checker review. |
+**Supported fields in `ExamDataSerializer`:**
+- `title` (optional, auto-generated if omitted)
+- `exam_type`: `'mcq'` or `'subjective'` (maps to Exam.exam_type; exam_mode defaults to `'offline'` in current flow)
+- `total_marks`, `pass_marks` (required for pass_marks)
+- `duration_minutes` (optional, auto-calculated from slot times)
+- `instructions`
+- `result_release_mode`: `'instant'` or `'manual'`
+- `selected_papers`: list of SubjectPaper UUIDs (syncs to Exam.selected_papers M2M)
+
+**Additional Exam v2 fields** (set on Exam model, some configurable via other endpoints or defaults):
+- `exam_mode`: `'online'` or `'offline'`
+- Geo: `geo_lat`, `geo_lon`, `geo_radius_meters`, `geo_check_interval_minutes`
+- Screen: `screen_lock_max_violations`, `screen_lock_action`, `split_screen_max_warnings`, `split_screen_action`
+
+See `exams_module_api_documentation.md` for full Exam CRUD and proctoring endpoints.
 
 ### A.5 Result Release Mode (`result_release_mode` inside `exam_data`)
 | Value | Display |
@@ -149,152 +156,7 @@
 
 ---
 
-## SECTION 1 — Timetable Exam Types (Reference Data)
-
-Exam types are reference records that categorize what kind of exam a timetable slot holds (e.g., "Internal", "Board Exam"). Create these before creating timetable slots.
-
----
-
-### 1.1 List All Exam Types
-
-**`GET /api/v1/timetable/exam-types/`**
-
-#### Query Params
-| Param | Type | Description |
-| :--- | :--- | :--- |
-| *(none)* | | Returns all exam types for the organization |
-
-#### Response (200 OK)
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "aaa00001-0000-0000-0000-000000000001",
-      "organization": "org-uuid-here",
-      "name": "Internal Assessment",
-      "description": "Regular internal class assessments",
-      "is_active": true,
-      "created_at": "2026-06-01T10:00:00Z"
-    },
-    {
-      "id": "aaa00002-0000-0000-0000-000000000002",
-      "organization": "org-uuid-here",
-      "name": "Board Exam",
-      "description": "Official board-level examination",
-      "is_active": true,
-      "created_at": "2026-06-02T10:00:00Z"
-    }
-  ]
-}
-```
-
----
-
-### 1.2 Create Exam Type
-
-**`POST /api/v1/timetable/exam-types/`**
-
-#### Request Body
-```json
-{
-  "name": "Internal Assessment",
-  "description": "Regular internal class assessments",
-  "is_active": true
-}
-```
-
-#### Response (201 Created)
-```json
-{
-  "success": true,
-  "message": "Exam type created.",
-  "data": {
-    "id": "aaa00001-0000-0000-0000-000000000001",
-    "organization": "org-uuid-here",
-    "name": "Internal Assessment",
-    "description": "Regular internal class assessments",
-    "is_active": true,
-    "created_at": "2026-06-12T10:00:00Z"
-  }
-}
-```
-
----
-
-### 1.3 Get Exam Type Detail
-
-**`GET /api/v1/timetable/exam-types/<exam_type_id>/`**
-
-#### Response (200 OK)
-```json
-{
-  "success": true,
-  "data": {
-    "id": "aaa00001-0000-0000-0000-000000000001",
-    "organization": "org-uuid-here",
-    "name": "Internal Assessment",
-    "description": "Regular internal class assessments",
-    "is_active": true,
-    "created_at": "2026-06-12T10:00:00Z"
-  }
-}
-```
-
-#### Response (404 Not Found)
-```json
-{
-  "success": false,
-  "message": "Exam type not found."
-}
-```
-
----
-
-### 1.4 Update Exam Type
-
-**`PATCH /api/v1/timetable/exam-types/<exam_type_id>/`**
-
-*(Send only the fields you want to update)*
-
-#### Request Body
-```json
-{
-  "description": "Updated description for internal assessments",
-  "is_active": false
-}
-```
-
-#### Response (200 OK)
-```json
-{
-  "success": true,
-  "message": "Exam type updated.",
-  "data": {
-    "id": "aaa00001-0000-0000-0000-000000000001",
-    "name": "Internal Assessment",
-    "description": "Updated description for internal assessments",
-    "is_active": false,
-    "created_at": "2026-06-12T10:00:00Z"
-  }
-}
-```
-
----
-
-### 1.5 Delete Exam Type
-
-**`DELETE /api/v1/timetable/exam-types/<exam_type_id>/`**
-
-#### Response (200 OK)
-```json
-{
-  "success": true,
-  "message": "Exam type deleted."
-}
-```
-
----
+**Note on Legacy Exam Types:** The dedicated `ExamType` / `timetable/exam-types/` endpoints and `timetable_exam_type` FK have been **completely removed** in the E4 refactor. All logic now uses `session_type` + nested `exam_data` (validated in `TimetableSlotCreateUpdateSerializer`). Exam linkage via OneToOne `TimetableSlot.exam`. See `exams_module_api_documentation.md` (Exam v2 with proctoring, `result_release_mode`, `selected_papers` round-robin at `/start/`, auto `total_marks` via signals) and Appendix A for full matrix.
 
 ## SECTION 2 — Timetable Slots (Full CRUD)
 
@@ -351,13 +213,11 @@ Exam types are reference records that categorize what kind of exam a timetable s
       "chapters_names": [],
       "examiners": [],
       "examiners_names": [],
-      "paper_checkers": [],
-      "paper_checkers_names": [],
-      "timetable_exam_type": null,
-      "exam_type_name": null,
-      "exam": null
-    }
-  ]
+    "paper_checkers": [],
+    "paper_checkers_names": [],
+    "exam": null
+  }
+]
 }
 ```
 
@@ -377,6 +237,7 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "batch_name": "cs_executive_june_2026_0101",
     "course": "course-uuid-001",
     "course_name": "CS Executive",
+    "course_code": "CRS-0001",
     "subject": "subject-uuid-001",
     "subject_name": "Company Law",
     "faculty": "faculty-uuid-001",
@@ -403,8 +264,6 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "examiners_names": [],
     "paper_checkers": [],
     "paper_checkers_names": [],
-    "timetable_exam_type": null,
-    "exam_type_name": null,
     "exam": null
   }
 }
@@ -510,8 +369,8 @@ Exam types are reference records that categorize what kind of exam a timetable s
 
 **`POST /api/v1/timetable/`**
 
-- `session_date`, `start_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `timetable_exam_type`, `exam_data` are **required**
-- `end_time` is **auto-computed** (90-minute fixed duration)
+- `session_date`, `start_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `exam_data` are **required**
+- `end_time` is **auto-computed** (90-minute fixed duration from `SESSION_DURATIONS`)
 - Chapters must belong to the selected subject and have `order ≤ 2`
 - `slot_code` is **forbidden**
 
@@ -532,23 +391,17 @@ Exam types are reference records that categorize what kind of exam a timetable s
   ],
   "examiners": ["user-uuid-examiner-001"],
   "paper_checkers": ["user-uuid-checker-001"],
-  "timetable_exam_type": "aaa00001-0000-0000-0000-000000000001",
   "exam_data": {
     "title": "Company Law — Ch 1 & 2 Class Test",
-    "exam_mode": "offline",
     "exam_type": "mcq",
     "total_marks": 50,
     "pass_marks": 18,
     "instructions": "Attempt all questions. Time: 90 minutes.",
     "result_release_mode": "manual",
-    "geo_lat": 23.0225,
-    "geo_lon": 72.5714,
-    "geo_radius_meters": 500,
-    "screen_lock_max_violations": 3,
-    "screen_lock_action": "flag_only"
+    "selected_papers": ["paper-uuid-001", "paper-uuid-002"]
   }
 }
-```
+
 
 ##### Response (201 Created)
 ```json
@@ -575,12 +428,10 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "examiners_names": ["Dr. Anil Sharma"],
     "paper_checkers": ["user-uuid-checker-001"],
     "paper_checkers_names": ["Ms. Priya Gupta"],
-    "timetable_exam_type": "aaa00001-0000-0000-0000-000000000001",
-    "exam_type_name": "Internal Assessment",
     "exam": "exam-uuid-0001"
   }
 }
-```
+
 
 ##### Error — Missing `exam_data` (400)
 ```json
@@ -608,7 +459,7 @@ Exam types are reference records that categorize what kind of exam a timetable s
 
 **`POST /api/v1/timetable/`**
 
-- `session_date`, `start_time`, `end_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `timetable_exam_type`, `exam_data` are **required**
+- `session_date`, `start_time`, `end_time`, `chapters`, `faculty`, `examiners`, `paper_checkers`, `exam_data` are **required**
 - `end_time` must be **manually provided** and must be after `start_time`
 - `slot_code` is **forbidden**
 
@@ -634,25 +485,17 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "user-uuid-examiner-002"
   ],
   "paper_checkers": ["user-uuid-checker-001"],
-  "timetable_exam_type": "aaa00002-0000-0000-0000-000000000002",
   "exam_data": {
     "title": "Company Law — June 2026 Prelim",
-    "exam_mode": "offline",
     "exam_type": "subjective",
     "total_marks": 100,
     "pass_marks": 35,
     "instructions": "All questions carry equal marks. Duration: 3 hours.",
     "result_release_mode": "instant",
-    "geo_lat": 23.0225,
-    "geo_lon": 72.5714,
-    "geo_radius_meters": 1000,
-    "screen_lock_max_violations": 2,
-    "split_screen_max_warnings": 3,
-    "screen_lock_action": "auto_submit",
-    "split_screen_action": "auto_submit"
+    "selected_papers": ["paper-uuid-003"]
   }
 }
-```
+
 
 ##### Response (201 Created)
 ```json
@@ -673,12 +516,10 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "examiners_names": ["Dr. Anil Sharma", "Prof. Meera Patel"],
     "paper_checkers": ["user-uuid-checker-001"],
     "paper_checkers_names": ["Ms. Priya Gupta"],
-    "timetable_exam_type": "aaa00002-0000-0000-0000-000000000002",
-    "exam_type_name": "Board Exam",
     "exam": "exam-uuid-0002"
   }
 }
-```
+
 
 ---
 
@@ -687,8 +528,8 @@ Exam types are reference records that categorize what kind of exam a timetable s
 **`POST /api/v1/timetable/`**
 
 - `session_date`, `start_time`, `faculty`, `examiners` are **required**
-- `end_time` is **auto-computed**
-- `paper_checkers`, `timetable_exam_type`, `exam_data`, `slot_code` are **forbidden**
+- `end_time` is **auto-computed** (from `SESSION_DURATIONS`)
+- `paper_checkers`, `exam_data`, `slot_code` are **forbidden**
 
 ##### Request Body
 ```json
@@ -726,11 +567,10 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "examiners": ["user-uuid-examiner-001", "user-uuid-examiner-002"],
     "examiners_names": ["Dr. Anil Sharma", "Prof. Meera Patel"],
     "paper_checkers": [],
-    "timetable_exam_type": null,
     "exam": null
   }
 }
-```
+
 
 ---
 
@@ -798,11 +638,10 @@ Exam types are reference records that categorize what kind of exam a timetable s
     "chapters": [],
     "examiners": [],
     "paper_checkers": [],
-    "timetable_exam_type": null,
     "exam": "exam-uuid-0003"
   }
 }
-```
+
 
 ---
 
@@ -889,6 +728,34 @@ Send **only the fields** you want to update. Clash detection runs again on updat
 {
   "success": false,
   "message": "Timetable slot not found."
+}
+```
+
+### 2.6 Duplicate Timetable Slot (New Endpoint)
+
+**`POST /api/v1/timetable/<slot_id>/duplicate/`**
+
+Duplicates a `regular` session slot to a different `slot_code` / `day_of_week` (or `session_date`). Performs clash detection. Only works for regular sessions.
+
+#### Request Body
+```json
+{
+  "slot_code": "P2",
+  "day_of_week": 2,
+  "session_name": "Optional override"
+}
+```
+
+- For P5/P6, also provide `start_time`/`end_time`.
+- Returns the new slot with full details (201 Created).
+- Errors: 400 for non-regular, invalid code, clashes, or missing params.
+
+#### Example Response (201)
+```json
+{
+  "success": true,
+  "message": "Timetable slot duplicated.",
+  "data": { ...full TimetableSlotListSerializer output... }
 }
 ```
 
@@ -1093,24 +960,26 @@ Use this to retrieve which subjects a faculty member currently teaches across al
 
 ---
 
-## SECTION 5 — Complete API Endpoint Summary Table
+## SECTION 5 — Complete API Endpoint Summary Table (E4 Updated)
+
+**Note:** Legacy `timetable/exam-types/` endpoints and `timetable_exam_type` field have been removed. All exam creation is now driven by `session_type` + inline `exam_data` (see Appendix A.1 and `_handle_exam()`).
 
 | # | Method | Endpoint | Description |
 | :--- | :--- | :--- | :--- |
-| 1 | `GET` | `/api/v1/timetable/` | List all timetable slots (with filters) |
-| 2 | `POST` | `/api/v1/timetable/` | Create a new timetable slot |
-| 3 | `GET` | `/api/v1/timetable/<slot_id>/` | Get a single slot detail |
-| 4 | `PATCH` | `/api/v1/timetable/<slot_id>/` | Update a timetable slot |
-| 5 | `DELETE` | `/api/v1/timetable/<slot_id>/` | Delete a timetable slot |
-| 6 | `GET` | `/api/v1/timetable/faculty/<faculty_id>/` | Faculty's weekly timetable (grouped by day) |
-| 7 | `GET` | `/api/v1/timetable/student/<student_id>/` | Student's weekly timetable (grouped by day) |
-| 8 | `GET` | `/api/v1/timetable/exam-types/` | List all timetable exam types |
-| 9 | `POST` | `/api/v1/timetable/exam-types/` | Create a timetable exam type |
-| 10 | `GET` | `/api/v1/timetable/exam-types/<id>/` | Get exam type detail |
-| 11 | `PATCH` | `/api/v1/timetable/exam-types/<id>/` | Update an exam type |
-| 12 | `DELETE` | `/api/v1/timetable/exam-types/<id>/` | Delete an exam type |
-| 13 | `GET` | `/api/v1/faculty/` | List all faculty (includes `subjects`, `subject_name`) |
-| 14 | `GET` | `/api/v1/faculty/<faculty_id>/` | Faculty profile detail (includes `subjects`, `subject_name`) |
+| 1 | `GET` | `/api/v1/batches/dropdowns/` | Academic dropdowns with nested E2 data: courses → levels, subjects (with chapters + papers), batches, branches, classrooms. Supports `?branch_id=` |
+| 2 | `GET` | `/api/v1/timetable/` | List timetable slots with filters (`batch_id`, `faculty_id`, `session_type`, `day_of_week`, etc.) + computed `_names` fields |
+| 3 | `POST` | `/api/v1/timetable/` | Create slot — strict per-`session_type` validation, clash detection (faculty+classroom), auto Exam for `class_test`/`prelim`/`custom` (if `exam_data` given) |
+| 4 | `GET` | `/api/v1/timetable/<slot_id>/` | Single slot detail (includes `exam`, `chapters_names`, `examiners_names`, `paper_checkers_names`) |
+| 5 | `PATCH` | `/api/v1/timetable/<slot_id>/` | Partial update (re-runs validation + clash checks; supports updating `exam_data`) |
+| 6 | `DELETE` | `/api/v1/timetable/<slot_id>/` | Delete slot (linked `Exam` record is **preserved**) |
+| 7 | `POST` | `/api/v1/timetable/<slot_id>/duplicate/` | Duplicate regular slot to new `slot_code`/`day_of_week` (or `session_date`); performs clash detection. Only for `regular` sessions |
+| 8 | `GET` | `/api/v1/timetable/faculty/<faculty_id>/` | Faculty's weekly timetable grouped by day label |
+| 9 | `GET` | `/api/v1/timetable/student/<student_id>/` | Student's aggregated timetable (from all enrolled batches), grouped by day |
+| 10 | `GET` | `/api/v1/courses/` | Course CRUD (includes nested levels & subjects via serializers) |
+| 11 | `GET` | `/api/v1/faculty/` | List faculty profiles (annotated with `subjects`, `subject_name`, batch counts) |
+| 12 | `GET` | `/api/v1/faculty/<faculty_id>/` | Faculty detail with subjects taught across batches |
+
+See `batches_module_api_documentation.md` for full CRUD on Courses, Subjects, Chapters, Levels, Batches (assign/remove students/faculty), Classrooms.
 
 ---
 
@@ -1179,20 +1048,20 @@ Timetable-created Exams now support full **Exam v2** proctoring:
 
 ---
 
-## SECTION 9 — Migrations Required
+## SECTION 9 — Additional Endpoints & Current State
 
-> **⚠️ Action Required**
->
-> After pulling the latest code, run these commands to apply all pending database migrations:
->
-> ```bash
-> python manage.py migrate batches
-> python manage.py migrate exams
-> ```
->
-> This applies recent changes for:
-> - `TimetableSlot`: `session_type`, `session_date`, M2M `chapters`/`examiners`/`paper_checkers`, OneToOne `exam`
-> - `Batch`: auto-naming via `BatchSequenceCounter`, QR code
-> - `Exam` v2: `geo_*` fields, screen thresholds/actions, `result_release_mode`, M2M `paper_checkers` + `selected_papers`, `assigned_paper` on `ExamSession`
-> - Signals for `recalculate_total_marks()`
-> - `CourseLevel`, `Chapter`, `BatchFaculty` enhancements
+### 9.1 Academic Dropdowns (for UI forms)
+
+**`GET /api/v1/batches/dropdowns/`** (or with `?branch_id=xxx`)
+
+Returns nested data for courses, levels, batches, subjects (with chapters + papers), branches, classrooms. Used by frontend for creating timetable slots, batches, etc. Includes E2 nested structures.
+
+Response includes `subjects` with `chapters` and `papers` arrays.
+
+### 9.2 Other Batches Module Endpoints
+
+See `batches_module_api_documentation.md` for full coverage of Courses, Subjects, Chapters (E2), Batches (with auto-naming/QR, assign students/faculty), Classrooms, Levels.
+
+**Current Migration Status:** All E4 changes (session_type matrix, Exam integration, M2M sync in `_handle_exam()`, `AcademicDropdownsView`, duplicate endpoint, updated serializers with per-type validation using `FIXED_SLOTS`/`SESSION_DURATIONS`, `_names` computed fields, CourseLevel/Chapter nesting) have been applied. Run `python manage.py migrate` if any pending. Tests in `batches/tests.py` and `tests_edge_cases.py` cover clash detection, validation rules, and exam creation flows.
+
+**Sync Note:** This guide is now aligned with `TimetableSlotCreateUpdateSerializer.validate()`, `TimetableDuplicateSlotView`, `AcademicDropdownsView`, and `TimetableSlotListSerializer` (as of latest code).

@@ -74,8 +74,8 @@
 | `sales_senior_executive` | Sales Senior Executive | Sales oversight | - |
 | `sales_executive` | Sales Executive | Lead management | - |
 | `tele_caller` | Tele Caller | Outbound calls | - |
-| `exam_supervisor` | Exam Supervisor | Exam proctoring | Integrates with exams module |
-| `paper_checker` | Paper Checker | Exam evaluation, per-paper payments | Uses `per_paper_rate` |
+| `exam_supervisor` | Exam Supervisor | Exam proctoring, geo/screen monitoring, malpractice reports | Integrates with Exam v2 (`/start/`, `/geo-check/`, `/screen-event/`, answer-key distribution) |
+| `paper_checker` | Paper Checker | Exam evaluation, rechecks (answer-key gated), queries | Uses `per_paper_rate`; integrates with `CheckerQuery`, `MarkSheet`, delayed round-robin assignment from `selected_papers` |
 | `accountant` | Accountant | Fees, payroll | - |
 | `student` | Student | View own timetable, attendance, results, exams | Linked to `students.Student` profile |
 | `parents` | Parents | View linked student's data | Uses `linked_student` FK |
@@ -514,13 +514,14 @@ Supports pagination. Auto-cleans records >60 days old.
 - Restricted views in attendance, results, exams.
 
 ### 7.4 Exam Supervisor / Paper Checker
-- Special rates and permissions for exam workflows.
-- `paper_checker` uses `per_paper_rate` in payroll calculations.
+- Special rates and permissions for exam workflows (proctoring, marking, rechecks).
+- `exam_supervisor`: Handles geo/screen events, malpractice.
+- `paper_checker`: Uses `per_paper_rate`; handles `MarkSheet`, `CheckerQuery` (blocks payroll if open), rechecks (requires `answer_key` on Exam).
 
 **Cross-Module Notes:**
-- **Timetable/Attendance:** Faculty & students use auth profile.
-- **Exams:** Links via `examiners`, `paper_checkers` (UUID arrays).
-- **Payroll:** Uses `salary`, `hourly_rate`, `per_paper_rate`, attendance records.
+- **Timetable:** M2M links for `examiners`/`paper_checkers` (synced to Exam via `ensure_paper_checkers()`).
+- **Exams v2:** Full integration with proctoring endpoints, `selected_papers` round-robin, `result_release_mode`.
+- **Results/Payroll:** Query resolution affects payslips; delayed assignment post-exam.
 - **Leads/Onboarding:** Sales roles create leads that convert to students.
 
 ---

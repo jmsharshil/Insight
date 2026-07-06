@@ -8,11 +8,18 @@ logger = logging.getLogger(__name__)
 
 # ── Stub notification helper ──────────────────────────────────────────────────
 
-def notify(recipient_user_id, title, body, metadata=None):
-    """Stub: push/in-app notification. Replace with real implementation."""
-    logger.info(f"NOTIFY [{recipient_user_id}] {title}: {body} | meta={metadata}")
-
-
+def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
+    from chat.notifications import send_system_notification
+    if recipient_user_id:
+        send_system_notification(
+            user_id=str(recipient_user_id),
+            title=title,
+            body=body,
+            metadata=metadata,
+            email_template=email_template,
+            email_context=email_context,
+            email_subject=email_subject,
+        )
 def calculate_leave_days(from_date, to_date, is_half_day=False,
                          sandwich_rule=False, branch=None, user_role=None):
     """
@@ -216,6 +223,13 @@ def check_late_entry_threshold(user, month, year):
         title="Half-day auto-deducted",
         body=f"You have {count} late entries this month. 0.5 leave day auto-deducted.",
         metadata={"month": month, "year": year},
+        email_template='emails/leave_auto_deducted.html',
+        email_context={
+            'user_name': user.name,
+            'late_entries_count': count,
+            'month': month,
+            'year': year
+        }
     )
 
     logger.info(f"Auto half-day deduction for user={user.id}, month={month}/{year}")
