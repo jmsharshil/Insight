@@ -164,6 +164,30 @@ class Exam(models.Model):
                 self._prefetched_objects_cache.pop('paper_checkers', None)
         return checker_ids
 
+    def ensure_supervisors(self):
+        """Ensure Exam.supervisors M2M is populated (with branch-scoped fallback if empty).
+        Called by post_save signal (signals.py) on every Exam creation/update.
+        """
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        if self.supervisors.exists():
+            return list(self.supervisors.values_list('id', flat=True))
+
+        qs = User.objects.filter(role='exam_supervisor', is_active=True)
+        if getattr(self, 'branch_id', None):
+            qs = qs.filter(branch_id=self.branch_id)
+        elif getattr(self, 'branch', None):
+            qs = qs.filter(branch_id=self.branch.id)
+            
+        supervisor_ids = list(qs.values_list('id', flat=True)[:20])
+        if supervisor_ids:
+            self.supervisors.add(*supervisor_ids)
+            logger.info(f"Ensured {len(supervisor_ids)} supervisors for exam {self.id} via M2M.")
+            if hasattr(self, '_prefetched_objects_cache'):
+                self._prefetched_objects_cache.pop('supervisors', None)
+        return supervisor_ids
+
 
 class Question(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

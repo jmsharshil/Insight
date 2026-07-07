@@ -721,15 +721,16 @@ class ExamStartView(APIView):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Only students can start exams.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Sanitize empty strings from frontend for decimal/IP fields to prevent 400 errors
+        # Sanitize empty strings and stringified nulls from mobile frontend
         data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
-        for field in ['student_lat', 'student_lon', 'ip_address']:
-            if field in data and data[field] == '':
+        for field in ['student_lat', 'student_lon', 'ip_address', 'device_fingerprint']:
+            if field in data and str(data[field]).strip().lower() in ['', 'null', 'undefined', 'none']:
                 data[field] = None
 
         # Validate full request body up front via ExamStartSerializer
         ser = ExamStartSerializer(data=data)
         if not ser.is_valid():
+            logger.error(f"Exam start validation failed: {ser.errors} | Data: {data}")
             return Response({'success': False, 'message': 'Invalid start data.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         lat = ser.validated_data.get('student_lat')
