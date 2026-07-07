@@ -203,10 +203,15 @@ class StudentAttendanceListAPIView(SafeAPIView):
         if getattr(user, 'organization', None):
             student_qs = student_qs.filter(branch__organization=user.organization)
 
+        # Scoping by role - prefer ParentLink as source of truth for parents
         if role == 'student':
             student_qs = student_qs.filter(user=user)
         elif role == 'parents':
-            if user.linked_students.exists():
+            from students.models import ParentLink
+            parent_links = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
+            if parent_links:
+                student_qs = student_qs.filter(id__in=parent_links)
+            elif user.linked_students.exists():
                 student_qs = student_qs.filter(user__in=user.linked_students.all())
             else:
                 student_qs = student_qs.none()
@@ -348,7 +353,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         user = request.user
         role = getattr(user, 'role', None)
 
-        from students.models import Student
+        from students.models import Student, ParentLink
         from batches.models import TimetableSlot
 
         try:
@@ -358,24 +363,23 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
             if not s:
                 return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Scoping check
+        # Scoping check - prefer ParentLink as source of truth for parents (per architecture decision)
         if role == 'student':
             student_profile = Student.objects.filter(user=user).first()
             if not student_profile or student_profile.id != s.id:
                 return Response({'success': False, 'message': 'Access denied (Student role mismatch).'}, status=status.HTTP_403_FORBIDDEN)
         elif role == 'parents':
-            has_access = False
-            if user.linked_students.exists() and Student.objects.filter(user__in=user.linked_students.all(), id=s.id).exists():
-                has_access = True
-            else:
-                from students.models import ParentLink
-                if ParentLink.objects.filter(parent=user, student=s).exists():
-                    has_access = True
-                    
+            has_access = ParentLink.objects.filter(parent=user, student=s).exists()
+            if not has_access and getattr(user, 'linked_students', None) and user.linked_students.exists():
+                has_access = Student.objects.filter(
+                    user__in=user.linked_students.all(), id=s.id
+                ).exists()
             if not has_access:
                 return Response({'success': False, 'message': 'Access denied (Parent role mismatch).'}, status=status.HTTP_403_FORBIDDEN)
         elif role == 'faculty':
-            batch_ids = list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)) if hasattr(user, 'faculty_profile') else []
+            batch_ids = list(
+                user.faculty_profile.batch_assignments.values_list('batch_id', flat=True)
+            ) if hasattr(user, 'faculty_profile') and hasattr(user.faculty_profile, 'batch_assignments') else []
             if s.batch_id not in batch_ids:
                 return Response({'success': False, 'message': 'Access denied (Faculty not assigned to batch).'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -633,11 +637,15 @@ class AttendanceHistoryAPIView(SafeAPIView):
         if getattr(user, 'organization', None):
             qs = qs.filter(branch__organization=user.organization)
 
-        # Scoping by role
+        # Scoping by role - prefer ParentLink as source of truth for parents
         if role == 'student':
             qs = qs.filter(student__user=user)
         elif role == 'parents':
-            if user.linked_students.exists():
+            from students.models import ParentLink
+            linked_ids = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
+            if linked_ids:
+                qs = qs.filter(student_id__in=linked_ids)
+            elif user.linked_students.exists():
                 qs = qs.filter(student__user__in=user.linked_students.all())
             else:
                 qs = qs.none()
@@ -1335,10 +1343,15 @@ class ViolationsAPIView(SafeAPIView):
         if getattr(user, 'organization', None):
             violation_qs = violation_qs.filter(student__branch__organization=user.organization)
 
+        # Scoping by role - prefer ParentLink as source of truth for parents
         if role == 'student':
             violation_qs = violation_qs.filter(student__user=user)
         elif role == 'parents':
-            if user.linked_students.exists():
+            from students.models import ParentLink
+            linked_ids = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
+            if linked_ids:
+                violation_qs = violation_qs.filter(student_id__in=linked_ids)
+            elif user.linked_students.exists():
                 violation_qs = violation_qs.filter(student__user__in=user.linked_students.all())
             else:
                 violation_qs = violation_qs.none()

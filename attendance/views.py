@@ -521,14 +521,21 @@ class StudentAttendanceView(APIView):
             except Exception:
                 return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
         elif role == 'parents':
-            linked = getattr(user, 'linked_student', None)
-            if not linked:
-                return Response({'success': False, 'message': 'No linked student.'}, status=status.HTTP_404_NOT_FOUND)
-            try:
-                if str(SP.objects.get(user=linked).id) != str(student_id):
+            # Prefer ParentLink as source of truth
+            from students.models import ParentLink
+            linked_ids = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
+            if linked_ids:
+                if str(student_id) not in [str(lid) for lid in linked_ids]:
                     return Response({'success': False, 'message': 'Not your linked child.'}, status=status.HTTP_403_FORBIDDEN)
-            except Exception:
-                return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+            elif getattr(user, 'linked_students', None) and user.linked_students.exists():
+                try:
+                    student_obj = SP.objects.filter(id=student_id).first()
+                    if not student_obj or not student_obj.user or not user.linked_students.filter(id=student_obj.user.id).exists():
+                        return Response({'success': False, 'message': 'Not your linked child.'}, status=status.HTTP_403_FORBIDDEN)
+                except Exception:
+                    return Response({'success': False, 'message': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                return Response({'success': False, 'message': 'No linked student.'}, status=status.HTTP_404_NOT_FOUND)
         elif role == 'faculty':
             bids = _user_batch_ids(user)
             if bids and not AttendanceRecord.objects.filter(student_id=student_id, batch_id__in=bids).exists():

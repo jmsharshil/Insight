@@ -417,7 +417,12 @@ class ResultView(APIView):
         if role == 'student':
             qs = qs.filter(student__user=request.user)
         elif role == 'parents':
-            qs = qs.filter(student__user__linked_parents=request.user)
+            # Use ParentLink as source of truth (consistent with dashboard, attendance, fees)
+            from students.models import ParentLink
+            linked_student_ids = ParentLink.objects.filter(
+                parent=request.user
+            ).values_list('student_id', flat=True)
+            qs = qs.filter(student_id__in=linked_student_ids)
 
         qs = apply_filters(self, request, qs)
 
