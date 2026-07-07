@@ -331,8 +331,18 @@ class ExamCreateSerializer(serializers.ModelSerializer):
 class ExamStartSerializer(serializers.Serializer):
     student_lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     student_lon = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
-    device_fingerprint = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
-    ip_address = serializers.IPAddressField(required=False, allow_null=True, default=None)
+    device_fingerprint = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True, default='')
+    ip_address = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
+
+    def validate(self, data):
+        # Gracefully handle empty strings for decimal fields
+        for field in ['student_lat', 'student_lon']:
+            if data.get(field) == '':
+                data[field] = None
+        # Convert empty IP to None
+        if data.get('ip_address') == '':
+            data['ip_address'] = None
+        return data
 
 
 class AnswerInputSerializer(serializers.Serializer):
