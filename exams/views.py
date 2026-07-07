@@ -721,8 +721,14 @@ class ExamStartView(APIView):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Only students can start exams.'}, status=status.HTTP_403_FORBIDDEN)
 
+        # Sanitize empty strings from frontend for decimal/IP fields to prevent 400 errors
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        for field in ['student_lat', 'student_lon', 'ip_address']:
+            if field in data and data[field] == '':
+                data[field] = None
+
         # Validate full request body up front via ExamStartSerializer
-        ser = ExamStartSerializer(data=request.data)
+        ser = ExamStartSerializer(data=data)
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Invalid start data.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -914,10 +920,11 @@ class ExamSubmitView(APIView):
             from results.models import MarkSheet
             # Create MarkSheet but delay paper_checker assignment until exam completion
             # (all marksheets submitted/absent-marked via Celery task). Matches summary.
+            # is_submitted=False: student submitted answers, but paper checker hasn't graded yet
             MarkSheet.objects.get_or_create(
                 exam=session.exam,
                 student=session.student,
-                defaults={'is_submitted': True, 'checked_at': timezone.now(), 'is_absent': False}
+                defaults={'is_submitted': False, 'is_absent': False}
             )
             # assign_papers_to_checker.delay(session.exam.id)
             # Do NOT call assign_papers_to_checker() here — delayed to update_exam_statuses task

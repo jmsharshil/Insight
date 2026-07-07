@@ -104,6 +104,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     split_screen_action_display = serializers.CharField(source="get_split_screen_action_display", read_only=True)
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
     paper_checkers = serializers.SerializerMethodField()
+    supervisors = serializers.SerializerMethodField()
     selected_papers = SubjectPaperSerializer(many=True, read_only=True)
     can_start_exam = serializers.SerializerMethodField()
     questions_count = serializers.SerializerMethodField()
@@ -122,7 +123,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'split_screen_max_warnings', 'split_screen_action',
             'result_release_mode',
             'exam_type_display', 'exam_mode_display', 'status_display', 'screen_lock_action_display',
-            'split_screen_action_display', 'result_release_mode_display', 'paper_checkers',
+            'split_screen_action_display', 'result_release_mode_display', 'paper_checkers', 'supervisors',
             'selected_papers',
             'can_start_exam', 'questions_count', 'is_upcoming']
 
@@ -243,11 +244,22 @@ class ExamListSerializer(serializers.ModelSerializer):
             for user in obj.paper_checkers.all()
         ]
 
+    def get_supervisors(self, obj):
+        """Return list of exam supervisors with id and name for frontend display."""
+        return [
+            {'id': user.id, 'name': user.name, 'email': user.email}
+            for user in obj.supervisors.all()
+        ]
+
 
 class ExamCreateSerializer(serializers.ModelSerializer):
     total_marks = serializers.IntegerField(required=False, default=0)
     paper_checkers = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role='paper_checker', is_active=True),
+        many=True, required=False, allow_empty=True, write_only=True
+    )
+    supervisors = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role='exam_supervisor', is_active=True),
         many=True, required=False, allow_empty=True, write_only=True
     )
     selected_papers = serializers.PrimaryKeyRelatedField(
@@ -266,7 +278,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
-            'result_release_mode', 'paper_checkers', 'selected_papers',
+            'result_release_mode', 'paper_checkers', 'supervisors', 'selected_papers',
         ]
 
     def validate(self, data):
@@ -289,20 +301,26 @@ class ExamCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         paper_checkers = validated_data.pop('paper_checkers', [])
+        supervisors = validated_data.pop('supervisors', [])
         selected_papers = validated_data.pop('selected_papers', [])
         exam = super().create(validated_data)
         if paper_checkers:
             exam.paper_checkers.set(paper_checkers)
+        if supervisors:
+            exam.supervisors.set(supervisors)
         if selected_papers:
             exam.selected_papers.set(selected_papers)
         return exam
 
     def update(self, instance, validated_data):
         paper_checkers = validated_data.pop('paper_checkers', None)
+        supervisors = validated_data.pop('supervisors', None)
         selected_papers = validated_data.pop('selected_papers', None)
         exam = super().update(instance, validated_data)
         if paper_checkers is not None:
             exam.paper_checkers.set(paper_checkers)
+        if supervisors is not None:
+            exam.supervisors.set(supervisors)
         if selected_papers is not None:
             exam.selected_papers.set(selected_papers)
         return exam

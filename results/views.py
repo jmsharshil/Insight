@@ -274,6 +274,7 @@ class CheckerStatusView(APIView):
             sheets = sheets.filter(exam__branch__organization=request.user.organization)
         total = sheets.count()
         submitted = sheets.filter(is_submitted=True).count()
+        unassigned = sheets.filter(paper_checker__isnull=True).count()
 
         checkers = sheets.values('paper_checker__id', 'paper_checker__name').annotate(
             assigned_count=Count('id'),
@@ -296,6 +297,7 @@ class CheckerStatusView(APIView):
             'data': {
                 'total_papers': total, 'submitted': submitted,
                 'approval_pending': total - submitted, 'overdue': 0,
+                'unassigned': unassigned,
                 'checkers': res_checkers,
             },
         })

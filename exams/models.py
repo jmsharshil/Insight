@@ -96,6 +96,14 @@ class Exam(models.Model):
         help_text='Available paper checkers assignable to this exam\'s marksheets. '
                   'Auto-assignment uses these + time slot availability.'
     )
+    
+    supervisors = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='supervised_exams',
+        limit_choices_to={'role': 'exam_supervisor', 'is_active': True},
+        help_text='Exam supervisors assigned to invigilate this exam.'
+    )
 
     # Answer key upload (required for recheck flow per user query)
     answer_key = models.FileField(

@@ -178,7 +178,12 @@ def get_refund_policy(payment, requested_amount=None):
             'deduction_percent': Decimal('100'),
         }
 
-    age_days = (timezone.now().date() - payment_date.date()).days
+    if hasattr(payment_date, 'date'):
+        payment_date_val = payment_date.date()
+    else:
+        payment_date_val = payment_date
+        
+    age_days = (timezone.now().date() - payment_date_val).days
     cap = Decimal('0')
     deduction_percent = Decimal('100')
 

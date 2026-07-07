@@ -325,6 +325,7 @@ class PaymentListSerializer(serializers.ModelSerializer):
     course_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
+    fee_structure_name = serializers.SerializerMethodField()
 
     def get_student_name(self, obj):
         return obj.student.full_name if obj.student else ''
@@ -341,6 +342,11 @@ class PaymentListSerializer(serializers.ModelSerializer):
             return fs_batch.name if fs_batch else None
         return None
 
+    def get_fee_structure_name(self, obj):
+        if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
+            return obj.student_fee.fee_structure.name
+        return None
+
     class Meta:
         model = Payment
         fields = ['id', 'student', 'student_name', 'student_fee',
@@ -348,7 +354,7 @@ class PaymentListSerializer(serializers.ModelSerializer):
                   'transaction_ref', 'payment_proof', 'payment_document',
                   'status', 'status_display', 'receipt_number',
                   'payment_date', 'created_at','payment_mode_display',
-                  'course_name','batch_name']
+                  'course_name','batch_name', 'fee_structure_name']
                  
 
 
