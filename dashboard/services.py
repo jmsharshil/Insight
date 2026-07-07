@@ -270,9 +270,14 @@ def _get_student_dashboard(user, now, today, month_start):
     # For parents, use ParentLink (preferred over linked_student for accuracy)
     student = None
     if user.role == 'parents':
+        # Prefer is_primary=True per ParentLink architecture (consistent with ParentStudentProfileAPIView)
         parent_link = ParentLink.objects.select_related('student__batch', 'student__user').filter(
-            parent=user
+            parent=user, is_primary=True
         ).first()
+        if not parent_link:
+            parent_link = ParentLink.objects.select_related('student__batch', 'student__user').filter(
+                parent=user
+            ).first()
         if parent_link:
             student = parent_link.student
     else:
