@@ -329,8 +329,8 @@ class ExamCreateSerializer(serializers.ModelSerializer):
 # ═══ Session ══════════════════════════════════════════════════════════════════
 
 class ExamStartSerializer(serializers.Serializer):
-    student_lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
-    student_lon = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
+    student_lat = serializers.FloatField(required=False, allow_null=True)
+    student_lon = serializers.FloatField(required=False, allow_null=True)
     device_fingerprint = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True, default='')
     ip_address = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
 
@@ -369,8 +369,8 @@ class ScreenEventSerializer(serializers.Serializer):
 
 # v2 NEW: geo-check serializer
 class GeoCheckSerializer(serializers.Serializer):
-    student_lat = serializers.DecimalField(max_digits=9, decimal_places=6)
-    student_lon = serializers.DecimalField(max_digits=9, decimal_places=6)
+    student_lat = serializers.FloatField()
+    student_lon = serializers.FloatField()
 
 
 # ═══ Seating ══════════════════════════════════════════════════════════════════
