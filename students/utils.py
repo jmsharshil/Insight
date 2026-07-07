@@ -220,11 +220,11 @@ class StudentService:
         Requires student.photo to be present.
         QR payload = str(student.id)  — scanned at attendance check-in.
         """
-        if not student.has_photo:
-            raise ValueError(
-                f"Cannot generate ID card for {student.admission_number}: "
-                "profile photo is required."
-            )
+        # if not student.has_photo:
+        #     raise ValueError(
+        #         f"Cannot generate ID card for {student.admission_number}: "
+        #         "profile photo is required."
+        #     )
 
         from django.conf import settings
         frontend_url = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
@@ -364,11 +364,11 @@ class StudentService:
 
         id_card = None
         if not hasattr(student, 'id_card') or student.id_card is None:
-            if student.has_photo:
-                try:
-                    id_card = StudentService.generate_id_card(student)
-                except Exception as exc:
-                    logger.error(f"On-demand ID card generation failed: {exc}")
+            # if student.has_photo:
+            try:
+                id_card = StudentService.generate_id_card(student)
+            except Exception as exc:
+                logger.error(f"On-demand ID card generation failed: {exc}")
         else:
             id_card = student.id_card
 
