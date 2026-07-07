@@ -193,13 +193,12 @@ class ExtraHoursApprovalUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=['pending', 'approved', 'rejected'])
 
 
-class MyPaySlipSerializer(serializers.ModelSerializer):
+class MyPaySlipSerializer(PaySlipSerializer):
     """Personal payslip view — used in 'My Payroll' API for the logged-in faculty."""
     payroll_month = serializers.IntegerField(source='payroll_run.month', read_only=True)
     payroll_year = serializers.IntegerField(source='payroll_run.year', read_only=True)
     payroll_status = serializers.CharField(source='payroll_run.get_status_display', read_only=True)
     branch_name = serializers.CharField(source='payroll_run.branch.name', read_only=True)
-    late_logs = SessionLatePenaltyLogSerializer(many=True, read_only=True)
 
     class Meta:
         model = PaySlip
@@ -210,6 +209,6 @@ class MyPaySlipSerializer(serializers.ModelSerializer):
             'retention_deduction', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
-            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours',
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary',
         ]
 

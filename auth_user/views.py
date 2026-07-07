@@ -134,9 +134,17 @@ class LoginAPIView(APIView):
                 student_profile = Student.objects.filter(user=user).first()
                 if student_profile:
                     actual_student_ids = [str(student_profile.id)]
-            elif user.role in ['parent', 'parents'] and user.linked_students.exists():
-                student_profiles = Student.objects.filter(user__in=user.linked_students.all())
-                actual_student_ids = [str(sp.id) for sp in student_profiles]
+            elif user.role in ['parent', 'parents']:
+                student_profiles = set()
+                if user.linked_students.exists():
+                    for sp in Student.objects.filter(user__in=user.linked_students.all()):
+                        student_profiles.add(str(sp.id))
+                
+                # Also check ParentLink models
+                for sp in Student.objects.filter(parent_links__parent=user):
+                    student_profiles.add(str(sp.id))
+                    
+                actual_student_ids = list(student_profiles)
 
             return Response({
                 "message": "Login successful",
@@ -353,6 +361,12 @@ class ParentStudentProfileAPIView(APIView):
             )
 
         student_user = parent_user.linked_students.first()
+        if not student_user:
+            from students.models import ParentLink
+            first_link = ParentLink.objects.filter(parent=parent_user).first()
+            if first_link and first_link.student and first_link.student.user:
+                student_user = first_link.student.user
+
         if not student_user:
             return Response(
                 {"success": False, "message": "No student is linked to this parent account."},

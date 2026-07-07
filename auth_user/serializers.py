@@ -443,6 +443,17 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        
+        if instance.role in ['parent', 'parents']:
+            from students.models import Student, ParentLink
+            student_profiles = set()
+            if instance.linked_students.exists():
+                for sp in Student.objects.filter(user__in=instance.linked_students.all()):
+                    student_profiles.add(str(sp.id))
+            for sp in Student.objects.filter(parent_links__parent=instance):
+                student_profiles.add(str(sp.id))
+            data['linked_students'] = list(student_profiles)
+
         if instance.profile_pic:
             file_url = instance.profile_pic.url
             # If Azure storage is enabled and URL is relative, build absolute URL
