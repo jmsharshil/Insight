@@ -191,7 +191,7 @@ class ExamListCreateView(APIView):
 
         return Response({
             'success': True, 'message': 'Exam created.',
-            'data': ExamListSerializer(exam).data,
+            'data': ExamListSerializer(exam, context={'request': request}).data,
         }, status=status.HTTP_201_CREATED)
 
 
@@ -215,7 +215,7 @@ class ExamDetailView(APIView):
         exam = self._get_exam(request, exam_id)
         if exam is None:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({'success': True, 'data': ExamListSerializer(exam).data})
+        return Response({'success': True, 'data': ExamListSerializer(exam, context={'request': request}).data})
 
     def patch(self, request, exam_id):
         role = _user_role(request.user)
@@ -233,7 +233,7 @@ class ExamDetailView(APIView):
         if not serializer.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
-        return Response({'success': True, 'message': 'Exam updated.', 'data': ExamListSerializer(exam).data})
+        return Response({'success': True, 'message': 'Exam updated.', 'data': ExamListSerializer(exam, context={'request': request}).data})
         
     def put(self, request, exam_id):
         # Handle PUT as a full update or alias to patch to be forgiving
@@ -253,7 +253,7 @@ class ExamDetailView(APIView):
         if not serializer.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
-        return Response({'success': True, 'message': 'Exam updated.', 'data': ExamListSerializer(exam).data})
+        return Response({'success': True, 'message': 'Exam updated.', 'data': ExamListSerializer(exam, context={'request': request}).data})
 
     def delete(self, request, exam_id):
         role = _user_role(request.user)

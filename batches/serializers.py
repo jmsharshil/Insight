@@ -610,6 +610,10 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             # Sync paper checkers from slot to exam
             if slot.paper_checkers.exists():
                 exam.paper_checkers.set(slot.paper_checkers.all())
+                
+            # Sync examiners from slot to exam supervisors
+            if slot.examiners.exists():
+                exam.supervisors.set(slot.examiners.all())
 
             # Sync selected_papers from exam_data to exam
             selected_paper_ids = exam_data.get('selected_papers', [])
@@ -634,6 +638,9 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
             
             # Sync paper checkers from slot to exam
             exam.paper_checkers.set(slot.paper_checkers.all())
+            
+            # Sync examiners from slot to exam supervisors
+            exam.supervisors.set(slot.examiners.all())
 
             # Sync selected_papers from exam_data to exam (only if provided)
             selected_paper_ids = exam_data.get('selected_papers')

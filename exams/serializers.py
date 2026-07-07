@@ -109,6 +109,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     can_start_exam = serializers.SerializerMethodField()
     questions_count = serializers.SerializerMethodField()
     is_upcoming = serializers.SerializerMethodField()
+    is_submitted = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
@@ -125,7 +126,31 @@ class ExamListSerializer(serializers.ModelSerializer):
             'exam_type_display', 'exam_mode_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers', 'supervisors',
             'selected_papers',
-            'can_start_exam', 'questions_count', 'is_upcoming']
+            'can_start_exam', 'questions_count', 'is_upcoming', 'is_submitted']
+
+    def get_is_submitted(self, obj):
+        request = self.context.get('request')
+        if not request or getattr(request.user, 'role', None) != 'student':
+            return False
+            
+        student = getattr(request, '_cached_student', None)
+        if student is None:
+            try:
+                from students.models import Student
+                student = Student.objects.filter(user=request.user).first()
+                if student:
+                    request._cached_student = student
+                else:
+                    request._cached_student = False
+                    return False
+            except Exception:
+                request._cached_student = False
+                return False
+        elif student is False:
+            return False
+
+        from .models import ExamSession
+        return ExamSession.objects.filter(exam=obj, student=student, is_submitted=True).exists()
 
     def get_is_upcoming(self, obj):
         from django.utils import timezone
