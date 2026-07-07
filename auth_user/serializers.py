@@ -211,13 +211,33 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         fields = ['username','email','phone','name','role','branch','linked_students','organization'] + EMPLOYEE_FIELDS
 
     def create(self, validated_data):
+        linked_students = validated_data.pop('linked_students', None)
         request = self.context.get('request')
         if ('organization' not in validated_data or validated_data['organization'] is None) and request is not None:
             request_org = getattr(request.user, 'organization', None)
             if request_org:
                 validated_data['organization'] = request_org
         user = User.objects.create_user(password=None, is_active=True, **validated_data)
-        return user   
+        
+        if linked_students:
+            user.linked_students.set(linked_students)
+            # Also create ParentLink records so dashboard and other parent features work
+            from students.models import ParentLink, Student
+            for student_user in linked_students:
+                try:
+                    student = Student.objects.get(user=student_user)
+                    ParentLink.objects.get_or_create(
+                        student=student,
+                        parent=user,
+                        defaults={
+                            'relationship': 'father',
+                            'is_primary': True,
+                        }
+                    )
+                except Student.DoesNotExist:
+                    # Student profile may not exist yet
+                    pass
+        return user
 
 class OrganizationCreateSerializer(serializers.Serializer):
     organization_name = serializers.CharField(max_length=255)
@@ -258,42 +278,7 @@ class PasswordSetSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=6)
     confirm_password = serializers.CharField(write_only=True, min_length=6)
 
-
-    def to_internal_value(self, data):
-        # Safely convert data to a mutable dictionary, avoiding deepcopy on file objects
-        if hasattr(data, 'getlist'):
-            mutable_data = {}
-            for k in data.keys():
-                lst = data.getlist(k)
-                mutable_data[k] = lst if len(lst) > 1 else lst[0]
-        else:
-            mutable_data = dict(data)
-            
-
-        choice_fields_defaults = {
-            'level': 'executive',
-            'employment_type': 'full_time'
-        }
-        for f, default_val in choice_fields_defaults.items():
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                # If they send empty string for a choice field, either remove it or set default.
-                # Removing it is safer for PATCH, it just keeps the existing value.
-                mutable_data.pop(f)
-
-        nullable_fields = ['joining_date', 'work_start_time', 'work_end_time', 'employee_id']
-        for f in nullable_fields:
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                mutable_data[f] = None
-                
-        numeric_fields = ['hourly_rate', 'session_hours', 'salary', 'salary_retention_percentage', 'per_paper_rate']
-        for f in numeric_fields:
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                mutable_data[f] = 0
-                
-        return super().to_internal_value(mutable_data)
-
     def validate(self, attrs):
-
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError("Passwords do not match")
         return attrs
@@ -318,42 +303,7 @@ class ResetPasswordSerializer(serializers.Serializer):
     password = serializers.CharField(min_length=6,write_only=True)
     confirm_password = serializers.CharField(min_length=6,write_only=True)
 
-
-    def to_internal_value(self, data):
-        # Safely convert data to a mutable dictionary, avoiding deepcopy on file objects
-        if hasattr(data, 'getlist'):
-            mutable_data = {}
-            for k in data.keys():
-                lst = data.getlist(k)
-                mutable_data[k] = lst if len(lst) > 1 else lst[0]
-        else:
-            mutable_data = dict(data)
-            
-
-        choice_fields_defaults = {
-            'level': 'executive',
-            'employment_type': 'full_time'
-        }
-        for f, default_val in choice_fields_defaults.items():
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                # If they send empty string for a choice field, either remove it or set default.
-                # Removing it is safer for PATCH, it just keeps the existing value.
-                mutable_data.pop(f)
-
-        nullable_fields = ['joining_date', 'work_start_time', 'work_end_time', 'employee_id']
-        for f in nullable_fields:
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                mutable_data[f] = None
-                
-        numeric_fields = ['hourly_rate', 'session_hours', 'salary', 'salary_retention_percentage', 'per_paper_rate']
-        for f in numeric_fields:
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                mutable_data[f] = 0
-                
-        return super().to_internal_value(mutable_data)
-
     def validate(self, attrs):
-
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError("Passwords do not match")
         return attrs
@@ -364,42 +314,7 @@ class ChangePasswordSerializer(serializers.Serializer):
     new_password = serializers.CharField(min_length=6, write_only=True)
     confirm_new_password = serializers.CharField(min_length=6, write_only=True)
 
-
-    def to_internal_value(self, data):
-        # Safely convert data to a mutable dictionary, avoiding deepcopy on file objects
-        if hasattr(data, 'getlist'):
-            mutable_data = {}
-            for k in data.keys():
-                lst = data.getlist(k)
-                mutable_data[k] = lst if len(lst) > 1 else lst[0]
-        else:
-            mutable_data = dict(data)
-            
-
-        choice_fields_defaults = {
-            'level': 'executive',
-            'employment_type': 'full_time'
-        }
-        for f, default_val in choice_fields_defaults.items():
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                # If they send empty string for a choice field, either remove it or set default.
-                # Removing it is safer for PATCH, it just keeps the existing value.
-                mutable_data.pop(f)
-
-        nullable_fields = ['joining_date', 'work_start_time', 'work_end_time', 'employee_id']
-        for f in nullable_fields:
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                mutable_data[f] = None
-                
-        numeric_fields = ['hourly_rate', 'session_hours', 'salary', 'salary_retention_percentage', 'per_paper_rate']
-        for f in numeric_fields:
-            if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
-                mutable_data[f] = 0
-                
-        return super().to_internal_value(mutable_data)
-
     def validate(self, attrs):
-
         if attrs['new_password'] != attrs['confirm_new_password']:
             raise serializers.ValidationError({"confirm_new_password": "Passwords do not match"})
 
@@ -429,6 +344,39 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         if User.objects.exclude(id=self.instance.id).filter(username=value).exists():
             raise serializers.ValidationError("Username already exists")
         return value
+
+    def update(self, instance, validated_data):
+        linked_students = validated_data.pop('linked_students', None)
+        instance = super().update(instance, validated_data)
+        
+        if linked_students is not None:
+            # linked_students may be list of User instances or pks (UUIDs)
+            instance.linked_students.set(linked_students)
+            # Sync ParentLink records for consistency with new source-of-truth model
+            from students.models import ParentLink, Student
+            # Clear links not in the new set
+            if linked_students:
+                # Convert to list of pks for safe lookup
+                student_pks = [ls.pk if hasattr(ls, 'pk') else ls for ls in linked_students]
+                ParentLink.objects.filter(parent=instance).exclude(
+                    student__user__in=student_pks
+                ).delete()
+                for student_pk in student_pks:
+                    try:
+                        student = Student.objects.get(user_id=student_pk)
+                        ParentLink.objects.get_or_create(
+                            student=student,
+                            parent=instance,
+                            defaults={
+                                'relationship': 'father',
+                                'is_primary': len(student_pks) == 1,
+                            }
+                        )
+                    except Student.DoesNotExist:
+                        pass
+            else:
+                ParentLink.objects.filter(parent=instance).delete()
+        return instance
 
 class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)

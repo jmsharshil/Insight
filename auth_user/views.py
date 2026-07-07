@@ -127,24 +127,16 @@ class LoginAPIView(APIView):
             if user.profile_pic and hasattr(user.profile_pic, 'url'):
                 profile_pic_url = request.build_absolute_uri(user.profile_pic.url)
 
-            # Determine the actual Student Profile IDs (UUIDs)
-            from students.models import Student
+            # Determine the actual Student Profile IDs (UUIDs) - prefer ParentLink as source of truth
+            from students.models import Student, ParentLink
             actual_student_ids = []
             if user.role == 'student':
                 student_profile = Student.objects.filter(user=user).first()
                 if student_profile:
                     actual_student_ids = [str(student_profile.id)]
-            elif user.role in ['parent', 'parents']:
-                student_profiles = set()
-                if user.linked_students.exists():
-                    for sp in Student.objects.filter(user__in=user.linked_students.all()):
-                        student_profiles.add(str(sp.id))
-                
-                # Also check ParentLink models
-                for sp in Student.objects.filter(parent_links__parent=user):
-                    student_profiles.add(str(sp.id))
-                    
-                actual_student_ids = list(student_profiles)
+            elif user.role == 'parents':
+                parent_links = ParentLink.objects.filter(parent=user).select_related('student')
+                actual_student_ids = [str(pl.student.id) for pl in parent_links if pl.student]
 
             return Response({
                 "message": "Login successful",
@@ -166,7 +158,7 @@ class LoginAPIView(APIView):
             })
         return Response(
             serializer.errors,
-            status=400
+            status=status.HTTP_400_BAD_REQUEST
         )
 
 
@@ -360,30 +352,55 @@ class ParentStudentProfileAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        student_user = parent_user.linked_students.first()
-        if not student_user:
-            from students.models import ParentLink
-            first_link = ParentLink.objects.filter(parent=parent_user).first()
-            if first_link and first_link.student and first_link.student.user:
-                student_user = first_link.student.user
+        # Prefer ParentLink as source of truth (per updated architecture)
+        from students.models import ParentLink, Student
+        from leads.models import Lead
+        from leads.serializers import LeadDetailSerializer
+        parent_link = ParentLink.objects.select_related('student', 'student__user').filter(
+            parent=parent_user, is_primary=True
+        ).first()
+        if not parent_link:
+            parent_link = ParentLink.objects.select_related('student', 'student__user').filter(
+                parent=parent_user
+            ).first()
+        
+        if not parent_link:
+            # Fallback to M2M
+            student_user = parent_user.linked_students.first()
+            if not student_user:
+                return Response(
+                    {"success": False, "message": "No student is linked to this parent account."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            try:
+                student = Student.objects.get(user=student_user)
+            except Student.DoesNotExist:
+                student = None
+        else:
+            student = parent_link.student
+            student_user = student.user if student else None
 
-        if not student_user:
+        if not student:
             return Response(
-                {"success": False, "message": "No student is linked to this parent account."},
+                {"success": False, "message": "Linked student profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        lead = Lead.objects.filter(email__iexact=student_user.email).order_by('-created_at').first()
+        from leads.models import Lead
+        lead = Lead.objects.filter(email__iexact=student.email).order_by('-created_at').first()
         if not lead:
-            lead = Lead.objects.filter(phone_student=student_user.phone).order_by('-created_at').first()
+            lead = Lead.objects.filter(phone_student=student.phone_student).order_by('-created_at').first()
 
         student_data = {
-            "id": str(student_user.id),
-            "username": student_user.username,
-            "email": student_user.email,
-            "phone": student_user.phone,
-            "name": student_user.name,
-            "role": student_user.role,
+            "id": str(student.id),
+            "admission_number": student.admission_number,
+            "username": getattr(student_user, 'username', ''),
+            "email": student.email,
+            "phone": student.phone_student,
+            "name": student.full_name,
+            "role": "student",
+            "batch": student.current_batch_name,
+            "photo": request.build_absolute_uri(student.photo.url) if student.photo else None,
         }
 
         return Response(
@@ -394,6 +411,7 @@ class ParentStudentProfileAPIView(APIView):
                         "id": str(parent_user.id),
                         "email": parent_user.email,
                         "name": parent_user.name,
+                        "relationship": parent_link.relationship if parent_link else "parent",
                     },
                     "student": student_data,
                     "student_lead_profile": LeadDetailSerializer(lead).data if lead else None,
