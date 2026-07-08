@@ -299,8 +299,9 @@ CORS_ALLOWED_ORIGINS = [
     'https://034b-2405-201-2005-1965-d1e6-c9fc-4e74-2cbe.ngrok-free.app',
     "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net",
     'https://insightsinstitute-fcdqe4gjcfe5c6gn.centralindia-01.azurewebsites.net',
+    'https://wonderful-pond-0982c5200.7.azurestaticapps.net',
+    'https://victorious-rock-0352cde00.7.azurestaticapps.net'
     'https://insight.jmstech.co',
-]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -369,6 +370,8 @@ CSRF_TRUSTED_ORIGINS = [
     'https://kdcpk8rj-5173.inc1.devtunnels.ms',
     "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net",
     'https://insightsinstitute-fcdqe4gjcfe5c6gn.centralindia-01.azurewebsites.net',
+    'https://wonderful-pond-0982c5200.7.azurestaticapps.net',
+    'https://victorious-rock-0352cde00.7.azurestaticapps.net'
     'https://insight.jmstech.co',
 ]
 
