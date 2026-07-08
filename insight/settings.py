@@ -355,6 +355,11 @@ if not DEBUG:
             },
         },
         'loggers': {
+            '': {
+                'handlers': ['file'],
+                'level': 'ERROR',
+                'propagate': True,
+            },
             'django': {
                 'handlers': ['file'],
                 'level': 'ERROR',
@@ -371,7 +376,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net",
     'https://insightsinstitute-fcdqe4gjcfe5c6gn.centralindia-01.azurewebsites.net',
     'https://wonderful-pond-0982c5200.7.azurestaticapps.net',
-    'https://victorious-rock-0352cde00.7.azurestaticapps.net'
+    'https://victorious-rock-0352cde00.7.azurestaticapps.net',
     'https://insight.jmstech.co',
 ]
 
