@@ -11,6 +11,7 @@ from rest_framework import status
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
+from django.conf import settings
 
 from .models import Admission
 from .serializers import (AdmissionSerializer,AdmissionStatusUpdateSerializer,AdmissionListSerializer,AdmissionDetailSerializer,AdmissionUpdateSerializer,AdmissionDocumentUploadSerializer,)
@@ -160,7 +161,7 @@ class AdmissionListView(APIView):
             if admission.email:
                 try:
                     from core.sender import send_email
-                    payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
+                    payment_link = f"{settings.FRONTEND_BASE_URL}/insight/student/payment-upload?id={admission.id}"
 
                     # Build bank details text for all eligible banks (shuffled)
                     bank_details = ""
@@ -336,7 +337,7 @@ class AdmissionDetailView(APIView):
 
                 if admission.email:
                     from core.sender import send_email
-                    payment_link = f"http://localhost:5173/insight/student/payment-upload?id={admission.id}"
+                    payment_link = f"{settings.FRONTEND_BASE_URL}/insight/student/payment-upload?id={admission.id}"
 
                     # Build bank details text for all eligible banks (shuffled)
                     bank_details = ""

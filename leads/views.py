@@ -11,6 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 from core.sender import send_email
+from django.conf import settings
 
 from .serializers import (
     get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer,
@@ -339,7 +340,7 @@ class LeadStatusUpdateView(APIView):
                     
                     if admission.email:
                         try:
-                            admission_link = f"http://localhost:5173/insight/student/admission-form?id={lead.id}"
+                            admission_link = f"{settings.FRONTEND_BASE_URL}/insight/student/admission-form?id={lead.id}"
                             subject = "Complete Your Admission Process"
                             text_content = f"Hello {admission.first_name},\n\nWe are thrilled to welcome you! Your lead has been converted, and we are ready to proceed with your admission.\n\nPlease click the link below to complete your admission form and upload the necessary documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\nInsight Institute Team"
                             
