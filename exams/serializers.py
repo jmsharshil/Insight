@@ -110,6 +110,8 @@ class ExamListSerializer(serializers.ModelSerializer):
     questions_count = serializers.SerializerMethodField()
     is_upcoming = serializers.SerializerMethodField()
     is_submitted = serializers.SerializerMethodField()
+    classroom = serializers.SerializerMethodField()
+    classroom_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
@@ -126,7 +128,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'exam_type_display', 'exam_mode_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers', 'supervisors',
             'selected_papers',
-            'can_start_exam', 'questions_count', 'is_upcoming', 'is_submitted']
+            'can_start_exam', 'questions_count', 'is_upcoming', 'is_submitted','classroom','classroom_name']
 
     def get_is_submitted(self, obj):
         request = self.context.get('request')
@@ -275,6 +277,16 @@ class ExamListSerializer(serializers.ModelSerializer):
             {'id': user.id, 'name': user.name, 'email': user.email}
             for user in obj.supervisors.all()
         ]
+
+    def get_classroom(self, obj):
+        if hasattr(obj, 'timetable_slot') and obj.timetable_slot and obj.timetable_slot.classroom_id:
+            return obj.timetable_slot.classroom_id
+        return None
+ 
+    def get_classroom_name(self, obj):
+        if hasattr(obj, 'timetable_slot') and obj.timetable_slot and obj.timetable_slot.classroom:
+            return obj.timetable_slot.classroom.name
+        return None
 
 
 class ExamCreateSerializer(serializers.ModelSerializer):

@@ -105,16 +105,14 @@ def auto_submit_session(session):
     if not requires_paper_checking(exam, has_subjective_questions=has_subjective):
         auto_grade_mcq(session.id)
     else:
-        # Create MarkSheet but DO NOT assign paper_checker yet.
-        # is_submitted=False: student submitted answers, but paper checker hasn't graded yet.
-        # Assignment delayed until exam completion (per user request).
+        # Create MarkSheet and assign paper checker immediately
         from results.models import MarkSheet
         MarkSheet.objects.get_or_create(
             exam=exam,
             student=session.student,
             defaults={'is_submitted': False}
         )
-        # Note: assign_papers_to_checker() is now ONLY called from completion task
+        assign_papers_to_checker(exam.id)
 
     return session
 

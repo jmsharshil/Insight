@@ -919,16 +919,14 @@ class ExamSubmitView(APIView):
                 return Response({'submitted': True, 'message': 'Answers submitted. Results will be released by the faculty.'})
         else:
             from results.models import MarkSheet
-            # Create MarkSheet but delay paper_checker assignment until exam completion
-            # (all marksheets submitted/absent-marked via Celery task). Matches summary.
-            # is_submitted=False: student submitted answers, but paper checker hasn't graded yet
+            # Create MarkSheet and assign paper checker immediately
             MarkSheet.objects.get_or_create(
                 exam=session.exam,
                 student=session.student,
                 defaults={'is_submitted': False, 'is_absent': False}
             )
-            # assign_papers_to_checker.delay(session.exam.id)
-            # Do NOT call assign_papers_to_checker() here — delayed to update_exam_statuses task
+            # Assign paper checker immediately per user request
+            assign_papers_to_checker(session.exam.id)
             return Response({'submitted': True, 'message': 'Answers submitted (with optional answer sheet). Results pending review by assigned checker.'})
 
 
@@ -1111,6 +1109,7 @@ class AnswerKeyDistributeView(APIView):
         if not checkers:
             return Response({'success': False, 'message': 'No checkers assigned'}, status=status.HTTP_400_BAD_REQUEST)
             
+        base_url = getattr(django_settings, 'BASE_URL', 'http://localhost:8000')
         sent = []
         for cid in checkers:
             checker = get_user_model().objects.get(id=cid)
@@ -1119,7 +1118,7 @@ class AnswerKeyDistributeView(APIView):
                 link_expires=timezone.now() + timezone.timedelta(hours=48)
             )
             token = hashlib.sha256(f"{log.id}{django_settings.SECRET_KEY}".encode()).hexdigest()
-            url = f"/api/v1/answer-key/{exam_id}/?token={log.id}_{token}"
+            url = f"{base_url}/api/v1/answer-key/{exam_id}/?token={log.id}_{token}"
             send_answer_key_email(checker, exam, url)
             sent.append(checker.name)
             
@@ -1148,6 +1147,20 @@ class AnswerKeyView(APIView):
             return Response({'success': False, 'message': 'Link expired'}, status=status.HTTP_403_FORBIDDEN)
             
         questions = Question.objects.filter(exam=log.exam).prefetch_related('choices')
+        
+        # If the exam itself has a global answer_key uploaded, redirect there first
+        from django.http import HttpResponseRedirect
+        if log.exam.answer_key:
+            return HttpResponseRedirect(log.exam.answer_key.url)
+
+        # Otherwise, if no questions exist, fallback to the SubjectPaper's answer_key or file
+        if not questions.exists() and log.exam.selected_papers.exists():
+            paper = log.exam.selected_papers.first()
+            if paper.answer_key:
+                return HttpResponseRedirect(paper.answer_key.url)
+            elif paper.file:
+                return HttpResponseRedirect(paper.file.url)
+                
         from .utils import group_questions
         return Response(group_questions(QuestionSerializer(questions, many=True).data))
 
