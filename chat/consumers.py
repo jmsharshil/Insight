@@ -142,6 +142,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         event_type = data.get("type")
         handler_map = {
+            "ping":           self._handle_ping,
             "send_message":   self._handle_send_message,
             "typing_start":   self._handle_typing_start,
             "typing_stop":    self._handle_typing_stop,
@@ -161,6 +162,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
     # ------------------------------------------------------------------
     # Inbound handlers
     # ------------------------------------------------------------------
+
+    async def _handle_ping(self, data: dict):
+        await self.send(text_data=json.dumps({"type": "pong"}))
 
     async def _handle_send_message(self, data: dict):
         content   = data.get("content", "")
@@ -230,15 +234,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self._send_error("DB_ERROR", f"Could not save message: {exc}")
                 return
 
-            # Rebuild targets_data from saved message
-            targets_data = []
-            if hasattr(message, "targets") and message.targets.exists():
-                for tgt in message.targets.all():
-                    targets_data.append({
-                        "id": str(tgt.id),
-                        "full_name": getattr(tgt, "name", ""),
-                        "role": getattr(tgt, "role", ""),
-                    })
+            # Rebuild targets_data from saved message safely using async helper
+            targets_data = await self._get_message_targets_data(message)
             message_data = {
                 "id":         str(message.id),
                 "room_id":    self.room_id,
@@ -545,6 +542,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
     # ------------------------------------------------------------------
     # DB helpers
     # ------------------------------------------------------------------
+
+    @database_sync_to_async
+    def _get_message_targets_data(self, message) -> list:
+        targets_data = []
+        if hasattr(message, "targets") and message.targets.exists():
+            for tgt in message.targets.all():
+                targets_data.append({
+                    "id": str(tgt.id),
+                    "full_name": getattr(tgt, "name", ""),
+                    "role": getattr(tgt, "role", ""),
+                })
+        return targets_data
 
     @database_sync_to_async
     def _authenticate_token(self, token_str: str):
