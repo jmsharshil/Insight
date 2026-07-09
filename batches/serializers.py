@@ -587,13 +587,17 @@ class TimetableSlotCreateUpdateSerializer(serializers.ModelSerializer):
                     if not branch_id and hasattr(request.user, 'profile'):
                         branch_id = getattr(request.user.profile, 'branch_id', None)
 
+            exam_type = exam_data.get('exam_type', 'offline')
+            exam_mode = exam_data.get('exam_mode', 'offline' if exam_type == 'offline' else 'online')
+
             exam = Exam.objects.create(
                 branch_id=branch_id,
                 batch=slot.batch,
                 subject=slot.subject,
                 faculty=slot.faculty,
                 title=title,
-                exam_type=exam_data.get('exam_type', 'offline'),
+                exam_type=exam_type,
+                exam_mode=exam_mode,
                 total_marks=exam_data.get('total_marks', 100),
                 pass_marks=exam_data.get('pass_marks', 35),
                 duration_minutes=duration or 60,
