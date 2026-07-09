@@ -542,7 +542,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     # ------------------------------------------------------------------
     # DB helpers
     # ------------------------------------------------------------------
-
+    # Take this synchronous database query and safely run it in a background thread so it doesn't freeze the main asynchronous WebSocket loop
     @database_sync_to_async
     def _get_message_targets_data(self, message) -> list:
         targets_data = []
