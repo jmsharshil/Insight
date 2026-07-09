@@ -1109,7 +1109,6 @@ class AnswerKeyDistributeView(APIView):
         if not checkers:
             return Response({'success': False, 'message': 'No checkers assigned'}, status=status.HTTP_400_BAD_REQUEST)
             
-        base_url = getattr(django_settings, 'BASE_URL', 'http://localhost:8000')
         sent = []
         for cid in checkers:
             checker = get_user_model().objects.get(id=cid)
@@ -1118,7 +1117,10 @@ class AnswerKeyDistributeView(APIView):
                 link_expires=timezone.now() + timezone.timedelta(hours=48)
             )
             token = hashlib.sha256(f"{log.id}{django_settings.SECRET_KEY}".encode()).hexdigest()
-            url = f"{base_url}/api/v1/answer-key/{exam_id}/?token={log.id}_{token}"
+            path = f"/api/v1/answer-key/{exam_id}/?token={log.id}_{token}"
+            url = request.build_absolute_uri(path)
+            # Replace localhost with 127.0.0.1 for local testing compatibility
+            url = url.replace('localhost', '127.0.0.1')
             send_answer_key_email(checker, exam, url)
             sent.append(checker.name)
             

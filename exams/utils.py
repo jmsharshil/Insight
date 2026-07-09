@@ -145,10 +145,22 @@ def get_available_paper_checkers(exam):
         logger.warning(f"No paper_checkers configured for exam {exam.id}. Using branch-wide fallback.")
         # Branch-scoped fallback to ensure Exam always gets paper_checkers (M2M)
         qs = User.objects.filter(role='paper_checker', is_active=True)
+        from django.db.models import Q
+        org_id = getattr(exam, 'organization_id', None)
+        if not org_id and getattr(exam, 'branch', None):
+            org_id = exam.branch.organization_id
+            
+        q_filter = Q()
         if exam.branch_id:
-            qs = qs.filter(branch_id=exam.branch_id)
-        elif exam.branch:
-            qs = qs.filter(branch_id=exam.branch.id)
+            q_filter |= Q(branch_id=exam.branch_id)
+        elif getattr(exam, 'branch', None):
+            q_filter |= Q(branch_id=exam.branch.id)
+            
+        if org_id:
+            q_filter |= Q(organization_id=org_id, branch__isnull=True)
+            
+        if q_filter:
+            qs = qs.filter(q_filter)
         fallback_ids = list(qs.values_list('id', flat=True)[:20])  # cap to prevent overload
         if fallback_ids:
             logger.info(f"Using {len(fallback_ids)} branch paper_checkers as fallback for exam {exam.id}")
