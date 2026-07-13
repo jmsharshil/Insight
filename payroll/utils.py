@@ -305,17 +305,22 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # 8. Absence deductions
     # Sundays that have any QR/session attendance count as full day present
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
-    absent_days = Decimal(max(0, working_days - days_with_attendance))
     attended_dates = session_dates | set(qr_by_date.keys())
     absent_dates = []
     from datetime import date
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
+        working_days_passed = working_days
         last_day = calendar.monthrange(year, month)[1]
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
+        working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
+        working_days_passed = 0
         last_day = 0
+        
+    absent_days = Decimal(max(0, working_days_passed - days_with_attendance))
+    
     for d in range(1, last_day + 1):
         if calendar.weekday(year, month, d) < 5:
             curr_date = date(year, month, d)
