@@ -383,11 +383,12 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     role_display = serializers.CharField(source="get_role_display", read_only=True)
+    linked_student_names = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display'] + EMPLOYEE_FIELDS
-        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names'] + EMPLOYEE_FIELDS
+        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'linked_student_names'] # These fields cannot be updated via this serializer
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -429,6 +430,11 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
             raise serializers.ValidationError("This email is already in use.")
         return value
+
+    def get_linked_student_names(self, obj):
+        return list(
+            obj.linked_students.values_list("name", flat=True)
+        ) 
 
 from .models import NotificationHistory
 
