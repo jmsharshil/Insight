@@ -106,6 +106,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         max_digits=8, decimal_places=2, default=0,
         help_text="Per-paper rate for paper_checker role (new FRD). Payment = papers_checked * rate - late_submission_penalties (5 days grace after exam.scheduled_date; then +5% per 7-day bracket)."
     )
+    accessible_modules = models.JSONField(
+        null=True, blank=True,
+        help_text="List of modules this user has access to. If null, falls back to role default modules."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     
     objects = UserManager()

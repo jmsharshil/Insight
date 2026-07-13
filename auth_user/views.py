@@ -138,6 +138,14 @@ class LoginAPIView(APIView):
                 parent_links = ParentLink.objects.filter(parent=user).select_related('student')
                 actual_student_ids = [str(pl.student.id) for pl in parent_links if pl.student]
 
+            # Build RBAC permissions for the frontend
+            from auth_user.permissions import get_role_config
+            role_config = get_role_config(user.role)
+            
+            accessible_modules = getattr(user, 'accessible_modules', None)
+            if accessible_modules is None:
+                accessible_modules = role_config.get('default_modules', [])
+
             return Response({
                 "message": "Login successful",
                 "access": str(refresh.access_token),
@@ -154,6 +162,9 @@ class LoginAPIView(APIView):
                     "organization": str(user.organization.id) if user.organization else None,
                     "organization_name": user.organization.name if user.organization else None,
                     "linked_students": actual_student_ids,
+                    "accessible_modules": accessible_modules,
+                    "canDelete": role_config.get('canDelete', False),
+                    "canExport": role_config.get('canExport', False),
                 }
             })
         return Response(

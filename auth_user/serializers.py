@@ -16,6 +16,19 @@ class EmployeeFieldsMixin:
         role = getattr(instance, 'role', None)
         emp_type = getattr(instance, 'employment_type', None)
         
+        # Inject RBAC fields
+        from auth_user.permissions import get_role_config
+        role_config = get_role_config(role or '')
+        
+        accessible_modules = getattr(instance, 'accessible_modules', None)
+        if accessible_modules is not None:
+            ret['accessible_modules'] = accessible_modules
+        else:
+            ret['accessible_modules'] = role_config.get('default_modules', [])
+            
+        ret['canDelete'] = role_config.get('canDelete', False)
+        ret['canExport'] = role_config.get('canExport', False)
+
         try:
             from payroll.utils import EMPLOYEE_ROLES
             all_employee_roles = EMPLOYEE_ROLES + ['faculty']
@@ -124,7 +137,7 @@ class UserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'organization', 'organization_name', 'profile_pic'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'organization', 'organization_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
@@ -152,7 +165,7 @@ class UserListSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'profile_pic'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
@@ -208,7 +221,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_students','organization'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def create(self, validated_data):
         linked_students = validated_data.pop('linked_students', None)
@@ -333,7 +346,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_students','is_active','organization','profile_pic'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','linked_students','is_active','organization','profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -386,7 +399,7 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'accessible_modules'] + EMPLOYEE_FIELDS
         read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name'] # These fields cannot be updated via this serializer
 
     def to_representation(self, instance):
