@@ -93,6 +93,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     bank_account = models.CharField(max_length=30, blank=True)
     ifsc_code = models.CharField(max_length=15, blank=True)
     pan_number = models.CharField(max_length=15, blank=True)
+    aadhar_number = models.CharField(max_length=12, blank=True)
     qr_code = models.ImageField(upload_to='qr/employee/', null=True, blank=True)
     work_start_time = models.TimeField(null=True, blank=True)
     work_end_time = models.TimeField(null=True, blank=True)
