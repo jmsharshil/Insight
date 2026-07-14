@@ -83,6 +83,11 @@ class SubjectPaperSerializer(serializers.ModelSerializer):
         max_length=50, required=False, allow_blank=True, default='',
         help_text='Optional label, e.g. "Set A". Auto-derived from filename if omitted.'
     )
+    no_of_questions = serializers.IntegerField(
+        required=True,
+        min_value=1,
+        help_text='Total number of questions in this paper. Must be at least 1.'
+    )
 
     class Meta:
         model = SubjectPaper
