@@ -86,7 +86,7 @@ class SubjectPaperSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SubjectPaper
-        fields = ['id', 'subject', 'subject_name', 'set_name', 'file', 'answer_key', 'created_at']
+        fields = ['id', 'subject', 'subject_name', 'set_name', 'file', 'answer_key', 'no_of_questions', 'created_at']
         read_only_fields = ['id', 'created_at', 'subject_name']
 
 
