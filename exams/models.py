@@ -236,6 +236,7 @@ class SubjectPaper(models.Model):
     )
     file = models.FileField(upload_to='subject_papers/')
     answer_key = models.FileField(upload_to='subject_papers/answer_keys/', null=True, blank=True)
+    no_of_questions = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
