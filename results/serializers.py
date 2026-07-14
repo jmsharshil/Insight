@@ -192,13 +192,15 @@ class PublishedResultSerializer(serializers.ModelSerializer):
     roll_number = serializers.SerializerMethodField()
     recheck_requests = serializers.SerializerMethodField()
     mcq_breakdown = serializers.SerializerMethodField()
+    question_marks = serializers.SerializerMethodField()
 
     class Meta:
         model = PublishedResult
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'marks_obtained', 'total_marks', 'percentage', 'is_pass',
-            'rank', 'published_at', 'recheck_requests', 'mcq_breakdown'
+            'rank', 'published_at', 'recheck_requests', 'mcq_breakdown',
+            'question_marks',
         ]
 
     def get_student_name(self, obj):
@@ -212,6 +214,19 @@ class PublishedResultSerializer(serializers.ModelSerializer):
             return obj.student.roll_number
         except Exception:
             return ''
+
+    def get_question_marks(self, obj):
+        """Return per-question marks from the MarkSheet for this student/exam.
+        Each item: {question_no, max_marks, obtained_marks}.
+        Empty list if checker did not submit per-question marks.
+        """
+        try:
+            ms = MarkSheet.objects.filter(exam=obj.exam, student=obj.student).first()
+            if ms and ms.question_marks:
+                return ms.question_marks
+        except Exception:
+            pass
+        return []
 
     def get_recheck_requests(self, obj):
         rechecks = RecheckRequest.objects.filter(

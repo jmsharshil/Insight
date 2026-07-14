@@ -46,19 +46,30 @@ class ItemCategoryViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         user = request.user
-        if user.role == 'super_admin' and not request.data.get('branch'):
-            return Response(
-                {'branch': 'Branch is required when creating a category as a Super Admin.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        return super().create(request, *args, **kwargs)
+        # Make a mutable copy of the incoming data
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+
+        if user.role == 'super_admin':
+            # Super admin must explicitly provide the branch
+            if not data.get('branch'):
+                return Response(
+                    {'branch': 'Branch is required when creating a category as a Super Admin.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            # For branch managers and other non-super_admin roles, inject branch automatically
+            branch_id = getattr(user, 'branch_id', None)
+            if branch_id and not data.get('branch'):
+                data['branch'] = str(branch_id)
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
-        user = self.request.user
-        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
-            serializer.save(branch_id=user.branch_id)
-        else:
-            serializer.save()
+        serializer.save()
 
 
 class ItemViewSet(viewsets.ModelViewSet):
