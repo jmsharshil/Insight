@@ -37,6 +37,29 @@ class ItemCategoryViewSet(viewsets.ModelViewSet):
     filterset_fields = ['branch', 'is_active']
     search_fields = ['name', 'description']
 
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
+            qs = qs.filter(branch_id=user.branch_id)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        if user.role == 'super_admin' and not request.data.get('branch'):
+            return Response(
+                {'branch': 'Branch is required when creating a category as a Super Admin.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
+            serializer.save(branch_id=user.branch_id)
+        else:
+            serializer.save()
+
 
 class ItemViewSet(viewsets.ModelViewSet):
     queryset = Item.objects.select_related('category').all()
@@ -45,6 +68,13 @@ class ItemViewSet(viewsets.ModelViewSet):
     filterset_fields = ['category', 'category__branch', 'is_active']
     search_fields = ['name', 'description']
 
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
+            qs = qs.filter(category__branch_id=user.branch_id)
+        return qs
+
 
 class StockTransactionViewSet(viewsets.ModelViewSet):
     queryset = StockTransaction.objects.select_related('item', 'created_by').all()
@@ -52,6 +82,13 @@ class StockTransactionViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['item', 'transaction_type', 'item__category__branch']
     ordering_fields = ['transaction_date']
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
+            qs = qs.filter(item__category__branch_id=user.branch_id)
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -63,6 +100,13 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['item', 'status', 'student', 'faculty', 'item__category__branch']
     search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name']
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
+            qs = qs.filter(item__category__branch_id=user.branch_id)
+        return qs
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy() if hasattr(request.data, 'copy') else request.data
@@ -187,5 +231,5 @@ def inventory_forecast_view(request):
     """
     Returns dynamically computed forecasting data for all active items.
     """
-    data = get_inventory_forecast()
+    data = get_inventory_forecast(user=request.user)
     return Response(data)

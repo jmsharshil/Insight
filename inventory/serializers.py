@@ -7,6 +7,9 @@ class ItemCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemCategory
         fields = ['id', 'branch', 'branch_name', 'name', 'description', 'is_active', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'branch': {'required': False}
+        }
 
 
 class ItemSerializer(serializers.ModelSerializer):

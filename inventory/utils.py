@@ -4,12 +4,15 @@ from django.db.models import Sum
 
 from .models import Item, ItemAllocation
 
-def get_inventory_forecast():
+def get_inventory_forecast(user=None):
     """
     Analyzes all active inventory items to project future stock status.
     Returns a list of dicts with forecasting details.
     """
     items = Item.objects.filter(is_active=True).select_related('category')
+    
+    if user and user.role != 'super_admin' and getattr(user, 'branch_id', None):
+        items = items.filter(category__branch_id=user.branch_id)
     
     thirty_days_ago = timezone.now() - timedelta(days=30)
     
