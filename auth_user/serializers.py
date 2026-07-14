@@ -409,12 +409,21 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         if instance.role in ['parent', 'parents']:
             from students.models import Student, ParentLink
             student_profiles = set()
+            student_names = set()
+            
             if instance.linked_students.exists():
                 for sp in Student.objects.filter(user__in=instance.linked_students.all()):
                     student_profiles.add(str(sp.id))
+                    student_names.add(sp.full_name)
+                    
             for sp in Student.objects.filter(parent_links__parent=instance):
                 student_profiles.add(str(sp.id))
+                student_names.add(sp.full_name)
+                
             data['linked_students'] = list(student_profiles)
+            data['linked_student_names'] = list(student_names)
+        else:
+            data['linked_student_names'] = list(instance.linked_students.values_list("name", flat=True))
 
         if instance.profile_pic:
             file_url = instance.profile_pic.url
@@ -439,15 +448,13 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         return data
 
     def validate_email(self, value):
-        # Ensure email is unique across users, excluding the current user
-        if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
+        if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
             raise serializers.ValidationError("This email is already in use.")
         return value
 
     def get_linked_student_names(self, obj):
-        return list(
-            obj.linked_students.values_list("name", flat=True)
-        ) 
+        # The actual data is populated in to_representation to avoid duplicate queries
+        return []
 
 from .models import NotificationHistory
 
