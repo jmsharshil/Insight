@@ -151,12 +151,33 @@ class PaperMarksView(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
         return ms, None
 
+    def get(self, request, exam_id, marksheet_id):
+        """GET — return the marksheet with exam questions list so the paper checker
+        can see each question's max marks and fill obtained marks.
+        Response includes:
+          - marksheet data (existing marks, remarks, question_marks saved so far)
+          - exam_questions: [{question_no, question_text (if online), max_marks}]
+          - no_of_questions: from selected paper or question count
+        """
+        ms, err = self._get_marksheet(request, exam_id, marksheet_id)
+        if err:
+            return err
+        return Response({
+            'success': True,
+            'data': MarkSheetSerializer(ms, context={'request': request}).data
+        })
+
     def post(self, request, exam_id, marksheet_id):
         """POST — submit or update marks on a marksheet. Delegates to PUT for unified logic."""
         return self.put(request, exam_id, marksheet_id)
 
     def put(self, request, exam_id, marksheet_id):
         """PUT — re-submit / update marks on a marksheet (e.g. after recheck).
+        Accepts either:
+          - `marks_obtained` directly (total marks as a number), OR
+          - `question_marks`: list of {question_no, max_marks, obtained_marks}
+            in which case marks_obtained is auto-computed as sum of obtained_marks.
+        Also accepts optional `remarks` / `notes`.
         If part of recheck flow, updates RecheckRequest to 'completed', saves checker_notes,
         ensuring the paper is added back to the (new) checker's payroll count.
         """
@@ -164,7 +185,25 @@ class PaperMarksView(APIView):
         if err:
             return err
 
+        question_marks = request.data.get('question_marks')
         marks = request.data.get('marks_obtained')
+
+        # If per-question marks are provided, compute total from them
+        if question_marks is not None:
+            if not isinstance(question_marks, list):
+                return Response(
+                    {'success': False, 'message': '`question_marks` must be a list of {question_no, obtained_marks}.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                marks = sum(float(q.get('obtained_marks', 0) or 0) for q in question_marks)
+            except (TypeError, ValueError):
+                return Response(
+                    {'success': False, 'message': 'Each item in `question_marks` must have a numeric `obtained_marks`.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            ms.question_marks = question_marks
+
         if marks is None or float(marks) < 0 or float(marks) > ms.exam.total_marks:
             return Response({'success': False, 'message': 'Invalid marks.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -201,7 +240,7 @@ class PaperMarksView(APIView):
         return Response({
             'success': True, 
             'message': 'Marks updated. Recheck completed if applicable.',
-            'data': MarkSheetSerializer(ms).data
+            'data': MarkSheetSerializer(ms, context={'request': request}).data
         })
 
     def delete(self, request, exam_id, marksheet_id):

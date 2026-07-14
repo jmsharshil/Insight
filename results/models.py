@@ -22,6 +22,7 @@ class MarkSheet(models.Model):
     recheck_request_at = models.DateTimeField(null=True, blank=True)
     is_submitted = models.BooleanField(default=False)
     is_absent = models.BooleanField(default=False)  # True if student did not appear for the exam
+    question_marks = models.JSONField(default=list,blank=True)
 
     class Meta:
         db_table = 'result_marksheets'

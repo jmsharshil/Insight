@@ -15,6 +15,8 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     has_open_query = serializers.SerializerMethodField()
     queries = serializers.SerializerMethodField()
     uploaded_answer_sheet_url = serializers.SerializerMethodField()
+    exam_questions = serializers.SerializerMethodField()
+    no_of_questions = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
@@ -26,6 +28,7 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             'exam_title', 'exam_scheduled_date', 'exam_total_marks',
             'exam_pass_marks', 'batch_name', 'subject_name', 'queries',
             'uploaded_answer_sheet_url',
+            'question_marks', 'exam_questions', 'no_of_questions',
         ]
 
     def get_student_name(self, obj):
@@ -100,6 +103,47 @@ class MarkSheetSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return None
+
+    def get_no_of_questions(self, obj):
+        """Return no_of_questions from the first selected paper (for offline/subjective exams)."""
+        try:
+            paper = obj.exam.selected_papers.first()
+            if paper:
+                return paper.no_of_questions
+            # Fallback: count questions directly linked to exam
+            return obj.exam.questions.count()
+        except Exception:
+            return None
+
+    def get_exam_questions(self, obj):
+        """Return list of questions with question_no and max_marks for the paper checker to fill marks."""
+        try:
+            exam = obj.exam
+            paper = exam.selected_papers.first()
+            no_of_q = paper.no_of_questions if paper and paper.no_of_questions else 0
+
+            # For online exams with actual Question records
+            questions_qs = exam.questions.order_by('order')
+            if questions_qs.exists():
+                return [
+                    {
+                        'question_no': q.order,
+                        'question_text': q.question_text,
+                        'max_marks': q.marks,
+                    }
+                    for q in questions_qs
+                ]
+
+            # For offline/subjective with no_of_questions set on paper
+            if no_of_q:
+                return [
+                    {'question_no': i, 'max_marks': None}
+                    for i in range(1, no_of_q + 1)
+                ]
+
+            return []
+        except Exception:
+            return []
 
 
 # v2 NEW: Recheck Request serializers (FRD §4.6.2 + upload/bulk/answerkey support)
