@@ -74,6 +74,13 @@ class AttendanceRecord(models.Model):
         on_delete=models.CASCADE,
         related_name='attendance_records',
     )
+    timetable_slot = models.ForeignKey(
+        'batches.TimetableSlot',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='attendance_records',
+    )
 
     # ── Attendance data ───────────────────────────────────────────────────────
     date = models.DateField()
@@ -111,7 +118,7 @@ class AttendanceRecord(models.Model):
 
     class Meta:
         db_table = 'attendance_records'
-        unique_together = ('student', 'date', 'batch')
+        unique_together = ('student', 'date', 'timetable_slot')
         ordering = ['-date']
         indexes = [
             models.Index(fields=['date', 'branch']),
@@ -331,6 +338,13 @@ class EmployeeAttendanceRecord(models.Model):
         on_delete=models.CASCADE,
         related_name='employee_attendance_records',
     )
+    timetable_slot = models.ForeignKey(
+        'batches.TimetableSlot',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_attendance_records',
+    )
 
     date = models.DateField()
     status = models.CharField(
@@ -363,7 +377,7 @@ class EmployeeAttendanceRecord(models.Model):
 
     class Meta:
         db_table = 'employee_attendance_records'
-        unique_together = ('user', 'date')
+        unique_together = ('user', 'date', 'timetable_slot')
         ordering = ['-date']
         indexes = [
             models.Index(fields=['date', 'branch']),

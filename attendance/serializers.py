@@ -76,6 +76,7 @@ class BatchAttendanceCreateSerializer(serializers.Serializer):
     batch_id = serializers.UUIDField()
     branch_id = serializers.UUIDField()
     date = serializers.DateField()
+    timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)
     records = StudentRecordInputSerializer(many=True)
 
     def validate_date(self, value):

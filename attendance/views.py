@@ -145,8 +145,10 @@ class AttendanceListCreateView(APIView):
         if not Batch.objects.filter(id=batch_id).exists():
             return Response({'success': False, 'message': 'Invalid Batch ID.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date).exists():
-            return Response({'success': False, 'message': 'Already marked. Use PATCH to correct.'}, status=status.HTTP_409_CONFLICT)
+        timetable_slot_id = request.data.get('timetable_slot_id')
+
+        if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date, timetable_slot_id=timetable_slot_id).exists():
+            return Response({'success': False, 'message': 'Already marked for this slot. Use PATCH to correct.'}, status=status.HTTP_409_CONFLICT)
 
         created, errors = [], []
         from students.models import Student
@@ -178,6 +180,7 @@ class AttendanceListCreateView(APIView):
                 r = AttendanceRecord.objects.create(
                     student_id=sid, batch_id=batch_id, branch_id=branch_id,
                     date=att_date, status=entry['status'], marked_by=user,
+                    timetable_slot_id=timetable_slot_id,
                 )
                 created.append(str(r.id))
 
@@ -375,8 +378,7 @@ class QRScanView(APIView):
         student_lon = ser.validated_data.get('longitude')
         timetable_slot_id = ser.validated_data.get('timetable_slot')
 
-        # Resolve timetable slot (optional)
-        timetable_slot_obj = None
+        timetable_slot_obj = active_slot
         if timetable_slot_id:
             from batches.models import TimetableSlot
             timetable_slot_obj = TimetableSlot.objects.filter(id=timetable_slot_id).first()
@@ -394,7 +396,7 @@ class QRScanView(APIView):
 
         # Check for multiple check-ins or missing check-ins before processing scan
         existing_record = AttendanceRecord.objects.filter(
-            student=student, batch_id=batch.id, date=now.date()
+            student=student, timetable_slot=timetable_slot_obj, date=now.date()
         ).first()
         has_prior_same_day_checkin = AttendanceRecord.objects.filter(
             student=student,
@@ -446,8 +448,8 @@ class QRScanView(APIView):
 
         if scan_type == 'check_in':
             record, created = AttendanceRecord.objects.get_or_create(
-                student=student, batch_id=batch.id, date=now.date(),
-                defaults={'branch_id': student_branch_id, 'status': 'checkout_pending', 'marked_by': user, 'checked_in_at': now},
+                student=student, timetable_slot=timetable_slot_obj, date=now.date(),
+                defaults={'batch_id': batch.id, 'branch_id': student_branch_id, 'status': 'checkout_pending', 'marked_by': user, 'checked_in_at': now},
             )
             if not created and not record.checked_in_at:
                 record.checked_in_at = now
@@ -493,7 +495,7 @@ class QRScanView(APIView):
         elif scan_type == 'check_out':
             try:
                 record = AttendanceRecord.objects.get(
-                    student=student, batch_id=batch.id, date=now.date(),
+                    student=student, timetable_slot=timetable_slot_obj, date=now.date(),
                 )
                 record.checked_out_at = now
                 record.status = 'present'
@@ -1258,8 +1260,29 @@ class EmployeeCheckInOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Resolve Timetable Slot for faculty
+        timetable_slot_obj = None
+        if getattr(user, 'role', '') == 'faculty':
+            try:
+                from batches.models import TimetableSlot
+                from faculty.models import FacultyProfile
+                fp = FacultyProfile.objects.filter(user=user).first()
+                if fp:
+                    current_dow = today.weekday() + 1
+                    current_time = now.time()
+                    # Find active slot
+                    active_slot = TimetableSlot.objects.filter(
+                        faculty=fp,
+                        day_of_week=current_dow,
+                        start_time__lte=current_time,
+                        end_time__gte=current_time
+                    ).first()
+                    timetable_slot_obj = active_slot
+            except Exception as e:
+                logger.error(f"Error resolving faculty slot: {e}")
+
         record, created = EmployeeAttendanceRecord.objects.get_or_create(
-            user=user, date=today,
+            user=user, date=today, timetable_slot=timetable_slot_obj,
             defaults={'branch_id': bid, 'status': 'checkout_pending'},
         )
 
