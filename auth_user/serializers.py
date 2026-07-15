@@ -6,7 +6,7 @@ from django.conf import settings
 EMPLOYEE_FIELDS = [
     'employee_id', 'qualification', 'specialization', 'subject_expertise', 'level', 
     'employment_type', 'joining_date', 'hourly_rate', 'session_hours', 'salary', 
-    'bank_account', 'ifsc_code', 'pan_number', 'work_start_time', 'work_end_time', 
+    'bank_account', 'ifsc_code', 'pan_number', 'aadhar_number', 'work_start_time', 'work_end_time', 
     'salary_retention_percentage', 'per_paper_rate'
 ]
 
@@ -222,6 +222,11 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['username','email','phone','name','role','branch','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
+
+    def validate_role(self, value):
+        if value in ['student', 'parents', 'super_admin']:
+            raise serializers.ValidationError(f"Users with role '{value}' cannot be created directly from the Add User interface. This role is managed automatically.")
+        return value
 
     def create(self, validated_data):
         linked_students = validated_data.pop('linked_students', None)
