@@ -264,24 +264,9 @@ class Batch(models.Model):
                 self.name = f"{ct_upper}_{year_str}_{seq}"
             self.is_auto_created = True
 
-        # Generate QR code for the batch using its ID (which is pre-assigned via uuid4 default)
-        if not self.qr_image:
-            import qrcode
-            import io
-            from django.core.files.base import ContentFile
-            
-            qr_payload = str(self.id)
-            qr = qrcode.QRCode(version=1, box_size=10, border=4)
-            qr.add_data(qr_payload)
-            qr.make(fit=True)
-            qr_img = qr.make_image(fill_color="black", back_color="white")
-            
-            buffer = io.BytesIO()
-            qr_img.save(buffer, format='PNG')
-            buffer.seek(0)
-            
-            file_name = f"{self.batch_code or qr_payload}_qr.png"
-            self.qr_image.save(file_name, ContentFile(buffer.read()), save=False)
+        # QR codes are now generated at the Branch level, not per Batch.
+        # if not self.qr_image:
+        #     ...
 
         super().save(*args, **kwargs)
 

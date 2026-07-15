@@ -76,6 +76,8 @@ class PaySlip(models.Model):
     hour_based_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # sum of (session_hours_per_subject * subject_hourly_rate)
     late_penalty = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    late_penalty_minutes = models.IntegerField(default=0, help_text="Total penalised minutes (after grace) summed across the month")
+    per_day_deduction_log = models.JSONField(default=list, blank=True, help_text="Per-day breakdown: date, late_minutes, penalty_minutes, penalty_amount")
     absence_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     # NEW (FRD §4.8.4): days absent * absence_deduction_per_day
     leave_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
