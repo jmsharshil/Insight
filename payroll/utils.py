@@ -213,6 +213,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     
     # Calculate implicit deduction per minute based on salary/hourly_rate
     if faculty_profile.employment_type == 'full_time':
+        # Net salary after retention — deductions are calculated from this
+        retention_pct = faculty_profile.salary_retention_percentage or Decimal(0)
+        effective_salary = fac_salary * (1 - retention_pct / Decimal(100)) if fac_salary else Decimal(0)
+        
         if faculty_profile.work_start_time and faculty_profile.work_end_time:
             s_dt = datetime.combine(datetime.today(), faculty_profile.work_start_time)
             e_dt = datetime.combine(datetime.today(), faculty_profile.work_end_time)
@@ -220,12 +224,13 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 e_dt += timedelta(days=1)
             work_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
             if work_mins > 0:
-                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / work_mins
+                implicit_deduction_per_minute = (effective_salary / Decimal(30)) / work_mins
             else:
-                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+                implicit_deduction_per_minute = (effective_salary / Decimal(30)) / Decimal(8) / Decimal(60) if effective_salary else Decimal(0)
         else:
-            implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+            implicit_deduction_per_minute = (effective_salary / Decimal(30)) / Decimal(8) / Decimal(60) if effective_salary else Decimal(0)
     else:
+        # Hourly rate is the effective take-home rate for part-time/visiting
         implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
     deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
@@ -287,6 +292,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     days_late_15_mins = 0
     late_dates = []
     half_day_dates = []
+    total_late_penalty_minutes = 0
+    per_day_deduction_log = []
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
             # Sunday — attendance counts as full day, no penalty
@@ -301,8 +308,16 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             
             if d_delay > grace:
                 penalty_min = d_delay - grace
-                late_penalty += min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                late_penalty += day_penalty
+                total_late_penalty_minutes += penalty_min
                 late_dates.append(d_date.strftime('%Y-%m-%d'))
+                per_day_deduction_log.append({
+                    'date': d_date.strftime('%Y-%m-%d'),
+                    'late_minutes': d_delay,
+                    'penalty_minutes': penalty_min,
+                    'penalty_amount': str(round(day_penalty, 2)),
+                })
 
     late_half_days += (days_late_15_mins // 3)
 
@@ -421,6 +436,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         total_session_hours=total_hours,
         hour_based_amount=applied_hour_based_amount,
         late_penalty=late_penalty,
+        late_penalty_minutes=total_late_penalty_minutes,
+        per_day_deduction_log=per_day_deduction_log,
         absence_deductions=absence_deductions,
         leave_deductions=applied_leave_deductions,
         retention_deduction=retention_deduction,
@@ -605,6 +622,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     days_late_15_mins = 0
     
     if faculty_profile.employment_type == 'full_time':
+        # Net salary after retention — deductions come from this
+        retention_pct = faculty_profile.salary_retention_percentage or Decimal(0)
+        effective_salary = fac_salary * (1 - retention_pct / Decimal(100)) if fac_salary else Decimal(0)
+        
         if faculty_profile.work_start_time and faculty_profile.work_end_time:
             s_dt = datetime.combine(datetime.today(), faculty_profile.work_start_time)
             e_dt = datetime.combine(datetime.today(), faculty_profile.work_end_time)
@@ -612,17 +633,21 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 e_dt += timedelta(days=1)
             work_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
             if work_mins > 0:
-                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / work_mins
+                implicit_deduction_per_minute = (effective_salary / Decimal(30)) / work_mins
             else:
-                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+                implicit_deduction_per_minute = (effective_salary / Decimal(30)) / Decimal(8) / Decimal(60) if effective_salary else Decimal(0)
         else:
-            implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+            implicit_deduction_per_minute = (effective_salary / Decimal(30)) / Decimal(8) / Decimal(60) if effective_salary else Decimal(0)
     else:
+        # For part-time/visiting: hourly_rate already represents their net take-home per hour
         implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
     deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
     grace = policy.grace_period_minutes if policy else 5
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
+
+    total_late_penalty_minutes = 0
+    per_day_deduction_log = []  # list of {date, penalty_minutes, penalty_amount}
 
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
@@ -636,7 +661,15 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             
             if d_delay > grace:
                 penalty_min = d_delay - grace
-                late_penalty += min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                late_penalty += day_penalty
+                total_late_penalty_minutes += penalty_min
+                per_day_deduction_log.append({
+                    'date': d_date.strftime('%Y-%m-%d'),
+                    'late_minutes': d_delay,
+                    'penalty_minutes': penalty_min,
+                    'penalty_amount': str(round(day_penalty, 2)),
+                })
 
     late_half_days += (days_late_15_mins // 3)
 
@@ -696,6 +729,8 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         'total_session_hours': str(round(total_hours, 2)),
         'hour_based_amount': str(round(applied_hour_based_amount, 2)),
         'late_penalty': str(round(late_penalty, 2)),
+        'late_penalty_minutes': total_late_penalty_minutes,
+        'per_day_deduction_log': per_day_deduction_log,
         'absence_deductions': str(round(absence_deductions, 2)),
         'leave_deductions': str(round(applied_leave_deductions, 2)),
         'retention_deduction': str(round(retention_deduction, 2)),

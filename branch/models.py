@@ -21,6 +21,7 @@ class Branch(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     allowed_radius_meters = models.PositiveIntegerField(default=100)
     is_active = models.BooleanField(default=True)
+    qr_image = models.ImageField(upload_to="branches/qrcodes/", null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_deleted = models.BooleanField(default=False)
@@ -44,4 +45,23 @@ class Branch(models.Model):
             else:
                 seq = 1
             self.name = f"{prefix}{seq:04d}"
+            
+        if not self.qr_image:
+            import qrcode
+            import io
+            from django.core.files.base import ContentFile
+            
+            qr_payload = str(self.id)
+            qr = qrcode.QRCode(version=1, box_size=10, border=4)
+            qr.add_data(qr_payload)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
+            
+            buffer = io.BytesIO()
+            qr_img.save(buffer, format='PNG')
+            buffer.seek(0)
+            
+            file_name = f"{self.name or qr_payload}_qr.png"
+            self.qr_image.save(file_name, ContentFile(buffer.read()), save=False)
+
         super().save(*args, **kwargs)

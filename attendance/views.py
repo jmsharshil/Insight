@@ -188,9 +188,7 @@ class QRScanView(APIView):
         user = request.user
         role = _user_role(user)
         
-        # In a Class-wise QR system, only the student scans the Class QR from their own app.
-        if role != 'student':
-            return Response({'success': False, 'message': 'Only students can scan the Class QR code to mark attendance.'}, status=status.HTTP_403_FORBIDDEN)
+        # Removed student-only restriction so employees can also scan the global branch QR.
 
         ser = QRScanInputSerializer(data=request.data)
         if not ser.is_valid():
@@ -200,24 +198,111 @@ class QRScanView(APIView):
         scan_type = ser.validated_data['scan_type']
         device_id = ser.validated_data['device_id']
 
-        # 1. Resolve Class/Batch from QR data
-        from batches.models import Batch
+        student_branch_id = getattr(student, 'branch_id', None) or _user_branch_id(user)
+
+        # 2. Resolve Branch from QR data
+        from branch.models import Branch
         from uuid import UUID
         
-        batch = None
+        branch = None
         try:
             UUID(str(qr_data))
-            batch = Batch.objects.filter(id=qr_data).first()
+            branch = Branch.objects.filter(id=qr_data).first()
         except ValueError:
             pass
             
-        if not batch:
-            batch = Batch.objects.filter(batch_code=qr_data).first()
+        if not branch:
+            # Fallback if QR data is branch name/code etc
+            branch = Branch.objects.filter(name=qr_data).first()
 
-        if not batch:
-            return Response({'success': False, 'message': 'Invalid Class/Batch QR code.'}, status=status.HTTP_404_NOT_FOUND)
+        if not branch:
+            return Response({'success': False, 'message': 'Invalid Institute/Branch QR code.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # 2. Identify the student from the authenticated user
+        # Handle Employee Scan
+        if role != 'student':
+            user_branch_id = _user_branch_id(user)
+            if str(branch.id) != str(user_branch_id):
+                return Response({'success': False, 'message': 'You are not assigned to this branch.'}, status=status.HTTP_403_FORBIDDEN)
+            
+            # Record employee attendance
+            from attendance.models import EmployeeAttendanceRecord
+            from attendance.serializers import EmployeeAttendanceRecordSerializer
+            from django.utils import timezone
+            
+            today = timezone.now().date()
+            now = timezone.now()
+            
+            record, created = EmployeeAttendanceRecord.objects.get_or_create(
+                user=user, date=today,
+                defaults={'branch_id': branch.id, 'status': 'checkout_pending'},
+            )
+
+            # Faculty specific tracking for payroll late/early logic
+            if role == 'faculty':
+                from faculty.models import FacultyQRScanLog, FacultyProfile
+                faculty_profile = FacultyProfile.objects.filter(user=user).first()
+                if faculty_profile:
+                    late_mins = 0
+                    if scan_type == 'check_in' and faculty_profile.work_start_time:
+                        import datetime
+                        s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
+                        diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                        if diff > 0:
+                            late_mins = int(diff)
+                    
+                    early_mins = 0
+                    if scan_type == 'check_out' and faculty_profile.work_end_time:
+                        import datetime
+                        e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
+                        if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
+                            e_dt += datetime.timedelta(days=1)
+                        diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
+                        if diff > 0:
+                            early_mins = int(diff)
+
+                    FacultyQRScanLog.objects.create(
+                        faculty=faculty_profile,
+                        branch=branch,
+                        scan_type=scan_type,
+                        is_late=(late_mins > 0),
+                        late_minutes=late_mins,
+                        is_early_checkout=(early_mins > 0),
+                        early_minutes=early_mins
+                    )
+
+            if scan_type == 'check_in':
+                if record.checked_in_at and not created:
+                    return Response({
+                        'success': False,
+                        'message': 'Already checked in today.',
+                        'data': EmployeeAttendanceRecordSerializer(record).data,
+                    }, status=status.HTTP_200_OK)
+                record.checked_in_at = now
+                record.status = 'checkout_pending'
+                record.save(update_fields=['checked_in_at', 'status'])
+            else:  # check_out
+                if not record.checked_in_at:
+                    return Response({
+                        'success': False,
+                        'message': 'Must check in first before checking out.',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                if record.checked_out_at:
+                    return Response({
+                        'success': False,
+                        'message': 'Already checked out today.',
+                        'data': EmployeeAttendanceRecordSerializer(record).data,
+                    }, status=status.HTTP_200_OK)
+                record.checked_out_at = now
+                record.status = 'present'
+                record.save(update_fields=['checked_out_at', 'status'])
+            
+            return Response({
+                'success': True,
+                'message': f'Employee {scan_type.replace("_", " ").title()} recorded successfully.',
+                'data': EmployeeAttendanceRecordSerializer(record).data,
+            })
+
+        # --- Student Logic ---
         try:
             from django.apps import apps
             SP = apps.get_model('students', 'Student')
@@ -225,13 +310,42 @@ class QRScanView(APIView):
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # 3. Verify if the student is actually in the scanned class/batch
-        student_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
-        from batches.models import BatchStudent
-        is_enrolled = BatchStudent.objects.filter(student=student, batch=batch).exists()
+        student_branch_id = getattr(student, 'branch_id', None) or _user_branch_id(user)
+
+        if str(branch.id) != str(student_branch_id):
+            return Response({'success': False, 'message': 'You are not assigned to this branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Auto-detect Batch for the current time
+        from batches.models import Batch, TimetableSlot, BatchStudent
+        from django.utils import timezone
+        import datetime
         
-        if str(student_batch_id) != str(batch.id) and not is_enrolled:
-            return Response({'success': False, 'message': 'You are not enrolled in this class/batch.'}, status=status.HTTP_403_FORBIDDEN)
+        current_time = timezone.localtime().time()
+        current_dow = timezone.localtime().weekday()
+
+        enrolled_batch_ids = list(BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True))
+        primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
+        if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
+            enrolled_batch_ids.append(primary_batch_id)
+
+        active_slot = TimetableSlot.objects.filter(
+            batch_id__in=enrolled_batch_ids,
+            day_of_week=current_dow,
+            start_time__lte=current_time,
+            end_time__gte=current_time
+        ).first()
+
+        batch = None
+        if active_slot and active_slot.batch:
+            batch = active_slot.batch
+        else:
+            if primary_batch_id:
+                batch = Batch.objects.filter(id=primary_batch_id).first()
+            if not batch and enrolled_batch_ids:
+                batch = Batch.objects.filter(id=enrolled_batch_ids[0]).first()
+
+        if not batch:
+             return Response({'success': False, 'message': 'No class/batch assigned to you could be detected.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Check QR block (3+ violations)
         if should_block_qr(student.id):
