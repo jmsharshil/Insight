@@ -72,10 +72,14 @@ class ChatRoomListSerializer(serializers.ModelSerializer):
     room_type_display = serializers.CharField(source="get_room_type_display", read_only=True)
     avatar_url = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
+    route = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatRoom
-        fields = ("id", "name", "avatar_url", "room_type", "created_at", "last_message", "unread_count", 'room_type_display')
+        fields = ("id", "name", "avatar_url", "room_type", "created_at", "last_message", "unread_count", 'room_type_display', 'route')
+
+    def get_route(self, obj):
+        return f"/chat/{obj.id}"
 
     def get_name(self, obj):
         if obj.room_type == 'group':
@@ -151,10 +155,14 @@ class ChatRoomSerializer(serializers.ModelSerializer):
     room_type_display = serializers.CharField(source="get_room_type_display", read_only=True)
     avatar_url = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
+    route = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatRoom
-        fields = ("id","name", "avatar_url", "room_type","participants","created_at","last_message","unread_count", 'room_type_display')
+        fields = ("id","name", "avatar_url", "room_type","participants","created_at","last_message","unread_count", 'room_type_display', 'route')
+
+    def get_route(self, obj):
+        return f"/chat/{obj.id}"
 
     def get_name(self, obj):
         if obj.room_type == 'group':
