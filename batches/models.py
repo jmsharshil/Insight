@@ -165,7 +165,7 @@ class Batch(models.Model):
     batch_attempt  = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True)
     start_date     = models.DateField()
     end_date       = models.DateField()
-    max_students   = models.PositiveIntegerField(default=30)
+    max_students   = models.PositiveIntegerField(default=80)
     timing         = models.CharField(max_length=100, blank=True)
     is_active      = models.BooleanField(default=True)
     # E1 ─ auto batch fields
@@ -334,7 +334,7 @@ class Classroom(models.Model):
     id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='classrooms', null=True, blank=True)
     name     = models.CharField(max_length=100)
-    capacity = models.PositiveIntegerField(default=30)
+    capacity = models.PositiveIntegerField(default=80)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
