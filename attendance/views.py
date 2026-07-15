@@ -339,9 +339,12 @@ class QRScanView(APIView):
         from batches.models import Batch, TimetableSlot, BatchStudent
         from django.utils import timezone
         import datetime
+        from datetime import timedelta
         
-        current_time = timezone.localtime().time()
-        current_dow = timezone.localtime().weekday()
+        now_local = timezone.localtime()
+        current_time = now_local.time()
+        buffered_time = (now_local + timedelta(minutes=15)).time()
+        current_dow = now_local.weekday() + 1 if now_local.weekday() != 6 else 7 # weekday() is 0-6 (Mon-Sun), day_of_week is 1-7 (Mon-Sun)
 
         enrolled_batch_ids = list(BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True))
         primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
@@ -351,7 +354,7 @@ class QRScanView(APIView):
         active_slot = TimetableSlot.objects.filter(
             batch_id__in=enrolled_batch_ids,
             day_of_week=current_dow,
-            start_time__lte=current_time,
+            start_time__lte=buffered_time,
             end_time__gte=current_time
         ).first()
 
@@ -1266,15 +1269,18 @@ class EmployeeCheckInOutView(APIView):
             try:
                 from batches.models import TimetableSlot
                 from faculty.models import FacultyProfile
+                from datetime import timedelta
                 fp = FacultyProfile.objects.filter(user=user).first()
                 if fp:
-                    current_dow = today.weekday() + 1
-                    current_time = now.time()
+                    now_local = timezone.localtime()
+                    current_dow = now_local.weekday() + 1 if now_local.weekday() != 6 else 7
+                    current_time = now_local.time()
+                    buffered_time = (now_local + timedelta(minutes=15)).time()
                     # Find active slot
                     active_slot = TimetableSlot.objects.filter(
                         faculty=fp,
                         day_of_week=current_dow,
-                        start_time__lte=current_time,
+                        start_time__lte=buffered_time,
                         end_time__gte=current_time
                     ).first()
                     timetable_slot_obj = active_slot
