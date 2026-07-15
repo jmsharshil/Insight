@@ -122,3 +122,56 @@ def create_student_fee(student, acting_user=None):
         f"from admission {admission.id} using FeeStructure {fs.name}"
     )
     return student_fee
+
+
+def payment_approval_reminders_task(*args, **kwargs):
+    """
+    Background task to notify branch managers and super admins about payments
+    that are pending approval for more than 2 hours.
+    Scheduled to run every 2 hours globally.
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import Payment
+    from core.utils import notify_users_by_role
+
+    two_hours_ago = timezone.now() - timedelta(hours=2)
+
+    # Get payments that are approval_pending and created older than 2 hours
+    pending_payments = Payment.objects.filter(
+        status='approval_pending',
+        created_at__lte=two_hours_ago
+    ).select_related('student__branch')
+
+    if not pending_payments.exists():
+        return
+
+    # Group by branch
+    branch_map = {}
+    for payment in pending_payments:
+        branch_id = payment.student.branch_id if payment.student.branch else None
+        if branch_id not in branch_map:
+            branch_map[branch_id] = {
+                'branch': payment.student.branch,
+                'count': 0,
+                'total_amount': 0
+            }
+        branch_map[branch_id]['count'] += 1
+        branch_map[branch_id]['total_amount'] += payment.amount
+
+    # Send notifications per branch to branch managers + super admins
+    for branch_id, data in branch_map.items():
+        count = data['count']
+        total = data['total_amount']
+        branch = data['branch']
+        branch_name = branch.name if branch else "Global"
+
+        notify_users_by_role(
+            roles=['super_admin', 'branch_manager'],
+            title=f'Pending Payment Approvals ({branch_name})',
+            body=f"There are {count} payments totaling ₹{total} pending approval for over 2 hours.",
+            organization=branch.organization if branch else None,
+            branch=branch,
+            email_subject=f"Action Required: {count} Payments Pending Approval"
+        )
+

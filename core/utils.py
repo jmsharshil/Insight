@@ -61,3 +61,41 @@ def apply_filters(view_instance, request, queryset):
         backend = backend_class()
         queryset = backend.filter_queryset(request, queryset, view_instance)
     return queryset
+
+
+def notify_users_by_role(
+    roles,
+    title,
+    body,
+    organization=None,
+    branch=None,
+    metadata=None,
+    email_template=None,
+    email_context=None,
+    email_subject=None,
+):
+    """
+    Find users with the given roles (optionally scoped by organization or branch)
+    and send them a system notification.
+    """
+    from django.contrib.auth import get_user_model
+    from chat.notifications import send_system_notification
+
+    User = get_user_model()
+    qs = User.objects.filter(role__in=roles, is_active=True)
+
+    if branch:
+        qs = qs.filter(branch=branch)
+    elif organization:
+        qs = qs.filter(organization=organization)
+
+    for user in qs:
+        send_system_notification(
+            user_id=str(user.id),
+            title=title,
+            body=body,
+            metadata=metadata,
+            email_template=email_template,
+            email_context=email_context,
+            email_subject=email_subject,
+        )

@@ -169,6 +169,16 @@ class LeadListView(APIView):
 
         tag = "duplicate" if duplicate_lead else "new"
 
+        # Send notification to admins
+        from core.utils import notify_users_by_role
+        notify_users_by_role(
+            roles=['super_admin', 'branch_manager', 'front_desk', 'admin_executive'],
+            title='New Lead Received',
+            body=f"A new lead ({lead.first_name} {lead.surname or ''}) has submitted a {FORM_TYPE_DISPLAY.get(lead.form_type, lead.form_type)} form.",
+            organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
+            branch=lead.branch if getattr(lead, 'branch', None) else None,
+        )
+
         return Response(
             {
                 "success": True,
@@ -621,6 +631,15 @@ class LeadReassignView(APIView):
             f"{previous_assignee} → {new_assignee} by {user}"
         )
 
+        if new_assignee:
+            from chat.notifications import send_system_notification
+            send_system_notification(
+                user_id=str(new_assignee.id),
+                title='Lead Assigned',
+                body=f"You have been assigned a lead: {lead.first_name} {lead.surname or ''}.",
+                metadata={'lead_id': str(lead.id)},
+            )
+
         # ── Response ───────────────────────────────────────────────────
         return Response(
             {
@@ -755,6 +774,15 @@ class LeadAssignView(APIView):
         logger.info(
             f"Lead {lead.id} assigned to {new_assignee} by {user}"
         )
+
+        if new_assignee:
+            from chat.notifications import send_system_notification
+            send_system_notification(
+                user_id=str(new_assignee.id),
+                title='Lead Assigned',
+                body=f"You have been assigned a new lead: {lead.first_name} {lead.surname or ''}.",
+                metadata={'lead_id': str(lead.id)},
+            )
 
         # ── Response ─────────────────────────────────────────────────────────
         return Response(

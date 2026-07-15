@@ -446,6 +446,18 @@ class PaymentListView(APIView):
             except Exception as e:
                 logger.error(f'Failed to mark installment paid: {e}')
 
+        # Notify admins if approval pending
+        if payment.status == 'approval_pending':
+            from core.utils import notify_users_by_role
+            notify_users_by_role(
+                roles=['super_admin', 'branch_manager'],
+                title='Payment Approval Required',
+                body=f"A new payment of ₹{payment.amount} by {payment.student.first_name} requires approval.",
+                organization=payment.student.branch.organization if getattr(payment.student, 'branch', None) else None,
+                branch=payment.student.branch if getattr(payment.student, 'branch', None) else None,
+                email_subject='Pending Payment Approval'
+            )
+
         return Response(
             {'success': True, 'message': 'Payment recorded.',
              'data': PaymentDetailSerializer(payment).data},
@@ -525,6 +537,56 @@ class PaymentVerifyView(APIView):
                 mark_installment_paid(payment.installment_item_id)
             except Exception as e:
                 logger.error(f'Failed to mark installment paid: {e}')
+
+        # Send emails on verification/rejection
+        from django.core.mail import EmailMessage
+        from django.conf import settings
+        
+        to_emails = []
+        if getattr(payment.student, 'email', None):
+            to_emails.append(payment.student.email)
+        if getattr(payment.student, 'parent_email', None):
+            to_emails.append(payment.student.parent_email)
+        if not to_emails and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
+            to_emails.append(payment.student.user.email)
+
+        if new_status == 'verified':
+            from .pdf_services import generate_payment_receipt_pdf
+            pdf_buffer = generate_payment_receipt_pdf(payment)
+            
+            if pdf_buffer and to_emails:
+                subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
+                body = f"Dear {payment.student.first_name},\n\nYour payment of ₹{payment.amount} has been successfully verified. Please find your receipt attached.\n\nThank you,\nInsight Institute"
+                
+                email = EmailMessage(
+                    subject,
+                    body,
+                    settings.DEFAULT_FROM_EMAIL,
+                    to_emails
+                )
+                email.attach(f"Receipt_{payment.receipt_number or payment.id}.pdf", pdf_buffer.getvalue(), 'application/pdf')
+                try:
+                    email.send(fail_silently=True)
+                except Exception as e:
+                    logger.error(f"Failed to send receipt email: {e}")
+                    
+        elif new_status == 'rejected' and to_emails:
+            subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
+            body = f"Dear {payment.student.first_name},\n\nUnfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"
+            if getattr(payment, 'note', None):
+                body += f"Reason: {payment.note}\n\n"
+            body += "Please contact the administration for more details.\n\nInsight Institute"
+            
+            email = EmailMessage(
+                subject,
+                body,
+                settings.DEFAULT_FROM_EMAIL,
+                to_emails
+            )
+            try:
+                email.send(fail_silently=True)
+            except Exception as e:
+                logger.error(f"Failed to send rejection email: {e}")
 
         return Response(
             {'success': True, 'message': f'Payment {new_status}.',

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    @page {
+        size: a4 portrait;
+        margin: 1cm;
+    }
+    body {
+        font-family: Arial, sans-serif;
+        color: #333;
+    }
+    .receipt-container {
+        border: 2px solid #ed7c31;
+        padding: 30px;
+        margin: 0;
+        position: relative;
+    }
+    .header {
+        text-align: center;
+        border-bottom: 2px solid #ed7c31;
+        padding-bottom: 20px;
+        margin-bottom: 30px;
+    }
+    .contact-info {
+        float: left;
+        color: #ed7c31;
+        font-size: 11px;
+        line-height: 1.5;
+        text-align: left;
+    }
+    .logo-container {
+        float: right;
+        text-align: right;
+    }
+    .title {
+        color: #fff;
+        background-color: #ed7c31;
+        display: inline-block;
+        padding: 8px 20px;
+        font-size: 24px;
+        font-weight: bold;
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+    .subtitle {
+        color: #666;
+        font-size: 16px;
+        margin-top: 10px;
+        font-weight: bold;
+    }
+    .row {
+        margin-bottom: 20px;
+        clear: both;
+    }
+    .label {
+        font-weight: bold;
+        color: #333;
+        font-size: 14px;
+    }
+    .value {
+        border-bottom: 1px dashed #666;
+        display: inline-block;
+        font-size: 14px;
+        min-width: 150px;
+    }
+    .checkboxes {
+        margin-top: 15px;
+        font-size: 14px;
+    }
+    .checkboxes span {
+        margin-right: 20px;
+    }
+    .footer {
+        margin-top: 60px;
+        text-align: right;
+    }
+    .sign-area {
+        display: inline-block;
+        text-align: center;
+    }
+    .sign-line {
+        border-top: 1px solid #333;
+        width: 200px;
+        margin-top: 50px;
+        padding-top: 5px;
+        font-weight: bold;
+    }
+</style>
+</head>
+<body>
+    <div class="receipt-container">
+        <div class="header">
+            <div class="contact-info">
+                <strong>77780 50578 | 99745 45456</strong><br>
+                www.insightinstitute.com<br>
+                insightinstitute.ips@gmail.com
+            </div>
+            <!-- Replace with actual logo image if available -->
+            <div class="logo-container">
+                <h1 style="margin: 0; color: #444; font-size: 32px;">INSIGHT</h1>
+                <div style="font-size:12px; color: #ed7c31;">Institute of Professional Studies</div>
+            </div>
+            <div style="clear:both;"></div>
+            
+            <br><br>
+            <div class="title">RECEIPT</div>
+            <div class="subtitle">Experience - Expertise - Excellence</div>
+        </div>
+
+        <div style="width: 100%;">
+            <div class="row" style="float: right;">
+                <span class="label">Receipt No :</span> 
+                <span class="value" style="font-weight: bold; font-size: 18px;">{{ receipt_no }}</span>
+            </div>
+            <div class="row" style="float: left;">
+                <span class="label">Receipt Date :</span> 
+                <span class="value">{{ receipt_date }}</span>
+            </div>
+            <div style="clear:both;"></div>
+        </div>
+        
+        <div class="row">
+            <span class="label">Received From M/s. :</span> 
+            <span class="value" style="width: 70%;">{{ student_name }}</span>
+        </div>
+
+        <div class="row">
+            <span class="label">Rs. :</span> 
+            <span class="value" style="font-weight: bold;">{{ amount }}</span>
+            
+            <span class="label" style="margin-left: 30px;">Rs. in words :</span> 
+            <span class="value" style="width: 45%;">{{ amount_words }}</span>
+        </div>
+        
+        <div class="row">
+            <span class="label">Batch :</span> 
+            <span class="value" style="width: 80%;">{{ batch_name }}</span>
+        </div>
+
+        <div class="checkboxes">
+            <span>[ {% if payment_type == 'token' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Token</span>
+            <span>[ {% if payment_type == 'full' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Full Payment</span>
+            <span>[ {% if payment_type == 'installment' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Installment</span>
+        </div>
+
+        <div class="checkboxes" style="margin-top: 25px;">
+            <span class="label">By</span>
+            <span style="margin-left: 10px;">[ {% if payment_mode == 'cash' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cash</span>
+            <span>[ {% if payment_mode == 'cheque' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cheque</span>
+            <span>[ {% if payment_mode == 'online' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Online</span>
+        </div>
+
+        <div class="row" style="margin-top: 25px;">
+            <span class="label">Cheque / Transaction No. :</span> 
+            <span class="value" style="width: 60%;">{{ transaction_ref }}</span>
+        </div>
+        
+        <div class="row">
+            <span class="label">Cheque Drawn on :</span> 
+            <span class="value" style="width: 70%;"></span>
+        </div>
+        
+        <div class="row">
+            <span class="label">Cheque/Transaction Date :</span> 
+            <span class="value" style="width: 60%;">{{ transaction_date }}</span>
+        </div>
+
+        <div class="footer">
+            <div style="float: left; width: 50%; text-align: left; margin-top: 50px;">
+                <div style="font-size: 11px; color: #ed7c31; line-height: 1.4;">
+                    <strong>Vastral Branch:</strong><br>
+                    (Parth Classes) 212, Siddhi Vinayak Complex,<br>
+                    Nr. Nirant Chokdi, Vastral Road, A'bad - 382413<br><br>
+                    <strong>INSIGHT INSTITUTE:</strong><br>
+                    INSIGHT HOUSE, 1st Floor, Bunglow No-2, Shreeji Society,<br>
+                    Behind Gautam Nagar Bus Stand, Near Naranpura Railway Crossing,<br>
+                    Naranpura, Ahmedabad - 380013
+                </div>
+            </div>
+            <div style="float: right; width: 50%; text-align: right;">
+                <div class="sign-area">
+                    <div style="color: #ed7c31; font-size: 12px; margin-bottom: 40px;">
+                        FOR, Insight Institute of Professional Studies
+                    </div>
+                    <div class="sign-line">Authorised Signatory</div>
+                </div>
+            </div>
+            <div style="clear:both;"></div>
+        </div>
+    </div>
+</body>
+</html>
