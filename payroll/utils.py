@@ -213,8 +213,18 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     
     # Calculate implicit deduction per minute based on salary/hourly_rate
     if faculty_profile.employment_type == 'full_time':
-        # Assuming 8 hours a day, 30 days a month
-        implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+        if faculty_profile.work_start_time and faculty_profile.work_end_time:
+            s_dt = datetime.combine(datetime.today(), faculty_profile.work_start_time)
+            e_dt = datetime.combine(datetime.today(), faculty_profile.work_end_time)
+            if e_dt < s_dt:
+                e_dt += timedelta(days=1)
+            work_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+            if work_mins > 0:
+                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / work_mins
+            else:
+                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+        else:
+            implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
     else:
         implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
@@ -234,24 +244,40 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     for s in sessions:
         from batches.models import TimetableSlot
         scheduled_time = s.start_time
+        scheduled_end_time = s.end_time
         dow = s.session_date.weekday()
         slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
         if slot and slot.start_time:
             scheduled_time = slot.start_time
+        if slot and slot.end_time:
+            scheduled_end_time = slot.end_time
 
         sched_dt = datetime.combine(datetime.today(), scheduled_time)
         actual_dt = datetime.combine(datetime.today(), s.start_time)
         diff = (actual_dt - sched_dt).total_seconds() / 60
 
+        sched_end_dt = datetime.combine(datetime.today(), scheduled_end_time)
+        actual_end_dt = datetime.combine(datetime.today(), s.end_time)
+        if sched_end_dt < sched_dt:
+            sched_end_dt += timedelta(days=1)
+        if actual_end_dt < actual_dt:
+            actual_end_dt += timedelta(days=1)
+        diff_end = (sched_end_dt - actual_end_dt).total_seconds() / 60
+
+        total_session_diff = 0
         if diff > 0:
-            late_min = int(diff)
-            daily_delays[s.session_date] += late_min
+            total_session_diff += int(diff)
+        if diff_end > 0:
+            total_session_diff += int(diff_end)
+
+        if total_session_diff > 0:
+            daily_delays[s.session_date] += total_session_diff
             session_late_details.append({
                 'session': s,
                 'scheduled_time': scheduled_time,
                 'actual_start': s.start_time,
-                'late_minutes': late_min,
-                'grace_applied': (late_min <= grace)
+                'late_minutes': total_session_diff,
+                'grace_applied': (total_session_diff <= grace)
             })
             
     # Compute total late penalty and half-day deductions
@@ -545,24 +571,52 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     for s in sessions:
         from batches.models import TimetableSlot
         scheduled_time = s.start_time
+        scheduled_end_time = s.end_time
         dow = s.session_date.weekday()
         slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
         if slot and slot.start_time:
             scheduled_time = slot.start_time
+        if slot and slot.end_time:
+            scheduled_end_time = slot.end_time
 
         sched_dt = datetime.combine(datetime.today(), scheduled_time)
         actual_dt = datetime.combine(datetime.today(), s.start_time)
         diff = (actual_dt - sched_dt).total_seconds() / 60
 
+        sched_end_dt = datetime.combine(datetime.today(), scheduled_end_time)
+        actual_end_dt = datetime.combine(datetime.today(), s.end_time)
+        if sched_end_dt < sched_dt:
+            sched_end_dt += timedelta(days=1)
+        if actual_end_dt < actual_dt:
+            actual_end_dt += timedelta(days=1)
+        diff_end = (sched_end_dt - actual_end_dt).total_seconds() / 60
+
+        total_session_diff = 0
         if diff > 0:
-            daily_delays[s.session_date] += int(diff)
+            total_session_diff += int(diff)
+        if diff_end > 0:
+            total_session_diff += int(diff_end)
+
+        if total_session_diff > 0:
+            daily_delays[s.session_date] += total_session_diff
 
     late_penalty = Decimal(0)
     late_half_days = 0
     days_late_15_mins = 0
     
     if faculty_profile.employment_type == 'full_time':
-        implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+        if faculty_profile.work_start_time and faculty_profile.work_end_time:
+            s_dt = datetime.combine(datetime.today(), faculty_profile.work_start_time)
+            e_dt = datetime.combine(datetime.today(), faculty_profile.work_end_time)
+            if e_dt < s_dt:
+                e_dt += timedelta(days=1)
+            work_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+            if work_mins > 0:
+                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / work_mins
+            else:
+                implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
+        else:
+            implicit_deduction_per_minute = (fac_salary / Decimal(30)) / Decimal(8) / Decimal(60) if fac_salary else Decimal(0)
     else:
         implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
@@ -836,7 +890,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
     leave_deductions = Decimal(leave_days) * daily_rate if user.employment_type == 'full_time' else Decimal(0)
 
-    # 5. Late penalty (from LateEntryRecord)
+    # 5. Late penalty 
     from leave.models import LateEntryRecord
     late_entries = LateEntryRecord.objects.filter(
         user=user,
@@ -845,25 +899,70 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     )
 
     policy = LateEntryPolicy.objects.filter(branch=user.branch, is_active=True).first() if user.branch else None
-    grace = policy.grace_period_minutes if policy else 15
+    grace = policy.grace_period_minutes if policy else 5
 
     late_penalty = Decimal(0)
     if user.employment_type == 'full_time':
-        deduction_per_minute = (user.salary / Decimal(30)) / Decimal(8) / Decimal(60) if user.salary else Decimal(0)
+        if user.work_start_time and user.work_end_time:
+            s_dt = datetime.combine(datetime.today(), user.work_start_time)
+            e_dt = datetime.combine(datetime.today(), user.work_end_time)
+            if e_dt < s_dt:
+                e_dt += timedelta(days=1)
+            work_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+            if work_mins > 0:
+                deduction_per_minute = (user.salary / Decimal(30)) / work_mins
+            else:
+                deduction_per_minute = (user.salary / Decimal(30)) / Decimal(8) / Decimal(60) if user.salary else Decimal(0)
+        else:
+            deduction_per_minute = (user.salary / Decimal(30)) / Decimal(8) / Decimal(60) if user.salary else Decimal(0)
     else:
         deduction_per_minute = user.hourly_rate / Decimal(60) if user.hourly_rate else Decimal(0)
 
-    if policy and policy.deduction_per_minute > 0:
-        deduction_per_minute = policy.deduction_per_minute
+    # Don't use policy.deduction_per_minute for these users if we want the actual salary deduction
+    # but keep it if policy overrides
+    # if policy and policy.deduction_per_minute > 0:
+    #     deduction_per_minute = policy.deduction_per_minute
 
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
 
-    late_dates = []
+    daily_delays = defaultdict(int)
     for entry in late_entries:
-        if entry.late_minutes > grace:
-            penalty_min = entry.late_minutes - grace
+        daily_delays[entry.date] += entry.late_minutes
+        
+    for rec in attendance_records:
+        if rec.checked_in_at and user.work_start_time:
+            s_time = user.work_start_time
+            from django.utils import timezone
+            local_checkin = timezone.localtime(rec.checked_in_at)
+            s_dt = datetime.combine(rec.date, s_time)
+            if local_checkin.replace(tzinfo=None) > s_dt:
+                diff = (local_checkin.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                daily_delays[rec.date] += int(diff)
+                
+        if rec.checked_out_at and user.work_end_time:
+            e_time = user.work_end_time
+            from django.utils import timezone
+            local_checkout = timezone.localtime(rec.checked_out_at)
+            e_dt = datetime.combine(rec.date, e_time)
+            if user.work_start_time and user.work_end_time < user.work_start_time:
+                e_dt += timedelta(days=1)
+                
+            if local_checkout.replace(tzinfo=None) < e_dt:
+                diff = (e_dt - local_checkout.replace(tzinfo=None)).total_seconds() / 60
+                daily_delays[rec.date] += int(diff)
+
+    late_dates = []
+    for d_date, d_delay in daily_delays.items():
+        if d_date.weekday() == 6:
+            continue
+        if d_delay > grace:
+            penalty_min = d_delay - grace
             late_penalty += min(Decimal(penalty_min) * deduction_per_minute, max_deduction)
-            late_dates.append(entry.date.strftime('%Y-%m-%d'))
+            late_dates.append(d_date.strftime('%Y-%m-%d'))
+            
+    if role in ['house_keeping', 'security']:
+        late_penalty = Decimal(0)
+        late_dates = []
 
     from datetime import date
     today = date.today()
