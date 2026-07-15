@@ -152,6 +152,16 @@ class AttendanceListCreateView(APIView):
         from students.models import Student
         from django.contrib.auth import get_user_model
         User = get_user_model()
+        from .notifications import notify_student_attendance_marked
+
+        # Resolve batch name for notification body
+        batch_name = None
+        try:
+            from batches.models import Batch
+            batch_obj = Batch.objects.filter(id=batch_id).first()
+            batch_name = batch_obj.name if batch_obj else None
+        except Exception:
+            pass
 
         for entry in records:
             try:
@@ -170,6 +180,13 @@ class AttendanceListCreateView(APIView):
                     date=att_date, status=entry['status'], marked_by=user,
                 )
                 created.append(str(r.id))
+
+                # Notify student + parent
+                try:
+                    student_obj = Student.objects.select_related('user').get(id=sid)
+                    notify_student_attendance_marked(student_obj, att_date, entry['status'], batch_name)
+                except Exception as ne:
+                    logger.error(f"Attendance notification failed for student {sid}: {ne}")
             except Exception as e:
                 errors.append({'student_id': str(entry['student_id']), 'error': str(e)})
 
@@ -451,6 +468,12 @@ class QRScanView(APIView):
                     description=f'Check-in was later than the allowed buffer for the class slot.',
                     created_by=user,
                 )
+                # Notify student + parent about violation
+                try:
+                    from .notifications import notify_student_violation
+                    notify_student_violation(student, 'late_entry', now.date(), 'Check-in was later than allowed.')
+                except Exception as ne:
+                    logger.error(f"Violation notification failed: {ne}")
             else:
                 record.status = 'checkout_pending'
             record.checked_in_at = now
@@ -460,8 +483,12 @@ class QRScanView(APIView):
             checked_in_at = record.checked_in_at
             checked_out_at = record.checked_out_at
 
-            # Stub: notify parent "✓ <Name> checked in at <time>"
-            # from notifications.utils import send_notification(...)
+            # Notify parent about check-in
+            try:
+                from .notifications import notify_student_qr_scan
+                notify_student_qr_scan(student, 'check_in', now)
+            except Exception as ne:
+                logger.error(f"QR check-in notification failed: {ne}")
 
         elif scan_type == 'check_out':
             try:
@@ -490,7 +517,12 @@ class QRScanView(APIView):
                                 message=f'{get_active_violations_count(student.id)} active violations. QR blocked.',
                             )
 
-                # Stub: notify parent "✓ <Name> checked out at <time>"
+                # Notify parent about check-out
+                try:
+                    from .notifications import notify_student_qr_scan
+                    notify_student_qr_scan(student, 'check_out', now)
+                except Exception as ne:
+                    logger.error(f"QR check-out notification failed: {ne}")
             except AttendanceRecord.DoesNotExist:
                 attendance_status = 'no_checkin_found'
 
@@ -569,6 +601,13 @@ class AttendanceCorrectionView(APIView):
         record.corrected_by = request.user
         record.correction_note = ser.validated_data.get('correction_note', '')
         record.save()
+
+        # Notify student about correction
+        try:
+            from .notifications import notify_attendance_correction
+            notify_attendance_correction(record.student, record.date, record.status)
+        except Exception as ne:
+            logger.error(f"Correction notification failed: {ne}")
     
         return Response({'success': True, 'message': 'Corrected.', 'data': AttendanceRecordListSerializer(record).data})
     
@@ -880,7 +919,12 @@ class AttendanceAlertView(APIView):
                     threshold=threshold, current_pct=pct,
                 )
                 alerts_created += 1
-                # Stub: notify parent
+                # Notify student + parent
+                try:
+                    from .notifications import notify_student_low_attendance
+                    notify_student_low_attendance(s, pct, threshold)
+                except Exception as ne:
+                    logger.error(f"Low attendance notification failed for student {s.id}: {ne}")
 
         return Response({'success': True, 'message': f'{alerts_created} alerts generated.', 'alerts_created': alerts_created}, status=status.HTTP_201_CREATED)
 
@@ -1176,6 +1220,13 @@ class EmployeeAttendanceListCreateView(APIView):
                 created_count += 1
             else:
                 updated_count += 1
+
+            # Notify the employee
+            try:
+                from .notifications import notify_employee_attendance_marked
+                notify_employee_attendance_marked(emp_user, d['date'], rec_status)
+            except Exception as ne:
+                logger.error(f"Employee attendance notification failed for {emp_user.id}: {ne}")
 
         return Response({
             'success': True,
