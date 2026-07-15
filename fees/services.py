@@ -82,15 +82,19 @@ def create_student_fee(student, acting_user=None):
         status=plan_status,
     )
 
+    # Create verified Payment if admission has payment info (as in approval flow)
+    payment_amount = getattr(admission, 'payment_amount', Decimal('0')) or Decimal('0')
+    # For lumpsum default plan, the installment item represents the full amount.
+    # Payment (token or full) is linked to it; status will be partial/paid via signals.
+    item_amount = student_fee.total_amount
+
     item = InstallmentItem.objects.create(
         plan=plan,
-        amount=student_fee.total_amount - admission.payment_amount,
+        amount=item_amount,
         due_date=student_fee.due_date or (timezone.now().date() + timezone.timedelta(days=30)),
         is_paid=False,
     )
 
-    # Create verified Payment if admission has payment info (as in approval flow)
-    payment_amount = getattr(admission, 'payment_amount', Decimal('0')) or Decimal('0')
     if payment_amount > 0 or admission.payment_screenshot or admission.transaction_id:
         payment = Payment.objects.create(
             student=student,
@@ -109,6 +113,8 @@ def create_student_fee(student, acting_user=None):
         )
         # Hook will trigger update_student_fee_status + mark_installment_paid
         logger.info(f"Auto-created verified Payment {payment.receipt_number} for admission {admission.id}")
+
+        send_payment_receipt(payment)
 
         # Auto-approve plan if it was pending
         if plan.status == 'pending_approval':
@@ -175,3 +181,51 @@ def payment_approval_reminders_task(*args, **kwargs):
             email_subject=f"Action Required: {count} Payments Pending Approval"
         )
 
+
+def send_payment_receipt(payment):
+    """
+    Shared utility to generate PDF receipt, persist it to payment.payment_document,
+    and email the receipt to student + parent. Used by both admission auto-enrollment
+    and manual PaymentVerifyView.
+    """
+    try:
+        from django.core.mail import EmailMessage
+        from django.conf import settings
+        from django.core.files.base import ContentFile
+        from .pdf_services import generate_payment_receipt_pdf
+
+        to_emails = []
+        if getattr(payment.student, 'email', None):
+            to_emails.append(payment.student.email)
+        if getattr(payment.student, 'email_parent', None):
+            to_emails.append(payment.student.email_parent)
+        if not to_emails and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
+            to_emails.append(payment.student.user.email)
+
+        pdf_buffer = generate_payment_receipt_pdf(payment)
+        if pdf_buffer:
+            filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
+            payment.payment_document.save(
+                filename, ContentFile(pdf_buffer.getvalue()), save=True
+            )
+
+            if to_emails:
+                subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
+                body = (
+                    f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
+                    f"Your payment of ₹{payment.amount} has been successfully verified. "
+                    f"Please find your receipt attached.\n\n"
+                    f"Thank you,\nInsight Institute"
+                )
+
+                email = EmailMessage(
+                    subject,
+                    body,
+                    settings.DEFAULT_FROM_EMAIL,
+                    to_emails
+                )
+                email.attach(filename, pdf_buffer.getvalue(), 'application/pdf')
+                email.send(fail_silently=False)
+                logger.info(f"Receipt email sent for payment {payment.receipt_number or payment.id}")
+    except Exception as e:
+        logger.error(f"Failed to generate/send receipt for payment {getattr(payment, 'id', 'N/A')}: {e}")

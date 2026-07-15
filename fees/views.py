@@ -28,6 +28,7 @@ from .serializers import (
     FeeReportSerializer,
 )
 from .utils import update_student_fee_status, mark_installment_paid, get_installment_plan_status
+from .services import send_payment_receipt
 
 logger = logging.getLogger(__name__)
 
@@ -551,30 +552,7 @@ class PaymentVerifyView(APIView):
             to_emails.append(payment.student.user.email)
 
         if new_status == 'verified':
-            from .pdf_services import generate_payment_receipt_pdf
-            pdf_buffer = generate_payment_receipt_pdf(payment)
-            
-            if pdf_buffer:
-                from django.core.files.base import ContentFile
-                filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
-                payment.payment_document.save(filename, ContentFile(pdf_buffer.getvalue()), save=True)
-
-                if to_emails:
-                    subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
-                    body = f"Dear {payment.student.first_name},\n\nYour payment of ₹{payment.amount} has been successfully verified. Please find your receipt attached.\n\nThank you,\nInsight Institute"
-                    
-                    email = EmailMessage(
-                        subject,
-                        body,
-                        settings.DEFAULT_FROM_EMAIL,
-                        to_emails
-                    )
-                    email.attach(filename, pdf_buffer.getvalue(), 'application/pdf')
-                    try:
-                        email.send(fail_silently=False)
-                    except Exception as e:
-                        logger.error(f"Failed to send receipt email: {e}")
-                    
+            send_payment_receipt(payment)
         elif new_status == 'rejected' and to_emails:
             subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
             body = f"Dear {payment.student.first_name},\n\nUnfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"

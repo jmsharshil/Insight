@@ -1,6 +1,6 @@
 def num2words(n):
     """
-    Convert a number into Indian Rupee words (up to Crores).
+    Convert a number into Indian Rupee words (up to Crores) with "Rupees ... Only" suffix.
     """
     try:
         n = int(n)
@@ -8,7 +8,7 @@ def num2words(n):
         return ""
 
     if n == 0:
-        return "Zero"
+        return "Zero Rupees Only"
 
     units = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
     teens = ["Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"]
@@ -29,6 +29,7 @@ def num2words(n):
             return units[num // 100] + " Hundred" + (" and " + convert_below_100(num % 100) if num % 100 != 0 else "")
 
     parts = []
+    original_n = n
     
     if n >= 10000000:
         crores = n // 10000000
@@ -48,4 +49,5 @@ def num2words(n):
     if n > 0:
         parts.append(convert_below_1000(n))
 
-    return " ".join(parts).strip() + " Only"
+    words = " ".join(parts).strip()
+    return f"Rupees {words} Only"
