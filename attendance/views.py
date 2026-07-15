@@ -218,8 +218,6 @@ class QRScanView(APIView):
         scan_type = ser.validated_data['scan_type']
         device_id = ser.validated_data['device_id']
 
-        student_branch_id = getattr(student, 'branch_id', None) or _user_branch_id(user)
-
         # 2. Resolve Branch from QR data
         from branch.models import Branch
         from uuid import UUID
@@ -252,11 +250,6 @@ class QRScanView(APIView):
             today = timezone.now().date()
             now = timezone.now()
             
-            record, created = EmployeeAttendanceRecord.objects.get_or_create(
-                user=user, date=today,
-                defaults={'branch_id': branch.id, 'status': 'checkout_pending'},
-            )
-
             # Faculty specific tracking for payroll late/early logic
             if role == 'faculty':
                 from faculty.models import FacultyQRScanLog, FacultyProfile
@@ -291,34 +284,49 @@ class QRScanView(APIView):
                     )
 
             if scan_type == 'check_in':
-                if record.checked_in_at and not created:
+                open_record = EmployeeAttendanceRecord.objects.filter(
+                    user=user,
+                    date=today,
+                    checked_in_at__isnull=False,
+                    checked_out_at__isnull=True,
+                ).order_by('-checked_in_at').first()
+                if open_record:
                     return Response({
                         'success': False,
-                        'message': 'Already checked in today.',
-                        'data': EmployeeAttendanceRecordSerializer(record).data,
-                    }, status=status.HTTP_200_OK)
-                record.checked_in_at = now
-                record.status = 'checkout_pending'
-                record.save(update_fields=['checked_in_at', 'status'])
+                        'message': 'You are already checked in. Please check out first.',
+                        'data': EmployeeAttendanceRecordSerializer(open_record).data,
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                # Create new record (allows multiple per day via different slots or null slots)
+                record = EmployeeAttendanceRecord.objects.create(
+                    user=user,
+                    date=today,
+                    branch_id=branch.id,
+                    status='checkout_pending',
+                    checked_in_at=now,
+                    marked_by=user,
+                )
+                message = f'Employee {scan_type.replace("_", " ").title()} recorded successfully.'
             else:  # check_out
-                if not record.checked_in_at:
+                record_qs = EmployeeAttendanceRecord.objects.filter(
+                    user=user,
+                    date=today,
+                    checked_in_at__isnull=False,
+                    checked_out_at__isnull=True,
+                ).order_by('-checked_in_at')
+                record = record_qs.first()
+                if not record:
                     return Response({
                         'success': False,
                         'message': 'Must check in first before checking out.',
                     }, status=status.HTTP_400_BAD_REQUEST)
-                if record.checked_out_at:
-                    return Response({
-                        'success': False,
-                        'message': 'Already checked out today.',
-                        'data': EmployeeAttendanceRecordSerializer(record).data,
-                    }, status=status.HTTP_200_OK)
                 record.checked_out_at = now
                 record.status = 'present'
                 record.save(update_fields=['checked_out_at', 'status'])
+                message = f'Employee {scan_type.replace("_", " ").title()} recorded successfully.'
             
             return Response({
                 'success': True,
-                'message': f'Employee {scan_type.replace("_", " ").title()} recorded successfully.',
+                'message': message,
                 'data': EmployeeAttendanceRecordSerializer(record).data,
             })
 
@@ -405,10 +413,7 @@ class QRScanView(APIView):
 
         now = timezone.now()
 
-        # Check for multiple check-ins or missing check-ins before processing scan
-        existing_record = AttendanceRecord.objects.filter(
-            student=student, timetable_slot=timetable_slot_obj, date=now.date()
-        ).first()
+        # Check for open check-in (supports multiple sessions per day across different slots)
         has_prior_same_day_checkin = AttendanceRecord.objects.filter(
             student=student,
             batch_id=batch.id,
@@ -417,13 +422,24 @@ class QRScanView(APIView):
         ).exists()
 
         if scan_type == 'check_in':
-            if existing_record and existing_record.checked_in_at:
-                if not existing_record.checked_out_at:
-                    return Response({'success': False, 'message': 'You are already checked in. Please check out first.'}, status=status.HTTP_400_BAD_REQUEST)
-                else:
-                    return Response({'success': False, 'message': 'You have already checked in and out for today.'}, status=status.HTTP_400_BAD_REQUEST)
+            existing_record = AttendanceRecord.objects.filter(
+                student=student, timetable_slot=timetable_slot_obj, date=now.date()
+            ).first()
+            # Only block if currently checked in without checkout for this slot (allows re-scan after checkout)
+            if existing_record and existing_record.checked_in_at and not getattr(existing_record, 'checked_out_at', None):
+                return Response({'success': False, 'message': 'You are already checked in. Please check out first.'}, status=status.HTTP_400_BAD_REQUEST)
         elif scan_type == 'check_out':
-            if not existing_record or not existing_record.checked_in_at:
+            # Use broader query for checkout to support checking out any open session (not just current slot)
+            open_record_qs = AttendanceRecord.objects.filter(
+                student=student,
+                date=now.date(),
+                checked_in_at__isnull=False,
+                checked_out_at__isnull=True,
+            )
+            if timetable_slot_obj and timetable_slot_obj.pk:
+                open_record_qs = open_record_qs.filter(timetable_slot=timetable_slot_obj)
+            existing_record = open_record_qs.order_by('-checked_in_at').first()
+            if not existing_record:
                 return Response({'success': False, 'message': 'You cannot check out without checking in first.'}, status=status.HTTP_400_BAD_REQUEST)
             if existing_record.checked_out_at:
                 return Response({'success': False, 'message': 'You are already checked out for today.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1288,7 +1304,7 @@ class EmployeeCheckInOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Resolve Timetable Slot for faculty
+        # Resolve Timetable Slot for faculty (used for unique per-session records)
         timetable_slot_obj = None
         if getattr(user, 'role', '') == 'faculty':
             try:
@@ -1312,42 +1328,59 @@ class EmployeeCheckInOutView(APIView):
             except Exception as e:
                 logger.error(f"Error resolving faculty slot: {e}")
 
-        record, created = EmployeeAttendanceRecord.objects.get_or_create(
-            user=user, date=today, timetable_slot=timetable_slot_obj,
-            defaults={'branch_id': bid, 'status': 'checkout_pending'},
-        )
-
         now = timezone.now()
 
+        # Updated logic to support multiple check-in/out per day (one record per session)
+        # This fixes the restriction for faculty and staff.
         if scan_type == 'check_in':
-            if record.checked_in_at and not created:
+            # Check for any currently open session today
+            open_record = EmployeeAttendanceRecord.objects.filter(
+                user=user,
+                date=today,
+                checked_in_at__isnull=False,
+                checked_out_at__isnull=True,
+            ).order_by('-checked_in_at').first()
+            if open_record:
                 return Response({
                     'success': False,
-                    'message': 'Already checked in today.',
-                    'data': EmployeeAttendanceRecordSerializer(record).data,
-                }, status=status.HTTP_200_OK)
-            record.checked_in_at = now
-            record.status = 'checkout_pending'
-            record.save(update_fields=['checked_in_at', 'status'])
+                    'message': 'You are already checked in. Please check out first.',
+                    'data': EmployeeAttendanceRecordSerializer(open_record).data,
+                }, status=status.HTTP_400_BAD_REQUEST)
+            # Create new record for this new session
+            record = EmployeeAttendanceRecord.objects.create(
+                user=user,
+                date=today,
+                timetable_slot=timetable_slot_obj,
+                branch_id=bid,
+                status='checkout_pending',
+                checked_in_at=now,
+                marked_by=user,
+            )
+            message = f'{scan_type.replace("_", " ").title()} recorded.'
         else:  # check_out
-            if not record.checked_in_at:
+            # Find most recent open record (prefer matching slot if available)
+            record_qs = EmployeeAttendanceRecord.objects.filter(
+                user=user,
+                date=today,
+                checked_in_at__isnull=False,
+                checked_out_at__isnull=True,
+            )
+            if timetable_slot_obj:
+                record_qs = record_qs.filter(timetable_slot=timetable_slot_obj)
+            record = record_qs.order_by('-checked_in_at').first()
+            if not record:
                 return Response({
                     'success': False,
                     'message': 'Must check in first before checking out.',
                 }, status=status.HTTP_400_BAD_REQUEST)
-            if record.checked_out_at:
-                return Response({
-                    'success': False,
-                    'message': 'Already checked out today.',
-                    'data': EmployeeAttendanceRecordSerializer(record).data,
-                }, status=status.HTTP_200_OK)
             record.checked_out_at = now
             record.status = 'present'
             record.save(update_fields=['checked_out_at', 'status'])
+            message = f'{scan_type.replace("_", " ").title()} recorded.'
 
         return Response({
             'success': True,
-            'message': f'{scan_type.replace("_", " ").title()} recorded.',
+            'message': message,
             'data': EmployeeAttendanceRecordSerializer(record).data,
         })
 
