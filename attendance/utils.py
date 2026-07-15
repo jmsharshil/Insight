@@ -427,7 +427,7 @@ def validate_qr_scan(scan_lat, scan_lng, branch, timetable_slot, scan_time) -> d
             slot_start = timetable_slot.start_time
             slot_end   = timetable_slot.end_time
             if slot_start is not None and slot_end is not None:
-                BUFFER = timedelta(minutes=10)
+                BUFFER = timedelta(minutes=45)
 
                 # Combine scan_time date with slot times
                 scan_date = scan_time.date()
@@ -443,7 +443,7 @@ def validate_qr_scan(scan_lat, scan_lng, branch, timetable_slot, scan_time) -> d
                             pass
                     return dt
 
-                window_start = _combine(slot_start) - BUFFER
+                window_start = _combine(slot_start) - timedelta(minutes=15)
                 window_end   = _combine(slot_end) + BUFFER
 
                 # Make scan_time offset-naive for comparison if needed

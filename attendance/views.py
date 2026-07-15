@@ -338,7 +338,6 @@ class QRScanView(APIView):
         # Auto-detect Batch for the current time
         from batches.models import Batch, TimetableSlot, BatchStudent
         from django.utils import timezone
-        import datetime
         from datetime import timedelta
         
         now_local = timezone.localtime()
@@ -351,12 +350,21 @@ class QRScanView(APIView):
         if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
             enrolled_batch_ids.append(primary_batch_id)
 
-        active_slot = TimetableSlot.objects.filter(
+        active_slot_qs = TimetableSlot.objects.filter(
             batch_id__in=enrolled_batch_ids,
             day_of_week=current_dow,
+        )
+        # Prefer slots where current time is between start and end, or within buffer after start
+        active_slot = active_slot_qs.filter(
             start_time__lte=buffered_time,
-            end_time__gte=current_time
-        ).first()
+            end_time__gte=(now_local - timedelta(minutes=30)).time()  # allow checking in up to 30min after nominal end
+        ).order_by('start_time').first()
+
+        if not active_slot:
+            # Fallback: find the most recent slot that started today for this student
+            active_slot = active_slot_qs.filter(
+                start_time__lte=current_time
+            ).order_by('-start_time').first()
 
         batch = None
         if active_slot and active_slot.batch:
@@ -466,17 +474,19 @@ class QRScanView(APIView):
             )
             if entry_status == 'late_entry':
                 record.status = 'late'
+                slot_start_str = str(timetable_slot_obj.start_time) if timetable_slot_obj and timetable_slot_obj.start_time else 'N/A'
+                checkin_str = now.strftime('%H:%M')
                 ViolationRecord.objects.create(
                     student=student,
                     violation_type='late_entry',
                     date=now.date(),
-                    description=f'Check-in was later than the allowed buffer for the class slot.',
+                    description=f'Check-in at {checkin_str} (slot start was {slot_start_str}). Late entry beyond allowed buffer.',
                     created_by=user,
                 )
                 # Notify student + parent about violation
                 try:
                     from .notifications import notify_student_violation
-                    notify_student_violation(student, 'late_entry', now.date(), 'Check-in was later than allowed.')
+                    notify_student_violation(student, 'late_entry', now.date(), f'Checked in at {checkin_str} for {slot_start_str} slot.')
                 except Exception as ne:
                     logger.error(f"Violation notification failed: {ne}")
             else:
@@ -497,9 +507,24 @@ class QRScanView(APIView):
 
         elif scan_type == 'check_out':
             try:
-                record = AttendanceRecord.objects.get(
-                    student=student, timetable_slot=timetable_slot_obj, date=now.date(),
+                record_qs = AttendanceRecord.objects.filter(
+                    student=student,
+                    date=now.date(),
+                    checked_in_at__isnull=False,
+                    checked_out_at__isnull=True,
                 )
+                if timetable_slot_obj and timetable_slot_obj.pk:
+                    record_qs = record_qs.filter(timetable_slot=timetable_slot_obj)
+                record = record_qs.order_by('-checked_in_at').first()
+
+                if not record:
+                    attendance_status = 'no_checkin_found'
+                    return Response({
+                        'success': False, 
+                        'message': 'Must check in first before checking out.',
+                        'attendance_status': 'no_checkin_found'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
                 record.checked_out_at = now
                 record.status = 'present'
                 record.save(update_fields=['checked_out_at', 'status'])
