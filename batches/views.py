@@ -27,7 +27,7 @@ from .serializers import (
     FacultyTimetableSerializer, StudentTimetableSerializer,
     CourseLevelSerializer, ChapterSerializer,
 )
-from .validators import check_faculty_clash, check_classroom_clash
+from .validators import check_faculty_clash, check_classroom_clash, check_batch_clash
 
 logger = logging.getLogger(__name__)
 
@@ -823,35 +823,76 @@ class TimetableListView(APIView):
         if day_of_week is None and session_date:
             day_of_week = session_date.weekday()
 
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        conflicts = []
+        all_clash_details = []
+
+        # Clash detection — batch
+        if data.get('batch') and start_time and end_time:
+            batch_clashes = check_batch_clash(
+                batch_id=data['batch'].id,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            if batch_clashes:
+                c = batch_clashes[0]
+                conflicts.append(
+                    f"Batch '{c['batch_name']}' already has a slot from "
+                    f"{c['start_time']}–{c['end_time']} on this day."
+                )
+                all_clash_details.extend(batch_clashes)
+
         # Clash detection — faculty
-        if data.get('faculty'):
+        if data.get('faculty') and start_time and end_time:
             faculty_clashes = check_faculty_clash(
                 faculty_id=data['faculty'].id,
                 day_of_week=day_of_week,
-                start_time=data['start_time'],
-                end_time=data['end_time'],
+                start_time=start_time,
+                end_time=end_time,
             )
             if faculty_clashes:
-                return Response(
-                    {'success': False, 'message': 'Faculty has a scheduling conflict.',
-                     'clashing_slots': faculty_clashes},
-                    status=status.HTTP_400_BAD_REQUEST,
+                c = faculty_clashes[0]
+                conflicts.append(
+                    f"Faculty '{c['faculty_name']}' is already scheduled from "
+                    f"{c['start_time']}–{c['end_time']} in batch '{c['batch_name']}' on this day."
                 )
+                all_clash_details.extend(faculty_clashes)
 
         # Clash detection — classroom
-        if data.get('classroom'):
+        if data.get('classroom') and start_time and end_time:
             classroom_clashes = check_classroom_clash(
                 classroom_id=data['classroom'].id,
                 day_of_week=day_of_week,
-                start_time=data['start_time'],
-                end_time=data['end_time'],
+                start_time=start_time,
+                end_time=end_time,
             )
             if classroom_clashes:
-                return Response(
-                    {'success': False, 'message': 'Classroom has a scheduling conflict.',
-                     'clashing_slots': classroom_clashes},
-                    status=status.HTTP_400_BAD_REQUEST,
+                c = classroom_clashes[0]
+                conflicts.append(
+                    f"Classroom '{c['classroom_name']}' is already booked from "
+                    f"{c['start_time']}–{c['end_time']} for batch '{c['batch_name']}' on this day."
                 )
+                all_clash_details.extend(classroom_clashes)
+
+        if conflicts:
+            seen = set()
+            unique_clashes = []
+            for cl in all_clash_details:
+                if cl['id'] not in seen:
+                    seen.add(cl['id'])
+                    unique_clashes.append(cl)
+            return Response(
+                {
+                    'success': False,
+                    'message': ' | '.join(conflicts),
+                    'conflicts': conflicts,
+                    'clashing_slots': unique_clashes,
+                    'can_force': True,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         slot = serializer.save(created_by=request.user if request.user.is_authenticated else None)
         return Response(
@@ -890,6 +931,7 @@ class TimetableDetailView(APIView):
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
+        batch = data.get('batch', slot.batch)
         faculty = data.get('faculty', slot.faculty)
         classroom = data.get('classroom', slot.classroom)
         day = data.get('day_of_week', slot.day_of_week)
@@ -899,30 +941,68 @@ class TimetableDetailView(APIView):
         start = data.get('start_time', slot.start_time)
         end = data.get('end_time', slot.end_time)
 
-        # Re-run clash detection
-        if faculty:
+        conflicts = []
+        all_clash_details = []
+
+        # Re-run clash detection — batch
+        if batch and start and end:
+            batch_clashes = check_batch_clash(
+                batch_id=batch.id, day_of_week=day,
+                start_time=start, end_time=end, exclude_id=slot.id,
+            )
+            if batch_clashes:
+                c = batch_clashes[0]
+                conflicts.append(
+                    f"Batch '{c['batch_name']}' already has a slot from "
+                    f"{c['start_time']}–{c['end_time']} on this day."
+                )
+                all_clash_details.extend(batch_clashes)
+
+        # Re-run clash detection — faculty
+        if faculty and start and end:
             faculty_clashes = check_faculty_clash(
                 faculty_id=faculty.id, day_of_week=day,
                 start_time=start, end_time=end, exclude_id=slot.id,
             )
             if faculty_clashes:
-                return Response(
-                    {'success': False, 'message': 'Faculty has a scheduling conflict.',
-                     'clashing_slots': faculty_clashes},
-                    status=status.HTTP_400_BAD_REQUEST,
+                c = faculty_clashes[0]
+                conflicts.append(
+                    f"Faculty '{c['faculty_name']}' is already scheduled from "
+                    f"{c['start_time']}–{c['end_time']} in batch '{c['batch_name']}' on this day."
                 )
+                all_clash_details.extend(faculty_clashes)
 
-        if classroom:
+        # Re-run clash detection — classroom
+        if classroom and start and end:
             classroom_clashes = check_classroom_clash(
                 classroom_id=classroom.id, day_of_week=day,
                 start_time=start, end_time=end, exclude_id=slot.id,
             )
             if classroom_clashes:
-                return Response(
-                    {'success': False, 'message': 'Classroom has a scheduling conflict.',
-                     'clashing_slots': classroom_clashes},
-                    status=status.HTTP_400_BAD_REQUEST,
+                c = classroom_clashes[0]
+                conflicts.append(
+                    f"Classroom '{c['classroom_name']}' is already booked from "
+                    f"{c['start_time']}–{c['end_time']} for batch '{c['batch_name']}' on this day."
                 )
+                all_clash_details.extend(classroom_clashes)
+
+        if conflicts:
+            seen = set()
+            unique_clashes = []
+            for cl in all_clash_details:
+                if cl['id'] not in seen:
+                    seen.add(cl['id'])
+                    unique_clashes.append(cl)
+            return Response(
+                {
+                    'success': False,
+                    'message': ' | '.join(conflicts),
+                    'conflicts': conflicts,
+                    'clashing_slots': unique_clashes,
+                    'can_force': True,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         serializer.save()
         return Response({'success': True, 'message': 'Timetable slot updated.',
@@ -1036,7 +1116,25 @@ class TimetableDuplicateSlotView(APIView):
         else:
             start_time, end_time = FIXED_SLOTS[slot_code]
 
-        # 5. Clash detection — faculty
+        # 5. Clash detection — batch, faculty, classroom
+        conflicts = []
+        all_clash_details = []
+
+        if source.batch_id:
+            batch_clashes = check_batch_clash(
+                batch_id=source.batch_id,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            if batch_clashes:
+                c = batch_clashes[0]
+                conflicts.append(
+                    f"Batch '{c['batch_name']}' already has a slot from "
+                    f"{c['start_time']}–{c['end_time']} on this day."
+                )
+                all_clash_details.extend(batch_clashes)
+
         if source.faculty_id:
             faculty_clashes = check_faculty_clash(
                 faculty_id=source.faculty_id,
@@ -1045,11 +1143,12 @@ class TimetableDuplicateSlotView(APIView):
                 end_time=end_time,
             )
             if faculty_clashes:
-                return Response(
-                    {'success': False, 'message': 'Faculty has a scheduling conflict.',
-                     'clashing_slots': faculty_clashes},
-                    status=status.HTTP_400_BAD_REQUEST,
+                c = faculty_clashes[0]
+                conflicts.append(
+                    f"Faculty '{c['faculty_name']}' is already scheduled from "
+                    f"{c['start_time']}–{c['end_time']} in batch '{c['batch_name']}' on this day."
                 )
+                all_clash_details.extend(faculty_clashes)
 
         # 6. Clash detection — classroom
         if source.classroom_id:
@@ -1060,11 +1159,30 @@ class TimetableDuplicateSlotView(APIView):
                 end_time=end_time,
             )
             if classroom_clashes:
-                return Response(
-                    {'success': False, 'message': 'Classroom has a scheduling conflict.',
-                     'clashing_slots': classroom_clashes},
-                    status=status.HTTP_400_BAD_REQUEST,
+                c = classroom_clashes[0]
+                conflicts.append(
+                    f"Classroom '{c['classroom_name']}' is already booked from "
+                    f"{c['start_time']}–{c['end_time']} for batch '{c['batch_name']}' on this day."
                 )
+                all_clash_details.extend(classroom_clashes)
+
+        if conflicts:
+            seen = set()
+            unique_clashes = []
+            for cl in all_clash_details:
+                if cl['id'] not in seen:
+                    seen.add(cl['id'])
+                    unique_clashes.append(cl)
+            return Response(
+                {
+                    'success': False,
+                    'message': ' | '.join(conflicts),
+                    'conflicts': conflicts,
+                    'clashing_slots': unique_clashes,
+                    'can_force': True,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # 7. Create the duplicate slot
         new_slot = TimetableSlot.objects.create(
@@ -1093,6 +1211,38 @@ class TimetableDuplicateSlotView(APIView):
 
 
 # ── Personal Timetable Views ─────────────────────────────────────────────────
+
+# ── Force-create (confirm) View ─────────────────────────────────────────────
+
+class TimetableConfirmView(APIView):
+    """
+    POST /api/v1/timetable/confirm/
+    Force-creates a timetable slot, bypassing all faculty / classroom / batch
+    clash checks.  Accepts the same payload as TimetableListView.post.
+    """
+
+    def post(self, request):
+        serializer = TimetableSlotCreateUpdateSerializer(
+            data=request.data, context={'request': request}
+        )
+        if not serializer.is_valid():
+            return Response(
+                {'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        slot = serializer.save(
+            created_by=request.user if request.user.is_authenticated else None
+        )
+        return Response(
+            {
+                'success': True,
+                'message': 'Timetable slot force-created (conflicts ignored).',
+                'data': TimetableSlotListSerializer(slot).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class FacultyTimetableView(APIView):
     """GET /api/v1/timetable/faculty/<faculty_id>/ — weekly schedule for a faculty member."""

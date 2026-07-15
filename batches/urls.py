@@ -7,6 +7,7 @@ from .views import (
     BatchAssignFacultyView, BatchRemoveFacultyView,
     ClassroomListView, ClassroomDetailView,
     TimetableListView, TimetableDetailView, TimetableDuplicateSlotView,
+    TimetableConfirmView,
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
     ChapterListView, ChapterDetailView,
@@ -43,6 +44,7 @@ urlpatterns = [
 
     # ── Timetable ───────────────────────────────────────────────────────────
     path('timetable/', TimetableListView.as_view(), name='timetable-list'),
+    path('timetable/confirm/', TimetableConfirmView.as_view(), name='timetable-confirm'),
     path('timetable/<uuid:pk>/', TimetableDetailView.as_view(), name='timetable-detail'),
     path('timetable/faculty/<uuid:faculty_id>/', FacultyTimetableView.as_view(), name='faculty-timetable'),
     path('timetable/student/<uuid:student_id>/', StudentTimetableView.as_view(), name='student-timetable'),
