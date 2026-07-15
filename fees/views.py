@@ -545,8 +545,8 @@ class PaymentVerifyView(APIView):
         to_emails = []
         if getattr(payment.student, 'email', None):
             to_emails.append(payment.student.email)
-        if getattr(payment.student, 'parent_email', None):
-            to_emails.append(payment.student.parent_email)
+        if getattr(payment.student, 'email_parent', None):
+            to_emails.append(payment.student.email_parent)
         if not to_emails and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
             to_emails.append(payment.student.user.email)
 
@@ -554,21 +554,26 @@ class PaymentVerifyView(APIView):
             from .pdf_services import generate_payment_receipt_pdf
             pdf_buffer = generate_payment_receipt_pdf(payment)
             
-            if pdf_buffer and to_emails:
-                subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
-                body = f"Dear {payment.student.first_name},\n\nYour payment of ₹{payment.amount} has been successfully verified. Please find your receipt attached.\n\nThank you,\nInsight Institute"
-                
-                email = EmailMessage(
-                    subject,
-                    body,
-                    settings.DEFAULT_FROM_EMAIL,
-                    to_emails
-                )
-                email.attach(f"Receipt_{payment.receipt_number or payment.id}.pdf", pdf_buffer.getvalue(), 'application/pdf')
-                try:
-                    email.send(fail_silently=True)
-                except Exception as e:
-                    logger.error(f"Failed to send receipt email: {e}")
+            if pdf_buffer:
+                from django.core.files.base import ContentFile
+                filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
+                payment.payment_document.save(filename, ContentFile(pdf_buffer.getvalue()), save=True)
+
+                if to_emails:
+                    subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
+                    body = f"Dear {payment.student.first_name},\n\nYour payment of ₹{payment.amount} has been successfully verified. Please find your receipt attached.\n\nThank you,\nInsight Institute"
+                    
+                    email = EmailMessage(
+                        subject,
+                        body,
+                        settings.DEFAULT_FROM_EMAIL,
+                        to_emails
+                    )
+                    email.attach(filename, pdf_buffer.getvalue(), 'application/pdf')
+                    try:
+                        email.send(fail_silently=False)
+                    except Exception as e:
+                        logger.error(f"Failed to send receipt email: {e}")
                     
         elif new_status == 'rejected' and to_emails:
             subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
@@ -584,7 +589,7 @@ class PaymentVerifyView(APIView):
                 to_emails
             )
             try:
-                email.send(fail_silently=True)
+                email.send(fail_silently=False)
             except Exception as e:
                 logger.error(f"Failed to send rejection email: {e}")
 
