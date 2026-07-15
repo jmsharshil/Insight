@@ -147,6 +147,8 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                 notes=allocation.notes,
                 created_by=self.request.user
             )
+            # Notify super admins
+            self._notify_allocation(allocation)
 
     @action(detail=True, methods=['post'])
     def return_item(self, request, pk=None):
@@ -233,8 +235,31 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Notify super admins about bulk allocation
+        for alloc in created_allocations:
+            self._notify_allocation(alloc)
+
         serializer = self.get_serializer(created_allocations, many=True)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _notify_allocation(self, allocation):
+        """Send system notification to super_admins when inventory is allocated."""
+        try:
+            from core.utils import notify_users_by_role
+            recipient_name = (
+                allocation.student.admission_number if allocation.student
+                else allocation.faculty.user.name if allocation.faculty
+                else 'Unknown'
+            )
+            notify_users_by_role(
+                roles=['super_admin'],
+                title='Inventory Allocated',
+                body=f"{allocation.quantity}x {allocation.item.name} allocated to {recipient_name} by {self.request.user.name}.",
+                metadata={'allocation_id': str(allocation.id), 'item_id': str(allocation.item.id)},
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to send allocation notification for {allocation.id}", exc_info=True)
 
 
 @api_view(['GET'])

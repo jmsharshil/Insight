@@ -116,6 +116,10 @@ class Exam(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='created_exams')
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    # Reminders tracking
+    reminder_1d_sent = models.BooleanField(default=False)
+    reminder_1h_sent = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'exams'

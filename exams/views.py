@@ -189,6 +189,13 @@ class ExamListCreateView(APIView):
         except Exception as e:
             logger.warning(f"Failed to auto-assign paper checkers for new exam {exam.id}: {e}")
 
+        # Send notifications
+        from .services import notify_exam_scheduled
+        try:
+            notify_exam_scheduled(exam)
+        except Exception as e:
+            logger.error(f"Failed to send exam schedule notifications for exam {exam.id}: {e}")
+
         return Response({
             'success': True, 'message': 'Exam created.',
             'data': ExamListSerializer(exam, context={'request': request}).data,
