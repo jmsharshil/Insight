@@ -198,6 +198,7 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
                     "room_id": str(room_id),
                     "message_id": str(message_id),
                     "is_targeted": bool(target_user_ids),
+                    "route": f"/chat/{str(room_id)}",
                 },
                 user_id=user['id']
             )
