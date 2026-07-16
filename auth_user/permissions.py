@@ -62,33 +62,33 @@ ROLE_PERMISSIONS = {
     'admin_executive': {
         'default_modules': [
             'students', 'attendance', 'courses_batches', 'timetable',
-            'payroll', 'settings',
+            'payroll', 'settings', 'notifications',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'front_desk': {
-        'default_modules': ['crm', 'payroll', 'settings'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
         'canDelete': False,
         'canExport': False,
     },
     'counsellor': {
-        'default_modules': ['crm', 'students', 'payroll', 'settings'],
+        'default_modules': ['crm', 'students', 'payroll', 'settings', 'attendance', 'notifications'],
         'canDelete': False,
         'canExport': False,
     },
     'tele_caller': {
-        'default_modules': ['crm', 'payroll', 'settings'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
         'canDelete': False,
         'canExport': False,
     },
     'sales_senior_executive': {
-        'default_modules': ['crm', 'payroll', 'settings'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
         'canDelete': False,
         'canExport': True,
     },
     'sales_executive': {
-        'default_modules': ['crm', 'payroll', 'settings'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
         'canDelete': False,
         'canExport': False,
     },
@@ -125,14 +125,14 @@ ROLE_PERMISSIONS = {
     },
     'paper_checker': {
         'default_modules': [
-            'exams', 'notifications', 'payroll', 'settings',
+            'attendance', 'exams', 'notifications', 'payroll', 'settings',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'accountant': {
         'default_modules': [
-            'fees', 'payroll', 'notifications', 'settings',
+            'attendance', 'fees', 'payroll', 'notifications', 'settings',
         ],
         'canDelete': False,
         'canExport': True,
