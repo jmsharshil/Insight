@@ -33,17 +33,17 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
 # 1. check_checkin_delay_15  (FRD §4.4.2: 15-min delay → Parent only)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def check_checkin_delay_15(student_id, date_str, session):
+def check_checkin_delay_15(student_id, date_str, session=None):
     """
-    Scheduled at (batch.session_start + 15 min) for every active student.
-    If still not checked in → alert Parent, then schedule 30-min escalation.
+    Scheduled at (slot start + 15 min). If still not checked in → alert Parent.
+    Updated for multiple sessions per day (no longer filters on legacy 'session' field).
     """
     from .models import AttendanceRecord, AlertLog
 
     try:
         record = AttendanceRecord.objects.filter(
-            student_id=student_id, date=date_str, session=session,
-        ).first()
+            student_id=student_id, date=date_str
+        ).order_by('-checked_in_at').first()
 
         if record and record.checked_in_at:
             return f"Student {student_id} already checked in."
@@ -51,7 +51,7 @@ def check_checkin_delay_15(student_id, date_str, session):
         alert = AlertLog.objects.create(
             student_id=student_id,
             alert_type='checkin_delay_15',
-            message=f'15-minute delay alert: Student has not checked in for {session} session.',
+            message='15-minute delay alert: Student has not checked in for today\'s session.',
             notified_parent=True,
             notified_admin=False,
         )
@@ -59,9 +59,6 @@ def check_checkin_delay_15(student_id, date_str, session):
 
         # Stub: notify Parent only (FRD §4.4.2)
         # notify(parent_user_id, "15-min delay", f"<Name> has not checked in", {})
-
-        # Schedule 30-min escalation
-        # check_checkin_delay_30(student_id, date_str, session) # Scheduled execution removed
 
         return f"15-min alert created for {student_id}"
 
@@ -74,17 +71,18 @@ def check_checkin_delay_15(student_id, date_str, session):
 # 2. check_checkin_delay_30  (FRD §4.4.2: 30-min delay → Parent AND Admin)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def check_checkin_delay_30(student_id, date_str, session):
+def check_checkin_delay_30(student_id, date_str, session=None):
     """
-    Escalation at session_start + 30 min.
+    Escalation at slot start + 30 min.
     Alert both Parent AND branch Admin.
+    Updated to not rely on legacy 'session' field.
     """
     from .models import AttendanceRecord, AlertLog
 
     try:
         record = AttendanceRecord.objects.filter(
-            student_id=student_id, date=date_str, session=session,
-        ).first()
+            student_id=student_id, date=date_str
+        ).order_by('-checked_in_at').first()
 
         if record and record.checked_in_at:
             return f"Student {student_id} checked in (late)."
@@ -92,7 +90,7 @@ def check_checkin_delay_30(student_id, date_str, session):
         AlertLog.objects.create(
             student_id=student_id,
             alert_type='checkin_delay_30',
-            message=f'ESCALATION: Student has not checked in within 30 minutes of {session} session.',
+            message='ESCALATION: Student has not checked in within 30 minutes of session.',
             notified_parent=True,
             notified_admin=True,
         )
@@ -114,21 +112,24 @@ def check_checkin_delay_30(student_id, date_str, session):
 #    v3: uses 'missing_checkout_scan' alert type, notifies Parent only
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def check_no_checkout_eod(student_id, date_str, session):
+def check_no_checkout_eod(student_id, date_str, session=None):
     """
     Fired at session end time.
     If student checked in but never checked out → violation + alert.
-    FRD §4.4.2: missing_checkout_scan → notify Parent only.
+    Updated for new multiple-record model (uses most recent open record).
     """
     from .models import AttendanceRecord, AlertLog, ViolationRecord
 
     try:
         record = AttendanceRecord.objects.filter(
-            student_id=student_id, date=date_str, session=session,
-        ).first()
+            student_id=student_id, 
+            date=date_str,
+            checked_in_at__isnull=False,
+            checked_out_at__isnull=True,
+        ).order_by('-checked_in_at').first()
 
-        if not record or not record.checked_in_at:
-            return "No check-in found — skip."
+        if not record:
+            return "No open check-in found — skip."
 
         if record.checked_out_at:
             return "Already checked out."
@@ -137,7 +138,7 @@ def check_no_checkout_eod(student_id, date_str, session):
         AlertLog.objects.create(
             student_id=student_id,
             alert_type='missing_checkout_scan',
-            message=f'Missing check-out scan: Student checked in at {record.checked_in_at:%H:%M} but did not check out for {session} session.',
+            message=f'Missing check-out scan: Student checked in at {record.checked_in_at:%H:%M} but did not check out.',
             notified_parent=True,
             notified_admin=False,
         )
@@ -146,7 +147,7 @@ def check_no_checkout_eod(student_id, date_str, session):
             student_id=student_id,
             violation_type='missing_checkout',
             date=date_str,
-            description=f'No check-out recorded for {session} session.',
+            description='No check-out recorded for session.',
             logged_by_admin=False,
             created_by=None,
         )
@@ -176,56 +177,86 @@ def detect_missing_scans(branch_id, date_str):
     """
     Run at end of each day (23:00).
     For every student with a scheduled batch session today:
-      CASE 1 - Missing OUT scan: IN exists, OUT does not → missing_checkout_scan (Parent)
-      CASE 2 - Missing IN scan: no IN scan at all → missing_checkin_scan (Parent)
-    A student missing both IN and OUT triggers Case 2 only.
+      CASE 1 - Missing OUT scan: IN exists, OUT does not → missing_checkout_scan (Parent) + violation
+      CASE 2 - Missing IN scan: no IN scan at all → missing_checkin_scan (Parent) + no_show violation
+    A student missing both triggers Case 2 only.
+    Uses AttendanceRecord for accuracy with multi-session support.
     """
-    from .models import QRScanLog, AlertLog
+    from .models import AttendanceRecord, AlertLog, ViolationRecord
+    from .notifications import notify_student_violation
+    from django.apps import apps
 
     try:
-        # Get all students with active batches in this branch
-        from django.apps import apps
         SP = apps.get_model('students', 'Student')
-        students = SP.objects.filter(branch_id=branch_id, is_active=True, batch__isnull=False)
+        students = SP.objects.filter(
+            branch_id=branch_id, is_active=True
+        ).select_related('user', 'batch')
 
         for student in students:
-            has_checkin = QRScanLog.objects.filter(
-                student=student, scanned_at__date=date_str, scan_type='check_in',
-            ).exists()
-            has_checkout = QRScanLog.objects.filter(
-                student=student, scanned_at__date=date_str, scan_type='check_out',
-            ).exists()
+            # Get all attendance records for the day (supports multiple sessions)
+            day_records = list(AttendanceRecord.objects.filter(
+                student=student,
+                date=date_str
+            ))
 
-            if not has_checkin:
-                # CASE 2: No IN scan for scheduled session → missing_checkin_scan
+            has_any_checkin = any(r.checked_in_at for r in day_records)
+            has_any_checkout = any(r.checked_out_at for r in day_records)
+            open_sessions = [r for r in day_records if r.checked_in_at and not r.checked_out_at]
+
+            if not has_any_checkin:
+                # CASE 2: Missing check-in scan (no_show)
                 AlertLog.objects.create(
                     student=student,
                     alert_type='missing_checkin_scan',
-                    message=f'Absent / Missing check-in alert: No check-in scan recorded on {date_str}.',
+                    message=f'Missing check-in scan / no-show on {date_str}.',
                     notified_parent=True,
                     notified_admin=False,
                 )
-                # Stub: notify Parent
-                # notify(parent_user_id, "Missing check-in", f"<Name> absent / missing check-in", {})
-
-            elif has_checkin and not has_checkout:
-                # CASE 1: IN exists, no OUT → missing_checkout_scan
-                AlertLog.objects.create(
+                ViolationRecord.objects.create(
                     student=student,
-                    alert_type='missing_checkout_scan',
-                    message=f'Missing check-out scan alert: Check-in recorded but no check-out on {date_str}.',
-                    notified_parent=True,
-                    notified_admin=False,
+                    violation_type='no_show',
+                    date=date_str,
+                    description='No check-in recorded for scheduled class.',
+                    logged_by_admin=False,
                 )
-                # Stub: notify Parent
-                # notify(parent_user_id, "Missing check-out", f"<Name> missing check-out", {})
+                try:
+                    notify_student_violation(student, 'no_show', date_str, 'No check-in scan detected.')
+                except Exception as ne:
+                    logger.warning(f"Notification failed for no_show: {ne}")
+                check_violation_threshold(student.id)
+
+            elif open_sessions:
+                # CASE 1: Has check-in but missing checkout
+                for open_rec in open_sessions:
+                    AlertLog.objects.create(
+                        student=student,
+                        alert_type='missing_checkout_scan',
+                        message=f'Missing check-out scan. Checked in at {open_rec.checked_in_at} but no checkout.',
+                        notified_parent=True,
+                        notified_admin=False,
+                    )
+                    ViolationRecord.objects.create(
+                        student=student,
+                        violation_type='missing_checkout',
+                        date=date_str,
+                        description=f'Missing checkout for session starting at {open_rec.checked_in_at}.',
+                        logged_by_admin=False,
+                    )
+                    try:
+                        notify_student_violation(
+                            student, 'missing_checkout', date_str,
+                            f'Checked in but no checkout recorded.'
+                        )
+                    except Exception as ne:
+                        logger.warning(f"Notification failed for missing_checkout: {ne}")
+                    check_violation_threshold(student.id)
 
         logger.info(f"Missing scan detection complete for branch {branch_id} on {date_str}")
-        return "Done"
+        return "Detection completed successfully."
 
     except Exception as exc:
-        logger.error(f"detect_missing_scans error: {exc}")
-        raise exc
+        logger.error(f"detect_missing_scans error for branch {branch_id}: {exc}")
+        return f"Error: {exc}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

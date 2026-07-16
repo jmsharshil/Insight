@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -29,7 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-f9)@dlifn!a2-j@xjl4*%jntg-txw21)shycp21puntphvpui0'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['7929-2401-4900-8898-ba5f-7ca5-635c-382e-a963.ngrok-free.app','127.0.0.1','localhost','*','insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net']
 
@@ -210,7 +211,7 @@ EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'iips.insightinstitute@gmail.com'
-EMAIL_HOST_PASSWORD = 'ulbt ojpp phph nuan'
+EMAIL_HOST_PASSWORD = 'fixn oprh zxpz uwor'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 BASE_URL = os.getenv('BASE_URL', 'http://localhost:8000')
 FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')

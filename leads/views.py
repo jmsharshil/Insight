@@ -23,6 +23,7 @@ from django.db.models import Q
 import re
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
+from chat.notifications import send_whatsapp_text
 
 FORM_TYPE_DISPLAY = dict(FORM_TYPE_CHOICES)
 STAGE_DISPLAY = dict(STAGE_CHOICES)
@@ -362,6 +363,11 @@ class LeadStatusUpdateView(APIView):
                                 template_context={},
                                 organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                             )
+                            
+                            try:
+                                send_whatsapp_text(to=admission.phone_student,body=text_content)
+                            except Exception as e:
+                                print(e)
                             logger.info(f"Admission form email sent to {admission.email}")
                         except Exception as e:
                             logger.error(f"Failed to send admission form email to {admission.email}: {e}")

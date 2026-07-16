@@ -1,7 +1,7 @@
 import logging
 from django.conf import settings
 from core.sender import send_email
-from chat.notifications import send_system_notification
+from chat.notifications import send_system_notification,send_whatsapp_text
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,11 @@ def send_checker_assignment_email(marksheet):
         organization=marksheet.exam.organization if hasattr(marksheet.exam, 'organization') else checker.organization,
     )
 
+    try:
+        send_whatsapp_text(to=checker.phone,body=text_content,user_id=str(checker.id))
+    except Exception as e:
+        print(e)
+
     # FRD §4.6.2: in-app notification alongside email
     _notify(
         checker.id, title="Paper Assigned",
@@ -76,6 +81,11 @@ def send_answer_key_email(checker, exam, signed_url):
         },
         organization=exam.organization if hasattr(exam, 'organization') else checker.organization,
     )
+
+    try:
+        send_whatsapp_text(to=checker.phone,body=text_content,user_id=str(checker.id))
+    except Exception as e:
+        print(e)
 
     # FRD §4.6.2: in-app notification
     _notify(
@@ -110,6 +120,11 @@ def send_submission_reminder_email(marksheet):
         organization=marksheet.exam.organization if hasattr(marksheet.exam, 'organization') else checker.organization,
     )
 
+    try:
+        send_whatsapp_text(to=checker.phone,body=text_content,user_id=str(checker.id))
+    except Exception as e:
+        print(e)
+
 
 def send_recheck_request_notification(recheck_request):
     """
@@ -132,6 +147,8 @@ def send_recheck_request_notification(recheck_request):
         admin_execs = admin_execs.filter(organization=organization)
         
     admin_email = admin_execs.first().email if admin_execs.exists() else settings.DEFAULT_FROM_EMAIL
+    admin_phone = admin_execs.first().phone if admin_execs.exists() else None
+    admin_id = admin_execs.first().id if admin_execs.exists() else None
 
     subject = f"Recheck Request: {exam_title}"
     text_content = (
@@ -153,6 +170,12 @@ def send_recheck_request_notification(recheck_request):
         },
         organization=organization,
     )
+    
+    try:
+        if admin_phone:
+            send_whatsapp_text(to=admin_phone,body=text_content,user_id=str(admin_id))
+    except Exception as e:
+        print(e)
 
     # In-app notification to ASE (recipient resolved by caller)
     _notify(

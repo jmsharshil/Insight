@@ -28,14 +28,14 @@ def compute_attendance_percentage(student_id, month=None, batch_id=None):
         except (ValueError, AttributeError):
             pass  # Ignore malformed month strings
 
-    # Exclude on_leave from total
-    qs = qs.exclude(status='on_leave')
-    total_count = qs.count()
+    # Use distinct dates to correctly handle multiple sessions/check-ins per day
+    # Exclude dates that are purely 'on_leave'
+    total_qs = qs.exclude(status='on_leave')
+    total_count = total_qs.values('date').distinct().count()
 
-    # Count present + late + half_day as "present"
-    present_count = qs.filter(
+    present_count = total_qs.filter(
         status__in=['present', 'late', 'half_day']
-    ).count()
+    ).values('date').distinct().count()
 
     percentage = round((present_count / total_count) * 100, 2) if total_count > 0 else 0.0
 
@@ -44,20 +44,28 @@ def compute_attendance_percentage(student_id, month=None, batch_id=None):
 
 def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
     """
-    Build an attendance pivot sheet for a batch, or all batches/branches.
-    Each cell includes status, checked_in_at, and checked_out_at.
+    Build an attendance pivot sheet for a batch (or all), supporting MULTIPLE
+    records/sessions per student per date via timetable_slot.
 
     Returns:
         dict: {
             student_id (str): {
                 'name': str,
                 'roll_number': str,
+                'branch_name': str,
+                'batch_name': str,
                 'dates': {
-                    'YYYY-MM-DD': {
+                    'YYYY-MM-DD': {                     # single session
+                        'timetable_slot_id': str|None,
+                        'slot_code': str|None,
                         'status': str,
                         'checked_in_at': str|None,
                         'checked_out_at': str|None,
                     },
+                    OR
+                    'YYYY-MM-DD': [                     # multiple sessions
+                        { ... }, { ... }
+                    ],
                     ...
                 }
             },
@@ -91,14 +99,17 @@ def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
     records = AttendanceRecord.objects.filter(
         date__year=year,
         date__month=mon,
-    ).select_related('student', 'student__user', 'student__branch', 'student__batch')
+    ).select_related(
+        'student', 'student__user', 'student__branch', 'student__batch',
+        'timetable_slot'
+    )
 
     if batch_id:
         records = records.filter(student__batch_id=batch_id)
     if branch_id:
         records = records.filter(student__branch_id=branch_id)
 
-    records = records.order_by('student', 'date')
+    records = records.order_by('student', 'date', 'checked_in_at')
 
     for record in records:
         sid = str(record.student_id)
@@ -127,26 +138,32 @@ def get_batch_attendance_sheet(batch_id=None, month=None, branch_id=None):
         date_key = record.date.strftime('%Y-%m-%d')
         checked_in = record.checked_in_at.isoformat() if record.checked_in_at else None
         checked_out = record.checked_out_at.isoformat() if record.checked_out_at else None
+        slot_id = str(record.timetable_slot_id) if record.timetable_slot_id else None
+        slot_code = record.timetable_slot.slot_code if record.timetable_slot and hasattr(record.timetable_slot, 'slot_code') else None
 
-        # If multiple sessions on same day, combine them into a list
+        session_info = {
+            'timetable_slot_id': slot_id,
+            'slot_code': slot_code,
+            'status': record.status,
+            'checked_in_at': checked_in,
+            'checked_out_at': checked_out,
+        }
+
+        # If multiple sessions on same day (now supported), combine them into a list.
+        # Normalize legacy dicts (had 'session' key) to new structure for consistency.
         existing = sheet[sid]['dates'].get(date_key)
         if existing:
             if isinstance(existing, dict):
+                # Convert previous single-entry dict (possibly legacy 'session' key)
+                if 'session' in existing and 'timetable_slot_id' not in existing:
+                    legacy_session = existing.pop('session', None)
+                    existing['timetable_slot_id'] = legacy_session
+                    existing['slot_code'] = None
                 existing = [existing]
-            existing.append({
-                'session': getattr(record, 'session', None),
-                'status': record.status,
-                'checked_in_at': checked_in,
-                'checked_out_at': checked_out,
-            })
+            existing.append(session_info)
             sheet[sid]['dates'][date_key] = existing
         else:
-            sheet[sid]['dates'][date_key] = {
-                'session': getattr(record, 'session', None),
-                'status': record.status,
-                'checked_in_at': checked_in,
-                'checked_out_at': checked_out,
-            }
+            sheet[sid]['dates'][date_key] = session_info
 
     return sheet
 

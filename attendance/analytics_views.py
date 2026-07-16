@@ -207,12 +207,11 @@ class StudentAttendanceListAPIView(SafeAPIView):
         if role == 'student':
             student_qs = student_qs.filter(user=user)
         elif role == 'parents':
+            # Prefer ParentLink as source of truth for parents (per architecture decision)
             from students.models import ParentLink
             parent_links = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
             if parent_links:
                 student_qs = student_qs.filter(id__in=parent_links)
-            elif user.linked_students.exists():
-                student_qs = student_qs.filter(user__in=user.linked_students.all())
             else:
                 student_qs = student_qs.none()
         elif role == 'faculty':
@@ -645,8 +644,6 @@ class AttendanceHistoryAPIView(SafeAPIView):
             linked_ids = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
             if linked_ids:
                 qs = qs.filter(student_id__in=linked_ids)
-            elif user.linked_students.exists():
-                qs = qs.filter(student__user__in=user.linked_students.all())
             else:
                 qs = qs.none()
         elif role == 'faculty':

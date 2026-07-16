@@ -162,6 +162,12 @@ def _setup_payment_bank_and_notify(admission):
                 template_context={},
                 organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
             )
+            
+            try:
+                from chat.notifications import send_whatsapp_text
+                send_whatsapp_text(to=admission.phone_student,body=text_content)
+            except Exception as e:
+                print(e)
             logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank.bank_name}")
         except Exception as e:
             logger.error(f"Failed to send payment email to {admission.email}: {e}")
