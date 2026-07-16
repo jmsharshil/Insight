@@ -422,11 +422,18 @@ class QRScanView(APIView):
         ).exists()
 
         if scan_type == 'check_in':
-            existing_record = AttendanceRecord.objects.filter(
-                student=student, timetable_slot=timetable_slot_obj, date=now.date()
-            ).first()
-            # Only block if currently checked in without checkout for this slot (allows re-scan after checkout)
-            if existing_record and existing_record.checked_in_at and not getattr(existing_record, 'checked_out_at', None):
+            # Block only if there's an *open* session (no checkout yet). This allows new check-in
+            # after a previous checkout for the same slot/date (multiple sessions supported
+            # since unique_together was removed in 0003 migration).
+            open_record_qs = AttendanceRecord.objects.filter(
+                student=student,
+                date=now.date(),
+                checked_in_at__isnull=False,
+                checked_out_at__isnull=True,
+            )
+            if timetable_slot_obj and timetable_slot_obj.pk:
+                open_record_qs = open_record_qs.filter(timetable_slot=timetable_slot_obj)
+            if open_record_qs.exists():
                 return Response({'success': False, 'message': 'You are already checked in. Please check out first.'}, status=status.HTTP_400_BAD_REQUEST)
         elif scan_type == 'check_out':
             # Use broader query for checkout to support checking out any open session (not just current slot)
@@ -441,8 +448,6 @@ class QRScanView(APIView):
             existing_record = open_record_qs.order_by('-checked_in_at').first()
             if not existing_record:
                 return Response({'success': False, 'message': 'You cannot check out without checking in first.'}, status=status.HTTP_400_BAD_REQUEST)
-            if existing_record.checked_out_at:
-                return Response({'success': False, 'message': 'You are already checked out for today.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # E3: run validate_qr_scan — never block on failure, just log results
         validation_result = validate_qr_scan(
@@ -474,14 +479,21 @@ class QRScanView(APIView):
 
 
         if scan_type == 'check_in':
-            record, created = AttendanceRecord.objects.get_or_create(
-                student=student, timetable_slot=timetable_slot_obj, date=now.date(),
-                defaults={'batch_id': batch.id, 'branch_id': student_branch_id, 'status': 'checkout_pending', 'marked_by': user, 'checked_in_at': now},
+            # Always CREATE new record for check_in. This fixes the bug where previous
+            # completed (checked-out) records were being reused/updated, causing
+            # "already existing check out time" errors on subsequent checkout.
+            # Multiple independent AttendanceRecord per (student, date, timetable_slot)
+            # is now allowed per the migration.
+            record = AttendanceRecord.objects.create(
+                student=student,
+                timetable_slot=timetable_slot_obj,
+                date=now.date(),
+                batch_id=batch.id,
+                branch_id=student_branch_id,
+                status='checkout_pending',
+                marked_by=user,
+                checked_in_at=now,
             )
-            if not created and not record.checked_in_at:
-                record.checked_in_at = now
-                record.status = 'checkout_pending'
-                record.save(update_fields=['checked_in_at', 'status'])
 
             entry_status = get_attendance_entry_status(
                 timetable_slot_obj,
@@ -507,10 +519,9 @@ class QRScanView(APIView):
                     logger.error(f"Violation notification failed: {ne}")
             else:
                 record.status = 'checkout_pending'
-            record.checked_in_at = now
-            record.save(update_fields=['checked_in_at', 'status'])
+            record.save(update_fields=['status'])
 
-            attendance_status = 'already_scanned' if (not created and record.checked_in_at and record.checked_in_at != now) else record.status
+            attendance_status = record.status
             checked_in_at = record.checked_in_at
             checked_out_at = record.checked_out_at
 
