@@ -172,9 +172,9 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
         User = get_user_model()
 
         if target_user_ids and len([tid for tid in target_user_ids if tid]) > 0:
-            # Targeted message: only notify the specific targets + super_admins (exclude sender)
+            # Targeted message: only notify the specific targets (exclude sender)
             target_ids = [tid for tid in target_user_ids if tid]
-            q = Q(id__in=target_ids) | Q(role='super_admin')
+            q = Q(id__in=target_ids)
             if sender_id:
                 q &= ~Q(id=sender_id)
             recipients = User.objects.filter(q).exclude(fcm_token='').values('id', 'name', 'fcm_token')

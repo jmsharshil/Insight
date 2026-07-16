@@ -11,7 +11,7 @@ from .views import (
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
     ChapterListView, ChapterDetailView,
-    AcademicDropdownsView,
+    AcademicDropdownsView, TimetablePublishView
 )
 
 urlpatterns = [
@@ -49,4 +49,5 @@ urlpatterns = [
     path('timetable/faculty/<uuid:faculty_id>/', FacultyTimetableView.as_view(), name='faculty-timetable'),
     path('timetable/student/<uuid:student_id>/', StudentTimetableView.as_view(), name='student-timetable'),
     path('timetable/<uuid:pk>/duplicate/', TimetableDuplicateSlotView.as_view(), name='timetable-duplicate-slot'),
+    path('timetable/publish/', TimetablePublishView.as_view(), name='timetable-publish'),
 ]

@@ -59,6 +59,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     total_session_minutes = Decimal(0)
     
     chapter_monthly_minutes = defaultdict(Decimal)
+    daily_stats = defaultdict(lambda: {'total_hours': Decimal(0), 'gross_salary': Decimal(0), 'deduction': Decimal(0), 'late_minutes': 0, 'penalty_minutes': 0})
 
     for s in sessions:
         session_dates.add(s.session_date)
@@ -93,6 +94,11 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             hours = actual_minutes / Decimal(60)
             subject_hours[s.subject_id] += hours
             total_session_minutes += actual_minutes
+
+        d_str = s.session_date.strftime('%Y-%m-%d')
+        daily_stats[d_str]['total_hours'] += actual_minutes / Decimal(60)
+        rate = get_subject_hourly_rate(faculty_profile, s.subject, month, year) if hasattr(s, 'subject') and s.subject else fac_hourly_rate
+        daily_stats[d_str]['gross_salary'] += (actual_minutes / Decimal(60)) * rate
 
     from payroll.models import ExtraHoursApproval
     from datetime import date
@@ -184,6 +190,11 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 diff_minutes = min(diff_minutes, scheduled_minutes)
                 
             qr_extra_minutes += max(diff_minutes, Decimal(0))
+            
+            if diff_minutes > 0:
+                d_str = log_date.strftime('%Y-%m-%d')
+                daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
+                daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
 
     total_hours = fac_session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
 
@@ -286,22 +297,23 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             })
             
     # Compute total late penalty and half-day deductions
-    # Sundays (weekday == 6): any attendance = full day, skip penalty entirely
     late_penalty = Decimal(0)
     late_half_days = 0
     days_late_15_mins = 0
     late_dates = []
     half_day_dates = []
     total_late_penalty_minutes = 0
-    per_day_deduction_log = []
+    
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
-            # Sunday — attendance counts as full day, no penalty
             continue
+            
+        d_str = d_date.strftime('%Y-%m-%d')
+        daily_stats[d_str]['late_minutes'] = d_delay
+        
         if d_delay >= 60:
             late_half_days += 1
-            half_day_dates.append(d_date.strftime('%Y-%m-%d'))
-            # Per user request: late time should not be counted if marked as half-day
+            half_day_dates.append(d_str)
         else:
             if d_delay >= 15:
                 days_late_15_mins += 1
@@ -311,13 +323,23 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
-                late_dates.append(d_date.strftime('%Y-%m-%d'))
-                per_day_deduction_log.append({
-                    'date': d_date.strftime('%Y-%m-%d'),
-                    'late_minutes': d_delay,
-                    'penalty_minutes': penalty_min,
-                    'penalty_amount': str(round(day_penalty, 2)),
-                })
+                late_dates.append(d_str)
+                daily_stats[d_str]['penalty_minutes'] = penalty_min
+                daily_stats[d_str]['deduction'] += day_penalty
+
+    per_day_deduction_log = []
+    for d_str, stat in sorted(daily_stats.items()):
+        net_salary = max(Decimal(0), stat['gross_salary'] - stat['deduction'])
+        per_day_deduction_log.append({
+            'date': d_str,
+            'total_hours': str(round(stat['total_hours'], 2)),
+            'gross_salary': str(round(stat['gross_salary'], 2)),
+            'deduction': str(round(stat['deduction'], 2)),
+            'net_salary': str(round(net_salary, 2)),
+            'late_minutes': stat['late_minutes'],
+            'penalty_minutes': stat['penalty_minutes'],
+            'penalty_amount': str(round(stat['deduction'], 2)),
+        })
 
     late_half_days += (days_late_15_mins // 3)
 
@@ -507,12 +529,18 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     session_dates = set()
     subject_hours = defaultdict(Decimal)
     total_session_minutes = Decimal(0)
+    daily_stats = defaultdict(lambda: {'total_hours': Decimal(0), 'gross_salary': Decimal(0), 'deduction': Decimal(0), 'late_minutes': 0, 'penalty_minutes': 0})
 
     for s in sessions:
         session_dates.add(s.session_date)
         hours = Decimal(s.duration_minutes) / Decimal(60)
         subject_hours[s.subject_id] += hours
         total_session_minutes += Decimal(s.duration_minutes)
+        
+        d_str = s.session_date.strftime('%Y-%m-%d')
+        daily_stats[d_str]['total_hours'] += hours
+        rate = get_subject_hourly_rate(faculty_profile, s.subject, month, year) if hasattr(s, 'subject') and s.subject else fac_hourly_rate
+        daily_stats[d_str]['gross_salary'] += hours * rate
 
     qr_logs = FacultyQRScanLog.objects.filter(
         faculty=faculty_profile,
@@ -535,6 +563,11 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             last_out = max(l.scanned_at for l in check_outs)
             diff_minutes = Decimal((last_out - first_in).total_seconds()) / Decimal(60)
             qr_extra_minutes += max(diff_minutes, Decimal(0))
+            
+            if diff_minutes > 0:
+                d_str = log_date.strftime('%Y-%m-%d')
+                daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
+                daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
 
     total_hours = fac_session_hours + (total_session_minutes + qr_extra_minutes) / Decimal(60)
 
@@ -647,12 +680,14 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
 
     total_late_penalty_minutes = 0
-    per_day_deduction_log = []  # list of {date, penalty_minutes, penalty_amount}
-
+    
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
-            # Sunday — attendance counts as full day, no penalty
             continue
+            
+        d_str = d_date.strftime('%Y-%m-%d')
+        daily_stats[d_str]['late_minutes'] = d_delay
+        
         if d_delay >= 60:
             late_half_days += 1
         else:
@@ -664,12 +699,22 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
-                per_day_deduction_log.append({
-                    'date': d_date.strftime('%Y-%m-%d'),
-                    'late_minutes': d_delay,
-                    'penalty_minutes': penalty_min,
-                    'penalty_amount': str(round(day_penalty, 2)),
-                })
+                daily_stats[d_str]['penalty_minutes'] = penalty_min
+                daily_stats[d_str]['deduction'] += day_penalty
+
+    per_day_deduction_log = []
+    for d_str, stat in sorted(daily_stats.items()):
+        net_salary = max(Decimal(0), stat['gross_salary'] - stat['deduction'])
+        per_day_deduction_log.append({
+            'date': d_str,
+            'total_hours': str(round(stat['total_hours'], 2)),
+            'gross_salary': str(round(stat['gross_salary'], 2)),
+            'deduction': str(round(stat['deduction'], 2)),
+            'net_salary': str(round(net_salary, 2)),
+            'late_minutes': stat['late_minutes'],
+            'penalty_minutes': stat['penalty_minutes'],
+            'penalty_amount': str(round(stat['deduction'], 2)),
+        })
 
     late_half_days += (days_late_15_mins // 3)
 
