@@ -448,7 +448,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         notes.append(f"Leave{lv_str}: -{round(applied_leave_deductions, 2)}")
     if retention_deduction > 0:
         notes.append(f"Retention ({faculty_profile.salary_retention_percentage}%): -{round(retention_deduction, 2)}")
-    deduction_note_str = ", ".join(notes)
+    deduction_note_str = ", ".join(notes)[:300]
 
     # 10. Create PaySlip
     payslip = PaySlip.objects.create(
@@ -1121,7 +1121,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         notes.append(f"Retention ({user.salary_retention_percentage}%): -{round(retention_deduction, 2)}")
     if sunday_deduction > 0:
         notes.append(f"Sunday Shortfall: -{round(sunday_deduction, 2)}")
-    deduction_note_str = ", ".join(notes)
+    deduction_note_str = ", ".join(notes)[:300]
 
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
