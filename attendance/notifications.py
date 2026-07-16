@@ -4,6 +4,7 @@ Centralized attendance notification helpers for students, parents, and staff.
 import logging
 from django.conf import settings
 from django.core.mail import EmailMessage
+from django.utils import timezone
 from chat.notifications import send_system_notification
 
 logger = logging.getLogger(__name__)
@@ -78,7 +79,8 @@ def notify_student_qr_scan(student, scan_type, scan_time):
         return
 
     action = 'checked in' if scan_type == 'check_in' else 'checked out'
-    time_str = scan_time.strftime('%I:%M %p')
+    local_scan_time = timezone.localtime(scan_time) if timezone.is_aware(scan_time) else scan_time
+    time_str = local_scan_time.strftime('%I:%M %p')
     student_name = getattr(student, 'first_name', str(student))
 
     # Notify parent via system notification
