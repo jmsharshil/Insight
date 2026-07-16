@@ -52,7 +52,8 @@ VIOLATION_TYPE_CHOICES = [
 
 class AttendanceRecord(models.Model):
     """
-    One record per student per date.
+    Supports multiple records per student per date (one per check-in session / slot).
+    Each check-in creates a separate record instead of overwriting previous check-in time.
     Tracks presence STATUS + raw check-in / check-out timestamps.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -118,7 +119,8 @@ class AttendanceRecord(models.Model):
 
     class Meta:
         db_table = 'attendance_records'
-        unique_together = ('student', 'date', 'timetable_slot')
+        # unique_together removed to support multiple check-in sessions per student per date
+        # (different timetable_slots or repeated scans now create separate records instead of overwriting)
         ordering = ['-date']
         indexes = [
             models.Index(fields=['date', 'branch']),
@@ -377,7 +379,8 @@ class EmployeeAttendanceRecord(models.Model):
 
     class Meta:
         db_table = 'employee_attendance_records'
-        unique_together = ('user', 'date', 'timetable_slot')
+        # unique_together removed to support multiple check-in sessions per employee per date
+        # (allows separate records per checkin instead of overwriting check-in time)
         ordering = ['-date']
         indexes = [
             models.Index(fields=['date', 'branch']),

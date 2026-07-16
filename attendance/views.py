@@ -582,11 +582,10 @@ class QRScanView(APIView):
 
         return Response({
             'success': True, 'student_name': sname, 'roll_number': roll,
-            'scan_time': timezone.localtime(scan_log.scanned_at).isoformat() if scan_log.scanned_at else None, 'scan_type': scan_type,
+            'scan_time': scan_log.scanned_at, 'scan_type': scan_type,
             'device_id': device_id, 'is_valid': True,
             'attendance_status': attendance_status,
-            'checked_in_at': timezone.localtime(checked_in_at).isoformat() if checked_in_at else None, 
-            'checked_out_at': timezone.localtime(checked_out_at).isoformat() if checked_out_at else None,
+            'checked_in_at': checked_in_at, 'checked_out_at': checked_out_at,
             'location_verified': validation_result['location_verified'],
             'time_verified': validation_result['time_verified'],
             'validation_reason': validation_result['reason'],
@@ -1305,7 +1304,7 @@ class EmployeeCheckInOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Resolve Timetable Slot for faculty (used for unique per-session records)
+        # Resolve Timetable Slot for faculty
         timetable_slot_obj = None
         if getattr(user, 'role', '') == 'faculty':
             try:

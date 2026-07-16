@@ -278,7 +278,15 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
         return obj.user.name if obj.user else ''
 
     def get_employee_id(self, obj):
-        return obj.user.employee_id or '' if obj.user else ''
+        if not obj.user:
+            return ''
+        try:
+            # Prefer FacultyProfile.employee_id
+            if hasattr(obj.user, 'faculty_profile') and obj.user.faculty_profile:
+                return obj.user.faculty_profile.employee_id or ''
+            return getattr(obj.user, 'employee_id', '') or ''
+        except Exception:
+            return ''
 
     def get_branch_name(self, obj):
         return obj.branch.name if obj.branch else ''
@@ -288,9 +296,12 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
 
 
 class EmployeeAttendanceCreateSerializer(serializers.Serializer):
-    """POST /api/v1/attendance/employee/ — mark attendance for employees."""
+    """POST /api/v1/attendance/employee/ — mark attendance for employees.
+    Supports timetable_slot_id to allow multiple sessions per day without duplicates.
+    """
     branch_id = serializers.UUIDField()
     date = serializers.DateField()
+    timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)
     records = serializers.ListField(child=serializers.DictField(), min_length=1)
 
     def validate_date(self, value):
