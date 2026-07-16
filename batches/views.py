@@ -1371,3 +1371,77 @@ class AcademicDropdownsView(APIView):
                 "classrooms": list(classrooms_qs.values('id', 'name', 'capacity')),
             }
         })
+
+
+class TimetablePublishView(APIView):
+    """
+    POST /api/v1/batches/timetable/publish/
+    Notifies faculty, students, and their parents that the timetable has been updated.
+    Payload: {"batch_id": "<uuid>"} or {"branch_id": "<uuid>"}
+    """
+    def post(self, request):
+        from .models import TimetableSlot, BatchStudent
+        from students.models import ParentLink
+        from chat.notifications import send_system_notification
+        
+        batch_id = request.data.get('batch_id')
+        branch_id = request.data.get('branch_id')
+        
+        if not batch_id and not branch_id:
+            return Response({'success': False, 'message': 'Please provide batch_id or branch_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        slots = TimetableSlot.objects.all()
+        if batch_id:
+            slots = slots.filter(batch_id=batch_id)
+        if branch_id:
+            slots = slots.filter(batch__branch_id=branch_id)
+            
+        if getattr(request.user, 'organization', None):
+            slots = slots.filter(organization=request.user.organization)
+            
+        if not slots.exists():
+            return Response({'success': False, 'message': 'No timetable slots found for the given criteria.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Get unique faculty members
+        faculty_ids = set(slots.values_list('faculty__user_id', flat=True).exclude(faculty__user_id__isnull=True))
+        
+        # Get unique batches
+        batch_ids = set(slots.values_list('batch_id', flat=True))
+        
+        # Get students in those batches
+        batch_students = BatchStudent.objects.filter(batch_id__in=batch_ids, is_active=True).select_related('student__user')
+        student_user_ids = set()
+        student_profile_ids = set()
+        
+        for bs in batch_students:
+            if getattr(bs.student, 'user', None):
+                student_user_ids.add(bs.student.user.id)
+            student_profile_ids.add(bs.student.id)
+            
+        # Get parents for those students
+        parents = ParentLink.objects.filter(student_id__in=student_profile_ids).select_related('parent')
+        parent_user_ids = set(p.parent.id for p in parents if p.parent)
+        
+        # Send notifications
+        title = "Timetable Updated"
+        body_faculty = "Your timetable has been updated. Please check your schedule."
+        body_student = "The timetable for your batch has been updated. Please check."
+        body_parent = "The timetable for your child has been updated."
+        
+        notified_count = 0
+        for f_id in faculty_ids:
+            send_system_notification(str(f_id), title, body_faculty, {"type": "timetable_publish"})
+            notified_count += 1
+            
+        for s_id in student_user_ids:
+            send_system_notification(str(s_id), title, body_student, {"type": "timetable_publish"})
+            notified_count += 1
+            
+        for p_id in parent_user_ids:
+            send_system_notification(str(p_id), title, body_parent, {"type": "timetable_publish"})
+            notified_count += 1
+            
+        return Response({
+            'success': True,
+            'message': f'Timetable published successfully. Notified {notified_count} users.',
+        })

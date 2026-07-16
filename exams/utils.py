@@ -82,10 +82,13 @@ def auto_grade_mcq(session_id):
     )
 
     if exam.result_release_mode == 'instant':
-        PublishedResult.objects.update_or_create(
+        pr, created = PublishedResult.objects.update_or_create(
             exam=exam, student=session.student,
             defaults={'marks_obtained': marks, 'total_marks': exam.total_marks, 'percentage': pct, 'is_pass': passed},
         )
+        if created:
+            from results.utils import notify_parents_of_exam_result
+            notify_parents_of_exam_result([pr])
 
     return marks, pct, passed
 

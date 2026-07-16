@@ -850,6 +850,23 @@ class PublicHolidayListCreateView(APIView):
                 year=d['date'].year,
                 created_by=request.user
             )
+
+            # Notify all active users in the organization
+            from django.contrib.auth import get_user_model
+            from chat.notifications import send_system_notification
+            User = get_user_model()
+            users_qs = User.objects.filter(is_active=True)
+            if organization:
+                users_qs = users_qs.filter(organization=organization)
+            
+            for uid in users_qs.values_list('id', flat=True):
+                send_system_notification(
+                    user_id=str(uid),
+                    title="New Public Holiday",
+                    body=f"A new public holiday '{holiday.name}' has been added on {holiday.date}.",
+                    metadata={"type": "public_holiday", "holiday_id": str(holiday.id)}
+                )
+
             return Response({
                 'success': True,
                 'message': 'Public holiday added successfully.',
