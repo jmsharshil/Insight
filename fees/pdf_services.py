@@ -38,7 +38,7 @@ def generate_payment_receipt_pdf(payment):
             ),
             'student_name': getattr(payment.student, 'full_name', 'N/A'),
             'amount': f"₹{payment.amount:,.2f}",
-            'amount_words': num2words(payment.amount, to='words').title() + ' Rupees Only',
+            'amount_words': num2words(payment.amount),
             'batch_name': (
                 payment.student_fee.fee_structure.batch.name
                 if getattr(payment.student_fee, 'fee_structure', None)
