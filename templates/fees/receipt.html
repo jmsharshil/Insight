@@ -33,6 +33,12 @@
     .logo-container {
         float: right;
         text-align: right;
+        max-width: 180px;
+    }
+    .logo-img {
+        max-height: 65px;
+        margin-bottom: 4px;
+        border-radius: 4px;
     }
     .title {
         color: #fff;
@@ -97,9 +103,13 @@
                 www.insightinstitute.com<br>
                 insightinstitute.ips@gmail.com
             </div>
-            <!-- Replace with actual logo image if available -->
+            <!-- Logo (from Azure) with text fallback below it if image fails to load -->
             <div class="logo-container">
-                <h1 style="margin: 0; color: #444; font-size: 32px;">INSIGHT</h1>
+                <img src="{{ logo_url }}" 
+                     alt="{{ school_name|default:'INSIGHT' }} Logo" 
+                     class="logo-img"
+                     style="max-height: 65px;">
+                <h1 style="margin: 8px 0 0 0; color: #444; font-size: 26px;">{{ school_name|default:'INSIGHT' }}</h1>
                 <div style="font-size:12px; color: #ed7c31;">Institute of Professional Studies</div>
             </div>
             <div style="clear:both;"></div>
@@ -140,16 +150,16 @@
         </div>
 
         <div class="checkboxes">
-            <span>[ {% if payment_type == 'token' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Token</span>
-            <span>[ {% if payment_type == 'full' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Full Payment</span>
-            <span>[ {% if payment_type == 'installment' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Installment</span>
+            <span>[ {% if payment_type == 'token' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Token</span>
+            <span>[ {% if payment_type == 'full' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Full Payment</span>
+            <span>[ {% if payment_type == 'installment' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Installment</span>
         </div>
 
         <div class="checkboxes" style="margin-top: 25px;">
             <span class="label">By</span>
-            <span style="margin-left: 10px;">[ {% if payment_mode == 'cash' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cash</span>
-            <span>[ {% if payment_mode == 'cheque' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cheque</span>
-            <span>[ {% if payment_mode == 'online' %}<strong>X</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Online</span>
+            <span style="margin-left: 10px;">[ {% if payment_mode == 'cash' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cash</span>
+            <span>[ {% if payment_mode == 'cheque' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cheque</span>
+            <span>[ {% if payment_mode == 'online' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Online</span>
         </div>
 
         <div class="row" style="margin-top: 25px;">
