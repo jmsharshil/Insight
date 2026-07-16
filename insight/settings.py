@@ -379,6 +379,7 @@ CSRF_TRUSTED_ORIGINS = [
     'https://wonderful-pond-0982c5200.7.azurestaticapps.net',
     'https://victorious-rock-0352cde00.7.azurestaticapps.net',
     'https://insight.jmstech.co',
+    "http://4k199908-8080.inc1.devtunnels.ms/"
 ]
 
 # Only enable secure cookies in production (HTTPS).
@@ -387,3 +388,6 @@ CSRF_TRUSTED_ORIGINS = [
 if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SECURE = True
+
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
+WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")

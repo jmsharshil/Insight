@@ -198,6 +198,7 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
                     "room_id": str(room_id),
                     "message_id": str(message_id),
                     "is_targeted": bool(target_user_ids),
+                    "route": f"/chat/{str(room_id)}",
                 },
                 user_id=user['id']
             )
@@ -205,6 +206,96 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
 
+#whatapp notifiation 
+from core.utils import queue_whatsapp_media, queue_whatsapp_template, queue_whatsapp_text 
+
+def send_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, user_id=None) -> Optional[str]:
+    """Schedule a plain text WhatsApp message. Returns the ScheduledTask id
+    (as a string) or None if `to` is empty. Mirrors send_fcm_notification's
+    signature style."""
+    if not to:
+        return None
+ 
+    task = queue_whatsapp_text(to=to, body=body, delay_seconds=delay_seconds)
+    task_id = str(task.id) if task else None
+ 
+    if user_id and task_id:
+        _record_history(user_id=user_id, title="WhatsApp", body=body, task_id=task_id)
+ 
+    return task_id
+ 
+ 
+def send_whatsapp_template(*, to: str, template_name: str, language_code: str = "en_US",
+                            components: list = None, delay_seconds: int = 0,
+                            user_id=None) -> Optional[str]:
+    """Schedule a template WhatsApp message (works outside the 24h session
+    window, unlike send_whatsapp_text)."""
+    if not to:
+        return None
+ 
+    task = queue_whatsapp_template(
+        to=to, template_name=template_name, language_code=language_code,
+        components=components, delay_seconds=delay_seconds,
+    )
+    task_id = str(task.id) if task else None
+ 
+    if user_id and task_id:
+        _record_history(
+            user_id=user_id, title="WhatsApp template", body=template_name, task_id=task_id
+        )
+ 
+    return task_id
+ 
+ 
+def send_whatsapp_media(*, to: str, media_type: str, link: str = None, media_id: str = None,
+                         caption: str = None, filename: str = None,
+                         delay_seconds: int = 0, user_id=None) -> Optional[str]:
+    if not to:
+        return None
+ 
+    task = queue_whatsapp_media(
+        to=to, media_type=media_type, link=link, media_id=media_id,
+        caption=caption, filename=filename, delay_seconds=delay_seconds,
+    )
+    task_id = str(task.id) if task else None
+ 
+    if user_id and task_id:
+        _record_history(user_id=user_id, title="WhatsApp media", body=media_type, task_id=task_id)
+ 
+    return task_id
+ 
+ 
+def notify_new_message_whatsapp(*, room_id: str, sender_name: str, content: str,
+                                 recipient_phone: str, recipient_user_id=None):
+    """
+    WhatsApp equivalent of notify_new_message() in notifications.py — call this
+    alongside the FCM one, e.g. as a fallback channel for users without an
+    fcm_token, or for users opted into WhatsApp alerts.
+    """
+    if not recipient_phone:
+        return
+ 
+    preview = content[:100] + "..." if len(content) > 100 else content
+    send_whatsapp_text(
+        to=recipient_phone,
+        body=f"{sender_name}: {preview}",
+        user_id=recipient_user_id,
+    )
+ 
+ 
+def _record_history(*, user_id, title: str, body: str, task_id: str):
+    """Optional: log queued WhatsApp sends the same way NotificationHistory does
+    for FCM, so you have one place to look up what was sent/attempted."""
+    try:
+        from auth_user.models import NotificationHistory
+        NotificationHistory.objects.create(
+            user_id=user_id,
+            title=title,
+            body=body,
+            data={"channel": "whatsapp", "scheduled_task_id": task_id},
+        )
+    except Exception as e:
+        logger.error("WhatsApp: failed to save notification history: %s", e)
 
 def send_system_notification(
     user_id: str,
@@ -214,6 +305,11 @@ def send_system_notification(
     email_template: str = None,
     email_context: dict = None,
     email_subject: str = None,
+    whatsapp_template: str = None,
+    whatsapp_context: dict = None,
+    whatsapp_template_lang_code: str = "en_US",
+    delay_seconds: int = 0,
+    whatsapp_media: dict = None
 ):
     """
     Centralized helper to send a push notification (FCM) and/or an email.
@@ -261,6 +357,34 @@ def send_system_notification(
                 )
             except Exception as e:
                 logger.error("Failed to send system email to %s: %s", user.email, e)
+
+
+            try:
+                if whatsapp_template and getattr(user, 'phone', None):
+                    send_whatsapp_template(
+                        to=user.phone,
+                        template_name=whatsapp_template,
+                        language_code= whatsapp_template_lang_code or 'en_US',
+                        components=[{"type": "body", "parameters": [{"type": "text", "text": str(whatsapp_context.get(k, ''))} for k in whatsapp_context]}] if whatsapp_context else [],
+                        user_id=str(user.id),
+                        delay_seconds=delay_seconds or 0
+                    )
+                elif whatsapp_media and getattr(user, 'phone', None):
+                    send_whatsapp_media(
+                        to=user.phone,
+                        media_type=whatsapp_media.get('media_type'),
+                        link=whatsapp_media.get('link'),
+                        media_id=whatsapp_media.get('media_id'),
+                        caption=whatsapp_media.get('caption'),
+                        filename=whatsapp_media.get('filename'),
+                        user_id=str(user.id),
+                        delay_seconds=delay_seconds or 0
+                    )
+                elif getattr(user, 'phone', None):
+                    # Fallback: send plain text WhatsApp if no template is specified
+                    send_whatsapp_text(to=user.phone, body=body, user_id=str(user.id))
+            except Exception as e:
+                logger.error("Failed to send WhatsApp notification to %s: %s", user.id, e)
 
     thread = threading.Thread(target=_send_task, daemon=True)
     thread.start()

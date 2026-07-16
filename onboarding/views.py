@@ -95,10 +95,82 @@ def _not_found():
         status=status.HTTP_404_NOT_FOUND,
     )
 
+
+def _setup_payment_bank_and_notify(admission):
+    """Extracted common logic (removes duplication between ListView and DetailView).
+    Assigns threshold-aware bank, creates status history, and sends payment email.
+    Relies on _get_bank_selection_amount() and StudentService (for later enrolment).
+    """
+    from fees.utils import select_bank_accounts_for_payment
+    from fees.models import BankAccount
+
+    if getattr(admission, 'bank_account', None):
+        return  # already assigned
+
+    payment_amount = _get_bank_selection_amount(admission)
+    eligible_banks = select_bank_accounts_for_payment(payment_amount)
+    if not eligible_banks:
+        eligible_banks = list(BankAccount.objects.filter(is_active=True))
+    if not eligible_banks:
+        logger.warning(f"No active bank accounts for admission {admission.id}")
+        assigned_bank = None
+    else:
+        assigned_bank = eligible_banks[0]
+        admission.assign_payment_bank_account(assigned_bank)
+
+    AdmissionStatusHistory.objects.create(
+        admission=admission,
+        status='payment_pending',
+        changed_by=None,
+        note='Form submitted. Waiting for fee payment.',
+    )
+
+    if admission.email and assigned_bank:
+        try:
+            from core.sender import send_email
+            payment_link = f"{settings.FRONTEND_BASE_URL}/insight/student/payment-upload?id={admission.id}"
+
+            bank_details = (
+                f"Bank Name       : {assigned_bank.bank_name}\n"
+                f"Account Holder  : {assigned_bank.name}\n"
+                f"Account Number  : {assigned_bank.account_number}\n"
+                f"IFSC Code       : {assigned_bank.ifsc_code}\n"
+                f"Branch          : {assigned_bank.branch_name}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            )
+            text_content = (
+                f"Hello {admission.first_name},\n\n"
+                f"Thank you for submitting your admission form. "
+                f"Please complete your fee payment to proceed with your enrollment.\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"BANK DETAILS FOR FEE PAYMENT\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{bank_details}"
+                f"After making the payment, please click the link below to "
+                f"upload your payment screenshot and transaction ID:\n\n"
+                f"{payment_link}\n\n"
+                f"If you have any questions, feel free to reach out to your counsellor.\n\n"
+                f"Best Regards,\n"
+                f"Insight Institute Team"
+            )
+
+            send_email(
+                to=admission.email,
+                subject="Complete Your Fee Payment",
+                text=text_content,
+                template=None,
+                template_context={},
+                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+            )
+            logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank.bank_name}")
+        except Exception as e:
+            logger.error(f"Failed to send payment email to {admission.email}: {e}")
+
+
 # ── POST /api/admissions/   — submit registration form
 # ── GET  /api/admissions/   — list all admissions (with optional filters)
 class AdmissionListView(APIView):
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+
     filterset_fields = ['status', 'course', 'attempt_year']
     search_fields = ['first_name', 'surname', 'email', 'phone_student']
     ordering_fields = '__all__'
@@ -140,67 +212,8 @@ class AdmissionListView(APIView):
                 )
             serializer.save()
 
-            # Auto-assign bank based on the student's full fee amount for the year
-            from fees.utils import select_bank_accounts_for_payment
-            from fees.models import BankAccount
-            payment_amount = _get_bank_selection_amount(admission)
-            eligible_banks = select_bank_accounts_for_payment(payment_amount)
-            if not eligible_banks:
-                # Fallback to any active bank
-                eligible_banks = list(BankAccount.objects.filter(is_active=True))
-            assigned_bank = eligible_banks[0]
-            admission.assign_payment_bank_account(assigned_bank)
-
-            AdmissionStatusHistory.objects.create(
-                admission=admission,
-                status='payment_pending',
-                changed_by=None,
-                note='Form submitted. Waiting for fee payment.',
-            )
-
-            if admission.email:
-                try:
-                    from core.sender import send_email
-                    payment_link = f"{settings.FRONTEND_BASE_URL}/insight/student/payment-upload?id={admission.id}"
-
-                    # Build bank details text for all eligible banks (shuffled)
-                    bank_details = ""
-                    if assigned_bank:
-                        bank_details = (
-                            f"Bank Name       : {assigned_bank.bank_name}\n"
-                            f"Account Holder  : {assigned_bank.name}\n"
-                            f"Account Number  : {assigned_bank.account_number}\n"
-                            f"IFSC Code       : {assigned_bank.ifsc_code}\n"
-                            f"Branch          : {assigned_bank.branch_name}\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        )
-                    text_content = (
-                        f"Hello {admission.first_name},\n\n"
-                        f"Thank you for submitting your admission form. "
-                        f"Please complete your fee payment to proceed with your enrollment.\n\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"BANK DETAILS FOR FEE PAYMENT\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"{bank_details}"
-                        f"After making the payment, please click the link below to "
-                        f"upload your payment screenshot and transaction ID:\n\n"
-                        f"{payment_link}\n\n"
-                        f"If you have any questions, feel free to reach out to your counsellor.\n\n"
-                        f"Best Regards,\n"
-                        f"Insight Institute Team"
-                    )
-
-                    send_email(
-                        to=admission.email,
-                        subject="Complete Your Fee Payment",
-                        text=text_content,
-                        template=None,
-                        template_context={},
-                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                    )
-                    logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank.bank_name}")
-                except Exception as e:
-                    logger.error(f"Failed to send payment email to {admission.email}: {e}")
+            # Cleaned: rely on shared helper (removes ~40 lines of duplication)
+            _setup_payment_bank_and_notify(admission)
 
         except Exception as e:
             logger.error(f"Admission update error: {e}")
@@ -316,67 +329,7 @@ class AdmissionDetailView(APIView):
 
         # Auto-assign bank and send payment email directly if form is submitted
         if admission.status == 'form_pending' and admission.dob is not None:
-            try:
-                # Auto-assign bank based on the student's full fee amount for the year
-                from fees.utils import select_bank_accounts_for_payment
-                from fees.models import BankAccount
-                payment_amount = _get_bank_selection_amount(admission)
-                eligible_banks = select_bank_accounts_for_payment(payment_amount)
-                if not eligible_banks:
-                    eligible_banks = list(BankAccount.objects.filter(is_active=True))
-                assigned_bank = eligible_banks[0]
-
-                admission.assign_payment_bank_account(assigned_bank)
-
-                AdmissionStatusHistory.objects.create(
-                    admission=admission,
-                    status='payment_pending',
-                    changed_by=None,
-                    note='Form submitted. Waiting for fee payment.',
-                )
-
-                if admission.email:
-                    from core.sender import send_email
-                    payment_link = f"{settings.FRONTEND_BASE_URL}/insight/student/payment-upload?id={admission.id}"
-
-                    # Build bank details text for all eligible banks (shuffled)
-                    bank_details = ""
-                    if assigned_bank:
-                        bank_details = (
-                            f"Bank Name       : {assigned_bank.bank_name}\n"
-                            f"Account Holder  : {assigned_bank.name}\n"
-                            f"Account Number  : {assigned_bank.account_number}\n"
-                            f"IFSC Code       : {assigned_bank.ifsc_code}\n"
-                            f"Branch          : {assigned_bank.branch_name}\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        )
-                    text_content = (
-                        f"Hello {admission.first_name},\n\n"
-                        f"Thank you for submitting your admission form. "
-                        f"Please complete your fee payment to proceed with your enrollment.\n\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"BANK DETAILS FOR FEE PAYMENT\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"{bank_details}"
-                        f"After making the payment, please click the link below to "
-                        f"upload your payment screenshot and transaction ID:\n\n"
-                        f"{payment_link}\n\n"
-                        f"If you have any questions, feel free to reach out to your counsellor.\n\n"
-                        f"Best Regards,\n"
-                        f"Insight Institute Team"
-                    )
-
-                    send_email(
-                        to=admission.email,
-                        subject="Complete Your Fee Payment",
-                        text=text_content,
-                        template=None,
-                        template_context={},
-                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                    )
-                    logger.info(f"Payment email sent directly to {admission.email}")
-            except Exception as e:
-                logger.error(f"Failed to process bank assignment and email: {e}")
+            _setup_payment_bank_and_notify(admission)
 
         return Response(
             {'success': True, 'message': 'Admission updated successfully.',

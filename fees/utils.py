@@ -1,8 +1,13 @@
 from django.db import transaction
-from .models import StudentFee, Payment, InstallmentItem
+from django.db.models import Q, Sum
+from .models import StudentFee, Payment, InstallmentItem, Refund, InstallmentPlan, BankAccount
+from decimal import Decimal
+import logging
 import random
-from django.db.models import Q
 from django.utils import timezone
+from datetime import timedelta
+
+logger = logging.getLogger(__name__)
 
 
 def get_installment_plan_status(level_or_course, num_installments):
@@ -38,10 +43,8 @@ def select_bank_accounts_for_payment(amount, limit=None):
     Returns:
         list[BankAccount]: Shuffled list of eligible bank accounts.
     """
-    from .models import BankAccount
     bank_accounts = BankAccount.objects.filter(is_active=True)
     eligible_accounts = [acc for acc in bank_accounts if acc.is_under_threshold(amount)]
-    import random
     random.shuffle(eligible_accounts)
     if limit is not None:
         return eligible_accounts[:limit]
@@ -53,94 +56,97 @@ def update_student_fee_status(student_fee_id):
     Recalculates amount_paid and status for a StudentFee
     based on all verified payments and completed refunds.
     """
-    student_fee = StudentFee.objects.get(id=student_fee_id)
+    try:
+        student_fee = StudentFee.objects.select_related('fee_structure').get(id=student_fee_id)
+    except StudentFee.DoesNotExist:
+        logger.warning(f"StudentFee {student_fee_id} not found during status update.")
+        return None
 
-    # Sum of verified payments
-    from django.db.models import Sum
+    # Sum of verified payments (note: only 'verified' count toward paid)
     paid_sum = Payment.objects.filter(
         student_fee=student_fee,
         status='verified',
-    ).aggregate(total=Sum('amount'))['total'] or 0
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
 
     # Subtract completed refunds
-    from .models import Refund
     refund_sum = Refund.objects.filter(
         payment__student_fee=student_fee,
         status='completed',
-    ).aggregate(total=Sum('amount'))['total'] or 0
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
 
     net_paid = paid_sum - refund_sum
     student_fee.amount_paid = net_paid
 
-    # Auto-resolve installments based on net_paid
-    from .models import InstallmentPlan
-    for plan in InstallmentPlan.objects.filter(student_fee=student_fee, status__in=['approved', 'completed']):
-        remaining_payment = net_paid
-        for item in plan.items.all().order_by('due_date', 'id'):
-            if remaining_payment >= item.amount:
-                if not item.is_paid:
-                    item.is_paid = True
-                    from django.utils import timezone
-                    item.paid_at = timezone.now()
-                    item.save(update_fields=['is_paid', 'paid_at'])
-                remaining_payment -= item.amount
-            else:
-                if item.is_paid:
-                    item.is_paid = False
-                    item.paid_at = None
-                    item.save(update_fields=['is_paid', 'paid_at'])
-                # Consume remaining payment so we don't apply it further
-                remaining_payment = 0
-                
-        if not plan.items.filter(is_paid=False).exists():
-            plan.status = 'completed'
-            plan.save(update_fields=['status'])
-        else:
-            plan.status = 'approved'
-            plan.save(update_fields=['status'])
+    # Sync every installment item (per-item payment sums drive is_paid flags).
+    # This replaces the previous remaining_payment sequential logic (which had
+    # bugs with multiple plans and didn't respect payment.installment_item FK).
+    for item in InstallmentItem.objects.filter(
+        plan__student_fee=student_fee
+    ).select_related('plan').order_by('due_date', 'id'):
+        mark_installment_paid(item.id)
 
-    # Determine status
+    # Determine StudentFee status (matches summary: paid/partial/overdue/approval_pending)
     amount_due = student_fee.total_amount - student_fee.discount - net_paid
     if amount_due <= 0:
         student_fee.status = 'paid'
     elif net_paid > 0:
         student_fee.status = 'partial'
     else:
-        from django.utils import timezone
-        if student_fee.due_date and student_fee.due_date < timezone.now().date():
+        if (student_fee.due_date and student_fee.due_date < timezone.now().date()):
             student_fee.status = 'overdue'
         else:
             student_fee.status = 'approval_pending'
 
     student_fee.save(update_fields=['amount_paid', 'status', 'updated_at'])
+    logger.info(
+        f"Updated StudentFee {student_fee.id} (status={student_fee.status}, "
+        f"paid={net_paid}, due={amount_due})"
+    )
     return student_fee
 
 
 @transaction.atomic
 def mark_installment_paid(installment_item_id):
-    """Mark an installment item as paid if its linked payment is verified."""
-    from django.db.models import Sum
-    from decimal import Decimal
-    item = InstallmentItem.objects.get(id=installment_item_id)
-    paid = Payment.objects.filter(
+    """Sync an InstallmentItem's is_paid status based on sum of its verified
+    linked Payments. Marks paid (and updates plan to completed if all items paid)
+    or unmarks if underpaid (reverts plan from completed). This is called from
+    update_student_fee_status(), Payment create/verify flows, and signals.
+    """
+    item = InstallmentItem.objects.select_related('plan').get(id=installment_item_id)
+    paid_sum = Payment.objects.filter(
         installment_item=item,
         status='verified',
-    ).aggregate(total=Sum('amount'))['total'] or 0
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
 
-    # Ensure paid is a Decimal to avoid TypeError in SQLite
-    paid = Decimal(str(paid))
+    # Ensure Decimal (handles both None/0 from aggregate and SQLite quirks)
+    paid = Decimal(str(paid_sum))
 
+    plan = item.plan
     if paid >= item.amount:
-        item.is_paid = True
-        from django.utils import timezone
-        item.paid_at = timezone.now()
-        item.save(update_fields=['is_paid', 'paid_at'])
+        if not item.is_paid:
+            item.is_paid = True
+            item.paid_at = timezone.now()
+            item.save(update_fields=['is_paid', 'paid_at'])
+            logger.debug(f"Marked InstallmentItem {item.id} as paid (₹{paid}/{item.amount})")
 
-        # Check if all items in the plan are paid
-        plan = item.plan
+        # If all items in plan are now paid, complete the plan
         if not plan.items.filter(is_paid=False).exists():
-            plan.status = 'completed'
+            if plan.status != 'completed':
+                plan.status = 'completed'
+                plan.save(update_fields=['status'])
+                logger.info(f"Completed InstallmentPlan {plan.id} for StudentFee {plan.student_fee_id}")
+    else:
+        if item.is_paid:
+            item.is_paid = False
+            item.paid_at = None
+            item.save(update_fields=['is_paid', 'paid_at'])
+            logger.debug(f"Unmarked InstallmentItem {item.id} (paid ₹{paid} < ₹{item.amount})")
+
+        # If plan was completed but now not, revert status
+        if plan.status == 'completed':
+            plan.status = 'approved'
             plan.save(update_fields=['status'])
+            logger.info(f"Reverted InstallmentPlan {plan.id} to approved (due to partial payment/refund)")
 
     return item
 
@@ -151,7 +157,6 @@ def has_overdue_installment(student_id):
     more than 15 days past its due_date (the 'expiry date of installment').
     This is used to block attendance QR check-in.
     """
-    from datetime import timedelta
     today = timezone.now().date()
     # due_date < (today - 15 days) = overdue by more than 15 days
     threshold = today - timedelta(days=15)
@@ -166,9 +171,6 @@ def has_overdue_installment(student_id):
 
 def get_refund_policy(payment, requested_amount=None):
     """Return refund eligibility and the capped amount based on payment age and issued inventory."""
-    from datetime import timedelta
-    from decimal import Decimal
-
     payment_date = getattr(payment, 'payment_date', None) or getattr(payment, 'created_at', None)
     if payment_date is None:
         return {

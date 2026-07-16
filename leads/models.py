@@ -106,6 +106,11 @@ class Lead(models.Model):
     is_visited = models.BooleanField(default=False)
     updated_by = models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True)
 
+    # ── Reminders tracking ────────────────────────────────────────────────────────
+    reminder_1d_sent = models.BooleanField(default=False)
+    reminder_2h_sent = models.BooleanField(default=False)
+    last_overdue_reminder_sent = models.DateField(null=True, blank=True)
+
     # ── Assignment (manual only — no auto-assignment) ──────────────────────────
     assigned_to = models.ForeignKey(
         User,
