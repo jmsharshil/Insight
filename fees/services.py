@@ -185,47 +185,60 @@ def payment_approval_reminders_task(*args, **kwargs):
 def send_payment_receipt(payment):
     """
     Shared utility to generate PDF receipt, persist it to payment.payment_document,
-    and email the receipt to student + parent. Used by both admission auto-enrollment
-    and manual PaymentVerifyView.
+    and email the receipt to student + parent using centralized core.sender.
+    Supports multi-recipient, uses attachment tuple. Uses _receipt_generated guard
+    (set by signal or explicitly) to prevent duplicate sends/PDFs from create_student_fee()
+    + post_save signal recursion on payment_document.save().
     """
+    if getattr(payment, '_receipt_generated', False):
+        logger.debug(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')}")
+        return
+    payment._receipt_generated = True
+
     try:
-        from django.core.mail import EmailMessage
-        from django.conf import settings
+        from core.sender import send_email
         from django.core.files.base import ContentFile
         from .pdf_services import generate_payment_receipt_pdf
 
-        to_emails = []
-        if getattr(payment.student, 'email', None):
-            to_emails.append(payment.student.email)
-        if getattr(payment.student, 'email_parent', None):
-            to_emails.append(payment.student.email_parent)
-        if not to_emails and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
-            to_emails.append(payment.student.user.email)
-
         pdf_buffer = generate_payment_receipt_pdf(payment)
-        if pdf_buffer:
-            filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
-            payment.payment_document.save(
-                filename, ContentFile(pdf_buffer.getvalue()), save=True
-            )
+        if not pdf_buffer:
+            logger.warning(f"No PDF buffer for payment {getattr(payment, 'id', 'N/A')}")
+            return
 
-            if to_emails:
-                subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
-                body = (
-                    f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
-                    f"Your payment of ₹{payment.amount} has been successfully verified. "
-                    f"Please find your receipt attached.\n\n"
-                    f"Thank you,\nInsight Institute"
-                )
+        filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
+        pdf_bytes = pdf_buffer.getvalue()  # once only
+        payment.payment_document.save(
+            filename, ContentFile(pdf_bytes), save=True
+        )
 
-                email = EmailMessage(
-                    subject,
-                    body,
-                    settings.DEFAULT_FROM_EMAIL,
-                    to_emails
+        # Prepare recipients (deduplicated)
+        to_list = []
+        if getattr(payment.student, 'email', None):
+            to_list.append(payment.student.email)
+        if getattr(payment.student, 'email_parent', None):
+            to_list.append(payment.student.email_parent)
+        if not to_list and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
+            to_list.append(payment.student.user.email)
+
+        subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
+        body = (
+            f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
+            f"Your payment of ₹{payment.amount} has been successfully verified. "
+            f"Please find your receipt attached.\n\n"
+            f"Thank you,\nInsight Institute"
+        )
+        attachment = (filename, pdf_bytes, 'application/pdf')
+
+        for recipient in set(to_list):  # avoid duplicate sends
+            try:
+                send_email(
+                    to=recipient,
+                    subject=subject,
+                    text=body,
+                    attachments=[attachment],
                 )
-                email.attach(filename, pdf_buffer.getvalue(), 'application/pdf')
-                email.send(fail_silently=False)
-                logger.info(f"Receipt email sent for payment {payment.receipt_number or payment.id}")
+                logger.info(f"Receipt email sent to {recipient} for payment {payment.receipt_number or payment.id}")
+            except Exception as mail_err:
+                logger.error(f"Email to {recipient} failed: {mail_err}")
     except Exception as e:
         logger.error(f"Failed to generate/send receipt for payment {getattr(payment, 'id', 'N/A')}: {e}")
