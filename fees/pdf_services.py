@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 def generate_payment_receipt_pdf(payment):
     """
-    Generate a professional PDF receipt using WeasyPrint (superior HTML/CSS support,
-    better typography, print standards compliance vs xhtml2pdf).
+    Generate a professional PDF receipt using WeasyPrint 61.2 (stable version).
+    Uses pydyf 0.11.0 to avoid 'super().transform' AttributeError.
     Returns a BytesIO buffer containing the PDF data or None on failure.
     """
     try:

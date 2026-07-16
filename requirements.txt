@@ -82,5 +82,6 @@ uv==0.11.26
 vine==5.1.0
 wcwidth==0.7.0
 whitenoise==6.12.0
-weasyprint==62.1
+weasyprint==61.2
+pydyf==0.11.0
 zope.interface==8.5
