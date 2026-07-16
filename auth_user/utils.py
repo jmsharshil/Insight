@@ -3,6 +3,7 @@ from urllib.parse import urlencode
 import secrets
 import string
 from core.sender import send_email
+from chat.notifications import send_whatsapp_text
 
 def generate_temporary_password(length=12):
     """Generate a secure temporary password"""
@@ -46,6 +47,11 @@ Thank you,
         organization=user.organization,
     )
 
+    try:
+        send_whatsapp_text(to=user.phone,body=text_content,user_id=str(user.id))
+    except Exception as e:
+        print(e)
+
 
 def send_otp_email(user, otp):
     subject = "Your OTP Verification Code"
@@ -79,6 +85,11 @@ Best Regards,
         },
         organization=user.organization,
     )
+
+    try:
+        send_whatsapp_text(to=user.phone,body=text_content,user_id=str(user.id))
+    except Exception as e:
+        print(e)
 
 
 def send_student_login_credentials(user, password):
@@ -125,6 +136,11 @@ Best Regards,
         organization=user.organization,
     )
 
+    try:
+        send_whatsapp_text(to=user.phone,body=text_content,user_id=str(user.id))
+    except Exception as e:
+        print(e)
+
 
 def send_parent_login_credentials(parent_user, student_user, password):
     """Send login credentials to a parent account linked with a student"""
@@ -170,3 +186,8 @@ Best Regards,
         },
         organization=parent_user.organization,
     )
+    
+    try:
+        send_whatsapp_text(to=parent_user.phone,body=text_content,parent_id=str(parent_user.id))
+    except Exception as e:
+        print(e)
