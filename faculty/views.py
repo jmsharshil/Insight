@@ -402,17 +402,18 @@ class FacultyQRCheckinView(APIView):
 
         # Get active check-in time if checked in today
         from .models import FacultyQRScanLog
-        today = timezone.now().date()
+        local_now = timezone.localtime(timezone.now())
+        today = local_now.date()
         last_log = FacultyQRScanLog.objects.filter(faculty=fp, scanned_at__date=today).order_by('-scanned_at').first()
         start_time = None
         if last_log and last_log.scan_type == 'check_in':
-            start_time = last_log.scanned_at.strftime('%H:%M')
+            start_time = timezone.localtime(last_log.scanned_at).strftime('%H:%M')
 
         # Get assigned batches, subjects, and chapters based on today's timetable slots
         from batches.models import TimetableSlot, Chapter
         from django.db.models import Q
         
-        now = timezone.now()
+        now = local_now
         dow = now.weekday()
         
         slots = TimetableSlot.objects.filter(
@@ -504,7 +505,8 @@ class FacultyQRCheckinView(APIView):
         late_minutes = 0
         is_early_checkout = False
         early_minutes = 0
-        now = timezone.now()
+        # Use local time for all comparisons with timetable slot times (which are stored in IST)
+        now = timezone.localtime(timezone.now())
 
         from payroll.models import LateEntryPolicy
         policy = LateEntryPolicy.objects.filter(branch=fp.branch, is_active=True).first()
@@ -586,12 +588,13 @@ class FacultyQRCheckinView(APIView):
                             chapters_str = ", ".join([c.name for c in chapters_qs])
                         
                         # Get actual check-in time for today, fallback to slot or now
+                        # Use local time to match timetable slot times stored in IST
                         checkin_log = FacultyQRScanLog.objects.filter(
                             faculty=fp, scan_type='check_in', scanned_at__date=now.date()
                         ).order_by('scanned_at').first()
                         
                         if checkin_log:
-                            start_time = checkin_log.scanned_at.time()
+                            start_time = timezone.localtime(checkin_log.scanned_at).time()
                         else:
                             start_time = now.time()
                             
