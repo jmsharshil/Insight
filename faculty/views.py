@@ -401,13 +401,17 @@ class FacultyQRCheckinView(APIView):
             return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Get active check-in time if checked in today
-        from .models import FacultyQRScanLog
+        from attendance.models import EmployeeAttendanceRecord
         local_now = timezone.localtime(timezone.now())
         today = local_now.date()
-        last_log = FacultyQRScanLog.objects.filter(faculty=fp, scanned_at__date=today).order_by('-scanned_at').first()
+        
+        first_record = EmployeeAttendanceRecord.objects.filter(
+            user=request.user, date=today, checked_in_at__isnull=False
+        ).order_by('checked_in_at').first()
+        
         start_time = None
-        if last_log and last_log.scan_type == 'check_in':
-            start_time = timezone.localtime(last_log.scanned_at).strftime('%H:%M')
+        if first_record:
+            start_time = timezone.localtime(first_record.checked_in_at).strftime('%H:%M')
 
         # Get assigned batches, subjects, and chapters based on today's timetable slots
         from batches.models import TimetableSlot, Chapter
@@ -474,7 +478,7 @@ class FacultyQRCheckinView(APIView):
             'faculty_name': fp.user.name,
             'date': today.strftime('%d-%m-%Y'),
             'start_time': start_time,
-            'end_time': timezone.now().strftime('%H:%M'),
+            'end_time': local_now.strftime('%H:%M'),
             'batches': list(batches_dict.values())
         }
 
