@@ -137,6 +137,7 @@ from .sender import WhatsAppAPIError, WhatsAppConfig, WhatsAppSender
 # Same list as before: Meta error codes that will never succeed on retry.
 # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes
 PERMANENT_ERROR_CODES = {
+    100,     # invalid object ID / no permission / unsupported operation (e.g. wrong phone_number_id)
     131026,  # undeliverable / invalid number
     131047,  # outside 24h window, needs a template
     131051,  # unsupported message type

@@ -23,6 +23,7 @@ from .utils import (
     resolve_qr_data, should_block_qr, get_active_violations_count,
     compute_avg_times, get_violations_breakdown, haversine_distance,
     validate_qr_scan, get_attendance_entry_status,
+    get_next_session_details,
 )
 
 logger = logging.getLogger(__name__)
@@ -451,8 +452,23 @@ class QRScanView(APIView):
             )
             if timetable_slot_obj and timetable_slot_obj.pk:
                 open_record_qs = open_record_qs.filter(timetable_slot=timetable_slot_obj)
-            if open_record_qs.exists():
-                return Response({'success': False, 'message': 'You are already checked in. Please check out first.'}, status=status.HTTP_400_BAD_REQUEST)
+            open_record = open_record_qs.order_by('-checked_in_at').first()
+            if open_record:
+                # Second check-in for same slot: return informative success response with next session details
+                next_session = get_next_session_details(student, timetable_slot_obj)
+                return Response({
+                    'success': True,
+                    'message': 'You are already checked in. Please check out first.',
+                    'already_checked_in': True,
+                    'current_record': {
+                        'id': str(open_record.id),
+                        'checked_in_at': open_record.checked_in_at,
+                        'status': open_record.status,
+                    },
+                    'next_session': next_session,
+                    'scan_type': scan_type,
+                    'device_id': device_id,
+                })
         elif scan_type == 'check_out':
             # Use broader query for checkout to support checking out any open session (not just current slot)
             open_record_qs = AttendanceRecord.objects.filter(

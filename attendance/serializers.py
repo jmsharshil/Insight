@@ -1,8 +1,9 @@
 from rest_framework import serializers
 from .models import (
     AttendanceRecord, QRScanLog, AlertLog, ViolationRecord,
+    EmployeeAttendanceRecord,
     ATTENDANCE_STATUS_CHOICES, SCAN_TYPE_CHOICES,
-    VIOLATION_TYPE_CHOICES,
+    VIOLATION_TYPE_CHOICES, EMPLOYEE_ATTENDANCE_STATUS_CHOICES,
 )
 from django.utils import timezone
 
@@ -12,7 +13,6 @@ from django.utils import timezone
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class AttendanceRecordListSerializer(serializers.ModelSerializer):
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
     """Read-only serializer for listing attendance records."""
     student_name = serializers.SerializerMethodField()
     roll_number = serializers.SerializerMethodField()
@@ -20,7 +20,7 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     marked_by_name = serializers.SerializerMethodField()
     corrected_by_name = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = AttendanceRecord
@@ -135,10 +135,10 @@ class QRScanInputSerializer(serializers.Serializer):
 
 
 class QRScanResponseSerializer(serializers.Serializer):
-    """Response for a successful QR scan."""
-    student_name = serializers.CharField()
-    roll_number = serializers.CharField()
-    scan_time = serializers.DateTimeField()
+    """Response for a successful QR scan (v4: supports already_checked_in + next_session for multi-session handling)."""
+    student_name = serializers.CharField(required=False)
+    roll_number = serializers.CharField(required=False)
+    scan_time = serializers.DateTimeField(required=False)
     scan_type = serializers.CharField()
     device_id = serializers.CharField()
     is_valid = serializers.BooleanField()
@@ -146,6 +146,9 @@ class QRScanResponseSerializer(serializers.Serializer):
     checked_in_at = serializers.DateTimeField(allow_null=True)
     checked_out_at = serializers.DateTimeField(allow_null=True)
     message = serializers.CharField(required=False)
+    already_checked_in = serializers.BooleanField(required=False, default=False)
+    next_session = serializers.DictField(required=False, allow_null=True)
+    current_record = serializers.DictField(required=False, allow_null=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -172,8 +175,7 @@ class AlertLogSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'student', 'student_name', 'alert_type',
             'message', 'threshold', 'current_pct', 'sent_at',
-            'notified_parent', 'notified_admin',
-         'alert_type_display']
+            'notified_parent', 'notified_admin', 'alert_type_display']
 
     def get_student_name(self, obj):
         try:
@@ -202,7 +204,7 @@ class ViolationRecordSerializer(serializers.ModelSerializer):
             'logged_by_admin', 'is_resolved',
             'resolved_by', 'resolved_by_name', 'resolved_at',
             'created_by', 'created_by_name', 'created_at',
-         'violation_type_display']
+            'violation_type_display']
 
     def get_student_name(self, obj):
         try:
@@ -257,8 +259,6 @@ class AttendanceReportRowSerializer(serializers.Serializer):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Employee Attendance Serializers
 # ═══════════════════════════════════════════════════════════════════════════════
-
-from .models import EmployeeAttendanceRecord, EMPLOYEE_ATTENDANCE_STATUS_CHOICES
 
 
 class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
@@ -318,4 +318,7 @@ class EmployeeAttendanceCreateSerializer(serializers.Serializer):
 class EmployeeCheckInOutSerializer(serializers.Serializer):
     """POST /api/v1/attendance/employee/check-in/ or check-out/"""
     scan_type = serializers.ChoiceField(choices=[('check_in', 'Check In'), ('check_out', 'Check Out')])
-
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+    device_id = serializers.CharField(required=True, max_length=100)
+    timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)

@@ -491,3 +491,75 @@ def validate_qr_scan(scan_lat, scan_lng, branch, timetable_slot, scan_time) -> d
         'time_verified':     time_verified,
         'reason':            ' | '.join(reasons),
     }
+
+
+def get_next_session_details(student, current_slot=None):
+    """
+    Returns details of the student's next scheduled class/session.
+    Used when a student attempts a second check-in for the same timeslot.
+    """
+    from django.utils import timezone
+    from batches.models import TimetableSlot, BatchStudent
+
+    now = timezone.localtime()
+    dow = now.weekday() + 1 if now.weekday() != 6 else 7  # model uses 1=Mon..7=Sun
+    current_time = now.time()
+
+    # Get student's enrolled batches
+    batch_ids = list(
+        BatchStudent.objects.filter(
+            student=student,
+            batch__is_active=True
+        ).values_list('batch_id', flat=True)
+    )
+    if not batch_ids:
+        return {'message': 'No scheduled sessions found.'}
+
+    # Look for next slot today (after current slot/time)
+    next_slots_qs = TimetableSlot.objects.filter(
+        batch_id__in=batch_ids,
+        day_of_week=dow,
+        is_recurring=True,
+    )
+    if current_slot and hasattr(current_slot, 'end_time') and current_slot.end_time:
+        next_slots_qs = next_slots_qs.filter(start_time__gt=current_slot.end_time)
+    else:
+        next_slots_qs = next_slots_qs.filter(start_time__gt=current_time)
+
+    next_slot = next_slots_qs.order_by('start_time').first()
+    if next_slot:
+        subject_name = getattr(next_slot.subject, 'name', 'Class') if next_slot.subject else 'Class'
+        session_type = next_slot.session_type
+        if hasattr(next_slot, 'get_session_type_display'):
+            display = next_slot.get_session_type_display()
+            if display and display != session_type:
+                session_type = display
+        return {
+            'next_session': f"{subject_name} ({session_type})",
+            'slot_code': next_slot.slot_code,
+            'start_time': next_slot.start_time.strftime('%I:%M %p'),
+            'day': 'today',
+        }
+
+    # Tomorrow's first slot
+    tomorrow_dow = (dow % 7) + 1
+    tomorrow_slot = TimetableSlot.objects.filter(
+        batch_id__in=batch_ids,
+        day_of_week=tomorrow_dow,
+        is_recurring=True,
+    ).order_by('start_time').first()
+    if tomorrow_slot:
+        subject_name = getattr(tomorrow_slot.subject, 'name', 'Class') if tomorrow_slot.subject else 'Class'
+        session_type = tomorrow_slot.session_type
+        if hasattr(tomorrow_slot, 'get_session_type_display'):
+            display = tomorrow_slot.get_session_type_display()
+            if display and display != session_type:
+                session_type = display
+        return {
+            'next_session': f"{subject_name} ({session_type})",
+            'slot_code': tomorrow_slot.slot_code,
+            'start_time': tomorrow_slot.start_time.strftime('%I:%M %p'),
+            'day': 'tomorrow',
+        }
+
+    return {'message': 'No upcoming sessions scheduled.'}
