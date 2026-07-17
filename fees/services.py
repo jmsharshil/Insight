@@ -8,7 +8,10 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.db import transaction
 
-from .utils import get_installment_plan_status, update_student_fee_status
+from .utils import (
+    get_installment_plan_status, update_student_fee_status,
+    get_recipient_emails, log_pdf_fallback_usage,
+)
 from .models import (
     StudentFee, InstallmentPlan, InstallmentItem,
     Payment, FeeStructure,
@@ -184,11 +187,12 @@ def payment_approval_reminders_task(*args, **kwargs):
 
 def send_payment_receipt(payment):
     """
-    Shared utility to generate PDF receipt, persist it to payment.payment_document,
-    and email the receipt to student + parent using centralized core.sender.
-    Supports multi-recipient, uses attachment tuple. Uses _receipt_generated guard
-    (set by signal or explicitly) to prevent duplicate sends/PDFs from create_student_fee()
-    + post_save signal recursion on payment_document.save().
+    Shared utility to generate PDF receipt (with WeasyPrint or Playwright fallback),
+    persist it to payment.payment_document, and email *using a Django template*
+    (templates/emails/payment_receipt.html extending emails/base.html, for consistency
+    with all other system emails like payslip/student_credentials) + plain-text fallback
+    to student/parent via core.sender.send_email (with tuple attachment).
+    Uses _receipt_generated guard to prevent recursion on payment_document.save().
     """
     if getattr(payment, '_receipt_generated', False):
         logger.debug(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')}")
@@ -200,44 +204,69 @@ def send_payment_receipt(payment):
         from django.core.files.base import ContentFile
         from .pdf_services import generate_payment_receipt_pdf
 
-        pdf_buffer = generate_payment_receipt_pdf(payment)
-        if not pdf_buffer:
+        result = generate_payment_receipt_pdf(payment)
+        if not result or not result[0]:
             logger.warning(f"No PDF buffer for payment {getattr(payment, 'id', 'N/A')}")
             return
+        pdf_buffer, method = result
 
         filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
-        pdf_bytes = pdf_buffer.getvalue()  # once only
+        pdf_bytes = pdf_buffer.getvalue()
+        log_pdf_fallback_usage(
+            payment,
+            used_fallback=(method == 'playwright'),
+            method=method,
+            size_bytes=len(pdf_bytes)
+        )
         payment.payment_document.save(
             filename, ContentFile(pdf_bytes), save=True
         )
 
-        # Prepare recipients (deduplicated)
-        to_list = []
-        if getattr(payment.student, 'email', None):
-            to_list.append(payment.student.email)
-        if getattr(payment.student, 'email_parent', None):
-            to_list.append(payment.student.email_parent)
-        if not to_list and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
-            to_list.append(payment.student.user.email)
+        recipients = get_recipient_emails(payment.student)
+        if not recipients:
+            logger.warning(f"No email recipients for payment {payment.id}")
+            return
 
         subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
-        body = (
-            f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
-            f"Your payment of ₹{payment.amount} has been successfully verified. "
-            f"Please find your receipt attached.\n\n"
-            f"Thank you,\nInsight Institute"
+        student_name = (
+            getattr(payment.student, 'first_name', '')
+            or getattr(payment.student, 'name', '')
+            or getattr(payment.student, 'full_name', 'Student')
         )
+        text_body = (
+            f"Dear {student_name},\n\n"
+            f"Your payment of ₹{payment.amount} has been successfully verified. "
+            f"Please find your official receipt attached as PDF.\n\n"
+            f"Thank you,\nInsight Institute of Professional Studies"
+        )
+
+        template_context = {
+            'student_name': student_name,
+            'amount': f"{payment.amount:,.2f}",
+            'receipt_number': payment.receipt_number or f'REC-{payment.id}',
+            'payment_mode': getattr(payment, 'payment_mode', 'N/A').title(),
+            'transaction_ref': payment.transaction_ref or 'N/A',
+            'payment_date': (
+                payment.payment_date.strftime('%d %b %Y')
+                if getattr(payment, 'payment_date', None) else ''
+            ),
+            'primary_color': '#ed7c31',  # matches original design / institute branding
+            'org_name': 'Insight Institute of Professional Studies',
+        }
+
         attachment = (filename, pdf_bytes, 'application/pdf')
 
-        for recipient in set(to_list):  # avoid duplicate sends
+        for recipient in recipients:
             try:
                 send_email(
                     to=recipient,
                     subject=subject,
-                    text=body,
+                    text=text_body,
+                    template="emails/payment_receipt.html",
+                    template_context=template_context,
                     attachments=[attachment],
                 )
-                logger.info(f"Receipt email sent to {recipient} for payment {payment.receipt_number or payment.id}")
+                logger.info(f"Receipt email (with template) sent to {recipient} for payment {payment.receipt_number or payment.id}")
             except Exception as mail_err:
                 logger.error(f"Email to {recipient} failed: {mail_err}")
     except Exception as e:

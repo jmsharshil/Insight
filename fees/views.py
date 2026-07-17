@@ -27,7 +27,10 @@ from .serializers import (
     BankAccountListSerializer, BankAccountCreateUpdateSerializer,
     FeeReportSerializer,
 )
-from .utils import update_student_fee_status, mark_installment_paid, get_installment_plan_status
+from .utils import (
+    update_student_fee_status, mark_installment_paid, get_installment_plan_status,
+    get_recipient_emails,
+)
 from .services import send_payment_receipt
 
 logger = logging.getLogger(__name__)
@@ -539,38 +542,51 @@ class PaymentVerifyView(APIView):
             except Exception as e:
                 logger.error(f'Failed to mark installment paid: {e}')
 
-        # Send emails on verification/rejection using centralized sender (supports attachments, dedup, HTML fallback)
-        to_emails = []
-        if getattr(payment.student, 'email', None):
-            to_emails.append(payment.student.email)
-        if getattr(payment.student, 'email_parent', None):
-            to_emails.append(payment.student.email_parent)
-        if not to_emails and getattr(payment.student, 'user', None) and getattr(payment.student.user, 'email', None):
-            to_emails.append(payment.student.user.email)
-
+        # Send emails on verification/rejection using centralized sender (with HTML fallback)
         if new_status == 'verified':
             send_payment_receipt(payment)
-        elif new_status == 'rejected' and to_emails:
-            from core.sender import send_email
-            subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
-            body = (
-                f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
-                f"Unfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"
-            )
-            if getattr(payment, 'note', None):
-                body += f"Reason: {payment.note}\n\n"
-            body += "Please contact the administration for more details.\n\nInsight Institute"
+        elif new_status == 'rejected':
+            recipients = get_recipient_emails(payment.student)
+            if recipients:
+                from core.sender import send_email
+                subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
+                text_body = (
+                    f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
+                    f"Unfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"
+                )
+                if getattr(payment, 'note', None):
+                    text_body += f"Reason: {payment.note}\n\n"
+                text_body += "Please contact the administration for more details.\n\nInsight Institute of Professional Studies"
 
-            for recipient in set(to_emails):
-                try:
-                    send_email(
-                        to=recipient,
-                        subject=subject,
-                        text=body,
-                    )
-                    logger.info(f"Rejection email sent to {recipient}")
-                except Exception as e:
-                    logger.error(f"Failed to send rejection email to {recipient}: {e}")
+                html_body = f"""<html>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: #dc3545; color: white; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0;">Payment Rejected</h2>
+    </div>
+    <div style="background: #f8f9fa; padding: 30px; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 8px 8px;">
+        <p>Dear <strong>{getattr(payment.student, 'first_name', 'Student')}</strong>,</p>
+        <p>Unfortunately, your payment of <strong>₹{payment.amount}</strong> has been rejected.</p>
+        {f'<p><strong>Reason:</strong> {payment.note}</p>' if getattr(payment, 'note', None) else ''}
+        <p>Please contact the administration immediately for resolution.</p>
+        <p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 20px;">
+            Insight Institute of Professional Studies<br>
+            <a href="mailto:insightinstitute.ips@gmail.com" style="color: #ed7c31;">insightinstitute.ips@gmail.com</a>
+        </p>
+    </div>
+</body>
+</html>"""
+
+                for recipient in recipients:
+                    try:
+                        send_email(
+                            to=recipient,
+                            subject=subject,
+                            text=text_body,
+                            template=html_body,
+                        )
+                        logger.info(f"Rejection email (with HTML) sent to {recipient}")
+                    except Exception as e:
+                        logger.error(f"Failed to send rejection email to {recipient}: {e}")
 
         return Response(
             {'success': True, 'message': f'Payment {new_status}.',

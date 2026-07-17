@@ -1,0 +1,29 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2 style="color: {{ primary_color }};">Your Payment Receipt</h2>
+
+<p>Hello <strong>{{ student_name }}</strong>,</p>
+
+<p>Your payment has been successfully verified. Please find the official receipt attached as a PDF.</p>
+
+<div class="info-box">
+    <h3 style="margin-top: 0; color: {{ primary_color }};">Receipt Details</h3>
+    <ul>
+        <li><strong>Receipt Number:</strong> {{ receipt_number }}</li>
+        <li><strong>Amount Paid:</strong> ₹{{ amount }}</li>
+        <li><strong>Payment Mode:</strong> {{ payment_mode }}</li>
+        <li><strong>Transaction Reference:</strong> {{ transaction_ref }}</li>
+        {% if payment_date %}<li><strong>Payment Date:</strong> {{ payment_date }}</li>{% endif %}
+    </ul>
+</div>
+
+<p>The attached PDF includes a professional layout with watermark, official signatures, and full breakdown (suitable for official use).</p>
+
+<p style="color: #28a745; font-weight: bold;">Thank you for your payment and trust in our institution!</p>
+
+<p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 15px;">
+    This is an automated email from {{ org_name|default:"Insight Institute of Professional Studies" }}.<br>
+    For any queries, contact us at <a href="mailto:iips.insightinstitute@gmail.com" style="color: {{ primary_color }};">iips.insightinstitute@gmail.com</a> or call 77780 50578.
+</p>
+{% endblock %}

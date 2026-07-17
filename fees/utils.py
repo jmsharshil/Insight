@@ -225,3 +225,35 @@ def get_refund_policy(payment, requested_amount=None):
         'max_refundable_amount': max_refundable,
         'deduction_percent': deduction_percent,
     }
+
+
+def get_recipient_emails(student):
+    """
+    Returns deduplicated list of email addresses for a student (self, parent, user fallback).
+    Used for receipt and rejection notifications.
+    """
+    emails = set()
+    if getattr(student, 'email', None):
+        emails.add(student.email)
+    if getattr(student, 'email_parent', None):
+        emails.add(student.email_parent)
+    if not emails and getattr(student, 'user', None) and getattr(student.user, 'email', None):
+        emails.add(student.user.email)
+    return list(emails)
+
+
+def log_pdf_fallback_usage(payment, used_fallback=False, method='weasyprint', size_bytes=0):
+    """
+    Helper for fallback detection and logging. Called from send_payment_receipt() or
+    pdf_services to track WeasyPrint vs Playwright usage (for monitoring complex CSS cases).
+    """
+    if used_fallback:
+        logger.warning(
+            f"Playwright fallback USED for payment {getattr(payment, 'id', 'N/A')} "
+            f"receipt PDF (size: {size_bytes} bytes)"
+        )
+    else:
+        logger.info(
+            f"Receipt PDF generated with {method} for payment {getattr(payment, 'id', 'N/A')} "
+            f"(size: {size_bytes} bytes)"
+        )

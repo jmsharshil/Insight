@@ -5,25 +5,35 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def send_email(to, subject, cc=None, text="", template=None, attachments=None, 
-               template_context=None, organization=None, from_email=None):
+def send_email(to, subject, cc=None, text="", template=None, attachments=None, template_context=None, organization=None, from_email=None):
     """
-    Send email with optional HTML template and attachments.
-    Uses configured DEFAULT_FROM_EMAIL by default.
+    Send email supporting plain-text + HTML fallback.
+    - `template`: if ends with ".html" renders Django template (with org context if provided);
+      otherwise treated as raw HTML string for attach_alternative("text/html").
+    - `attachments`: list of str (file paths) or tuples (filename, content_bytes, mimetype).
+    - Auto-deduplicates to/cc lists. Uses DEFAULT_FROM_EMAIL by default.
     """
     if cc is None:
         cc = []
     if from_email is None:
         from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'iips.insightinstitute@gmail.com')
     
-    # Ensure to is always a list
+    # Ensure to/cc are always lists and deduplicate while preserving order
     if isinstance(to, str):
         to_list = [to]
     else:
-        to_list = to or []
+        to_list = list(to) if to else []
+    if isinstance(cc, str):
+        cc = [cc]
+    elif not isinstance(cc, list):
+        cc = list(cc) if cc else []
+    
+    # Deduplicate preserving first occurrence order
+    to_list = list(dict.fromkeys([email for email in to_list if email]))
+    cc = list(dict.fromkeys([email for email in cc if email]))
     
     msg = EmailMultiAlternatives(subject, text, from_email, to=to_list, cc=cc)
-    
+
     html_body = template
     if template and template.endswith(".html"):
         ctx = {**(template_context or {})}
