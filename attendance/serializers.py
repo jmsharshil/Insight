@@ -320,5 +320,5 @@ class EmployeeCheckInOutSerializer(serializers.Serializer):
     scan_type = serializers.ChoiceField(choices=[('check_in', 'Check In'), ('check_out', 'Check Out')])
     latitude = serializers.FloatField(required=False, allow_null=True)
     longitude = serializers.FloatField(required=False, allow_null=True)
-    device_id = serializers.CharField(required=True, max_length=100)
+    # device_id = serializers.CharField(required=True, max_length=100)
     timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)
