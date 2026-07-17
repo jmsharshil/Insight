@@ -203,8 +203,11 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                     qr_slot_deviation[d_str]['late_in'] += late_in
                     qr_slot_deviation[d_str]['early_out'] += early_out
 
+            # If they had a scheduled slot, their base pay for this period is the full scheduled duration.
+            # The late/early penalty will correctly deduct from this base if they exceed the buffer.
+            # If we don't do this, they get penalized twice (once for missing minutes in diff_minutes, and again via penalty).
             if scheduled_minutes > 0:
-                diff_minutes = min(diff_minutes, scheduled_minutes)
+                diff_minutes = scheduled_minutes
 
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
@@ -511,6 +514,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=faculty_profile,
+        user=faculty_profile.user,
         basic_salary=basic_salary,
         total_session_hours=total_hours,
         hour_based_amount=applied_hour_based_amount,
@@ -652,7 +656,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                     qr_slot_deviation[d_str]['early_out'] += early_out
 
             if scheduled_minutes > 0:
-                diff_minutes = min(diff_minutes, scheduled_minutes)
+                diff_minutes = scheduled_minutes
 
             qr_extra_minutes += max(diff_minutes, Decimal(0))
 
@@ -1163,6 +1167,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
         working_days_passed = working_days
+        last_day = calendar.monthrange(year, month)[1]
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
         working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
