@@ -539,10 +539,7 @@ class PaymentVerifyView(APIView):
             except Exception as e:
                 logger.error(f'Failed to mark installment paid: {e}')
 
-        # Send emails on verification/rejection
-        from django.core.mail import EmailMessage
-        from django.conf import settings
-        
+        # Send emails on verification/rejection using centralized sender (supports attachments, dedup, HTML fallback)
         to_emails = []
         if getattr(payment.student, 'email', None):
             to_emails.append(payment.student.email)
@@ -554,22 +551,26 @@ class PaymentVerifyView(APIView):
         if new_status == 'verified':
             send_payment_receipt(payment)
         elif new_status == 'rejected' and to_emails:
+            from core.sender import send_email
             subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
-            body = f"Dear {payment.student.first_name},\n\nUnfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"
+            body = (
+                f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
+                f"Unfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"
+            )
             if getattr(payment, 'note', None):
                 body += f"Reason: {payment.note}\n\n"
             body += "Please contact the administration for more details.\n\nInsight Institute"
-            
-            email = EmailMessage(
-                subject,
-                body,
-                settings.DEFAULT_FROM_EMAIL,
-                to_emails
-            )
-            try:
-                email.send(fail_silently=False)
-            except Exception as e:
-                logger.error(f"Failed to send rejection email: {e}")
+
+            for recipient in set(to_emails):
+                try:
+                    send_email(
+                        to=recipient,
+                        subject=subject,
+                        text=body,
+                    )
+                    logger.info(f"Rejection email sent to {recipient}")
+                except Exception as e:
+                    logger.error(f"Failed to send rejection email to {recipient}: {e}")
 
         return Response(
             {'success': True, 'message': f'Payment {new_status}.',
