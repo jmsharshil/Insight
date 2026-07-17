@@ -981,19 +981,15 @@ class ScreenEventView(APIView):
             qs = ExamSession.objects.select_related('exam').all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
-            qs = qs.filter(id=exam_id)
+            session = qs.get(id=exam_id)
             data = {
-                "student_id": exam.student.id,
-                "session_id": exam.session.id,
-                "screen_lock_action": exam.screen_lock_action,
-                "screen_lock_max_violations": exam.screen_lock_max_violations,
-                "screen_lock_violations": exam.screen_lock_violations,
-                "split_screen_action": exam.split_screen_action,
-                "split_screen_max_violations": exam.split_screen_max_violations,
-                "split_screen_violations": exam.split_screen_violations,
-                "full_screen_action": exam.full_screen_action,
-                "full_screen_max_violations": exam.full_screen_max_violations,
-                "full_screen_violations": exam.full_screen_violations,
+                "student_id": session.student.id,
+                "student_name": session.student.full_name,
+                "session_id": session.id,
+                "session_start_time": session.started_at,
+                "session_submit_time": session.submitted_at,
+                "screen_lock_violations": session.screen_lock_violations,
+                "split_screen_violations": session.split_screen_warnings,
             }
             return Response({'success': True, 'data': data})
         except ExamSession.DoesNotExist:
