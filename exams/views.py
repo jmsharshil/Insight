@@ -976,6 +976,29 @@ class ScreenEventView(APIView):
     """v2: configurable per-exam screen_lock_action / split_screen_action (FRD §4.6.1)."""
     # permission_classes = [IsAuthenticated]
 
+    def get(self, request, exam_id):
+        try:
+            qs = ExamSession.objects.select_related('exam').all()
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(exam__branch__organization=request.user.organization)
+            qs = qs.filter(id=exam_id)
+            data = {
+                "student_id": exam.student.id,
+                "session_id": exam.session.id,
+                "screen_lock_action": exam.screen_lock_action,
+                "screen_lock_max_violations": exam.screen_lock_max_violations,
+                "screen_lock_violations": exam.screen_lock_violations,
+                "split_screen_action": exam.split_screen_action,
+                "split_screen_max_violations": exam.split_screen_max_violations,
+                "split_screen_violations": exam.split_screen_violations,
+                "full_screen_action": exam.full_screen_action,
+                "full_screen_max_violations": exam.full_screen_max_violations,
+                "full_screen_violations": exam.full_screen_violations,
+            }
+            return Response({'success': True, 'data': data})
+        except ExamSession.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam Not found'}, status=status.HTTP_404_NOT_FOUND)
+    
     def post(self, request, exam_id, session_id):
         if _user_role(request.user) != 'student':
             return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
