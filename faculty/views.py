@@ -405,13 +405,13 @@ class FacultyQRCheckinView(APIView):
         local_now = timezone.localtime(timezone.now())
         today = local_now.date()
         
-        first_record = EmployeeAttendanceRecord.objects.filter(
-            user=request.user, date=today, checked_in_at__isnull=False
-        ).order_by('checked_in_at').first()
+        open_record = EmployeeAttendanceRecord.objects.filter(
+            user=request.user, date=today, checked_in_at__isnull=False, checked_out_at__isnull=True
+        ).order_by('-checked_in_at').first()
         
         start_time = None
-        if first_record:
-            start_time = timezone.localtime(first_record.checked_in_at).strftime('%H:%M')
+        if open_record:
+            start_time = timezone.localtime(open_record.checked_in_at).strftime('%H:%M')
 
         # Get assigned batches, subjects, and chapters based on today's timetable slots
         from batches.models import TimetableSlot, Chapter
