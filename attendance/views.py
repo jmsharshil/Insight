@@ -121,6 +121,7 @@ class AttendanceListCreateView(APIView):
 
         data = ser.validated_data
         batch_id, att_date, records = data['batch_id'], data['date'], data['records']
+        timetable_slot_id = data.get('timetable_slot_id')  # from validated data (consistent with serializer)
 
         # if role == 'faculty':
         #     bids = _user_batch_ids(user)
@@ -145,11 +146,6 @@ class AttendanceListCreateView(APIView):
         if not Batch.objects.filter(id=batch_id).exists():
             return Response({'success': False, 'message': 'Invalid Batch ID.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        timetable_slot_id = request.data.get('timetable_slot_id')
-
-        if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date, timetable_slot_id=timetable_slot_id).exists():
-            return Response({'success': False, 'message': 'Already marked for this slot. Use PATCH to correct.'}, status=status.HTTP_409_CONFLICT)
-
         created, errors = [], []
         from students.models import Student
         from django.contrib.auth import get_user_model
@@ -165,6 +161,11 @@ class AttendanceListCreateView(APIView):
         except Exception:
             pass
 
+        # Per-student duplicate check (moved inside loop). The old batch-wide exists()
+        # was blocking ALL students if the slot had ANY record — this was the root
+        # of the persistent "multi checkin/checkout" problem. Model no longer has
+        # unique_together, so we now allow multiple records per (student, date, slot)
+        # while still erroring per-student for already-marked cases (use PATCH for corrections).
         for entry in records:
             try:
                 sid = entry['student_id']
@@ -176,6 +177,18 @@ class AttendanceListCreateView(APIView):
                         sid = student_profile.id
                     else:
                         raise Exception("Student ID does not exist in the database.")
+
+                # Per-student check for this exact slot/date (supports multi-session)
+                if AttendanceRecord.objects.filter(
+                    student_id=sid,
+                    date=att_date,
+                    timetable_slot_id=timetable_slot_id
+                ).exists():
+                    errors.append({
+                        'student_id': str(sid),
+                        'error': 'Already marked for this slot. Use PATCH to correct.'
+                    })
+                    continue
 
                 r = AttendanceRecord.objects.create(
                     student_id=sid, batch_id=batch_id, branch_id=branch_id,
@@ -191,9 +204,14 @@ class AttendanceListCreateView(APIView):
                 except Exception as ne:
                     logger.error(f"Attendance notification failed for student {sid}: {ne}")
             except Exception as e:
-                errors.append({'student_id': str(entry['student_id']), 'error': str(e)})
+                errors.append({'student_id': str(entry.get('student_id', sid)), 'error': str(e)})
 
-        return Response({'success': True, 'message': f'{len(created)} records created.', 'created_ids': created, 'errors': errors}, status=status.HTTP_201_CREATED)
+        return Response({
+            'success': True,
+            'message': f'{len(created)} records created, {len(errors)} errors/skipped.',
+            'created_ids': created,
+            'errors': errors
+        }, status=status.HTTP_201_CREATED)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1256,6 +1274,15 @@ class EmployeeAttendanceListCreateView(APIView):
                 errors.append({'user_id': str(raw_id), 'error': 'Student accounts should use student attendance endpoint.'})
                 continue
 
+            # Support multi-session per day: use timetable_slot_id (per-record or top-level)
+            # in lookup so we CREATE separate records instead of just updating the existing
+            # daily record. This fixes the persistent multi check-in/check-out issue.
+            timetable_slot_id = (
+                rec.get('timetable_slot_id')
+                or rec.get('timetable_slot')
+                or d.get('timetable_slot_id')
+            )
+
             defaults = {
                 'branch_id': d.get('branch_id') or _user_branch_id(request.user),
                 'status': rec_status,
@@ -1268,9 +1295,18 @@ class EmployeeAttendanceListCreateView(APIView):
             if 'checked_out_at' in rec:
                 val = rec['checked_out_at']
                 defaults['checked_out_at'] = None if val == "" else val
+            if timetable_slot_id:
+                defaults['timetable_slot_id'] = timetable_slot_id
+
+            lookup = {
+                'user': emp_user,
+                'date': d['date'],
+            }
+            if timetable_slot_id:
+                lookup['timetable_slot_id'] = timetable_slot_id
 
             record, created = EmployeeAttendanceRecord.objects.update_or_create(
-                user=emp_user, date=d['date'],
+                **lookup,
                 defaults=defaults,
             )
             if created:

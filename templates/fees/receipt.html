@@ -16,6 +16,23 @@
         padding: 30px;
         margin: 0;
         position: relative;
+        overflow: hidden;
+    }
+    .watermark {
+        position: absolute;
+        top: 45%;
+        left: 15%;
+        transform: rotate(-38deg);
+        font-size: 85px;
+        font-weight: 900;
+        color: rgba(237, 124, 49, 0.13);
+        z-index: 0;
+        pointer-events: none;
+        letter-spacing: 8px;
+        border: 6px solid rgba(237, 124, 49, 0.18);
+        padding: 8px 50px;
+        text-transform: uppercase;
+        opacity: 0.85;
     }
     .header {
         text-align: center;
@@ -97,6 +114,7 @@
 </head>
 <body>
     <div class="receipt-container">
+        <div class="watermark">PAID</div>
         <div class="header">
             <div class="contact-info">
                 <strong>77780 50578 | 99745 45456</strong><br>
