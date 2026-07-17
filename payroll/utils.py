@@ -1163,6 +1163,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
         working_days_passed = working_days
+        last_day = calendar.monthrange(year, month)[1]
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
         working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
