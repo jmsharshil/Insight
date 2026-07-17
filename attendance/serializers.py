@@ -6,6 +6,18 @@ from .models import (
     VIOLATION_TYPE_CHOICES, EMPLOYEE_ATTENDANCE_STATUS_CHOICES,
 )
 from django.utils import timezone
+from django.utils.timezone import localtime
+
+
+def _fmt_local(dt):
+    """Return datetime converted to the configured TIME_ZONE (Asia/Kolkata) as a
+    formatted string, or None. Prevents UTC times appearing in API responses."""
+    if dt is None:
+        return None
+    try:
+        return localtime(dt).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return str(dt)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21,6 +33,10 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
     marked_by_name = serializers.SerializerMethodField()
     corrected_by_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    # Override datetime fields to return IST (Asia/Kolkata) times instead of UTC
+    checked_in_at = serializers.SerializerMethodField()
+    checked_out_at = serializers.SerializerMethodField()
+    marked_at = serializers.SerializerMethodField()
 
     class Meta:
         model = AttendanceRecord
@@ -61,6 +77,15 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
 
     def get_corrected_by_name(self, obj):
         return obj.corrected_by.name if obj.corrected_by else None
+
+    def get_checked_in_at(self, obj):
+        return _fmt_local(obj.checked_in_at)
+
+    def get_checked_out_at(self, obj):
+        return _fmt_local(obj.checked_out_at)
+
+    def get_marked_at(self, obj):
+        return _fmt_local(getattr(obj, 'marked_at', None))
 
 
 # ── Batch POST payload ───────────────────────────────────────────────────────
@@ -268,6 +293,10 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     marked_by_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    # Override datetime fields to return IST (Asia/Kolkata) times instead of UTC
+    checked_in_at = serializers.SerializerMethodField()
+    checked_out_at = serializers.SerializerMethodField()
+    marked_at = serializers.SerializerMethodField()
 
     class Meta:
         model = EmployeeAttendanceRecord
@@ -298,6 +327,15 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
 
     def get_marked_by_name(self, obj):
         return obj.marked_by.name if obj.marked_by else None
+
+    def get_checked_in_at(self, obj):
+        return _fmt_local(obj.checked_in_at)
+
+    def get_checked_out_at(self, obj):
+        return _fmt_local(obj.checked_out_at)
+
+    def get_marked_at(self, obj):
+        return _fmt_local(getattr(obj, 'marked_at', None))
 
 
 class EmployeeAttendanceCreateSerializer(serializers.Serializer):

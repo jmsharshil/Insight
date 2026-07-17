@@ -349,6 +349,12 @@ if not DEBUG:
             },
         },
         'handlers': {
+            # stdout → Azure Log Stream / App Service Diagnostics / local console
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+                'level': 'ERROR',
+            },
             'file': {
                 'level': 'ERROR',
                 'class': 'logging.FileHandler',
@@ -358,12 +364,12 @@ if not DEBUG:
         },
         'loggers': {
             '': {
-                'handlers': ['file'],
+                'handlers': ['console', 'file'],
                 'level': 'ERROR',
                 'propagate': True,
             },
             'django': {
-                'handlers': ['file'],
+                'handlers': ['console', 'file'],
                 'level': 'ERROR',
                 'propagate': False,
             },

@@ -987,10 +987,15 @@ class ExamScreenEventsView(APIView):
                 qs = qs.filter(session__exam__branch__organization=request.user.organization)
             
             events = qs.filter(session__exam_id=exam_id).order_by('-occurred_at')
-            
+            event_description = ''
+
             data = []
             for event in events:
                 student = event.session.student
+                if event.event_type == 'lock_breach':
+                    event_description = f"Student tried to switch screens or open new tabs"
+                elif event.event_type == 'split_screen':
+                    event_description = f"Student tried to open multiple screens"
                 data.append({
                     "id": event.id,
                     "student_id": student.id,
@@ -998,6 +1003,7 @@ class ExamScreenEventsView(APIView):
                     "session_id": event.session.id,
                     "event_type": event.event_type,
                     "event_type_display": event.get_event_type_display(),
+                    "event_description": event_description,
                     "action_taken": event.action_taken,
                     "action_taken_display": event.get_action_taken_display(),
                     "occurred_at": event.occurred_at,
