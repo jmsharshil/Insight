@@ -66,9 +66,14 @@ class AttendanceRecordListSerializer(serializers.ModelSerializer):
 # ── Batch POST payload ───────────────────────────────────────────────────────
 
 class StudentRecordInputSerializer(serializers.Serializer):
-    """A single {student_id, status} pair inside the batch POST body."""
+    """A single {student_id, status, timetable_slot_id?} pair inside the batch POST body.
+    Supports per-record timetable_slot_id to allow different slots/sessions in one bulk call.
+    """
     student_id = serializers.UUIDField()
     status = serializers.ChoiceField(choices=ATTENDANCE_STATUS_CHOICES)
+    timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)
+    checked_in_at = serializers.DateTimeField(required=False, allow_null=True)
+    remarks = serializers.CharField(required=False, allow_blank=True)
 
 
 class BatchAttendanceCreateSerializer(serializers.Serializer):
