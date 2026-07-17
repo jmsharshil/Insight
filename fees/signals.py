@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 @receiver(post_save, sender='fees.Payment')
 def payment_status_changed(sender, instance, created, **kwargs):
     """
-    When a Payment is saved with verified status, trigger full status recalc
-    via utils (updates amount_paid, marks installments paid, sets fee status
-    to paid/partial/overdue/approval_pending). Also logs.
+    Post-save handler limited to status recalculation. Receipt PDF + email is now
+    called explicitly from create_student_fee() and PaymentVerifyView (with
+    _receipt_generated guard on the instance to break recursion on
+    payment_document.save()).
     """
     if getattr(instance, 'status', None) not in ('verified', 'approved'):
         return
@@ -31,16 +32,5 @@ def payment_status_changed(sender, instance, created, **kwargs):
                 f"Payment {instance.receipt_number or instance.id} verified — "
                 f"updated StudentFee {updated_fee.id} to status '{updated_fee.status}'"
             )
-
-        # Auto-generate and save receipt PDF to payment.payment_document (and email)
-        # when payment is verified. Uses _receipt_generated flag on instance to
-        # prevent recursion from the document.save() inside send_payment_receipt().
-        if (
-            getattr(instance, 'status', None) == 'verified'
-            and not getattr(instance, '_receipt_generated', False)
-        ):
-            instance._receipt_generated = True
-            from .services import send_payment_receipt
-            send_payment_receipt(instance)
     except Exception as e:
         logger.error(f"Fee payment signal error for payment {getattr(instance, 'id', 'N/A')}: {e}")

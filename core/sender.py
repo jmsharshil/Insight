@@ -1,8 +1,28 @@
-from django.core.mail import send_mail, EmailMultiAlternatives
+from django.conf import settings
+from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+import logging
 
-def send_email(to, subject, cc=[], text="", template=None, attachments=None, template_context=None, organization=None):
-    msg = EmailMultiAlternatives(subject, text, "talent@knowcraft.in", to=[to], cc=cc)
+logger = logging.getLogger(__name__)
+
+def send_email(to, subject, cc=None, text="", template=None, attachments=None, 
+               template_context=None, organization=None, from_email=None):
+    """
+    Send email with optional HTML template and attachments.
+    Uses configured DEFAULT_FROM_EMAIL by default.
+    """
+    if cc is None:
+        cc = []
+    if from_email is None:
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'iips.insightinstitute@gmail.com')
+    
+    # Ensure to is always a list
+    if isinstance(to, str):
+        to_list = [to]
+    else:
+        to_list = to or []
+    
+    msg = EmailMultiAlternatives(subject, text, from_email, to=to_list, cc=cc)
     
     html_body = template
     if template and template.endswith(".html"):
@@ -36,13 +56,20 @@ def send_email(to, subject, cc=[], text="", template=None, attachments=None, tem
                     with open(attachment, "rb") as f:
                         msg.attach(filename, f.read(), "application/pdf")
                 else:
-                    # attachment is a tuple
-                    # (filename, content_bytes, mimetype)
+                    # attachment is a tuple (filename, content_bytes, mimetype)
                     msg.attach(*attachment)
             except Exception as e:
-                print("Error Attachning Documents:", e)
+                logger.error("Error attaching document: %s", e)
+                print("Error Attaching Documents:", e)
 
-    msg.send()
+    try:
+        msg.send()
+        logger.info("Email sent successfully to %s with subject: %s", to_list, subject)
+        return True
+    except Exception as e:
+        logger.error("Failed to send email to %s: %s", to_list, str(e))
+        print(f"Email send failed: {e}")
+        return False
 
 """
 whatsapp_sender.py
