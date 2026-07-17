@@ -229,17 +229,24 @@ def get_refund_policy(payment, requested_amount=None):
 
 def get_recipient_emails(student):
     """
-    Returns deduplicated list of email addresses for a student (self, parent, user fallback).
-    Used for receipt and rejection notifications.
+    Returns deduplicated list of email addresses for a student (self, parent, user account).
+    Always includes the student's own email, parent email (if set), and the linked
+    user account email (login email). Used for receipt and rejection notifications.
     """
     emails = set()
+    # Student's own email (direct field on profile)
     if getattr(student, 'email', None):
         emails.add(student.email)
+    # Parent's email
     if getattr(student, 'email_parent', None):
         emails.add(student.email_parent)
-    if not emails and getattr(student, 'user', None) and getattr(student.user, 'email', None):
-        emails.add(student.user.email)
-    return list(emails)
+    # User account email (login email — always include, not just as fallback)
+    try:
+        if getattr(student, 'user', None) and getattr(student.user, 'email', None):
+            emails.add(student.user.email)
+    except Exception:
+        pass
+    return list(filter(None, emails))
 
 
 def log_pdf_fallback_usage(payment, used_fallback=False, method='weasyprint', size_bytes=0):

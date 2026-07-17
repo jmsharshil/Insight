@@ -55,9 +55,14 @@ def generate_payment_receipt_pdf(payment):
         
         # Determine payment type (token vs full vs installment)
         payment_type = 'installment'
+        try:
+            admission = getattr(payment.student, 'admission', None)
+        except Exception:
+            admission = None
+            
         if (
-            getattr(payment.student, 'admission', None)
-            and getattr(payment.student.admission, 'payment_amount', 0) == payment.amount
+            admission
+            and getattr(admission, 'payment_amount', 0) == payment.amount
             and payment.amount < getattr(payment.student_fee, 'total_amount', 0)
         ):
             payment_type = 'token'

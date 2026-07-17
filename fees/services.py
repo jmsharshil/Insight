@@ -184,7 +184,6 @@ def payment_approval_reminders_task(*args, **kwargs):
             email_subject=f"Action Required: {count} Payments Pending Approval"
         )
 
-
 def send_payment_receipt(payment):
     """
     Shared utility to generate PDF receipt (with WeasyPrint or Playwright fallback),
@@ -193,6 +192,7 @@ def send_payment_receipt(payment):
     with all other system emails like payslip/student_credentials) + plain-text fallback
     to student/parent via core.sender.send_email (with tuple attachment).
     Uses _receipt_generated guard to prevent recursion on payment_document.save().
+    Falls back to sending an email without PDF attachment if PDF generation fails.
     """
     if getattr(payment, '_receipt_generated', False):
         logger.debug(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')}")
@@ -204,42 +204,32 @@ def send_payment_receipt(payment):
         from django.core.files.base import ContentFile
         from .pdf_services import generate_payment_receipt_pdf
 
-        result = generate_payment_receipt_pdf(payment)
-        if not result or not result[0]:
-            logger.warning(f"No PDF buffer for payment {getattr(payment, 'id', 'N/A')}")
-            return
-        pdf_buffer, method = result
-
-        filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
-        pdf_bytes = pdf_buffer.getvalue()
-        log_pdf_fallback_usage(
-            payment,
-            used_fallback=(method == 'playwright'),
-            method=method,
-            size_bytes=len(pdf_bytes)
-        )
-        payment.payment_document.save(
-            filename, ContentFile(pdf_bytes), save=True
-        )
-
+        # --- Build recipient list first so we can always send at least a text email ---
         recipients = get_recipient_emails(payment.student)
         if not recipients:
-            logger.warning(f"No email recipients for payment {payment.id}")
+            logger.warning(
+                f"No email recipients found for payment {payment.id} "
+                f"(student: {getattr(payment.student, 'id', 'N/A')}). "
+                "Ensure student.email or student.user.email is set."
+            )
             return
 
-        subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
         student_name = (
             getattr(payment.student, 'first_name', '')
             or getattr(payment.student, 'name', '')
             or getattr(payment.student, 'full_name', 'Student')
         )
+        subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
         text_body = (
             f"Dear {student_name},\n\n"
-            f"Your payment of ₹{payment.amount} has been successfully verified. "
+            f"Your payment of \u20b9{payment.amount} has been successfully verified. "
             f"Please find your official receipt attached as PDF.\n\n"
+            f"Receipt No: {payment.receipt_number or 'N/A'}\n"
+            f"Amount: \u20b9{payment.amount}\n"
+            f"Payment Mode: {getattr(payment, 'payment_mode', 'N/A')}\n"
+            f"Transaction Ref: {payment.transaction_ref or 'N/A'}\n\n"
             f"Thank you,\nInsight Institute of Professional Studies"
         )
-
         template_context = {
             'student_name': student_name,
             'amount': f"{payment.amount:,.2f}",
@@ -250,12 +240,50 @@ def send_payment_receipt(payment):
                 payment.payment_date.strftime('%d %b %Y')
                 if getattr(payment, 'payment_date', None) else ''
             ),
-            'primary_color': '#ed7c31',  # matches original design / institute branding
+            'primary_color': '#ed7c31',
             'org_name': 'Insight Institute of Professional Studies',
         }
 
-        attachment = (filename, pdf_bytes, 'application/pdf')
+        # --- Attempt PDF generation ---
+        pdf_attachment = None
+        try:
+            result = generate_payment_receipt_pdf(payment)
+            if result and result[0]:
+                pdf_buffer, method = result
+                filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
+                pdf_bytes = pdf_buffer.getvalue()
+                log_pdf_fallback_usage(
+                    payment,
+                    used_fallback=(method == 'playwright'),
+                    method=method,
+                    size_bytes=len(pdf_bytes)
+                )
+                # Save to payment.payment_document (save=True triggers a model save)
+                try:
+                    payment.payment_document.save(
+                        filename, ContentFile(pdf_bytes), save=True
+                    )
+                    logger.info(f"PDF saved to payment_document for payment {payment.id}")
+                except Exception as save_err:
+                    logger.error(
+                        f"Failed to save PDF to payment_document for payment {payment.id}: {save_err}",
+                        exc_info=True
+                    )
+                pdf_attachment = (filename, pdf_bytes, 'application/pdf')
+            else:
+                logger.warning(
+                    f"PDF generation returned empty/None for payment {payment.id}. "
+                    "Sending email without PDF attachment."
+                )
+        except Exception as pdf_err:
+            logger.error(
+                f"PDF generation failed for payment {payment.id}: {pdf_err}",
+                exc_info=True
+            )
+            # Continue — email will still be sent without PDF attachment
 
+        # --- Send email to all recipients ---
+        attachments = [pdf_attachment] if pdf_attachment else []
         for recipient in recipients:
             try:
                 send_email(
@@ -264,10 +292,21 @@ def send_payment_receipt(payment):
                     text=text_body,
                     template="emails/payment_receipt.html",
                     template_context=template_context,
-                    attachments=[attachment],
+                    attachments=attachments,
                 )
-                logger.info(f"Receipt email (with template) sent to {recipient} for payment {payment.receipt_number or payment.id}")
+                logger.info(
+                    f"Receipt email sent to {recipient} for payment "
+                    f"{payment.receipt_number or payment.id}"
+                    + (" (with PDF)" if pdf_attachment else " (NO PDF — generation failed)")
+                )
             except Exception as mail_err:
-                logger.error(f"Email to {recipient} failed: {mail_err}")
+                logger.error(
+                    f"Email to {recipient} failed for payment {payment.id}: {mail_err}",
+                    exc_info=True
+                )
     except Exception as e:
-        logger.error(f"Failed to generate/send receipt for payment {getattr(payment, 'id', 'N/A')}: {e}")
+        logger.error(
+            f"Failed to process receipt for payment {getattr(payment, 'id', 'N/A')}: {e}",
+            exc_info=True
+        )
+
