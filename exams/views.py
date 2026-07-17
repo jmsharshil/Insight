@@ -972,28 +972,44 @@ class AutosaveView(APIView):
         return Response({'saved': True, 'question_id': ser.validated_data['question_id'], 'remaining_seconds': remaining})
 
 
-class ScreenEventView(APIView):
-    """v2: configurable per-exam screen_lock_action / split_screen_action (FRD §4.6.1)."""
+class ExamScreenEventsView(APIView):
+    """v2: get all screen events for an exam."""
     # permission_classes = [IsAuthenticated]
 
     def get(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'exam_supervisor', 'admin_senior_executive', 'branch_manager', 'faculty']:
+            return Response({'success': False, 'message': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+            
         try:
-            qs = ExamSession.objects.select_related('exam').all()
+            qs = ScreenEvent.objects.select_related('session__student__user').all()
             if getattr(request.user, 'organization', None):
-                qs = qs.filter(exam__branch__organization=request.user.organization)
-            session = qs.get(id=exam_id)
-            data = {
-                "student_id": session.student.id,
-                "student_name": session.student.full_name,
-                "session_id": session.id,
-                "session_start_time": session.started_at,
-                "session_submit_time": session.submitted_at,
-                "screen_lock_violations": session.screen_lock_violations,
-                "split_screen_violations": session.split_screen_warnings,
-            }
+                qs = qs.filter(session__exam__branch__organization=request.user.organization)
+            
+            events = qs.filter(session__exam_id=exam_id).order_by('-occurred_at')
+            
+            data = []
+            for event in events:
+                student = event.session.student
+                data.append({
+                    "id": event.id,
+                    "student_id": student.id,
+                    "student_name": student.user.name if student and student.user else str(student.id),
+                    "session_id": event.session.id,
+                    "event_type": event.event_type,
+                    "event_type_display": event.get_event_type_display(),
+                    "action_taken": event.action_taken,
+                    "action_taken_display": event.get_action_taken_display(),
+                    "occurred_at": event.occurred_at,
+                })
             return Response({'success': True, 'data': data})
-        except ExamSession.DoesNotExist:
-            return Response({'success': False, 'message': 'Exam Not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'success': False, 'message': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ScreenEventView(APIView):
+    """v2: configurable per-exam screen_lock_action / split_screen_action (FRD §4.6.1)."""
+    # permission_classes = [IsAuthenticated]
     
     def post(self, request, exam_id, session_id):
         if _user_role(request.user) != 'student':

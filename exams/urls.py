@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     ExamListCreateView, ExamDetailView, QuestionView, QuestionDetailView,
     SeatingView, SeatingDetailView,
-    ExamStartView, ExamSubmitView, AutosaveView, ScreenEventView,
+    ExamStartView, ExamSubmitView, AutosaveView, ScreenEventView, ExamScreenEventsView,
     GeoCheckView, AnswerKeyDistributeView, AnswerKeyView,
     MalpracticeView, MalpracticeDetailView, ExamScheduleView,
     SubjectPaperListCreateView, SubjectPaperDetailView,
@@ -40,6 +40,7 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/start/', ExamStartView.as_view(), name='exam-start'),
     path('exams/<uuid:exam_id>/submit/', ExamSubmitView.as_view(), name='exam-submit'),
     path('exams/<uuid:exam_id>/sessions/<uuid:session_id>/autosave/', AutosaveView.as_view(), name='exam-autosave'),
+    path('exams/<uuid:exam_id>/screen-events/', ExamScreenEventsView.as_view(), name='exam-all-screen-events'),
     path('exams/<uuid:exam_id>/sessions/<uuid:session_id>/screen-event/', ScreenEventView.as_view(), name='exam-screen-event'),
     # v2 NEW: periodic geo-check (FRD §4.6.1)
     path('exams/<uuid:exam_id>/sessions/<uuid:session_id>/geo-check/', GeoCheckView.as_view(), name='exam-geo-check'),
