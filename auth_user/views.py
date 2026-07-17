@@ -224,7 +224,12 @@ class AddUserAPIView(APIView):
                             employee_id=emp_id,
                             qualification="N/A",
                             specialization="N/A",
-                            joining_date=timezone.now().date()
+                            joining_date=timezone.now().date(),
+                            employment_type=user.employment_type,
+                            hourly_rate=user.hourly_rate,
+                            session_hours=user.session_hours,
+                            salary=user.salary,
+                            salary_retention_percentage=user.salary_retention_percentage
                         )
                         if qr_file:
                             fp.qr_code.save(qr_file.name, qr_file, save=True)

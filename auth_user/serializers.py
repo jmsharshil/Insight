@@ -394,6 +394,21 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
                         pass
             else:
                 ParentLink.objects.filter(parent=instance).delete()
+
+        # Sync employee fields to FacultyProfile if it exists
+        if instance.role == 'faculty':
+            try:
+                from faculty.models import FacultyProfile
+                fp = FacultyProfile.objects.get(user=instance)
+                fp.employment_type = instance.employment_type
+                fp.hourly_rate = instance.hourly_rate
+                fp.session_hours = instance.session_hours
+                fp.salary = instance.salary
+                fp.salary_retention_percentage = instance.salary_retention_percentage
+                fp.save(update_fields=['employment_type', 'hourly_rate', 'session_hours', 'salary', 'salary_retention_percentage'])
+            except:
+                pass
+                
         return instance
 
 class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
