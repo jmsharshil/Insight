@@ -59,40 +59,62 @@ def generate_payment_receipt_pdf(payment):
             admission = getattr(payment.student, 'admission', None)
         except Exception:
             admission = None
-            
-        if (
-            admission
-            and getattr(admission, 'payment_amount', 0) == payment.amount
-            and payment.amount < getattr(payment.student_fee, 'total_amount', 0)
-        ):
-            payment_type = 'token'
-        elif payment.amount >= getattr(payment.student_fee, 'total_amount', 0):
-            payment_type = 'full'
-            
-        context = {
-            'receipt_no': payment.receipt_number or f"REC-{payment.id}",
-            'receipt_date': (
-                payment.payment_date.strftime('%d %b, %Y')
-                if payment.payment_date
-                else payment.created_at.strftime('%d %b, %Y')
-            ),
-            'student_name': getattr(payment.student, 'full_name', 'N/A'),
-            'amount': f"₹{payment.amount:,.2f}",
-            'amount_words': num2words(payment.amount),
-            'batch_name': (
+
+        try:
+            student_fee_total = payment.student_fee.total_amount if payment.student_fee else None
+        except Exception:
+            student_fee_total = None
+        
+        if student_fee_total is not None:
+            try:
+                if (
+                    admission
+                    and getattr(admission, 'payment_amount', None) == payment.amount
+                    and payment.amount < student_fee_total
+                ):
+                    payment_type = 'token'
+                elif payment.amount >= student_fee_total:
+                    payment_type = 'full'
+            except TypeError:
+                pass  # leave as 'installment' if comparison fails
+
+        # Safe date fallback
+        from django.utils import timezone as tz
+        if payment.payment_date:
+            receipt_date_str = payment.payment_date.strftime('%d %b, %Y')
+        else:
+            try:
+                receipt_date_str = tz.localtime(payment.created_at).strftime('%d %b, %Y')
+            except Exception:
+                receipt_date_str = tz.localtime().strftime('%d %b, %Y')
+
+        # Safe batch name
+        try:
+            batch_name = (
                 payment.student_fee.fee_structure.batch.name
-                if getattr(payment.student_fee, 'fee_structure', None)
+                if payment.student_fee
+                and getattr(payment.student_fee, 'fee_structure', None)
                 and getattr(payment.student_fee.fee_structure, 'batch', None)
                 else 'N/A'
-            ),
+            )
+        except Exception:
+            batch_name = 'N/A'
+
+        context = {
+            'receipt_no': payment.receipt_number or f"REC-{payment.id}",
+            'receipt_date': receipt_date_str,
+            'student_name': getattr(payment.student, 'full_name', 'N/A'),
+            'amount': f"\u20b9{payment.amount:,.2f}",
+            'amount_words': num2words(payment.amount),
+            'batch_name': batch_name,
             'payment_type': payment_type,
             'payment_mode': payment.payment_mode or 'N/A',
             'transaction_ref': payment.transaction_ref or 'N/A',
             'transaction_date': (
                 payment.payment_date.strftime('%d %b, %Y') if payment.payment_date else ''
             ),
-            'school_name': getattr(settings, 'SCHOOL_NAME', 'Your School Name'),
-            'school_address': getattr(settings, 'SCHOOL_ADDRESS', ''),
+            # 'school_name': getattr(settings, 'SCHOOL_NAME', 'Your School Name'),
+            # 'school_address': getattr(settings, 'SCHOOL_ADDRESS', ''),
             'logo_url': 'https://insightsinstitutes.blob.core.windows.net/media/insight.png',
         }
         

@@ -1,278 +1,377 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>Payment Receipt - {{ receipt_no }}</title>
     <style>
         @page {
             size: A4;
-            margin: 15mm;
+            margin: 12mm 15mm;
         }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: 'DejaVu Sans', Arial, sans-serif;
-            font-size: 12pt;
-            line-height: 1.4;
-            color: #333;
-            max-width: 800px;
-            margin: 0 auto;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #222;
+            margin: 0;
+            padding: 0;
         }
+
+        /* ── Header ─────────────────────────────── */
         .header {
-            text-align: center;
-            border-bottom: 4px solid #0a3d62;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
-        }
-        .logo {
-            max-height: 70px;
+            display: table;
+            width: 100%;
+            border-bottom: 3px solid #e67e22;
+            padding-bottom: 10px;
             margin-bottom: 10px;
         }
-        .institute-name {
-            font-size: 22pt;
-            font-weight: bold;
-            color: #0a3d62;
-            margin: 5px 0;
+
+        .header-left {
+            display: table-cell;
+            width: 55%;
+            vertical-align: middle;
         }
+
+        .header-right {
+            display: table-cell;
+            width: 45%;
+            vertical-align: middle;
+            text-align: right;
+        }
+
+        .logo {
+            max-height: 80px;
+            max-width: 220px;
+            display: block;
+        }
+
         .tagline {
             font-size: 10pt;
-            color: #555;
-            margin-bottom: 5px;
-        }
-        .title {
-            font-size: 18pt;
-            color: #d32f2f;
-            font-weight: bold;
-            letter-spacing: 2px;
-            margin: 15px 0 5px;
-        }
-        .receipt-meta {
-            display: flex;
-            justify-content: space-between;
-            margin: 20px 0;
-            font-size: 11pt;
-        }
-        .meta-box {
-            border: 2px solid #0a3d62;
-            padding: 12px 15px;
-            width: 48%;
-            background-color: #f8f9fa;
-        }
-        .meta-label {
-            font-weight: bold;
-            color: #0a3d62;
-        }
-        .student-info {
-            background-color: #f0f4f8;
-            padding: 15px;
-            border-left: 5px solid #0a3d62;
-            margin-bottom: 20px;
-        }
-        .amount-section {
-            text-align: center;
-            border: 3px double #0a3d62;
-            padding: 20px;
-            margin: 25px 0;
-            background-color: #fff;
-        }
-        .amount {
-            font-size: 32pt;
-            font-weight: bold;
-            color: #006400;
-            margin: 10px 0;
-        }
-        .amount-words {
-            font-size: 13pt;
+            color: #333;
+            margin-top: 4px;
             font-style: italic;
+        }
+
+        .badge {
+            display: inline-block;
+            background-color: #e67e22;
+            color: white;
+            font-size: 20pt;
+            font-weight: bold;
+            letter-spacing: 4px;
+            padding: 6px 22px;
+            margin-top: 6px;
+        }
+
+        .inst-info {
+            font-size: 8.5pt;
             color: #444;
+            line-height: 1.6;
+        }
+
+        .inst-info strong {
+            font-size: 9.5pt;
+            color: #222;
+        }
+
+        /* ── Receipt body ───────────────────────── */
+        .outer-box {
+            border: 1.5px solid #e67e22;
+            padding: 14px 18px 10px;
             margin-top: 8px;
         }
-        table {
+
+        .row {
+            display: table;
             width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
+            margin-bottom: 10px;
         }
-        th {
-            background-color: #0a3d62;
-            color: white;
-            padding: 12px 8px;
-            text-align: left;
-            font-weight: normal;
+
+        .col {
+            display: table-cell;
+            vertical-align: bottom;
         }
-        td {
-            padding: 12px 8px;
-            border-bottom: 1px solid #ddd;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .payment-details {
-            margin: 25px 0;
-            padding: 15px;
-            border: 1px solid #ccc;
-        }
-        .type-labels {
-            margin: 15px 0;
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-        .type-item {
-            display: flex;
-            align-items: center;
-        }
-        .checkbox {
-            display: inline-block;
-            width: 18px;
-            height: 18px;
-            border: 2px solid #0a3d62;
-            margin-right: 8px;
-            position: relative;
-            flex-shrink: 0;
-        }
-        .checked .checkbox:after {
-            content: '✔';
-            position: absolute;
-            top: -2px;
-            left: 2px;
-            color: #0a3d62;
-            font-size: 16px;
-        }
-        .footer {
-            margin-top: 50px;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-        }
-        .thankyou {
-            font-size: 11pt;
-            max-width: 60%;
-        }
-        .signatory {
-            text-align: center;
-            border-top: 1px solid #0a3d62;
-            width: 220px;
-            padding-top: 5px;
-        }
-        .signatory-name {
+
+        .col-label {
+            width: 1%;
+            white-space: nowrap;
             font-weight: bold;
-            color: #0a3d62;
-            margin-top: 25px;
+            padding-right: 6px;
         }
-        .watermark {
+
+        .dotted-line {
+            border-bottom: 1px dashed #888;
+            width: 100%;
+            display: inline-block;
+        }
+
+        .col-gap {
+            width: 30px;
+        }
+
+        /* ── Checkboxes ─────────────────────────── */
+        .checkbox-section {
+            margin: 12px 0 8px;
+        }
+
+        .checkbox-row {
+            display: table;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .checkbox-row-label {
+            display: table-cell;
+            font-weight: bold;
+            white-space: nowrap;
+            padding-right: 14px;
+            vertical-align: middle;
+            width: 1%;
+        }
+
+        .checkbox-items {
+            display: table-cell;
+            vertical-align: middle;
+        }
+
+        .cb-item {
+            display: inline-block;
+            margin-right: 28px;
+            vertical-align: middle;
+        }
+
+        .cb-box {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 1.5px solid #333;
+            vertical-align: middle;
+            margin-right: 5px;
+            position: relative;
+            background: white;
+        }
+
+        /* Tick using border trick — WeasyPrint safe */
+        .cb-box.ticked {
+            border-color: #0a3d62;
+            background: white;
+        }
+
+        .cb-box.ticked::after {
+            content: '\2714';
             position: absolute;
-            top: 40%;
-            left: 30%;
+            top: -3px;
+            left: 1px;
+            font-size: 13px;
+            color: #0a3d62;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .cb-label {
+            vertical-align: middle;
+            font-size: 10.5pt;
+        }
+
+        /* ── Transaction details ─────────────────── */
+        .trans-row {
+            display: table;
+            width: 100%;
+            margin-top: 6px;
+        }
+
+        .trans-cell {
+            display: table-cell;
+            vertical-align: bottom;
+        }
+
+        .trans-cell-gap {
+            width: 30px;
+        }
+
+        /* ── Watermark ────────────────────────────── */
+        .watermark {
+            position: fixed;
+            top: 38%;
+            left: 22%;
             transform: rotate(-35deg);
-            font-size: 60pt;
-            color: rgba(10, 61, 98, 0.08);
+            font-size: 80pt;
+            color: rgba(10, 61, 98, 0.06);
             font-weight: bold;
             pointer-events: none;
             z-index: -1;
             user-select: none;
         }
-        @media print {
-            body { margin: 0; }
+
+        /* ── Footer ──────────────────────────────── */
+        .footer {
+            display: table;
+            width: 100%;
+            margin-top: 36px;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+        }
+
+        .footer-left {
+            display: table-cell;
+            vertical-align: bottom;
+            font-size: 10pt;
+        }
+
+        .footer-right {
+            display: table-cell;
+            vertical-align: bottom;
+            text-align: center;
+            width: 220px;
+        }
+
+        .footer-right .sig-line {
+            border-top: 1px solid #333;
+            padding-top: 4px;
+            margin-top: 40px;
+            font-size: 10pt;
+        }
+
+        .org-name {
+            font-weight: bold;
+            color: #e67e22;
+        }
+
+        .receipt-num-bar {
+            text-align: center;
+            font-size: 8.5pt;
+            color: #888;
+            margin-top: 16px;
+            border-top: 1px dashed #ccc;
+            padding-top: 6px;
         }
     </style>
 </head>
+
 <body>
     <div class="watermark">PAID</div>
-    
+
     <div class="header">
-        <img src="{{ logo_url }}" alt="Institute Logo" class="logo" 
-             onerror="this.onerror=null; this.src='https://insightsinstitutes.blob.core.windows.net/media/insight.png';">
-        <div class="institute-name">{{ school_name }}</div>
-        <div class="tagline">{{ school_address }}</div>
-        <div class="title">OFFICIAL RECEIPT</div>
-    </div>
-
-    <div class="receipt-meta">
-        <div class="meta-box">
-            <div><span class="meta-label">Receipt No:</span> <strong>{{ receipt_no }}</strong></div>
-            <div><span class="meta-label">Date:</span> {{ receipt_date }}</div>
+        <div class="header-left">
+            <img src="{{ logo_url }}" alt="Insight Logo" class="logo"
+                onerror="this.onerror=null; this.src='https://insightsinstitutes.blob.core.windows.net/media/insight.png'">
+            <div class="tagline">Experience &bull; Expertise &bull; Excellence</div>
         </div>
-        <div class="meta-box">
-            <div><span class="meta-label">Payment Type:</span> <strong>{{ payment_type|title }}</strong></div>
-            <div><span class="meta-label">Mode:</span> {{ payment_mode|title }}</div>
-        </div>
-    </div>
-
-    <div class="student-info">
-        <strong>Student Name:</strong> {{ student_name }}<br>
-        <strong>Batch / Course:</strong> {{ batch_name }}<br>
-        <strong>Transaction Reference:</strong> {{ transaction_ref }}<br>
-        {% if transaction_date %}
-        <strong>Transaction Date:</strong> {{ transaction_date }}
-        {% endif %}
-    </div>
-
-    <div class="amount-section">
-        <div style="font-size: 14pt; color: #555; margin-bottom: 5px;">Amount Paid</div>
-        <div class="amount">{{ amount }}</div>
-        <div class="amount-words">{{ amount_words }}</div>
-    </div>
-
-    <table>
-        <thead>
-            <tr>
-                <th width="70%">Particulars</th>
-                <th width="30%">Amount (₹)</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td>Fee Payment - {{ payment_type|title }} towards {{ batch_name }}</td>
-                <td style="text-align: right; font-weight: bold;">{{ amount }}</td>
-            </tr>
-            {% if payment_type == 'full' %}
-            <tr>
-                <td colspan="2" style="font-size: 10pt; color: #006400; text-align: center;">
-                    Full payment received. Thank you!
-                </td>
-            </tr>
-            {% elif payment_type == 'token' %}
-            <tr>
-                <td colspan="2" style="font-size: 10pt; color: #d35400; text-align: center;">
-                    Token / Admission Fee. Balance due as per fee structure.
-                </td>
-            </tr>
-            {% endif %}
-        </tbody>
-    </table>
-
-    <div class="payment-details">
-        <strong>Payment Category:</strong>
-        <div class="type-labels">
-            <div class="type-item {% if payment_type == 'token' %}checked{% endif %}">
-                <div class="checkbox"></div>
-                Token / Admission Fee
+        <div class="header-right">
+            <div class="inst-info">
+                <strong>INSIGHT INSTITUTE</strong><br>
+                1st Floor, Bunglow No.2, Shreeji Society,<br>
+                Behind Gautam Nagar Bus Stand,<br>
+                Near Maninagar Railway Crossing,<br>
+                Maninagar, Ahmedabad – 380013.<br>
+                77780 50378 | 93745 49455
             </div>
-            <div class="type-item {% if payment_type == 'installment' %}checked{% endif %}">
-                <div class="checkbox"></div>
-                Installment Fee
-            </div>
-            <div class="type-item {% if payment_type == 'full' %}checked{% endif %}">
-                <div class="checkbox"></div>
-                Full Fee Payment
-            </div>
+            <div class="badge">RECEIPT</div>
         </div>
     </div>
 
+    <!-- ═══════════════ BODY ═══════════════ -->
+    <div class="outer-box">
+
+        <!-- Receipt No + Date -->
+        <div class="row">
+            <div class="col col-label">Receipt Date&nbsp;</div>
+            <div class="col"><span class="dotted-line">{{ receipt_date }}</span></div>
+            <div class="col col-gap"></div>
+            <div class="col col-label">Receipt No.&nbsp;</div>
+            <div class="col" style="width:130px;"><span class="dotted-line"><strong>{{ receipt_no }}</strong></span>
+            </div>
+        </div>
+
+        <!-- Received From -->
+        <div class="row">
+            <div class="col col-label">Received From M/s.&nbsp;</div>
+            <div class="col"><span class="dotted-line">{{ student_name }}</span></div>
+            <div class="col col-gap"></div>
+            <div class="col col-label">Batch&nbsp;</div>
+            <div class="col" style="width:160px;"><span class="dotted-line">{{ batch_name }}</span></div>
+        </div>
+
+        <!-- Amount -->
+        <div class="row">
+            <div class="col col-label">Rs.&nbsp;</div>
+            <div class="col" style="width:130px;"><span class="dotted-line"><strong>{{ amount }}</strong></span></div>
+            <div class="col col-gap"></div>
+            <div class="col col-label">Rs. In words&nbsp;</div>
+            <div class="col"><span class="dotted-line">{{ amount_words }}</span></div>
+        </div>
+
+        <!-- ── Payment Category Checkboxes ── -->
+        <div class="checkbox-section">
+            <div class="checkbox-row">
+                <div class="checkbox-row-label" style="width:1px; white-space:nowrap; padding-right:16px;"></div>
+                <div class="checkbox-items">
+                    <span class="cb-item">
+                        <span class="cb-box {% if payment_type == 'token' %}ticked{% endif %}"></span>
+                        <span class="cb-label">Token</span>
+                    </span>
+                    <span class="cb-item">
+                        <span class="cb-box {% if payment_type == 'full' %}ticked{% endif %}"></span>
+                        <span class="cb-label">Full Payment</span>
+                    </span>
+                    <span class="cb-item">
+                        <span class="cb-box {% if payment_type == 'installment' %}ticked{% endif %}"></span>
+                        <span class="cb-label">Installment</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- ── Payment Mode Checkboxes ── -->
+            <div class="checkbox-row">
+                <div class="checkbox-row-label">By&nbsp;</div>
+                <div class="checkbox-items">
+                    <span class="cb-item">
+                        <span class="cb-box {% if payment_mode|lower == 'cash' %}ticked{% endif %}"></span>
+                        <span class="cb-label">Cash</span>
+                    </span>
+                    <span class="cb-item">
+                        <span class="cb-box {% if payment_mode|lower == 'cheque' %}ticked{% endif %}"></span>
+                        <span class="cb-label">Cheque</span>
+                    </span>
+                    <span class="cb-item">
+                        <span class="cb-box {% if payment_mode|lower in 'online,upi,dd' %}ticked{% endif %}"></span>
+                        <span class="cb-label">Online / UPI</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transaction details -->
+        <div class="trans-row">
+            <div class="trans-cell col-label">Cheque / Transaction No.&nbsp;</div>
+            <div class="trans-cell"><span class="dotted-line">{{ transaction_ref }}</span></div>
+            <div class="trans-cell trans-cell-gap"></div>
+            <div class="trans-cell col-label">Cheque / Transaction Date&nbsp;</div>
+            <div class="trans-cell" style="width:150px;"><span class="dotted-line">{% if transaction_date %}{{
+                    transaction_date }}{% endif %}</span></div>
+        </div>
+
+    </div><!-- /outer-box -->
+
+    <!-- ═══════════════ FOOTER ═══════════════ -->
     <div class="footer">
-        <div class="thankyou">
-            <p>This is a computer-generated receipt and does not require a physical signature.</p>
-            <p style="margin-top: 10px; color: #006400;">Thank you for your timely payment. Your support helps us provide quality education.</p>
-            <p style="margin-top: 20px; font-size: 10pt;">Receipt generated on {{ receipt_date }} via Insight Institute Management System</p>
+        <div class="footer-left">
+            <div>FOR, <span class="org-name">Insight Institute of Professional Studies</span></div>
         </div>
-        <div class="signatory">
-            <p>___________________________</p>
-            <div class="signatory-name">Authorized Signatory</div>
-            <div style="font-size: 10pt; color: #555;">Finance &amp; Accounts</div>
-            <div style="font-size: 9pt; margin-top: 5px;">Insight Institute</div>
+        <div class="footer-right">
+            <div class="sig-line">Authorised Signatory</div>
         </div>
     </div>
 
-    <div style="text-align: center; margin-top: 40px; font-size: 9pt; color: #777; border-top: 1px dashed #ccc; padding-top: 10px;">
-        Receipt No: {{ receipt_no }} | For any queries contact accounts@insightinstitute.edu.in
+    <div class="receipt-num-bar">
+        Receipt No: {{ receipt_no }} &nbsp;|&nbsp; For queries: iips.insightinstitute@gmail.com
     </div>
 </body>
+
 </html>

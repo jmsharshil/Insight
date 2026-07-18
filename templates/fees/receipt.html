@@ -1,122 +1,145 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-    @page {
-        size: a4 portrait;
-        margin: 1cm;
-    }
-    body {
-        font-family: Arial, sans-serif;
-        color: #333;
-    }
-    .receipt-container {
-        border: 2px solid #ed7c31;
-        padding: 30px;
-        margin: 0;
-        position: relative;
-        overflow: hidden;
-    }
-    .watermark {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: rotate(-38deg) translate(-50%, -50%);
-        font-size: 110px;
-        font-weight: 900;
-        color: rgba(237, 124, 49, 0.12);
-        z-index: -1;
-        pointer-events: none;
-        letter-spacing: 12px;
-        border: 8px solid rgba(237, 124, 49, 0.18);
-        padding: 10px 60px;
-        text-transform: uppercase;
-        opacity: 0.85;
-        text-shadow: 0 0 15px rgba(237, 124, 49, 0.25);
-        /* Playwright compatibility tweaks */
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-    }
-    .header {
-        text-align: center;
-        border-bottom: 2px solid #ed7c31;
-        padding-bottom: 20px;
-        margin-bottom: 30px;
-    }
-    .contact-info {
-        float: left;
-        color: #ed7c31;
-        font-size: 11px;
-        line-height: 1.5;
-        text-align: left;
-    }
-    .logo-container {
-        float: right;
-        text-align: right;
-        max-width: 180px;
-    }
-    .logo-img {
-        max-height: 65px;
-        margin-bottom: 4px;
-        border-radius: 4px;
-    }
-    .title {
-        color: #fff;
-        background-color: #ed7c31;
-        display: inline-block;
-        padding: 8px 20px;
-        font-size: 24px;
-        font-weight: bold;
-        border-radius: 5px;
-        margin-top: 10px;
-    }
-    .subtitle {
-        color: #666;
-        font-size: 16px;
-        margin-top: 10px;
-        font-weight: bold;
-    }
-    .row {
-        margin-bottom: 20px;
-        clear: both;
-    }
-    .label {
-        font-weight: bold;
-        color: #333;
-        font-size: 14px;
-    }
-    .value {
-        border-bottom: 1px dashed #666;
-        display: inline-block;
-        font-size: 14px;
-        min-width: 150px;
-    }
-    .checkboxes {
-        margin-top: 15px;
-        font-size: 14px;
-    }
-    .checkboxes span {
-        margin-right: 20px;
-    }
-    .footer {
-        margin-top: 60px;
-        text-align: right;
-    }
-    .sign-area {
-        display: inline-block;
-        text-align: center;
-    }
-    .sign-line {
-        border-top: 1px solid #333;
-        width: 200px;
-        margin-top: 50px;
-        padding-top: 5px;
-        font-weight: bold;
-    }
-</style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        @page {
+            size: a4 portrait;
+            margin: 1cm;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            color: #333;
+        }
+
+        .receipt-container {
+            border: 2px solid #ed7c31;
+            padding: 30px;
+            margin: 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: rotate(-38deg) translate(-50%, -50%);
+            font-size: 110px;
+            font-weight: 900;
+            color: rgba(237, 124, 49, 0.12);
+            z-index: -1;
+            pointer-events: none;
+            letter-spacing: 12px;
+            border: 8px solid rgba(237, 124, 49, 0.18);
+            padding: 10px 60px;
+            text-transform: uppercase;
+            opacity: 0.85;
+            text-shadow: 0 0 15px rgba(237, 124, 49, 0.25);
+            /* Playwright compatibility tweaks */
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #ed7c31;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .contact-info {
+            float: left;
+            color: #ed7c31;
+            font-size: 11px;
+            line-height: 1.5;
+            text-align: left;
+        }
+
+        .logo-container {
+            float: right;
+            width: 220px;
+            text-align: right;
+        }
+
+        .logo-img {
+            display: block;
+            max-width: 100%;
+            max-height: 65px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            margin-left: auto;
+        }
+
+        .title {
+            color: #fff;
+            background-color: #ed7c31;
+            display: inline-block;
+            padding: 8px 20px;
+            font-size: 24px;
+            font-weight: bold;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        .row {
+            margin-bottom: 20px;
+            clear: both;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .value {
+            border-bottom: 1px dashed #666;
+            display: inline-block;
+            font-size: 14px;
+            min-width: 150px;
+        }
+
+        .checkboxes {
+            margin-top: 15px;
+            font-size: 14px;
+        }
+
+        .checkboxes span {
+            margin-right: 20px;
+        }
+
+        .footer {
+            margin-top: 60px;
+            text-align: right;
+        }
+
+        .sign-area {
+            display: inline-block;
+            text-align: center;
+        }
+
+        .sign-line {
+            border-top: 1px solid #333;
+            width: 200px;
+            margin-top: 50px;
+            padding-top: 5px;
+            font-weight: bold;
+        }
+    </style>
 </head>
+
 <body>
     <div class="receipt-container">
         <div class="watermark">PAID</div>
@@ -128,15 +151,13 @@
             </div>
             <!-- Logo (from Azure) with text fallback below it if image fails to load -->
             <div class="logo-container">
-                <img src="{{ logo_url }}" 
-                     alt="{{ school_name|default:'INSIGHT' }} Logo" 
-                     class="logo-img"
-                     style="max-height: 65px;">
-                <h1 style="margin: 8px 0 0 0; color: #444; font-size: 26px;">{{ school_name|default:'INSIGHT' }}</h1>
-                <div style="font-size:12px; color: #ed7c31;">Institute of Professional Studies</div>
+                <img src="{{ logo_url }}" alt="{{ school_name|default:'INSIGHT' }} Logo" class="logo-img"
+                    style="max-height: 65px;">
+                <!-- <h1 style="margin: 8px 0 0 0; color: #444; font-size: 26px;">{{ school_name|default:'INSIGHT' }}</h1>
+                <div style="font-size:12px; color: #ed7c31;">Institute of Professional Studies</div> -->
             </div>
             <div style="clear:both;"></div>
-            
+
             <br><br>
             <div class="title">RECEIPT</div>
             <div class="subtitle">Experience - Expertise - Excellence</div>
@@ -144,31 +165,31 @@
 
         <div style="width: 100%;">
             <div class="row" style="float: right;">
-                <span class="label">Receipt No :</span> 
+                <span class="label">Receipt No :</span>
                 <span class="value" style="font-weight: bold; font-size: 18px;">{{ receipt_no }}</span>
             </div>
             <div class="row" style="float: left;">
-                <span class="label">Receipt Date :</span> 
+                <span class="label">Receipt Date :</span>
                 <span class="value">{{ receipt_date }}</span>
             </div>
             <div style="clear:both;"></div>
         </div>
-        
+
         <div class="row">
-            <span class="label">Received From M/s. :</span> 
+            <span class="label">Received From M/s. :</span>
             <span class="value" style="width: 70%;">{{ student_name }}</span>
         </div>
 
         <div class="row">
-            <span class="label">Rs. :</span> 
+            <span class="label">Rs. :</span>
             <span class="value" style="font-weight: bold;">{{ amount }}</span>
-            
-            <span class="label" style="margin-left: 30px;">Rs. in words :</span> 
+
+            <span class="label" style="margin-left: 30px;">Rs. in words :</span>
             <span class="value" style="width: 45%;">{{ amount_words }}</span>
         </div>
-        
+
         <div class="row">
-            <span class="label">Batch :</span> 
+            <span class="label">Batch :</span>
             <span class="value" style="width: 80%;">{{ batch_name }}</span>
         </div>
 
@@ -186,17 +207,17 @@
         </div>
 
         <div class="row" style="margin-top: 25px;">
-            <span class="label">Cheque / Transaction No. :</span> 
+            <span class="label">Cheque / Transaction No. :</span>
             <span class="value" style="width: 60%;">{{ transaction_ref }}</span>
         </div>
-        
+
         <div class="row">
-            <span class="label">Cheque Drawn on :</span> 
+            <span class="label">Cheque Drawn on :</span>
             <span class="value" style="width: 70%;"></span>
         </div>
-        
+
         <div class="row">
-            <span class="label">Cheque/Transaction Date :</span> 
+            <span class="label">Cheque/Transaction Date :</span>
             <span class="value" style="width: 60%;">{{ transaction_date }}</span>
         </div>
 
@@ -224,4 +245,5 @@
         </div>
     </div>
 </body>
+
 </html>
