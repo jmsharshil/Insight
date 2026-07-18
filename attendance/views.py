@@ -225,8 +225,6 @@ class QRScanView(APIView):
         scan_type = ser.validated_data['scan_type']
         device_id = ser.validated_data['device_id']
 
-        student_branch_id = getattr(student, 'branch_id', None) or _user_branch_id(user)
-
         # 2. Resolve Branch from QR data
         from branch.models import Branch
         from uuid import UUID
@@ -270,7 +268,7 @@ class QRScanView(APIView):
                         local = timezone.localtime(now)
                         current_dow = local.weekday() + 1 if local.weekday() != 6 else 7
                         current_time = local.time()
-                        buffered_time = (local + datetime.timedelta(minutes=15)).time()
+                        buffered_time = (local + timedelta(minutes=15)).time()
                         active_slot = TimetableSlot.objects.filter(
                             faculty=fp,
                             day_of_week=current_dow,
@@ -288,36 +286,38 @@ class QRScanView(APIView):
 
             # Faculty specific tracking for payroll late/early logic
             if role == 'faculty':
-                from faculty.models import FacultyQRScanLog, FacultyProfile
-                faculty_profile = FacultyProfile.objects.filter(user=user).first()
-                if faculty_profile:
-                    late_mins = 0
-                    if scan_type == 'check_in' and faculty_profile.work_start_time:
-                        import datetime
-                        s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
-                        diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
-                        if diff > 0:
-                            late_mins = int(diff)
-                    
-                    early_mins = 0
-                    if scan_type == 'check_out' and faculty_profile.work_end_time:
-                        import datetime
-                        e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
-                        if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
-                            e_dt += datetime.timedelta(days=1)
-                        diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
-                        if diff > 0:
-                            early_mins = int(diff)
+                try:
+                    from faculty.models import FacultyQRScanLog, FacultyProfile
+                    import datetime
+                    faculty_profile = FacultyProfile.objects.filter(user=user).first()
+                    if faculty_profile:
+                        late_mins = 0
+                        if scan_type == 'check_in' and faculty_profile.work_start_time:
+                            s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
+                            diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                            if diff > 0:
+                                late_mins = int(diff)
+                        
+                        early_mins = 0
+                        if scan_type == 'check_out' and faculty_profile.work_end_time:
+                            e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
+                            if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
+                                e_dt += timedelta(days=1)
+                            diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
+                            if diff > 0:
+                                early_mins = int(diff)
 
-                    FacultyQRScanLog.objects.create(
-                        faculty=faculty_profile,
-                        branch=branch,
-                        scan_type=scan_type,
-                        is_late=(late_mins > 0),
-                        late_minutes=late_mins,
-                        is_early_checkout=(early_mins > 0),
-                        early_minutes=early_mins
-                    )
+                        FacultyQRScanLog.objects.create(
+                            faculty=faculty_profile,
+                            branch=branch,
+                            scan_type=scan_type,
+                            is_late=(late_mins > 0),
+                            late_minutes=late_mins,
+                            is_early_checkout=(early_mins > 0),
+                            early_minutes=early_mins
+                        )
+                except Exception as e:
+                    logger.error(f"Faculty QR scan log failed: {e}")
 
             if scan_type == 'check_in':
                 if open_record:
