@@ -202,8 +202,8 @@
         <div class="checkboxes" style="margin-top: 25px;">
             <span class="label">By</span>
             <span style="margin-left: 10px;">[ {% if payment_mode == 'cash' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cash</span>
-            <span>[ {% if payment_mode == 'cheque' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cheque</span>
-            <span>[ {% if payment_mode == 'online' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Online</span>
+            <span>[ {% if payment_mode == 'cheque' or payment_mode == 'dd' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Cheque</span>
+            <span>[ {% if payment_mode == 'online' or payment_mode == 'upi' %}<strong style="color: #28a745;">✓</strong>{% else %}&nbsp;&nbsp;&nbsp;{% endif %} ] Online</span>
         </div>
 
         <div class="row" style="margin-top: 25px;">
