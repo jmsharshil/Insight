@@ -525,12 +525,21 @@ class FacultyQRCheckinView(APIView):
         current_time = now.time()
         current_dow = now.weekday() + 1 if now.weekday() != 6 else 7
         buffered_time = (now + timedelta(minutes=15)).time()
-        active_slot = TimetableSlot.objects.filter(
+        matching_slots = TimetableSlot.objects.filter(
             faculty=fp,
             day_of_week=current_dow,
             start_time__lte=buffered_time,
             end_time__gte=current_time
-        ).first()
+        ).order_by('start_time')
+
+        active_slot = None
+        for slot in matching_slots:
+            if not EmployeeAttendanceRecord.objects.filter(user=request.user, date=now.date(), timetable_slot=slot).exists():
+                active_slot = slot
+                break
+                
+        if not active_slot and matching_slots.exists():
+            active_slot = matching_slots.last()
 
         # 2. Check existing open record
         open_record = EmployeeAttendanceRecord.objects.filter(

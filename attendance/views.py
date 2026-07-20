@@ -404,12 +404,24 @@ class QRScanView(APIView):
 
         from datetime import timedelta
         buffered_time = (local + timedelta(minutes=15)).time()
-        active_slot = TimetableSlot.objects.filter(
+        matching_slots = TimetableSlot.objects.filter(
             batch_id__in=enrolled_batch_ids,
             day_of_week=current_dow,
             start_time__lte=buffered_time,
             end_time__gte=current_time
-        ).first()
+        ).order_by('start_time')
+
+        active_slot = None
+        for slot in matching_slots:
+            # If they already checked into this slot today, skip it and look for the next one
+            if not AttendanceRecord.objects.filter(student=student, date=local.date(), timetable_slot=slot).exists():
+                active_slot = slot
+                break
+        
+        # If all matching slots were already attended (or there was only one and they attended it),
+        # just default to the last matching one so the proper error message is generated later.
+        if not active_slot and matching_slots.exists():
+            active_slot = matching_slots.last()
 
         batch = None
         if active_slot and active_slot.batch:
@@ -1341,12 +1353,21 @@ class EmployeeCheckInOutView(APIView):
                     current_time = local.time()
                     buffered_time = (local + timedelta(minutes=15)).time()
                     # Find active slot
-                    active_slot = TimetableSlot.objects.filter(
+                    matching_slots = TimetableSlot.objects.filter(
                         faculty=fp,
                         day_of_week=current_dow,
                         start_time__lte=buffered_time,
                         end_time__gte=current_time
-                    ).first()
+                    ).order_by('start_time')
+                    
+                    active_slot = None
+                    for slot in matching_slots:
+                        if not EmployeeAttendanceRecord.objects.filter(user=user, date=today, timetable_slot=slot).exists():
+                            active_slot = slot
+                            break
+                            
+                    if not active_slot and matching_slots.exists():
+                        active_slot = matching_slots.last()
                     timetable_slot_obj = active_slot
             except Exception as e:
                 logger.error(f"Error resolving faculty slot: {e}")
