@@ -266,7 +266,7 @@ class QRScanView(APIView):
                     fp = FacultyProfile.objects.filter(user=user).first()
                     if fp:
                         local = timezone.localtime(now)
-                        current_dow = local.weekday() + 1 if local.weekday() != 6 else 7
+                        current_dow = local.weekday()
                         current_time = local.time()
                         buffered_time = (local + timedelta(minutes=15)).time()
                         active_slot = TimetableSlot.objects.filter(
@@ -403,7 +403,6 @@ class QRScanView(APIView):
         if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
             enrolled_batch_ids.append(primary_batch_id)
 
-        from datetime import timedelta
         buffered_time = (local + timedelta(minutes=15)).time()
         
         # Get matching slots within the time window

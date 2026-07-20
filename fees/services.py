@@ -197,7 +197,6 @@ def send_payment_receipt(payment):
     if getattr(payment, '_receipt_generated', False):
         logger.debug(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')}")
         return
-    payment._receipt_generated = True
 
     try:
         from core.sender import send_email
@@ -271,6 +270,7 @@ def send_payment_receipt(payment):
                         exc_info=True
                     )
                 pdf_attachment = (filename, pdf_bytes, 'application/pdf')
+                payment._receipt_generated = True
             else:
                 logger.warning(
                     f"PDF generation returned empty/None for payment {payment.id}. "

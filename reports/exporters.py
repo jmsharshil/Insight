@@ -3,7 +3,7 @@ reports/exporters.py — CSV and PDF export helpers.
 """
 import csv
 import io
-from datetime import datetime
+from django.utils import timezone
 from django.http import StreamingHttpResponse, HttpResponse
 
 
@@ -73,7 +73,7 @@ def export_pdf(title, headers, rows, filename='report.pdf', landscape=False):
     elements.append(Paragraph(title, styles['Title']))
     elements.append(Spacer(1, 6))
     elements.append(Paragraph(
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"Generated: {timezone.localtime(timezone.now()).strftime('%Y-%m-%d %H:%M')}",
         styles['Normal']
     ))
     elements.append(Spacer(1, 12))

@@ -502,7 +502,7 @@ def get_next_session_details(student, current_slot=None):
     from batches.models import TimetableSlot, BatchStudent
 
     now = timezone.localtime()
-    dow = now.weekday() + 1 if now.weekday() != 6 else 7  # model uses 1=Mon..7=Sun
+    dow = now.weekday()
     current_time = now.time()
 
     # Get student's enrolled batches
