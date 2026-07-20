@@ -524,14 +524,11 @@ class FacultyQRCheckinView(APIView):
         # 1. Determine Timetable Slot for current time
         current_time = now.time()
         current_dow = now.weekday()
-        buffered_time = (now + timedelta(minutes=15)).time()
 
-        # Get matching slots within the time window
-        matching_slots = TimetableSlot.objects.filter(
+        # Get ALL of today's slots for this faculty (not limited by a time buffer)
+        all_today_slots = TimetableSlot.objects.filter(
             faculty=fp,
             day_of_week=current_dow,
-            start_time__lte=buffered_time,
-            end_time__gte=current_time
         ).order_by('start_time')
 
         # Collect already-attended slot IDs for today
@@ -541,16 +538,16 @@ class FacultyQRCheckinView(APIView):
             ).values_list('timetable_slot_id', flat=True)
         )
 
-        # Pick the first matching slot that hasn't been attended yet
+        # Pick the first unattended slot that hasn't fully ended yet
         active_slot = None
-        for slot in matching_slots:
-            if slot.id not in attended_slot_ids:
+        for slot in all_today_slots:
+            if slot.id not in attended_slot_ids and slot.end_time >= current_time:
                 active_slot = slot
                 break
 
-        # If no unattended matching slot, fallback to the last matching slot for proper error messaging
-        if not active_slot and matching_slots.exists():
-            active_slot = matching_slots.last()
+        # If no future unattended slot, fallback to the last slot for proper error messaging
+        if not active_slot and all_today_slots.exists():
+            active_slot = all_today_slots.last()
 
         # 2. Check existing open record
         open_record = EmployeeAttendanceRecord.objects.filter(
@@ -565,25 +562,11 @@ class FacultyQRCheckinView(APIView):
                 if EmployeeAttendanceRecord.objects.filter(user=request.user, date=now.date(), timetable_slot=active_slot).exists():
                     return Response({'success': False, 'message': 'You have already marked attendance for this slot today.'}, status=status.HTTP_400_BAD_REQUEST)
             else:
-                # Check if there is a future slot they are too early for
-                future_slot = TimetableSlot.objects.filter(
-                    faculty=fp,
-                    day_of_week=current_dow,
-                    start_time__gt=buffered_time
-                ).order_by('start_time').first()
-                
-                if future_slot:
-                    from datetime import datetime, timedelta
-                    open_time = (datetime.combine(now.date(), future_slot.start_time) - timedelta(minutes=15)).strftime('%I:%M %p')
-                    subject_name = future_slot.subject.name if future_slot.subject else 'Class'
-                    msg = f"You are too early for your next session ({subject_name}). Check-in opens 15 minutes before class at {open_time}."
-                    return Response({'success': False, 'message': msg}, status=status.HTTP_400_BAD_REQUEST)
-
                 completed_today = EmployeeAttendanceRecord.objects.filter(
                     user=request.user, date=now.date(), checked_in_at__isnull=False, checked_out_at__isnull=False
                 ).exists()
                 if completed_today:
-                    return Response({'success': False, 'message': 'You have already completed attendance for your scheduled sessions today.'}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({'success': False, 'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.'}, status=status.HTTP_400_BAD_REQUEST)
 
         elif scan_type == 'check_out':
             if not open_record:
