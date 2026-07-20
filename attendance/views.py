@@ -338,6 +338,17 @@ class QRScanView(APIView):
                             'message': 'Already marked attendance for this slot today.',
                             'data': EmployeeAttendanceRecordSerializer(slot_record).data,
                         }, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    # Enforce once per day if no slot is resolved
+                    completed_today = EmployeeAttendanceRecord.objects.filter(
+                        user=user, date=today,
+                        checked_in_at__isnull=False, checked_out_at__isnull=False
+                    ).exists()
+                    if completed_today:
+                        return Response({
+                            'success': False,
+                            'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.',
+                        }, status=status.HTTP_400_BAD_REQUEST)
                 
                 # Create a new session record
                 record = EmployeeAttendanceRecord.objects.create(
@@ -460,6 +471,14 @@ class QRScanView(APIView):
                 ).first()
                 if slot_record:
                     return Response({'success': False, 'message': 'You have already marked attendance for this slot today.'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # If no slot, enforce one-check-in-per-batch-per-day
+                completed_today = AttendanceRecord.objects.filter(
+                    student=student, batch_id=batch.id, date=now.date(),
+                    checked_in_at__isnull=False, checked_out_at__isnull=False
+                ).exists()
+                if completed_today:
+                    return Response({'success': False, 'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.'}, status=status.HTTP_400_BAD_REQUEST)
             
             existing_record = None # we will create a new one below
         
@@ -1353,6 +1372,16 @@ class EmployeeCheckInOutView(APIView):
                         'success': False,
                         'message': 'Already marked attendance for this slot today.',
                         'data': EmployeeAttendanceRecordSerializer(slot_record).data,
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                completed_today = EmployeeAttendanceRecord.objects.filter(
+                    user=user, date=today,
+                    checked_in_at__isnull=False, checked_out_at__isnull=False
+                ).exists()
+                if completed_today:
+                    return Response({
+                        'success': False,
+                        'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.',
                     }, status=status.HTTP_400_BAD_REQUEST)
             
             # Create a new session record

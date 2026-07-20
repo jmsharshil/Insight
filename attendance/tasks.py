@@ -1,12 +1,12 @@
 """
-Attendance Celery tasks — v3 FRD §4.4 aligned.
+Attendance background tasks — v3 FRD §4.4 aligned.
 
 Changes from v2:
-- detect_missing_scans: split into CASE 1 (missing OUT) + CASE 2 (missing IN)
+- detect_missing_scans: CASE 1 (missing OUT) + CASE 2 (missing IN)
   with correct alert types: missing_checkout_scan / missing_checkin_scan
 - check_no_checkout_eod: uses missing_checkout_scan alert type
-- check_violation_threshold: actually updates Student.qr_blocked
-- Notification stubs use: notify(recipient_user_id, title, body, metadata)
+- All stub notify() calls replaced with real notification helpers
+- detect_missing_scans and check_no_checkout_eod wired to scheduler
 """
 
 import logging
@@ -15,7 +15,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-# ── Stub notification helper ──────────────────────────────────────────────────
+# ── Notification helper ───────────────────────────────────────────────────────
 
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
     from chat.notifications import send_system_notification
@@ -29,6 +29,8 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
             email_context=email_context,
             email_subject=email_subject,
         )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. check_checkin_delay_15  (FRD §4.4.2: 15-min delay → Parent only)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -48,6 +50,15 @@ def check_checkin_delay_15(student_id, date_str, session=None):
         if record and record.checked_in_at:
             return f"Student {student_id} already checked in."
 
+        # Fetch student for notification
+        student = None
+        try:
+            from django.apps import apps
+            SP = apps.get_model('students', 'Student')
+            student = SP.objects.select_related('user').get(id=student_id)
+        except Exception:
+            pass
+
         alert = AlertLog.objects.create(
             student_id=student_id,
             alert_type='checkin_delay_15',
@@ -57,8 +68,15 @@ def check_checkin_delay_15(student_id, date_str, session=None):
         )
         logger.info(f"15-min delay alert for student {student_id} on {date_str}")
 
-        # Stub: notify Parent only (FRD §4.4.2)
-        # notify(parent_user_id, "15-min delay", f"<Name> has not checked in", {})
+        # Notify parent about missing check-in at 15-min mark
+        if student:
+            try:
+                from .notifications import notify_student_missing_scan
+                import datetime
+                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date() if isinstance(date_str, str) else date_str
+                notify_student_missing_scan(student, 'no_checkin', date_obj)
+            except Exception as ne:
+                logger.warning(f"15-min delay notification failed for {student_id}: {ne}")
 
         return f"15-min alert created for {student_id}"
 
@@ -71,7 +89,7 @@ def check_checkin_delay_15(student_id, date_str, session=None):
 # 2. check_checkin_delay_30  (FRD §4.4.2: 30-min delay → Parent AND Admin)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def check_checkin_delay_30(student_id, date_str, session=None):
+def check_checkin_delay_30(student_id, date_str, branch_id=None, session=None):
     """
     Escalation at slot start + 30 min.
     Alert both Parent AND branch Admin.
@@ -87,6 +105,15 @@ def check_checkin_delay_30(student_id, date_str, session=None):
         if record and record.checked_in_at:
             return f"Student {student_id} checked in (late)."
 
+        # Fetch student for notification
+        student = None
+        try:
+            from django.apps import apps
+            SP = apps.get_model('students', 'Student')
+            student = SP.objects.select_related('user').get(id=student_id)
+        except Exception:
+            pass
+
         AlertLog.objects.create(
             student_id=student_id,
             alert_type='checkin_delay_30',
@@ -96,9 +123,36 @@ def check_checkin_delay_30(student_id, date_str, session=None):
         )
         logger.info(f"30-min escalation alert for student {student_id} on {date_str}")
 
-        # Stub: notify Parent AND Admin (FRD §4.4.2)
-        # notify(parent_user_id, "30-min escalation", ...)
-        # notify(admin_user_id, "30-min escalation", ...)
+        # Notify parent (30-min escalation)
+        if student:
+            try:
+                from .notifications import notify_student_missing_scan
+                import datetime
+                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date() if isinstance(date_str, str) else date_str
+                notify_student_missing_scan(student, 'no_checkin', date_obj)
+            except Exception as ne:
+                logger.warning(f"30-min escalation notification failed for {student_id}: {ne}")
+
+        # Notify branch admin via system notification
+        if branch_id:
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                admins = User.objects.filter(
+                    branch_id=branch_id,
+                    role__in=['branch_manager', 'admin_senior_executive', 'admin_executive'],
+                    is_active=True,
+                )
+                student_name = getattr(student, 'first_name', str(student_id)) if student else str(student_id)
+                for admin in admins:
+                    notify(
+                        admin.id,
+                        'Student Not Checked In — 30 Min',
+                        f"{student_name} has not checked in 30 minutes after session start on {date_str}.",
+                        {'module': 'attendance', 'student_id': str(student_id), 'type': 'checkin_delay_30'}
+                    )
+            except Exception as ne:
+                logger.warning(f"Admin escalation notification failed: {ne}")
 
         return f"30-min escalation alert created for {student_id}"
 
@@ -122,7 +176,7 @@ def check_no_checkout_eod(student_id, date_str, session=None):
 
     try:
         record = AttendanceRecord.objects.filter(
-            student_id=student_id, 
+            student_id=student_id,
             date=date_str,
             checked_in_at__isnull=False,
             checked_out_at__isnull=True,
@@ -133,6 +187,15 @@ def check_no_checkout_eod(student_id, date_str, session=None):
 
         if record.checked_out_at:
             return "Already checked out."
+
+        # Fetch student for notification
+        student = None
+        try:
+            from django.apps import apps
+            SP = apps.get_model('students', 'Student')
+            student = SP.objects.select_related('user').get(id=student_id)
+        except Exception:
+            pass
 
         # v3: use missing_checkout_scan alert type
         AlertLog.objects.create(
@@ -153,8 +216,17 @@ def check_no_checkout_eod(student_id, date_str, session=None):
         )
         logger.info(f"No-checkout violation for student {student_id} on {date_str}")
 
-        # Stub: notify Parent (FRD §4.4.2)
-        # notify(parent_user_id, "Missing check-out", f"<Name> missing check-out scan", {})
+        # Notify parent about missing check-out
+        if student:
+            try:
+                from .notifications import notify_student_missing_scan
+                import datetime
+                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date() if isinstance(date_str, str) else date_str
+                notify_student_missing_scan(
+                    student, 'no_checkout', date_obj, checkin_time=record.checked_in_at
+                )
+            except Exception as ne:
+                logger.warning(f"No-checkout notification failed for {student_id}: {ne}")
 
         # Check violation threshold
         check_violation_threshold(student_id)
@@ -173,7 +245,7 @@ def check_no_checkout_eod(student_id, date_str, session=None):
 #    CASE 2 — missing IN (no IN for scheduled session) → missing_checkin_scan
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def detect_missing_scans(branch_id, date_str):
+def detect_missing_scans(branch_id, date_str=None):
     """
     Run at end of each day (23:00).
     For every student with a scheduled batch session today:
@@ -183,15 +255,22 @@ def detect_missing_scans(branch_id, date_str):
     Uses AttendanceRecord for accuracy with multi-session support.
     """
     from .models import AttendanceRecord, AlertLog, ViolationRecord
-    from .notifications import notify_student_violation
+    from .notifications import notify_student_missing_scan
     from django.apps import apps
+
+    if date_str is None:
+        date_str = timezone.localtime(timezone.now()).date().strftime('%Y-%m-%d')
+
+    import datetime
+    date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date() if isinstance(date_str, str) else date_str
 
     try:
         SP = apps.get_model('students', 'Student')
         students = SP.objects.filter(
             branch_id=branch_id, is_active=True
-        ).select_related('user', 'batch')
+        ).select_related('user')
 
+        processed = 0
         for student in students:
             # Get all attendance records for the day (supports multiple sessions)
             day_records = list(AttendanceRecord.objects.filter(
@@ -200,11 +279,17 @@ def detect_missing_scans(branch_id, date_str):
             ))
 
             has_any_checkin = any(r.checked_in_at for r in day_records)
-            has_any_checkout = any(r.checked_out_at for r in day_records)
             open_sessions = [r for r in day_records if r.checked_in_at and not r.checked_out_at]
 
             if not has_any_checkin:
-                # CASE 2: Missing check-in scan (no_show)
+                # CASE 2: Missing check-in scan (no_show) — avoid duplicate alerts
+                if AlertLog.objects.filter(
+                    student=student,
+                    alert_type='missing_checkin_scan',
+                    sent_at__date=date_obj,
+                ).exists():
+                    continue
+
                 AlertLog.objects.create(
                     student=student,
                     alert_type='missing_checkin_scan',
@@ -220,14 +305,22 @@ def detect_missing_scans(branch_id, date_str):
                     logged_by_admin=False,
                 )
                 try:
-                    notify_student_violation(student, 'no_show', date_str, 'No check-in scan detected.')
+                    notify_student_missing_scan(student, 'no_checkin', date_obj)
                 except Exception as ne:
-                    logger.warning(f"Notification failed for no_show: {ne}")
+                    logger.warning(f"Notification failed for no_show {student.id}: {ne}")
                 check_violation_threshold(student.id)
+                processed += 1
 
             elif open_sessions:
                 # CASE 1: Has check-in but missing checkout
                 for open_rec in open_sessions:
+                    if AlertLog.objects.filter(
+                        student=student,
+                        alert_type='missing_checkout_scan',
+                        sent_at__date=date_obj,
+                    ).exists():
+                        continue
+
                     AlertLog.objects.create(
                         student=student,
                         alert_type='missing_checkout_scan',
@@ -243,19 +336,44 @@ def detect_missing_scans(branch_id, date_str):
                         logged_by_admin=False,
                     )
                     try:
-                        notify_student_violation(
-                            student, 'missing_checkout', date_str,
-                            f'Checked in but no checkout recorded.'
+                        notify_student_missing_scan(
+                            student, 'no_checkout', date_obj, checkin_time=open_rec.checked_in_at
                         )
                     except Exception as ne:
-                        logger.warning(f"Notification failed for missing_checkout: {ne}")
+                        logger.warning(f"Notification failed for missing_checkout {student.id}: {ne}")
                     check_violation_threshold(student.id)
+                    processed += 1
 
-        logger.info(f"Missing scan detection complete for branch {branch_id} on {date_str}")
-        return "Detection completed successfully."
+        logger.info(f"Missing scan detection complete for branch {branch_id} on {date_str}: {processed} issues found")
+        return f"Detection completed: {processed} issues found."
 
     except Exception as exc:
         logger.error(f"detect_missing_scans error for branch {branch_id}: {exc}")
+        return f"Error: {exc}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4b. detect_missing_scans_all_branches  (scheduler entry point)
+#     Runs detect_missing_scans for every active branch.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def detect_missing_scans_all_branches():
+    """
+    Nightly task: runs detect_missing_scans for all active branches.
+    Registered as 'detect_missing_scans_all_branches' in the scheduler.
+    """
+    try:
+        from branch.models import Branch
+        branches = Branch.objects.filter(is_active=True)
+        date_str = timezone.localtime(timezone.now()).date().strftime('%Y-%m-%d')
+        results = []
+        for branch in branches:
+            result = detect_missing_scans(str(branch.id), date_str)
+            results.append(f"Branch {branch.name}: {result}")
+        logger.info(f"Nightly missing scan detection done for {len(results)} branches.")
+        return "\n".join(results)
+    except Exception as exc:
+        logger.error(f"detect_missing_scans_all_branches error: {exc}")
         return f"Error: {exc}"
 
 
@@ -297,9 +415,6 @@ def check_violation_threshold(student_id):
                 notified_admin=True,
             )
 
-        # Stub: notify Admin
-        # notify(admin_user_id, "QR blocked", f"<Name> has {count} violations", {})
-
         logger.info(f"QR blocked for student {student_id} ({count} violations)")
     else:
         # Re-enable QR if was blocked
@@ -320,6 +435,7 @@ def send_low_attendance_alerts(branch_id, threshold=75.0):
     """
     from .models import AlertLog
     from .utils import compute_attendance_percentage
+    from .notifications import notify_student_low_attendance
 
     try:
         from django.apps import apps
@@ -348,8 +464,11 @@ def send_low_attendance_alerts(branch_id, threshold=75.0):
                 threshold=threshold, current_pct=pct,
                 notified_parent=True,
             )
+            try:
+                notify_student_low_attendance(s, pct, threshold)
+            except Exception as ne:
+                logger.warning(f"Low attendance notification failed for {s.id}: {ne}")
             alerts += 1
-            # Stub: notify Parent
 
     logger.info(f"Low attendance alerts: {alerts} for branch {branch_id}")
     return f"{alerts} alerts created"

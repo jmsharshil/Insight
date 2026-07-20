@@ -518,6 +518,41 @@ class FacultyQRCheckinView(APIView):
 
         from batches.models import TimetableSlot
         from django.db.models import Q
+        from attendance.models import EmployeeAttendanceRecord
+        
+        # 1. Determine Timetable Slot for current time
+        current_time = now.time()
+        current_dow = now.weekday() + 1 if now.weekday() != 6 else 7
+        buffered_time = (now + timedelta(minutes=15)).time()
+        active_slot = TimetableSlot.objects.filter(
+            faculty=fp,
+            day_of_week=current_dow,
+            start_time__lte=buffered_time,
+            end_time__gte=current_time
+        ).first()
+
+        # 2. Check existing open record
+        open_record = EmployeeAttendanceRecord.objects.filter(
+            user=request.user, date=now.date(), checked_in_at__isnull=False, checked_out_at__isnull=True
+        ).order_by('-checked_in_at').first()
+
+        if scan_type == 'check_in':
+            if open_record:
+                return Response({'success': False, 'message': 'You are already checked in. Please check out first.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            if active_slot:
+                if EmployeeAttendanceRecord.objects.filter(user=request.user, date=now.date(), timetable_slot=active_slot).exists():
+                    return Response({'success': False, 'message': 'You have already marked attendance for this slot today.'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                completed_today = EmployeeAttendanceRecord.objects.filter(
+                    user=request.user, date=now.date(), checked_in_at__isnull=False, checked_out_at__isnull=False
+                ).exists()
+                if completed_today:
+                    return Response({'success': False, 'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        elif scan_type == 'check_out':
+            if not open_record:
+                return Response({'success': False, 'message': 'Must check in first before checking out.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Determine late status for check_in
         if scan_type == 'check_in':
@@ -619,6 +654,17 @@ class FacultyQRCheckinView(APIView):
                             if chapter_ids and chapters_qs:
                                 sr.chapters.set(chapters_qs)
 
+        if scan_type == 'check_in':
+            EmployeeAttendanceRecord.objects.create(
+                user=request.user, date=now.date(), timetable_slot=active_slot,
+                branch_id=fp.branch_id, status='checkout_pending', checked_in_at=now
+            )
+        elif scan_type == 'check_out':
+            if open_record:
+                open_record.checked_out_at = now
+                open_record.status = 'present'
+                open_record.save(update_fields=['checked_out_at', 'status'])
+
         if is_late:
             from leave.models import LateEntryRecord
             LateEntryRecord.objects.create(
@@ -631,6 +677,13 @@ class FacultyQRCheckinView(APIView):
             # Check late entry threshold for auto half-day deduction
             from leave.utils import check_late_entry_threshold
             check_late_entry_threshold(request.user, now.month, now.year)
+
+        # Send notification using the new helper
+        try:
+            from attendance.notifications import notify_faculty_checkin
+            notify_faculty_checkin(request.user, scan_type, now, is_late=is_late, late_minutes=late_minutes)
+        except Exception as ne:
+            logger.error(f"Faculty checkin notification failed: {ne}")
 
         message = 'Check-out recorded.' if scan_type == 'check_out' else (
             'Late check-in recorded.' if is_late else 'Check-in recorded.'

@@ -511,6 +511,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     deduction_note_str = ", ".join(notes)[:300]
 
     # 10. Create PaySlip
+    PaySlip.objects.filter(payroll_run=payroll_run, faculty=faculty_profile).delete()
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=faculty_profile,
@@ -592,16 +593,84 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     total_session_minutes = Decimal(0)
     daily_stats = defaultdict(lambda: {'total_hours': Decimal(0), 'gross_salary': Decimal(0), 'deduction': Decimal(0), 'late_minutes': 0, 'penalty_minutes': 0})
 
+    chapter_monthly_minutes = defaultdict(Decimal)
     for s in sessions:
         session_dates.add(s.session_date)
-        hours = Decimal(s.duration_minutes) / Decimal(60)
-        subject_hours[s.subject_id] += hours
-        total_session_minutes += Decimal(s.duration_minutes)
         
+        # Calculate scheduled duration
+        from batches.models import TimetableSlot
+        from django.db.models import Q
+        dow = s.session_date.weekday()
+        slot = TimetableSlot.objects.filter(
+            Q(day_of_week=dow) | Q(session_date=s.session_date),
+            batch_id=s.batch_id, subject_id=s.subject_id
+        ).first()
+        
+        scheduled_minutes = Decimal(s.duration_minutes)
+        if slot and slot.start_time and slot.end_time:
+            s_dt = datetime.combine(s.session_date, slot.start_time)
+            e_dt = datetime.combine(s.session_date, slot.end_time)
+            if e_dt < s_dt:
+                e_dt += timedelta(days=1)
+            scheduled_minutes = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+            
+        actual_minutes = Decimal(s.duration_minutes)
+        if scheduled_minutes > 0:
+            actual_minutes = min(actual_minutes, scheduled_minutes)
+            
+        chapters = list(s.chapters.all())
+        if chapters:
+            mins_per_chap = actual_minutes / len(chapters)
+            for c in chapters:
+                chapter_monthly_minutes[c] += mins_per_chap
+        else:
+            hours = actual_minutes / Decimal(60)
+            subject_hours[s.subject_id] += hours
+            total_session_minutes += actual_minutes
+
         d_str = s.session_date.strftime('%Y-%m-%d')
-        daily_stats[d_str]['total_hours'] += hours
+        daily_stats[d_str]['total_hours'] += actual_minutes / Decimal(60)
         rate = get_subject_hourly_rate(faculty_profile, s.subject, month, year) if hasattr(s, 'subject') and s.subject else fac_hourly_rate
-        daily_stats[d_str]['gross_salary'] += hours * rate
+        daily_stats[d_str]['gross_salary'] += (actual_minutes / Decimal(60)) * rate
+
+    from payroll.models import ExtraHoursApproval
+    from datetime import date
+    first_of_month = date(year, month, 1)
+
+    for chap, monthly_mins in chapter_monthly_minutes.items():
+        prev_reports = SessionReport.objects.filter(
+            faculty=faculty_profile,
+            chapters=chap,
+            session_date__lt=first_of_month
+        ).distinct()
+        
+        prev_mins = Decimal(0)
+        for pr in prev_reports:
+            pr_chapters_count = pr.chapters.count()
+            if pr_chapters_count > 0:
+                prev_mins += Decimal(pr.duration_minutes) / pr_chapters_count
+
+        allocated_mins = Decimal(chap.duration_hours * 60)
+        remaining_allocated_mins = max(allocated_mins - prev_mins, Decimal(0))
+        
+        payable_mins = monthly_mins
+        
+        if monthly_mins > remaining_allocated_mins:
+            payable_mins = remaining_allocated_mins
+            
+            approval = ExtraHoursApproval.objects.filter(
+                faculty=faculty_profile,
+                chapter=chap,
+                payroll_month=month,
+                payroll_year=year
+            ).first()
+            
+            if approval and approval.status == 'approved':
+                payable_mins += Decimal(approval.extra_minutes)
+
+        hours = payable_mins / Decimal(60)
+        subject_hours[chap.subject_id] += hours
+        total_session_minutes += payable_mins
 
     qr_logs = FacultyQRScanLog.objects.filter(
         faculty=faculty_profile,

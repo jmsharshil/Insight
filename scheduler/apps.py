@@ -84,6 +84,9 @@ class SchedulerConfig(AppConfig):
         )
         from auditlog.tasks import cleanup_old_audit_logs
         from auth_user.tasks import cleanup_old_notifications
+        from attendance.tasks import (
+            detect_missing_scans_all_branches,
+        )
         TaskScheduler.register(
             "accrue_monthly_leaves",
             lambda: accrue_monthly_leaves_task()
@@ -93,6 +96,7 @@ class SchedulerConfig(AppConfig):
         TaskScheduler.register("auto_expire_exam_sessions", auto_expire_exam_sessions)
         TaskScheduler.register("cleanup_old_audit_logs", cleanup_old_audit_logs)
         TaskScheduler.register("cleanup_old_notifications", cleanup_old_notifications)
+        TaskScheduler.register("detect_missing_scans_all_branches", detect_missing_scans_all_branches)
         print("[SCHEDULER APP] All task types registered.")
 
     def _ensure_recurring_tasks(self):
@@ -137,6 +141,12 @@ class SchedulerConfig(AppConfig):
                 "task_type": "cleanup_old_notifications",
                 "interval_seconds": 86400,       # daily
                 "delay_seconds": 1800,           # 30 min after startup
+                "max_retries": 3,
+            },
+            {
+                "task_type": "detect_missing_scans_all_branches",
+                "interval_seconds": 86400,       # nightly (every 24h)
+                "delay_seconds": 82800,          # ~23:00 after midnight startup
                 "max_retries": 3,
             },
         ]
