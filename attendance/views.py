@@ -395,7 +395,8 @@ class QRScanView(APIView):
         
         local = timezone.localtime()
         current_time = local.time()
-        current_dow = local.weekday() + 1 if local.weekday() != 6 else 7
+        # Monday is 0, Sunday is 6 in TimetableSlot DAY_CHOICES
+        current_dow = local.weekday()
 
         enrolled_batch_ids = list(BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True))
         primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
@@ -1349,7 +1350,7 @@ class EmployeeCheckInOutView(APIView):
                 fp = FacultyProfile.objects.filter(user=user).first()
                 if fp:
                     local = timezone.localtime(now)
-                    current_dow = local.weekday() + 1 if local.weekday() != 6 else 7
+                    current_dow = local.weekday()
                     current_time = local.time()
                     buffered_time = (local + timedelta(minutes=15)).time()
                     # Find active slot

@@ -523,7 +523,7 @@ class FacultyQRCheckinView(APIView):
         
         # 1. Determine Timetable Slot for current time
         current_time = now.time()
-        current_dow = now.weekday() + 1 if now.weekday() != 6 else 7
+        current_dow = now.weekday()
         buffered_time = (now + timedelta(minutes=15)).time()
         matching_slots = TimetableSlot.objects.filter(
             faculty=fp,
