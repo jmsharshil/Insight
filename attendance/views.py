@@ -404,11 +404,14 @@ class QRScanView(APIView):
             enrolled_batch_ids.append(primary_batch_id)
 
         from datetime import timedelta
-
-        # Get ALL of today's slots for enrolled batches (not limited by a time buffer)
-        all_today_slots = TimetableSlot.objects.filter(
+        buffered_time = (local + timedelta(minutes=15)).time()
+        
+        # Get matching slots within the time window
+        matching_slots = TimetableSlot.objects.filter(
             batch_id__in=enrolled_batch_ids,
             day_of_week=current_dow,
+            start_time__lte=buffered_time,
+            end_time__gte=current_time
         ).order_by('start_time')
 
         # Collect already-attended slot IDs for today
@@ -418,16 +421,16 @@ class QRScanView(APIView):
             ).values_list('timetable_slot_id', flat=True)
         )
 
-        # Pick the first unattended slot that hasn't fully ended yet
+        # Pick the first matching slot that hasn't been attended yet
         active_slot = None
-        for slot in all_today_slots:
-            if slot.id not in attended_slot_ids and slot.end_time >= current_time:
+        for slot in matching_slots:
+            if slot.id not in attended_slot_ids:
                 active_slot = slot
                 break
 
-        # If no future unattended slot, fallback to the last slot for proper error messaging
-        if not active_slot and all_today_slots.exists():
-            active_slot = all_today_slots.last()
+        # If no unattended matching slot, fallback to the last matching slot for proper error messaging
+        if not active_slot and matching_slots.exists():
+            active_slot = matching_slots.last()
 
         batch = None
         if active_slot and active_slot.batch:
@@ -1356,11 +1359,13 @@ class EmployeeCheckInOutView(APIView):
                 if fp:
                     local = timezone.localtime(now)
                     current_dow = local.weekday()
-                    current_time = local.time()
-                    # Get ALL of today's slots for this faculty
-                    all_today_slots = TimetableSlot.objects.filter(
+                    buffered_time = (local + timedelta(minutes=15)).time()
+                    # Get matching slots within the time window
+                    matching_slots = TimetableSlot.objects.filter(
                         faculty=fp,
                         day_of_week=current_dow,
+                        start_time__lte=buffered_time,
+                        end_time__gte=current_time
                     ).order_by('start_time')
                     
                     # Collect already-attended slot IDs
@@ -1370,15 +1375,15 @@ class EmployeeCheckInOutView(APIView):
                         ).values_list('timetable_slot_id', flat=True)
                     )
                     
-                    # Pick first unattended slot that hasn't ended yet
+                    # Pick first matching slot that hasn't been attended yet
                     active_slot = None
-                    for slot in all_today_slots:
-                        if slot.id not in attended_slot_ids and slot.end_time >= current_time:
+                    for slot in matching_slots:
+                        if slot.id not in attended_slot_ids:
                             active_slot = slot
                             break
                     
-                    if not active_slot and all_today_slots.exists():
-                        active_slot = all_today_slots.last()
+                    if not active_slot and matching_slots.exists():
+                        active_slot = matching_slots.last()
                     timetable_slot_obj = active_slot
             except Exception as e:
                 logger.error(f"Error resolving faculty slot: {e}")
