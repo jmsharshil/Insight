@@ -404,11 +404,14 @@ class QRScanView(APIView):
             enrolled_batch_ids.append(primary_batch_id)
 
         from datetime import timedelta
-
-        # Get ALL of today's slots for enrolled batches (not limited by a time buffer)
-        all_today_slots = TimetableSlot.objects.filter(
+        buffered_time = (local + timedelta(minutes=15)).time()
+        
+        # Get matching slots within the time window
+        matching_slots = TimetableSlot.objects.filter(
             batch_id__in=enrolled_batch_ids,
             day_of_week=current_dow,
+            start_time__lte=buffered_time,
+            end_time__gte=current_time
         ).order_by('start_time')
 
         # Collect already-attended slot IDs for today
@@ -418,16 +421,16 @@ class QRScanView(APIView):
             ).values_list('timetable_slot_id', flat=True)
         )
 
-        # Pick the first unattended slot that hasn't fully ended yet
+        # Pick the first matching slot that hasn't been attended yet
         active_slot = None
-        for slot in all_today_slots:
-            if slot.id not in attended_slot_ids and slot.end_time >= current_time:
+        for slot in matching_slots:
+            if slot.id not in attended_slot_ids:
                 active_slot = slot
                 break
 
-        # If no future unattended slot, fallback to the last slot for proper error messaging
-        if not active_slot and all_today_slots.exists():
-            active_slot = all_today_slots.last()
+        # If no unattended matching slot, fallback to the last matching slot for proper error messaging
+        if not active_slot and matching_slots.exists():
+            active_slot = matching_slots.last()
 
         batch = None
         if active_slot and active_slot.batch:
@@ -492,13 +495,27 @@ class QRScanView(APIView):
                 if slot_record:
                     return Response({'success': False, 'message': 'You have already marked attendance for this slot today.'}, status=status.HTTP_400_BAD_REQUEST)
             else:
+                # Check if there is a future slot they are too early for
+                future_slot = TimetableSlot.objects.filter(
+                    batch_id__in=enrolled_batch_ids,
+                    day_of_week=current_dow,
+                    start_time__gt=buffered_time
+                ).order_by('start_time').first()
+                
+                if future_slot:
+                    import datetime as dt
+                    open_time = (dt.datetime.combine(now.date(), future_slot.start_time) - dt.timedelta(minutes=15)).strftime('%I:%M %p')
+                    subject_name = future_slot.subject.name if future_slot.subject else 'Class'
+                    msg = f"You are too early for the next session ({subject_name}). Check-in opens 15 minutes before class at {open_time}."
+                    return Response({'success': False, 'message': msg}, status=status.HTTP_400_BAD_REQUEST)
+
                 # If no slot, enforce one-check-in-per-batch-per-day
                 completed_today = AttendanceRecord.objects.filter(
                     student=student, batch_id=batch.id, date=now.date(),
                     checked_in_at__isnull=False, checked_out_at__isnull=False
                 ).exists()
                 if completed_today:
-                    return Response({'success': False, 'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.'}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({'success': False, 'message': 'You have already completed attendance for your scheduled sessions today.'}, status=status.HTTP_400_BAD_REQUEST)
             
             existing_record = None # we will create a new one below
         
