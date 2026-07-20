@@ -30,7 +30,6 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
             email_subject=email_subject,
         )
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. check_checkin_delay_15  (FRD §4.4.2: 15-min delay → Parent only)
 # ═══════════════════════════════════════════════════════════════════════════════
