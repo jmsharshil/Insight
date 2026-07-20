@@ -553,7 +553,7 @@ class QRScanView(APIView):
             # Notify parent about check-in
             try:
                 from .notifications import notify_student_qr_scan
-                notify_student_qr_scan(student, 'check_in', now)
+                notify_student_qr_scan(student, 'check_in', now, attendance_status=record.status)
             except Exception as ne:
                 logger.error(f"QR check-in notification failed: {ne}")
 
@@ -585,7 +585,7 @@ class QRScanView(APIView):
                 # Notify parent about check-out
                 try:
                     from .notifications import notify_student_qr_scan
-                    notify_student_qr_scan(student, 'check_out', now)
+                    notify_student_qr_scan(student, 'check_out', now, attendance_status='Checked Out')
                 except Exception as ne:
                     logger.error(f"QR check-out notification failed: {ne}")
             else:

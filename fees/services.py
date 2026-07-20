@@ -205,7 +205,8 @@ def send_payment_receipt(payment):
         from .pdf_services import generate_payment_receipt_pdf
 
         # --- Build recipient list first so we can always send at least a text email ---
-        recipients = get_recipient_emails(payment.student)
+        parent_email = getattr(payment.student, 'email_parent', None)
+        recipients = [parent_email] if parent_email else get_recipient_emails(payment.student)
         if not recipients:
             logger.warning(
                 f"No email recipients found for payment {payment.id} "
@@ -221,9 +222,9 @@ def send_payment_receipt(payment):
         )
         subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
         text_body = (
-            f"Dear {student_name},\n\n"
-            f"Your payment of \u20b9{payment.amount} has been successfully verified. "
-            f"Please find your official receipt attached as PDF.\n\n"
+            f"Dear Parent / Student ({student_name}),\n\n"
+            f"A payment of \u20b9{payment.amount} has been successfully verified. "
+            f"Please find the official receipt attached as PDF.\n\n"
             f"Receipt No: {payment.receipt_number or 'N/A'}\n"
             f"Amount: \u20b9{payment.amount}\n"
             f"Payment Mode: {getattr(payment, 'payment_mode', 'N/A')}\n"
