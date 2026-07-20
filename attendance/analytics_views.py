@@ -413,21 +413,38 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         check_in_history = []
         check_out_history = []
         day_wise_attendance = []
-        for r in records.order_by('-date'):
+        for r in records.select_related('timetable_slot', 'timetable_slot__subject').order_by('-date', '-checked_in_at'):
+            slot_info = None
+            if r.timetable_slot:
+                slot_info = {
+                    'id': str(r.timetable_slot.id),
+                    'start_time': str(r.timetable_slot.start_time) if r.timetable_slot.start_time else None,
+                    'end_time': str(r.timetable_slot.end_time) if r.timetable_slot.end_time else None,
+                    'subject_name': r.timetable_slot.subject.name if r.timetable_slot.subject else None,
+                    'slot_code': r.timetable_slot.slot_code,
+                }
             day_wise_attendance.append({
+                'id': str(r.id),
                 'date': r.date,
-                'status': r.status
+                'status': r.status,
+                'checked_in_at': r.checked_in_at,
+                'checked_out_at': r.checked_out_at,
+                'timetable_slot': slot_info,
             })
             if r.checked_in_at:
                 check_in_history.append({
+                    'id': str(r.id),
                     'date': r.date,
                     'time': r.checked_in_at,
-                    'status': r.status
+                    'status': r.status,
+                    'timetable_slot': slot_info,
                 })
             if r.checked_out_at:
                 check_out_history.append({
+                    'id': str(r.id),
                     'date': r.date,
-                    'time': r.checked_out_at
+                    'time': r.checked_out_at,
+                    'timetable_slot': slot_info,
                 })
 
         # Violations
@@ -1871,21 +1888,38 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
         check_in_history = []
         check_out_history = []
         day_wise_attendance = []
-        for r in records.order_by('-date'):
+        for r in records.select_related('timetable_slot', 'timetable_slot__subject').order_by('-date', '-checked_in_at'):
+            slot_info = None
+            if r.timetable_slot:
+                slot_info = {
+                    'id': str(r.timetable_slot.id),
+                    'start_time': str(r.timetable_slot.start_time) if r.timetable_slot.start_time else None,
+                    'end_time': str(r.timetable_slot.end_time) if r.timetable_slot.end_time else None,
+                    'subject_name': r.timetable_slot.subject.name if r.timetable_slot.subject else None,
+                    'slot_code': r.timetable_slot.slot_code,
+                }
             day_wise_attendance.append({
+                'id': str(r.id),
                 'date': r.date,
-                'status': r.status
+                'status': r.status,
+                'checked_in_at': r.checked_in_at,
+                'checked_out_at': r.checked_out_at,
+                'timetable_slot': slot_info,
             })
             if r.checked_in_at:
                 check_in_history.append({
+                    'id': str(r.id),
                     'date': r.date,
                     'time': r.checked_in_at,
-                    'status': r.status
+                    'status': r.status,
+                    'timetable_slot': slot_info,
                 })
             if r.checked_out_at:
                 check_out_history.append({
+                    'id': str(r.id),
                     'date': r.date,
-                    'time': r.checked_out_at
+                    'time': r.checked_out_at,
+                    'timetable_slot': slot_info,
                 })
 
         # Recent absences

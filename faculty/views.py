@@ -524,22 +524,30 @@ class FacultyQRCheckinView(APIView):
         # 1. Determine Timetable Slot for current time
         current_time = now.time()
         current_dow = now.weekday()
-        buffered_time = (now + timedelta(minutes=15)).time()
-        matching_slots = TimetableSlot.objects.filter(
+
+        # Get ALL of today's slots for this faculty (not limited by a time buffer)
+        all_today_slots = TimetableSlot.objects.filter(
             faculty=fp,
             day_of_week=current_dow,
-            start_time__lte=buffered_time,
-            end_time__gte=current_time
         ).order_by('start_time')
 
+        # Collect already-attended slot IDs for today
+        attended_slot_ids = set(
+            EmployeeAttendanceRecord.objects.filter(
+                user=request.user, date=now.date(), timetable_slot__isnull=False
+            ).values_list('timetable_slot_id', flat=True)
+        )
+
+        # Pick the first unattended slot that hasn't fully ended yet
         active_slot = None
-        for slot in matching_slots:
-            if not EmployeeAttendanceRecord.objects.filter(user=request.user, date=now.date(), timetable_slot=slot).exists():
+        for slot in all_today_slots:
+            if slot.id not in attended_slot_ids and slot.end_time >= current_time:
                 active_slot = slot
                 break
-                
-        if not active_slot and matching_slots.exists():
-            active_slot = matching_slots.last()
+
+        # If no future unattended slot, fallback to the last slot for proper error messaging
+        if not active_slot and all_today_slots.exists():
+            active_slot = all_today_slots.last()
 
         # 2. Check existing open record
         open_record = EmployeeAttendanceRecord.objects.filter(
