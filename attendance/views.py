@@ -402,10 +402,12 @@ class QRScanView(APIView):
         if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
             enrolled_batch_ids.append(primary_batch_id)
 
+        from datetime import timedelta
+        buffered_time = (local + timedelta(minutes=15)).time()
         active_slot = TimetableSlot.objects.filter(
             batch_id__in=enrolled_batch_ids,
             day_of_week=current_dow,
-            start_time__lte=current_time,
+            start_time__lte=buffered_time,
             end_time__gte=current_time
         ).first()
 
