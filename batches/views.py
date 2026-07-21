@@ -1409,7 +1409,7 @@ class TimetablePublishView(APIView):
         batch_ids = set(slots.values_list('batch_id', flat=True))
         
         # Get students in those batches
-        batch_students = BatchStudent.objects.filter(batch_id__in=batch_ids, is_active=True).select_related('student__user')
+        batch_students = BatchStudent.objects.filter(batch_id__in=batch_ids).select_related('student__user')
         student_user_ids = set()
         student_profile_ids = set()
         
