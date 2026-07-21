@@ -291,7 +291,7 @@ class RecheckRequestActionSerializer(serializers.Serializer):
 class CheckerQueryCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CheckerQuery
-        fields = ['query_type', 'description']
+        fields = ['query_type', 'description', 'evidence']
         extra_kwargs = {
             'query_type': {'required': True, 'allow_blank': False},
         }
@@ -303,12 +303,13 @@ class CheckerQuerySerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     raised_by_name = serializers.SerializerMethodField()
     resolved_by_name = serializers.SerializerMethodField()
+    evidence_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CheckerQuery
         fields = [
             'id', 'marksheet', 'raised_by', 'raised_by_name', 'query_type',
-            'query_type_display', 'description', 'status', 'status_display',
+            'query_type_display', 'description', 'evidence', 'evidence_url', 'status', 'status_display',
             'resolved_by', 'resolved_by_name', 'resolved_at', 'created_at',
         ]
         read_only_fields = ['marksheet', 'raised_by', 'status', 'resolved_by', 'resolved_at', 'created_at']
@@ -318,3 +319,8 @@ class CheckerQuerySerializer(serializers.ModelSerializer):
 
     def get_resolved_by_name(self, obj):
         return obj.resolved_by.name if obj.resolved_by else None
+
+    def get_evidence_url(self, obj):
+        if obj.evidence:
+            return obj.evidence.url
+        return None
