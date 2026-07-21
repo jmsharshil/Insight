@@ -25,6 +25,7 @@ from .utils import (
     resolve_qr_data, should_block_qr, get_active_violations_count,
     compute_avg_times, get_violations_breakdown, haversine_distance,
     validate_qr_scan, get_attendance_entry_status,
+    get_active_timetable_slot_for_scan,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,7 @@ class QRScanView(APIView):
         qr_data = ser.validated_data['qr_data']
         scan_type = ser.validated_data['scan_type']
         device_id = ser.validated_data['device_id']
+        timetable_slot_id = request.data.get('timetable_slot')
 
         # 2. Resolve Branch from QR data
         from branch.models import Branch
@@ -257,9 +259,18 @@ class QRScanView(APIView):
             today = timezone.now().date()
             now = timezone.now()
 
-            # Resolve Timetable Slot for faculty
+            # Resolve Timetable Slot for faculty (now supports explicit `timetable_slot_id` from payload for both faculty + student paths)
             timetable_slot_obj = None
-            if role == 'faculty':
+            if timetable_slot_id:
+                # Prefer explicit slot (for multi-session / specific QR cases); direct lookup
+                try:
+                    from batches.models import TimetableSlot
+                    timetable_slot_obj = TimetableSlot.objects.select_related('batch', 'subject').get(id=timetable_slot_id)
+                except (TimetableSlot.DoesNotExist, ValueError, TypeError, AttributeError):
+                    timetable_slot_obj = None  # graceful fallback to auto
+                    logger.warning(f"Explicit timetable_slot {timetable_slot_id} not found; falling back to auto-detection")
+            if not timetable_slot_obj and role == 'faculty':
+                # OLD faculty auto-detection logic (kept in full; not deleted per instructions - just augmented with explicit support above)
                 try:
                     from batches.models import TimetableSlot
                     from faculty.models import FacultyProfile
@@ -284,7 +295,9 @@ class QRScanView(APIView):
                 user=user, date=today, checked_in_at__isnull=False, checked_out_at__isnull=True
             ).order_by('-checked_in_at').first()
 
-            # Faculty specific tracking for payroll late/early logic
+            # Faculty specific tracking for payroll late/early logic (updated to prefer timetable_slot_obj when provided)
+            # This ensures late/early mins are recorded accurately so payroll deducts the amount (fixes the reported bug).
+            # Old profile-only calc kept as fallback; old code not deleted.
             if role == 'faculty':
                 try:
                     from faculty.models import FacultyQRScanLog, FacultyProfile
@@ -292,14 +305,28 @@ class QRScanView(APIView):
                     faculty_profile = FacultyProfile.objects.filter(user=user).first()
                     if faculty_profile:
                         late_mins = 0
-                        if scan_type == 'check_in' and faculty_profile.work_start_time:
+                        early_mins = 0
+                        # Prefer slot times if available (more precise for class timetable vs general shift)
+                        if timetable_slot_obj and hasattr(timetable_slot_obj, 'start_time') and scan_type == 'check_in':
+                            s_dt = datetime.datetime.combine(today, timetable_slot_obj.start_time)
+                            diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                            if diff > 0:
+                                late_mins = int(diff)
+                        elif faculty_profile.work_start_time and scan_type == 'check_in':
                             s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
                             diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
                             if diff > 0:
                                 late_mins = int(diff)
                         
-                        early_mins = 0
-                        if scan_type == 'check_out' and faculty_profile.work_end_time:
+                        if timetable_slot_obj and hasattr(timetable_slot_obj, 'end_time') and scan_type == 'check_out':
+                            e_dt = datetime.datetime.combine(today, timetable_slot_obj.end_time)
+                            if (timetable_slot_obj.start_time and timetable_slot_obj.end_time < timetable_slot_obj.start_time) or \
+                               (faculty_profile.work_start_time and faculty_profile.work_end_time and faculty_profile.work_end_time < faculty_profile.work_start_time):
+                                e_dt += timedelta(days=1)
+                            diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
+                            if diff > 0:
+                                early_mins = int(diff)
+                        elif faculty_profile.work_end_time and scan_type == 'check_out':
                             e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
                             if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
                                 e_dt += timedelta(days=1)
@@ -441,7 +468,19 @@ class QRScanView(APIView):
                 batch = Batch.objects.filter(id=enrolled_batch_ids[0]).first()
 
         if not batch:
-             return Response({'success': False, 'message': 'No class/batch assigned to you could be detected.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'success': False, 'message': 'No class/batch assigned to you could be detected.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # If explicit timetable_slot provided in payload, override with helper
+        # (uses direct lookup instead of time-based scan; falls back inside util if invalid)
+        # Old auto-detect code above is kept (not deleted, just augmented)
+        timetable_slot_id = request.data.get('timetable_slot')
+        if timetable_slot_id:
+            slot_from_util, batch_from_util = get_active_timetable_slot_for_scan(student, slot_id=timetable_slot_id)
+            if slot_from_util:
+                active_slot = slot_from_util
+                timetable_slot_obj = slot_from_util
+                if batch_from_util:
+                    batch = batch_from_util
 
         # Check QR block (3+ violations)
         if should_block_qr(student.id):
@@ -452,12 +491,14 @@ class QRScanView(APIView):
         # Geofencing check for students (if lat/long provided and branch has coords)
         student_lat = ser.validated_data.get('latitude')
         student_lon = ser.validated_data.get('longitude')
-        timetable_slot_id = ser.validated_data.get('timetable_slot')
 
+        # Old manual slot override (COMMENTED - now handled earlier with get_active_timetable_slot_for_scan
+        # to avoid duplicate queries; old code kept per instructions)
+        # timetable_slot_id = ser.validated_data.get('timetable_slot')
         timetable_slot_obj = active_slot
-        if timetable_slot_id:
-            from batches.models import TimetableSlot
-            timetable_slot_obj = TimetableSlot.objects.filter(id=timetable_slot_id).first()
+        # if timetable_slot_id:
+        #     from batches.models import TimetableSlot
+        #     timetable_slot_obj = TimetableSlot.objects.filter(id=timetable_slot_id).first()
 
         # Resolve branch object for validation
         branch_obj_for_validation = None
@@ -1354,6 +1395,7 @@ class EmployeeCheckInOutView(APIView):
         user = request.user
         now = timezone.now()
         today = now.date()
+        timetable_slot_id = request.data.get('timetable_slot_id')  # supports explicit from EmployeeCheckInOutSerializer (for faculty)
 
         bid = _user_branch_id(user)
         if not bid:
@@ -1362,9 +1404,18 @@ class EmployeeCheckInOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Resolve Timetable Slot for faculty
+        # Resolve Timetable Slot for faculty (now supports explicit `timetable_slot_id`; works for faculty path)
         timetable_slot_obj = None
-        if getattr(user, 'role', '') == 'faculty':
+        if timetable_slot_id:
+            # Prefer explicit slot from payload (direct lookup, no time/attendance query)
+            try:
+                from batches.models import TimetableSlot
+                timetable_slot_obj = TimetableSlot.objects.select_related('batch', 'subject').get(id=timetable_slot_id)
+            except (TimetableSlot.DoesNotExist, ValueError, TypeError, AttributeError):
+                timetable_slot_obj = None
+                logger.warning(f"Explicit timetable_slot_id {timetable_slot_id} not found for employee; falling back")
+        if not timetable_slot_obj and getattr(user, 'role', '') == 'faculty':
+            # OLD faculty auto-detection logic (FULLY KEPT per "don't delete old code just comment it" - augmented with explicit check above)
             try:
                 from batches.models import TimetableSlot
                 from faculty.models import FacultyProfile
@@ -1453,6 +1504,56 @@ class EmployeeCheckInOutView(APIView):
             record.status = 'present'
             record.save(update_fields=['checked_out_at', 'status'])
             message = f'Check Out recorded successfully.'
+
+        # NEW: Faculty late/early deduction logging (fixes amount not being deducted in payroll)
+        # Uses resolved timetable_slot_obj if available (per-slot accuracy vs profile work times); 
+        # falls back to existing profile-based calc. Old code/logic fully kept.
+        if getattr(user, 'role', '') == 'faculty':
+            try:
+                from faculty.models import FacultyQRScanLog, FacultyProfile
+                import datetime
+                faculty_profile = FacultyProfile.objects.filter(user=user).first()
+                if faculty_profile:
+                    late_mins = 0
+                    early_mins = 0
+                    # Prefer slot times if provided (more accurate for class-specific late/early)
+                    if timetable_slot_obj and hasattr(timetable_slot_obj, 'start_time') and scan_type == 'check_in':
+                        s_dt = datetime.datetime.combine(today, timetable_slot_obj.start_time)
+                        diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                        if diff > 0:
+                            late_mins = int(diff)
+                    elif faculty_profile.work_start_time and scan_type == 'check_in':
+                        s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
+                        diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                        if diff > 0:
+                            late_mins = int(diff)
+                    
+                    if timetable_slot_obj and hasattr(timetable_slot_obj, 'end_time') and scan_type == 'check_out':
+                        e_dt = datetime.datetime.combine(today, timetable_slot_obj.end_time)
+                        if timetable_slot_obj.start_time and timetable_slot_obj.end_time < timetable_slot_obj.start_time:
+                            e_dt += timedelta(days=1)
+                        diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
+                        if diff > 0:
+                            early_mins = int(diff)
+                    elif faculty_profile.work_end_time and scan_type == 'check_out':
+                        e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
+                        if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
+                            e_dt += timedelta(days=1)
+                        diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
+                        if diff > 0:
+                            early_mins = int(diff)
+
+                    FacultyQRScanLog.objects.create(
+                        faculty=faculty_profile,
+                        branch_id=bid,
+                        scan_type=scan_type,
+                        is_late=(late_mins > 0),
+                        late_minutes=late_mins,
+                        is_early_checkout=(early_mins > 0),
+                        early_minutes=early_mins
+                    )
+            except Exception as e:
+                logger.error(f"Faculty QR scan log failed in employee view: {e}")
 
         return Response({
             'success': True,
