@@ -809,6 +809,7 @@ class PaperCheckerQueryView(APIView):
             raised_by=request.user,
             query_type=ser.validated_data['query_type'],
             description=ser.validated_data.get('description', ''),
+            evidence=ser.validated_data.get('evidence'),
             status='open',
         )
 

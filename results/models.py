@@ -140,6 +140,12 @@ class CheckerQuery(models.Model):
     )
     query_type = models.CharField(max_length=30, choices=QUERY_TYPE_CHOICES, default='other')
     description = models.TextField(blank=True, help_text="Details of the query, e.g. what is missing.")
+    evidence = models.FileField(
+        upload_to='checker_queries/',
+        null=True,
+        blank=True,
+        help_text="Optional evidence file uploaded by the paper checker."
+    )
     status = models.CharField(
         max_length=20, choices=QUERY_STATUS_CHOICES, default='open'
     )

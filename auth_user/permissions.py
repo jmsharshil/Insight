@@ -125,7 +125,7 @@ ROLE_PERMISSIONS = {
     },
     'paper_checker': {
         'default_modules': [
-            'attendance', 'exams', 'notifications', 'payroll', 'settings',
+            'exams', 'notifications', 'payroll', 'settings',
         ],
         'canDelete': False,
         'canExport': False,
