@@ -342,3 +342,62 @@ def generate_checker_token(marksheet):
         expires_at=timezone.now() + timedelta(hours=72),
     )
     return token_str
+
+
+def distribute_answer_keys(exam):
+    """Send answer key with signed URL (48h expiry) to all relevant paper checkers.
+    Triggered automatically on exam status -> 'completed' (see tasks.py).
+    Uses AnswerKeyDistributionLog for audit and token-based access control.
+    Leverages send_answer_key_email() which integrates with send_system_notification
+    for FCM, WhatsApp and email (per updated notification stack).
+    """
+    import hashlib
+    from django.conf import settings
+    from django.contrib.auth import get_user_model
+    from .emails import send_answer_key_email
+    from .models import AnswerKeyDistributionLog
+    from results.models import MarkSheet
+
+    User = get_user_model()
+
+    logger.info(f"Starting auto answer-key distribution for exam {exam.id} ({exam.title})")
+
+    # Get checkers from Exam M2M + any assigned in MarkSheet (for robustness)
+    checker_ids = set(exam.paper_checkers.values_list('id', flat=True))
+    ms_checker_ids = set(
+        MarkSheet.objects.filter(exam=exam, paper_checker__isnull=False)
+        .values_list('paper_checker_id', flat=True)
+    )
+    checker_ids |= ms_checker_ids
+
+    if not checker_ids:
+        logger.warning(f"No checkers configured for answer key on exam {exam.id}. Skipping.")
+        return 0
+
+    sent_count = 0
+    base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8000')
+    for cid in checker_ids:
+        try:
+            checker = User.objects.get(id=cid)
+            log = AnswerKeyDistributionLog.objects.create(
+                exam=exam, sent_to=checker,
+                link_expires=timezone.now() + timedelta(hours=48)
+            )
+            token = hashlib.sha256(
+                f"{log.id}{settings.SECRET_KEY}".encode('utf-8')
+            ).hexdigest()
+            path = f"/api/v1/answer-key/{exam.id}/?token={log.id}_{token}"
+            signed_url = f"{base_url.rstrip('/')}{path}"
+            signed_url = signed_url.replace('localhost', '127.0.0.1')
+            send_answer_key_email(checker, exam, signed_url)
+            sent_count += 1
+        except Exception as e:
+            logger.error(
+                f"Failed sending answer key to user {cid} for exam {exam.id}: {e}"
+            )
+
+    logger.info(
+        f"Auto-distributed answer keys to {sent_count}/{len(checker_ids)} "
+        f"checkers for exam '{exam.title}'"
+    )
+    return sent_count

@@ -13,7 +13,8 @@ def update_exam_statuses():
     Every minute: automatically transition exam statuses.
     - scheduled -> ongoing (if current time >= start_time)
     - ongoing -> completed (if current time > end_time)
-      → Also auto-marks absent students when transitioning to completed.
+      → Also: auto-marks absent, assigns papers to checkers, AND auto-distributes
+        answer key (signed URL, 48h expiry) via email/WhatsApp/in-app notifications.
     """
     from .models import Exam
     
@@ -61,6 +62,17 @@ def update_exam_statuses():
                     logger.info(f"Auto-assigned {assigned_count} papers to checkers for exam {exam.title} ({exam.id})")
             except Exception as e:
                 logger.error(f"Error auto-assigning papers for exam {exam.id}: {e}")
+
+            # Auto-distribute answer key (signed URL, 48h expiry) to paper checkers + integrate
+            # with notification stack (FCM/WhatsApp/email via send_system_notification).
+            # Replaces previous manual /answer-key/distribute/ API trigger.
+            try:
+                from .utils import distribute_answer_keys
+                distributed_count = distribute_answer_keys(exam)
+                if distributed_count > 0:
+                    logger.info(f"Auto-distributed answer keys to {distributed_count} checkers for exam {exam.title} ({exam.id})")
+            except Exception as e:
+                logger.error(f"Error auto-distributing answer keys for exam {exam.id}: {e}")
 
     if count_ongoing > 0 or count_completed > 0:
         logger.info(f"Exam Status Update: {count_ongoing} -> ongoing, {count_completed} -> completed.")
