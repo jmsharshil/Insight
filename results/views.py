@@ -794,11 +794,11 @@ class PaperCheckerQueryView(APIView):
             return Response({'success': False, 'message': 'Not assigned to you.'}, status=status.HTTP_403_FORBIDDEN)
 
         # Enforce after recheck start per requirement
-        if not getattr(ms, 'is_rechecked', False) and role == 'paper_checker':
-            return Response({
-                'success': False,
-                'message': 'Queries typically raised after recheck starts. Use marks submission instead.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # if not getattr(ms, 'is_rechecked', False) and role == 'paper_checker':
+        #     return Response({
+        #         'success': False,
+        #         'message': 'Queries typically raised after recheck starts. Use marks submission instead.'
+        #     }, status=status.HTTP_400_BAD_REQUEST)
 
         ser = CheckerQueryCreateSerializer(data=request.data)
         if not ser.is_valid():
@@ -861,7 +861,7 @@ class PaperCheckerQueryView(APIView):
                 ms.remarks = request.data.get('remarks', ms.remarks or 'Query resolved with marks')
                 ms.checked_at = timezone.now()
                 ms.is_submitted = True
-                ms.is_pass = float(marks) >= (ms.exam.total_marks or 0)
+                ms.is_pass = float(marks) >= (ms.exam.pass_marks or 0)
                 ms.save()
 
         logger.info(f"Query {query_obj.id} resolved by {request.user}")
