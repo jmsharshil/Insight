@@ -24,6 +24,12 @@ def get_lead_report(user, params):
     if branch_id:
         bq &= Q(branch_id=branch_id)
 
+    if user.is_authenticated:
+        role = getattr(user, 'role', None)
+        if role in {'counsellor', 'tele_caller', 'sales_executive'}:
+            # These roles can ONLY see leads assigned to them
+            bq &= Q(assigned_to=user)
+
     qs = Lead.objects.filter(bq)
     if from_date:
         qs = qs.filter(created_at__date__gte=from_date)
