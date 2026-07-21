@@ -62,6 +62,30 @@ def _user_batch_ids(user):
     return []
 
 
+def _validate_slot_gap_for_checkin(timetable_slot_obj, scan_time, max_gap_minutes=15):
+    """
+    NEW: Only allow check-in when explicit slot_id is passed in request.data
+    if the time gap from slot.start_time to now is <= max_gap_minutes (default 15).
+    Returns error message string if gap exceeded, else None.
+    Used to enforce 'max 15 min gap no more' for check_in with provided slot.
+    """
+    if not timetable_slot_obj or not hasattr(timetable_slot_obj, 'start_time'):
+        return None
+    try:
+        from datetime import datetime
+        today = scan_time.date() if hasattr(scan_time, 'date') else scan_time.date()
+        slot_start_dt = datetime.combine(today, timetable_slot_obj.start_time)
+        # Handle tz-aware vs naive (consistent with existing late_mins calc in file)
+        now_dt = scan_time.replace(tzinfo=None) if hasattr(scan_time, 'tzinfo') and scan_time.tzinfo else scan_time
+        gap = (now_dt - slot_start_dt).total_seconds() / 60.0
+        if gap > max_gap_minutes:
+            return f'Too late for this slot (gap ≈{int(gap)}min). Max allowed gap is {max_gap_minutes} minutes.'
+        return None
+    except Exception as e:
+        logger.warning(f'Slot gap validation error for slot {getattr(timetable_slot_obj, "id", None)}: {e}')
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GET & POST  /api/v1/attendance/
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -365,6 +389,18 @@ class QRScanView(APIView):
                             'message': 'Already marked attendance for this slot today.',
                             'data': EmployeeAttendanceRecordSerializer(slot_record).data,
                         }, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    # NEW CONDITION (per request): only allow check_in if explicit slot_id from request.data
+                    # has max 15 min gap (lateness) to slot.start_time. "max 15 min gap no more".
+                    # Only triggers on explicit timetable_slot from payload (auto-detect already buffers).
+                    # Matches existing late_mins / naive datetime patterns used for payroll.
+                    if timetable_slot_id:
+                        gap_error = _validate_slot_gap_for_checkin(timetable_slot_obj, now)
+                        if gap_error:
+                            return Response({
+                                'success': False,
+                                'message': gap_error,
+                            }, status=status.HTTP_400_BAD_REQUEST)
                 else:
                     # Enforce once per day if no slot is resolved
                     completed_today = EmployeeAttendanceRecord.objects.filter(
@@ -534,6 +570,15 @@ class QRScanView(APIView):
                 ).first()
                 if slot_record:
                     return Response({'success': False, 'message': 'You have already marked attendance for this slot today.'}, status=status.HTTP_400_BAD_REQUEST)
+                
+                # NEW CONDITION (per request): only allow check_in if explicit slot_id from request.data
+                # has max 15 min gap (lateness) to slot.start_time. "max 15 min gap no more".
+                # Only triggers on explicit timetable_slot from payload (auto-detect already buffers via buffered_time).
+                # Reuses helper (consistent with faculty/employee path and payroll late_mins logic).
+                if timetable_slot_id:
+                    gap_error = _validate_slot_gap_for_checkin(timetable_slot_obj, now)
+                    if gap_error:
+                        return Response({'success': False, 'message': gap_error}, status=status.HTTP_400_BAD_REQUEST)
             else:
                 # Check if there is a future slot they are too early for
                 future_slot = TimetableSlot.objects.filter(
@@ -1474,6 +1519,17 @@ class EmployeeCheckInOutView(APIView):
                         'message': 'Already marked attendance for this slot today.',
                         'data': EmployeeAttendanceRecordSerializer(slot_record).data,
                     }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # NEW CONDITION (per request): only allow check_in if explicit slot_id from request.data
+                # has max 15 min gap (lateness) to slot.start_time. "max 15 min gap no more".
+                # Only triggers on explicit timetable_slot_id from payload.
+                if timetable_slot_id:
+                    gap_error = _validate_slot_gap_for_checkin(timetable_slot_obj, now)
+                    if gap_error:
+                        return Response({
+                            'success': False,
+                            'message': gap_error,
+                        }, status=status.HTTP_400_BAD_REQUEST)
             else:
                 completed_today = EmployeeAttendanceRecord.objects.filter(
                     user=user, date=today,
