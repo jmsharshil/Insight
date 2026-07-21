@@ -9,7 +9,10 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from core.pagination import paginate_queryset
-from .models import AttendanceRecord, ViolationRecord, QRScanLog
+from .models import (
+    AttendanceRecord, ViolationRecord, QRScanLog, EmployeeAttendanceRecord,
+    EMPLOYEE_ATTENDANCE_STATUS_CHOICES
+)
 from .serializers import ViolationRecordSerializer, ViolationCreateSerializer, ViolationResolveSerializer
 from .utils import get_batch_attendance_sheet, get_active_violations_count, should_block_qr
 
@@ -2005,4 +2008,106 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                 'check_out_history': check_out_history[start:end],
                 'monthly_trend': monthly_trend,
             }
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 16. GET /api/attendance/employee/violations/ — Employee's own violations
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EmployeeViolationsAPIView(SafeAPIView):
+    """
+    Separate API for employees to view their own attendance violations.
+    - Employees (non-admin) see only their own late/absent/missing-checkout records.
+    - Admins can filter by user_id, branch, etc.
+    Violations are derived from EmployeeAttendanceRecord where status indicates a problem.
+    This fulfills the missing endpoint mentioned in the query.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        role = getattr(user, 'role', None)
+
+        from django.db.models import Q
+
+        # Base queryset for violation-like records
+        qs = EmployeeAttendanceRecord.objects.filter(
+            Q(status__in=['late', 'absent', 'checkout_pending']) |
+            Q(checked_out_at__isnull=True, checked_in_at__isnull=False)  # missing checkout
+        ).select_related('user', 'branch', 'timetable_slot', 'marked_by').order_by('-date', '-checked_in_at')
+
+        # Scoping
+        if role not in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']:
+            # Regular employees see ONLY their own violations
+            qs = qs.filter(user=user)
+        else:
+            # Admins can view any employee's violations
+            user_id = request.GET.get('user_id')
+            if user_id:
+                qs = qs.filter(user_id=user_id)
+            if getattr(user, 'organization', None):
+                qs = qs.filter(branch__organization=user.organization)
+            branch_id = request.GET.get('branch_id') or request.GET.get('branch')
+            if branch_id:
+                qs = qs.filter(branch_id=branch_id)
+            date_from = request.GET.get('date_from')
+            date_to = request.GET.get('date_to')
+            if date_from:
+                qs = qs.filter(date__gte=date_from)
+            if date_to:
+                qs = qs.filter(date__lte=date_to)
+
+        # Convert to violation-style response (consistent with student violations)
+        violation_list = []
+        for rec in qs:
+            v_type = 'late_entry' if rec.status == 'late' else \
+                     'no_show' if rec.status == 'absent' else \
+                     'missing_checkout'
+            description = rec.correction_note or f"{rec.get_status_display()} on this date."
+            if not rec.checked_out_at and rec.checked_in_at:
+                description += " (Missing check-out scan)"
+
+            violation_list.append({
+                'id': str(rec.id),
+                'violation_type': v_type,
+                'violation_type_display': dict(EMPLOYEE_ATTENDANCE_STATUS_CHOICES).get(rec.status, rec.status).title(),
+                'date': rec.date.isoformat() if rec.date else None,
+                'description': description,
+                'status': rec.status,
+                'checked_in_at': rec.checked_in_at.isoformat() if rec.checked_in_at else None,
+                'checked_out_at': rec.checked_out_at.isoformat() if rec.checked_out_at else None,
+                'user': {
+                    'id': str(rec.user.id),
+                    'name': getattr(rec.user, 'name', str(rec.user)),
+                    'role': getattr(rec.user, 'role', 'employee'),
+                },
+                'branch_name': rec.branch.name if rec.branch else None,
+                'timetable_slot': rec.timetable_slot.slot_code if rec.timetable_slot else None,
+                'is_resolved': rec.status != 'checkout_pending',  # pending checkout is "active"
+                'created_at': rec.marked_at.isoformat() if hasattr(rec, 'marked_at') and rec.marked_at else None,
+            })
+
+        # Use existing pagination helper if available, else return all (or paginate manually)
+        page = request.GET.get('page', 1)
+        page_size = request.GET.get('page_size', 20)
+        try:
+            page = int(page)
+            page_size = int(page_size)
+        except ValueError:
+            page = 1
+            page_size = 20
+
+        total = len(violation_list)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = violation_list[start:end]
+
+        return Response({
+            'success': True,
+            'count': total,
+            'page': page,
+            'page_size': page_size,
+            'data': paginated,
+            'message': 'Employee violations retrieved successfully.'
         })

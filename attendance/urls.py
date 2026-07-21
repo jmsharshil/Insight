@@ -12,6 +12,7 @@ from .analytics_views import (
     FacultyAttendanceDetailAPIView, AttendanceAnalyticsAPIView, DefaulterStudentsAPIView,
     ViolationsAPIView, ViolationDetailAPIView, AttendanceExportAPIView, AttendanceAuditAPIView,
     BatchWiseAttendanceAPIView, EmployeeAttendanceDetailAPIView,
+    EmployeeViolationsAPIView,
 )
 
 urlpatterns = [
@@ -57,6 +58,7 @@ urlpatterns = [
     path('attendance/employee/', EmployeeAttendanceListCreateView.as_view(), name='employee-attendance-list-create'),
     path('attendance/employee/scan/', EmployeeCheckInOutView.as_view(), name='employee-attendance-scan'),
     path('attendance/employee/history/', EmployeeAttendanceHistoryView.as_view(), name='employee-attendance-history'),
+    path('attendance/employee/violations/', EmployeeViolationsAPIView.as_view(), name='employee-violations'),
     path('attendance/employee/<uuid:user_id>/', EmployeeAttendanceDetailAPIView.as_view(), name='employee-attendance-detail'),
     # Dropdown for assigning employees (paper checkers, faculty, staff)
     path('attendance/employees/dropdown/', EmployeeDropdownView.as_view(), name='employee-dropdown'),
