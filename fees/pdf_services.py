@@ -1,13 +1,198 @@
 import logging
+import sys
+import hashlib
 from io import BytesIO
 from django.template.loader import get_template
 from django.conf import settings
-from weasyprint import HTML
-from weasyprint.text.fonts import FontConfiguration
 from core.number_utils import num2words
 from asgiref.sync import async_to_sync
 
+# ── Python 3.8 compat: hashlib.md5 doesn't support usedforsecurity kwarg.
+# reportlab 4.x and xhtml2pdf pass it, causing TypeError on Python 3.8.
+if sys.version_info < (3, 9):
+    _original_md5 = hashlib.md5
+
+    def _md5_compat(*args, **kwargs):
+        kwargs.pop('usedforsecurity', None)
+        return _original_md5(*args, **kwargs)
+
+    hashlib.md5 = _md5_compat
+
 logger = logging.getLogger(__name__)
+
+
+def _reportlab_receipt_pdf(context):
+    """
+    Generate a receipt PDF using reportlab (pure Python, no system libs needed).
+    Serves as a reliable fallback when WeasyPrint/Playwright/xhtml2pdf all fail.
+    Accepts the same `context` dict as the Django template.
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib.colors import HexColor, black, white
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=1.5 * cm, rightMargin=1.5 * cm,
+        topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+    )
+
+    orange = HexColor('#ed7c31')
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('ReceiptTitle', parent=styles['Title'],
+                                  fontSize=22, textColor=white, alignment=TA_CENTER)
+    heading_style = ParagraphStyle('ReceiptHeading', parent=styles['Heading2'],
+                                    fontSize=14, textColor=orange, alignment=TA_CENTER)
+    label_style = ParagraphStyle('Label', parent=styles['Normal'],
+                                  fontSize=11, textColor=black, leading=16)
+    value_style = ParagraphStyle('Value', parent=styles['Normal'],
+                                  fontSize=11, textColor=HexColor('#333333'), leading=16)
+    small_style = ParagraphStyle('Small', parent=styles['Normal'],
+                                  fontSize=9, textColor=HexColor('#666666'), leading=12)
+
+    elements = []
+
+    # Header: Institute info
+    header_data = [
+        [
+            Paragraph('<b>77780 50578 | 99745 45456</b><br/>'
+                      'www.insightinstitute.com<br/>'
+                      'insightinstitute.ips@gmail.com', small_style),
+            Paragraph('<b>INSIGHT</b><br/>Institute of Professional Studies',
+                      ParagraphStyle('Logo', parent=heading_style, fontSize=14, alignment=TA_RIGHT)),
+        ]
+    ]
+    header_table = Table(header_data, colWidths=[doc.width * 0.5, doc.width * 0.5])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LINEBELOW', (0, 0), (-1, 0), 2, orange),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 8 * mm))
+
+    # Title bar
+    title_data = [[Paragraph('RECEIPT', title_style)]]
+    title_table = Table(title_data, colWidths=[doc.width])
+    title_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), orange),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('ROUNDEDCORNERS', [4, 4, 4, 4]),
+    ]))
+    elements.append(title_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    subtitle = Paragraph('Experience - Expertise - Excellence', heading_style)
+    elements.append(subtitle)
+    elements.append(Spacer(1, 8 * mm))
+
+    # Receipt No & Date row
+    meta_data = [
+        [
+            Paragraph(f'<b>Receipt Date:</b> {context.get("receipt_date", "")}', label_style),
+            Paragraph(f'<b>Receipt No:</b> <font size="13">{context.get("receipt_no", "")}</font>', label_style),
+        ]
+    ]
+    meta_table = Table(meta_data, colWidths=[doc.width * 0.5, doc.width * 0.5])
+    meta_table.setStyle(TableStyle([
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    # Details rows
+    details = [
+        ('Received From M/s.', context.get('student_name', 'N/A')),
+        ('Amount', context.get('amount', '')),
+        ('Amount in Words', context.get('amount_words', '')),
+        ('Batch', context.get('batch_name', 'N/A')),
+    ]
+    for lbl, val in details:
+        row = Table(
+            [[Paragraph(f'<b>{lbl}:</b>', label_style),
+              Paragraph(str(val), value_style)]],
+            colWidths=[doc.width * 0.3, doc.width * 0.7],
+        )
+        row.setStyle(TableStyle([
+            ('LINEBELOW', (1, 0), (1, 0), 0.5, HexColor('#999999')),
+            ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+        ]))
+        elements.append(row)
+        elements.append(Spacer(1, 2 * mm))
+
+    elements.append(Spacer(1, 3 * mm))
+
+    # Payment type checkboxes
+    pt = context.get('payment_type', 'installment')
+    checks = []
+    for key, label in [('token', 'Token'), ('full', 'Full Payment'), ('installment', 'Installment')]:
+        mark = '✓' if pt == key else '  '
+        checks.append(f'[ {mark} ] {label}')
+    elements.append(Paragraph('    '.join(checks), label_style))
+    elements.append(Spacer(1, 3 * mm))
+
+    # Payment mode checkboxes
+    pm = (context.get('payment_mode', '') or '').lower()
+    mode_checks = []
+    for keys, label in [(['cash'], 'Cash'), (['cheque', 'dd'], 'Cheque'), (['online', 'upi'], 'Online')]:
+        mark = '✓' if pm in keys else '  '
+        mode_checks.append(f'[ {mark} ] {label}')
+    elements.append(Paragraph(f'<b>By</b>    ' + '    '.join(mode_checks), label_style))
+    elements.append(Spacer(1, 5 * mm))
+
+    # Transaction details
+    tx_details = [
+        ('Cheque / Transaction No.', context.get('transaction_ref', 'N/A')),
+        ('Cheque/Transaction Date', context.get('transaction_date', '')),
+    ]
+    for lbl, val in tx_details:
+        row = Table(
+            [[Paragraph(f'<b>{lbl}:</b>', label_style),
+              Paragraph(str(val), value_style)]],
+            colWidths=[doc.width * 0.35, doc.width * 0.65],
+        )
+        row.setStyle(TableStyle([
+            ('LINEBELOW', (1, 0), (1, 0), 0.5, HexColor('#999999')),
+            ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+        ]))
+        elements.append(row)
+        elements.append(Spacer(1, 2 * mm))
+
+    elements.append(Spacer(1, 15 * mm))
+
+    # Footer
+    footer_data = [
+        [
+            Paragraph(
+                '<b>Vastral Branch:</b><br/>'
+                '(Parth Classes) 212, Siddhi Vinayak Complex,<br/>'
+                'Nr. Nirant Chokdi, Vastral Road, A\'bad - 382413<br/><br/>'
+                '<b>INSIGHT INSTITUTE:</b><br/>'
+                'INSIGHT HOUSE, 1st Floor, Bunglow No-2,<br/>'
+                'Shreeji Society, Behind Gautam Nagar Bus Stand,<br/>'
+                'Naranpura, Ahmedabad - 380013', small_style),
+            Paragraph(
+                'FOR, Insight Institute of Professional Studies<br/><br/><br/><br/>'
+                '___________________________<br/>'
+                '<b>Authorised Signatory</b>',
+                ParagraphStyle('Footer', parent=small_style, alignment=TA_RIGHT)),
+        ]
+    ]
+    footer_table = Table(footer_data, colWidths=[doc.width * 0.55, doc.width * 0.45])
+    footer_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(footer_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 
 def playwright_pdf(html: str) -> BytesIO:
@@ -122,6 +307,8 @@ def generate_payment_receipt_pdf(payment):
         
         # Primary: WeasyPrint (fast, no browser required)
         try:
+            from weasyprint import HTML
+            from weasyprint.text.fonts import FontConfiguration
             font_config = FontConfiguration()
             html_doc = HTML(string=html, base_url=str(settings.BASE_DIR))
             buffer = BytesIO()
@@ -157,8 +344,17 @@ def generate_payment_receipt_pdf(payment):
                 return buffer, 'xhtml2pdf'
         except Exception as xhtml_err:
             logger.error(f"xhtml2pdf fallback failed: {xhtml_err}")
-            
-        logger.error(f"ALL PDF generation methods (WeasyPrint, Playwright, xhtml2pdf) failed for payment {getattr(payment, 'id', 'N/A')}")
+
+        # Fallback 3: reportlab (pure Python, no system libs needed — works everywhere)
+        try:
+            buffer = _reportlab_receipt_pdf(context)
+            if buffer and buffer.getvalue():
+                logger.info(f"Successfully generated PDF receipt using reportlab fallback for payment {payment.id}")
+                return buffer, 'reportlab'
+        except Exception as rl_err:
+            logger.error(f"reportlab fallback failed: {rl_err}")
+
+        logger.error(f"ALL PDF generation methods (WeasyPrint, Playwright, xhtml2pdf, reportlab) failed for payment {getattr(payment, 'id', 'N/A')}")
         return None, None
             
     except Exception as e:

@@ -131,11 +131,26 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
             "data": {str(k): str(v) for k, v in (data or {}).items()},
             "android": {
                 "priority": "high",
-                "notification": {"sound": "default"},
+                "notification": {
+                    "sound": "default",
+                    "channel_id": "insight_default",
+                    "default_vibrate_timings": True,
+                    "default_light_settings": True,
+                    "notification_priority": "PRIORITY_HIGH",
+                },
+                "direct_boot_ok": True,
             },
             "apns": {
+                "headers": {
+                    "apns-priority": "10",
+                    "apns-push-type": "alert",
+                },
                 "payload": {
-                    "aps": {"sound": "default"}
+                    "aps": {
+                        "sound": "default",
+                        "content-available": 1,
+                        "mutable-content": 1,
+                    }
                 }
             },
         }
