@@ -524,11 +524,16 @@ class FacultyQRCheckinView(APIView):
         # 1. Determine Timetable Slot for current time
         current_time = now.time()
         current_dow = now.weekday()
+        
+        from datetime import timedelta
+        buffered_time = (now + timedelta(minutes=15)).time()
 
-        # Get ALL of today's slots for this faculty (not limited by a time buffer)
-        all_today_slots = TimetableSlot.objects.filter(
+        # Get matching slots within the time window (15 min buffer)
+        matching_slots = TimetableSlot.objects.filter(
             faculty=fp,
             day_of_week=current_dow,
+            start_time__lte=buffered_time,
+            end_time__gte=current_time
         ).order_by('start_time')
 
         # Collect already-attended slot IDs for today
@@ -538,16 +543,26 @@ class FacultyQRCheckinView(APIView):
             ).values_list('timetable_slot_id', flat=True)
         )
 
-        # Pick the first unattended slot that hasn't fully ended yet
+        # Pick the first matching slot that hasn't fully ended yet and isn't attended
         active_slot = None
-        for slot in all_today_slots:
-            if slot.id not in attended_slot_ids and slot.end_time >= current_time:
+        for slot in matching_slots:
+            if slot.id not in attended_slot_ids:
                 active_slot = slot
                 break
 
-        # If no future unattended slot, fallback to the last slot for proper error messaging
-        if not active_slot and all_today_slots.exists():
-            active_slot = all_today_slots.last()
+        # Check if there's any future slot to give a good error message if they are too early
+        future_slot = None
+        if not active_slot:
+            future_slot = TimetableSlot.objects.filter(
+                faculty=fp,
+                day_of_week=current_dow,
+                start_time__gt=buffered_time
+            ).order_by('start_time').first()
+
+        # If no active slot found from matching slots, but there's a past matching slot that was attended,
+        # we can use that to trigger the "already marked" message instead of "too early".
+        if not active_slot and not future_slot and matching_slots.exists():
+            active_slot = matching_slots.last()
 
         # 2. Check existing open record
         open_record = EmployeeAttendanceRecord.objects.filter(
@@ -562,11 +577,15 @@ class FacultyQRCheckinView(APIView):
                 if EmployeeAttendanceRecord.objects.filter(user=request.user, date=now.date(), timetable_slot=active_slot).exists():
                     return Response({'success': False, 'message': 'You have already marked attendance for this slot today.'}, status=status.HTTP_400_BAD_REQUEST)
             else:
+                if future_slot:
+                    formatted_time = future_slot.start_time.strftime("%I:%M %p")
+                    return Response({'success': False, 'message': f'You are too early to check in. Your next session starts at {formatted_time}. Check-in is allowed 15 minutes prior.'}, status=status.HTTP_400_BAD_REQUEST)
+                
                 completed_today = EmployeeAttendanceRecord.objects.filter(
                     user=request.user, date=now.date(), checked_in_at__isnull=False, checked_out_at__isnull=False
                 ).exists()
                 if completed_today:
-                    return Response({'success': False, 'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.'}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({'success': False, 'message': 'You have already completed attendance for all your sessions today.'}, status=status.HTTP_400_BAD_REQUEST)
 
         elif scan_type == 'check_out':
             if not open_record:
