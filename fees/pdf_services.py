@@ -137,12 +137,28 @@ def generate_payment_receipt_pdf(payment):
                 "Falling back to Playwright."
             )
         
-        # Fallback
+        # Fallback 1: Playwright
         buffer = playwright_pdf(html)
         if buffer and buffer.getvalue():
             logger.info(f"Successfully generated PDF receipt using Playwright fallback for payment {payment.id}")
             return buffer, 'playwright'
-        logger.error(f"Both WeasyPrint and Playwright failed for payment {getattr(payment, 'id', 'N/A')}")
+            
+        logger.warning(f"Both WeasyPrint and Playwright failed for payment {getattr(payment, 'id', 'N/A')}. Falling back to xhtml2pdf.")
+        
+        # Fallback 2: xhtml2pdf (Pure Python, highest reliability on unconfigured servers)
+        try:
+            from xhtml2pdf import pisa
+            buffer = BytesIO()
+            # xhtml2pdf expects bytes input
+            pisa_status = pisa.pisaDocument(BytesIO(html.encode('utf-8')), buffer)
+            if not pisa_status.err and buffer.getvalue():
+                buffer.seek(0)
+                logger.info(f"Successfully generated PDF receipt using xhtml2pdf fallback for payment {payment.id}")
+                return buffer, 'xhtml2pdf'
+        except Exception as xhtml_err:
+            logger.error(f"xhtml2pdf fallback failed: {xhtml_err}")
+            
+        logger.error(f"ALL PDF generation methods (WeasyPrint, Playwright, xhtml2pdf) failed for payment {getattr(payment, 'id', 'N/A')}")
         return None, None
             
     except Exception as e:
