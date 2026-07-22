@@ -64,7 +64,6 @@ def _get_access_token() -> Optional[str]:
                 credentials = service_account.Credentials.from_service_account_info(
                     info, scopes=[_FCM_SCOPE]
                 )
-                print("INFO:",info)
             except Exception as e:
                 logger.error("FCM: Failed to fetch service account from URL: %s", e)
                 return None
@@ -260,9 +259,6 @@ def send_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, user_id=No
     task = queue_whatsapp_text(to=to, body=body, delay_seconds=delay_seconds)
     task_id = str(task.id) if task else None
  
-    if user_id and task_id:
-        _record_history(user_id=user_id, title="WhatsApp", body=body, task_id=task_id)
- 
     return task_id
  
  
@@ -280,11 +276,6 @@ def send_whatsapp_template(*, to: str, template_name: str, language_code: str = 
     )
     task_id = str(task.id) if task else None
  
-    if user_id and task_id:
-        _record_history(
-            user_id=user_id, title="WhatsApp template", body=template_name, task_id=task_id
-        )
- 
     return task_id
  
  
@@ -299,9 +290,6 @@ def send_whatsapp_media(*, to: str, media_type: str, link: str = None, media_id:
         caption=caption, filename=filename, delay_seconds=delay_seconds,
     )
     task_id = str(task.id) if task else None
- 
-    if user_id and task_id:
-        _record_history(user_id=user_id, title="WhatsApp media", body=media_type, task_id=task_id)
  
     return task_id
  
