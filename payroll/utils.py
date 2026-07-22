@@ -8,6 +8,58 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def _fmt_currency(value):
+    return format(value.quantize(Decimal('0.01')), '.2f')
+
+
+def build_deduction_note(
+    late_penalty,
+    late_penalty_minutes=0,
+    late_penalty_rate=Decimal('0'),
+    late_dates=None,
+    absence_deductions=Decimal('0'),
+    absent_dates=None,
+    applied_leave_deductions=Decimal('0'),
+    leave_dates=None,
+    retention_deduction=Decimal('0'),
+    retention_percentage=Decimal('0'),
+    sunday_deduction=Decimal('0'),
+):
+    """Build a concise deduction note with accurate per-minute late-checkin details."""
+    notes = []
+    late_dates = late_dates or []
+    absent_dates = absent_dates or []
+    leave_dates = leave_dates or []
+
+    if late_penalty > 0:
+        date_suffix = f" on {', '.join(late_dates)}" if late_dates else ""
+        penalty_suffix = f" ({late_penalty_minutes} min @ {late_penalty_rate:.2f}/min)" if late_penalty_minutes > 0 and late_penalty_rate > 0 else ""
+        notes.append(f"Late check-in/out{date_suffix}{penalty_suffix}: -{_fmt_currency(late_penalty)}")
+
+    if absence_deductions > 0:
+        absent_count = len(absent_dates)
+        if absent_count > 0:
+            date_suffix = f" on {', '.join(absent_dates)}"
+            notes.append(f"Absent ({absent_count} day{'s' if absent_count != 1 else ''}){date_suffix}: -{_fmt_currency(absence_deductions)}")
+        else:
+            notes.append(f"Absent: -{_fmt_currency(absence_deductions)}")
+
+    if applied_leave_deductions > 0:
+        leave_count = len(leave_dates)
+        if leave_count > 0:
+            notes.append(f"Leave ({leave_count} day{'s' if leave_count != 1 else ''}): -{_fmt_currency(applied_leave_deductions)}")
+        else:
+            notes.append(f"Leave: -{_fmt_currency(applied_leave_deductions)}")
+
+    if retention_deduction > 0:
+        notes.append(f"Retention ({retention_percentage}%): -{_fmt_currency(retention_deduction)}")
+
+    if sunday_deduction > 0:
+        notes.append(f"Sunday Shortfall: -{_fmt_currency(sunday_deduction)}")
+
+    return ", ".join(notes)[:300]
+
+
 def get_subject_hourly_rate(faculty_profile, subject, month, year):
     """
     NEW (FRD §4.8.4): returns the effective hourly rate for a given faculty+subject.
@@ -493,20 +545,19 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     net = max(net, Decimal(0))
 
-    notes = []
-    if late_penalty > 0:
-        ld_str = f" on {', '.join(late_dates)}" if late_dates else ""
-        notes.append(f"Late{ld_str}: -{round(late_penalty, 2)}")
-    if absence_deductions > 0:
-        ad_str = f" on {', '.join(absent_dates)}" if absent_dates else ""
-        hd_str = f" (Half days: {', '.join(half_day_dates)})" if half_day_dates else ""
-        notes.append(f"Absent{ad_str}{hd_str}: -{round(absence_deductions, 2)}")
-    if applied_leave_deductions > 0:
-        lv_str = f" ({', '.join(leave_dates)})" if leave_dates else ""
-        notes.append(f"Leave{lv_str}: -{round(applied_leave_deductions, 2)}")
-    if retention_deduction > 0:
-        notes.append(f"Retention ({faculty_profile.salary_retention_percentage}%): -{round(retention_deduction, 2)}")
-    deduction_note_str = ", ".join(notes)[:300]
+    deduction_note_str = build_deduction_note(
+        late_penalty=late_penalty,
+        late_penalty_minutes=total_late_penalty_minutes,
+        late_penalty_rate=deduction_rate,
+        late_dates=late_dates,
+        absence_deductions=absence_deductions,
+        absent_dates=absent_dates,
+        applied_leave_deductions=applied_leave_deductions,
+        leave_dates=leave_dates,
+        retention_deduction=retention_deduction,
+        retention_percentage=faculty_profile.salary_retention_percentage,
+        sunday_deduction=Decimal('0'),
+    )
 
     # 10. Create PaySlip
     PaySlip.objects.filter(payroll_run=payroll_run, faculty=faculty_profile).delete()
@@ -1292,21 +1343,26 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     # Delete existing payslip for this user in this payroll run (for regeneration)
     PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
 
-    notes = []
-    if late_penalty > 0:
-        ld_str = f" on {', '.join(late_dates)}" if late_dates else ""
-        notes.append(f"Late{ld_str}: -{round(late_penalty, 2)}")
-    if absence_deductions > 0:
-        ad_str = f" on {', '.join(absent_dates)}" if absent_dates else ""
-        notes.append(f"Absent{ad_str}: -{round(absence_deductions, 2)}")
-    if leave_deductions > 0:
-        lv_str = f" ({', '.join(leave_dates)})" if leave_dates else ""
-        notes.append(f"Leave{lv_str}: -{round(leave_deductions, 2)}")
-    if retention_deduction > 0:
-        notes.append(f"Retention ({user.salary_retention_percentage}%): -{round(retention_deduction, 2)}")
-    if sunday_deduction > 0:
-        notes.append(f"Sunday Shortfall: -{round(sunday_deduction, 2)}")
-    deduction_note_str = ", ".join(notes)[:300]
+    late_penalty_minutes = 0
+    for d_date, d_delay in daily_delays.items():
+        if d_date.weekday() == 6:
+            continue
+        if d_delay > grace:
+            late_penalty_minutes += d_delay - grace
+
+    deduction_note_str = build_deduction_note(
+        late_penalty=late_penalty,
+        late_penalty_minutes=late_penalty_minutes,
+        late_penalty_rate=deduction_per_minute,
+        late_dates=late_dates,
+        absence_deductions=absence_deductions,
+        absent_dates=absent_dates,
+        applied_leave_deductions=leave_deductions,
+        leave_dates=leave_dates,
+        retention_deduction=retention_deduction,
+        retention_percentage=user.salary_retention_percentage,
+        sunday_deduction=sunday_deduction,
+    )
 
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
