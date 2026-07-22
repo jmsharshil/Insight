@@ -26,7 +26,7 @@ from .utils import calculate_leave_days, check_leave_overlap, check_late_entry_t
 logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
-LEAVE_APPLY_EXCLUDE = ['accountant', 'house_keeping', 'security']
+LEAVE_APPLY_EXCLUDE = ['super_admin', 'house_keeping', 'security']
 LEAVE_APPROVE_ROLES = ['branch_manager', 'admin_senior_executive']
 POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
 LATE_ENTRY_ADMIN = ['branch_manager', 'admin_senior_executive']
@@ -230,6 +230,16 @@ class LeaveListCreateView(APIView):
             balance = LeaveBalance.objects.filter(
                 user=request.user, leave_type=d['leave_type'], year=today.year,
             ).first()
+            
+            if not balance:
+                # Auto-initialize and try again
+                from .utils import initialize_leave_balances_for_year
+                if branch_obj:
+                    initialize_leave_balances_for_year(branch_obj, today.year)
+                    balance = LeaveBalance.objects.filter(
+                        user=request.user, leave_type=d['leave_type'], year=today.year,
+                    ).first()
+
             if not balance or balance.remaining_days < total_days:
                 remaining = balance.remaining_days if balance else 0
                 return Response({'success': False, 'message': f"Insufficient balance. Remaining: {remaining} days."}, status=status.HTTP_400_BAD_REQUEST)
@@ -644,6 +654,17 @@ class LeaveBalanceView(APIView):
     def get(self, request):
         year = timezone.now().year
         balances = LeaveBalance.objects.filter(user=request.user, year=year)
+        
+        if not balances.exists():
+            bid = _user_branch_id(request.user)
+            if bid:
+                from branch.models import Branch
+                branch = Branch.objects.filter(id=bid).first()
+                if branch:
+                    from .utils import initialize_leave_balances_for_year
+                    initialize_leave_balances_for_year(branch, year)
+                    balances = LeaveBalance.objects.filter(user=request.user, year=year)
+
         return Response({'success': True, 'data': LeaveBalanceSerializer(balances, many=True).data})
 
 
@@ -654,10 +675,32 @@ class LeaveBalanceUserView(APIView):
         role = _user_role(request.user)
         if role not in ADMIN_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-        year = request.GET.get('year', timezone.now().year)
+        
+        try:
+            year = int(request.GET.get('year', timezone.now().year))
+        except ValueError:
+            year = timezone.now().year
+            
         qs = LeaveBalance.objects.filter(user_id=user_id, year=year)
         if getattr(request.user, 'organization', None):
             qs = qs.filter(user__organization=request.user.organization)
+            
+        if not qs.exists():
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            target_user = User.objects.filter(id=user_id).first()
+            if target_user:
+                bid = _user_branch_id(target_user)
+                if bid:
+                    from branch.models import Branch
+                    branch = Branch.objects.filter(id=bid).first()
+                    if branch:
+                        from .utils import initialize_leave_balances_for_year
+                        initialize_leave_balances_for_year(branch, year)
+                        qs = LeaveBalance.objects.filter(user_id=user_id, year=year)
+                        if getattr(request.user, 'organization', None):
+                            qs = qs.filter(user__organization=request.user.organization)
+
         return Response({'success': True, 'data': LeaveBalanceSerializer(qs, many=True).data})
 
 
