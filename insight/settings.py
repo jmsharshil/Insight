@@ -219,7 +219,7 @@ FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://localhost:5173')
 # Firebase Cloud Messaging (v1 API) — set path to your service account JSON in .env
 # Download from: Firebase Console → Project Settings → Service accounts → Generate new private key
 # FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH', '')
-FIREBASE_SERVICE_ACCOUNT_PATH = "https://insightsinstitutes.blob.core.windows.net/media/insightServicesSdk.json"
+FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH', 'https://insightsinstitutes.blob.core.windows.net/media/insightServicesSdk.json')
 
 LANGUAGE_CODE = 'en-us'
 
