@@ -97,7 +97,7 @@ def initialize_leave_balances_for_year(branch, year):
     User = get_user_model()
 
     staff_roles = [
-        'faculty', 'branch_manager', 'admin_senior_executive', 'admin_executive',
+        'super_admin', 'faculty', 'branch_manager', 'admin_senior_executive', 'admin_executive',
         'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
         'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
         # house_keeping/security have no leave option (special Sunday attendance rules instead)

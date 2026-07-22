@@ -555,10 +555,12 @@ class LeavePolicyView(APIView):
     # permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        req_bid = request.GET.get('branch_id') or request.GET.get('branch')
-        bid = _user_branch_id(request.user)
-        if not bid and req_bid:
-            bid = req_bid
+        # Prioritize explicit branch_id requested by frontend
+        bid = request.GET.get('branch_id') or request.GET.get('branch')
+        
+        # If no explicit branch is requested, default to the user's branch
+        if not bid:
+            bid = _user_branch_id(request.user)
             
         qs = LeavePolicy.objects.filter(is_active=True)
         if getattr(request.user, 'organization', None):
@@ -661,8 +663,14 @@ class LeaveBalanceView(APIView):
         
         if not balances.exists():
             bid = _user_branch_id(request.user)
+            from branch.models import Branch
+            if not bid and getattr(request.user, 'organization', None):
+                # Fallback for super_admin who has no specific branch
+                branch = Branch.objects.filter(organization=request.user.organization).first()
+                if branch:
+                    bid = branch.id
+                    
             if bid:
-                from branch.models import Branch
                 branch = Branch.objects.filter(id=bid).first()
                 if branch:
                     from .utils import initialize_leave_balances_for_year
@@ -695,8 +703,12 @@ class LeaveBalanceUserView(APIView):
             target_user = User.objects.filter(id=user_id).first()
             if target_user:
                 bid = _user_branch_id(target_user)
+                from branch.models import Branch
+                if not bid and getattr(target_user, 'organization', None):
+                    branch = Branch.objects.filter(organization=target_user.organization).first()
+                    if branch:
+                        bid = branch.id
                 if bid:
-                    from branch.models import Branch
                     branch = Branch.objects.filter(id=bid).first()
                     if branch:
                         from .utils import initialize_leave_balances_for_year
