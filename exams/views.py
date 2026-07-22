@@ -31,7 +31,7 @@ from .serializers import (
 )
 from .utils import (
     auto_submit_session, check_geo_boundary, assign_papers_to_checker,
-    calculate_ranks,
+    calculate_ranks, build_absolute_url,
 )
 from .emails import send_answer_key_email
 
@@ -1166,9 +1166,7 @@ class AnswerKeyDistributeView(APIView):
             )
             token = hashlib.sha256(f"{log.id}{django_settings.SECRET_KEY}".encode()).hexdigest()
             path = f"/api/v1/answer-key/{exam_id}/?token={log.id}_{token}"
-            url = request.build_absolute_uri(path)
-            # Replace localhost with 127.0.0.1 for local testing compatibility
-            url = url.replace('localhost', '127.0.0.1')
+            url = build_absolute_url(path, request=request)
             send_answer_key_email(checker, exam, url)
             sent.append(checker.name)
             

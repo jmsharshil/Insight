@@ -2,6 +2,7 @@ import uuid
 import math
 import logging
 from datetime import timedelta
+from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,26 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
             email_context=email_context,
             email_subject=email_subject,
         )
+
+
+def build_absolute_url(path, request=None):
+    """Return a stable absolute URL for email links using configured backend settings."""
+    if not path:
+        return ''
+
+    if path.startswith(('http://', 'https://')):
+        return path
+
+    base_url = getattr(settings, 'BASE_URL', '').strip() or getattr(settings, 'FRONTEND_BASE_URL', '').strip()
+    if base_url:
+        normalized_path = path if path.startswith('/') else f'/{path}'
+        url = f"{base_url.rstrip('/')}{normalized_path}"
+        return url.replace('localhost', '127.0.0.1')
+
+    if request is not None:
+        return request.build_absolute_uri(path)
+
+    return path
 
 
 def group_questions(serialized_questions):

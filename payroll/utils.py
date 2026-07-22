@@ -415,10 +415,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     leave_dates = []
     for l in approved_leaves:
         leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
-    if fac_hourly_rate != Decimal(0):
-        daily_rate = Decimal(0)
-    else:
-        daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
+    # Daily rate should be derived from monthly salary regardless of hourly rate
+    daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = Decimal(leave_days) * daily_rate
 
     # 7. Working days
@@ -768,10 +766,8 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     leave_dates = []
     for l in approved_leaves:
         leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
-    if fac_hourly_rate != Decimal(0):
-        daily_rate = Decimal(0)
-    else:
-        daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
+    # Daily rate should be derived from monthly salary regardless of hourly rate
+    daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = Decimal(leave_days) * daily_rate
 
     working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
