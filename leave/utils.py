@@ -102,7 +102,15 @@ def initialize_leave_balances_for_year(branch, year):
         'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
         # house_keeping/security have no leave option (special Sunday attendance rules instead)
     ]
-    staff = User.objects.filter(role__in=staff_roles, is_active=True)
+    
+    # Filter users to only those in the given branch (or if they are super_admin and want to test)
+    from .views import _user_branch_id
+    all_staff = User.objects.filter(role__in=staff_roles, is_active=True)
+    staff = []
+    for u in all_staff:
+        u_bid = _user_branch_id(u)
+        if str(u_bid) == str(branch.id) or u.role == 'super_admin':
+            staff.append(u)
     policies = LeavePolicy.objects.filter(branch=branch, is_active=True)
 
     created_count = 0

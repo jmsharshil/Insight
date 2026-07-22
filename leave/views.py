@@ -555,7 +555,11 @@ class LeavePolicyView(APIView):
     # permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        req_bid = request.GET.get('branch_id') or request.GET.get('branch')
         bid = _user_branch_id(request.user)
+        if not bid and req_bid:
+            bid = req_bid
+            
         qs = LeavePolicy.objects.filter(is_active=True)
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
@@ -572,7 +576,7 @@ class LeavePolicyView(APIView):
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        bid = _user_branch_id(request.user) or request.data.get('branch_id')
+        bid = _user_branch_id(request.user) or request.data.get('branch_id') or request.data.get('branch')
         if not bid:
             return Response({'success': False, 'message': 'Branch required.'}, status=status.HTTP_400_BAD_REQUEST)
 
