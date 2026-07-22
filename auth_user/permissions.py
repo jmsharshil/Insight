@@ -62,33 +62,33 @@ ROLE_PERMISSIONS = {
     'admin_executive': {
         'default_modules': [
             'students', 'attendance', 'courses_batches', 'timetable',
-            'payroll', 'settings', 'notifications',
+            'payroll', 'settings', 'notifications', 'leave',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'front_desk': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'counsellor': {
-        'default_modules': ['crm', 'students', 'payroll', 'settings', 'attendance', 'notifications'],
+        'default_modules': ['crm', 'students', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'tele_caller': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'sales_senior_executive': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': True,
     },
     'sales_executive': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications'],
+        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
@@ -118,21 +118,21 @@ ROLE_PERMISSIONS = {
     },
     'exam_supervisor': {
         'default_modules': [
-            'attendance', 'exams', 'notifications', 'payroll', 'settings',
+            'attendance', 'exams', 'notifications', 'payroll', 'settings', 'leave',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'paper_checker': {
         'default_modules': [
-            'exams', 'notifications', 'payroll', 'settings',
+            'exams', 'notifications', 'payroll', 'settings', 'leave',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'accountant': {
         'default_modules': [
-            'attendance', 'fees', 'payroll', 'notifications', 'settings',
+            'attendance', 'fees', 'payroll', 'notifications', 'settings', 'leave',
         ],
         'canDelete': False,
         'canExport': True,

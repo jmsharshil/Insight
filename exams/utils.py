@@ -261,7 +261,7 @@ def assign_papers_to_checker(exam_id, checker_ids=None):
     """
     from results.models import MarkSheet
     from .models import Exam
-    from .emails import send_checker_assignment_email
+    # from .emails import send_checker_assignment_email  # commented per request to stop assignment emails (spam)
 
     exam = Exam.objects.select_related('branch').get(id=exam_id)
 
@@ -290,22 +290,32 @@ def assign_papers_to_checker(exam_id, checker_ids=None):
         return 0
 
     assigned_count = 0
+    assigned_checkers_map = {}
+    
     for i, sheet in enumerate(sheets):
         checker_id = checker_ids[i % len(checker_ids)]
         sheet.paper_checker_id = checker_id
         sheet.save(update_fields=['paper_checker_id'])
         generate_checker_token(sheet)
-        send_checker_assignment_email(sheet)
-        # v2: in-app notification stub (FRD §4.6.2)
+        
+        # v2: in-app notification (now says "to check" per request)
         notify(
             checker_id,
-            title="Paper assigned",
-            body=f"You have been assigned papers for {exam.title}",
+            title="Papers assigned for checking",
+            body=f"Papers have been assigned to you to check for {exam.title}",
             metadata={"exam_id": str(exam_id), "marksheet_id": str(sheet.id)},
         )
+        
+        if checker_id not in assigned_checkers_map:
+            assigned_checkers_map[checker_id] = sheet
+            
         assigned_count += 1
 
-    logger.info(f"Auto-assigned {assigned_count} papers to {len(set(checker_ids))} checkers for exam {exam.title}")
+    from .emails import send_checker_assignment_email
+    for checker_id, first_sheet in assigned_checkers_map.items():
+        send_checker_assignment_email(first_sheet)
+
+    logger.info(f"Auto-assigned {assigned_count} papers to {len(set(checker_ids))} checkers for exam {exam.title} (email sent once per checker)")
     return assigned_count
 
 
@@ -363,3 +373,80 @@ def generate_checker_token(marksheet):
         expires_at=timezone.now() + timedelta(hours=72),
     )
     return token_str
+
+
+def distribute_answer_keys(exam):
+    """Send answer key with signed URL (48h expiry) to all relevant paper checkers.
+    Triggered automatically on exam status -> 'completed' (see tasks.py).
+    Uses AnswerKeyDistributionLog for audit and token-based access control.
+    Leverages send_answer_key_email() which integrates with send_system_notification
+    for FCM, WhatsApp and email (per updated notification stack).
+    """
+    import hashlib
+    from django.conf import settings
+    from django.contrib.auth import get_user_model
+    from .emails import send_answer_key_email
+    from .models import AnswerKeyDistributionLog
+    from results.models import MarkSheet
+
+    User = get_user_model()
+
+    logger.info(f"Starting auto answer-key distribution for exam {exam.id} ({exam.title})")
+
+    # Get checkers from Exam M2M + any assigned in MarkSheet (for robustness)
+    checker_ids = set(exam.paper_checkers.values_list('id', flat=True))
+    ms_checker_ids = set(
+        MarkSheet.objects.filter(exam=exam, paper_checker__isnull=False)
+        .values_list('paper_checker_id', flat=True)
+    )
+    checker_ids |= ms_checker_ids
+
+    if not checker_ids:
+        logger.warning(f"No checkers configured for answer key on exam {exam.id}. Skipping.")
+        return 0
+
+    sent_count = 0
+    base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8000')
+    
+    # Try to resolve the direct blob storage URL first to avoid base_url issues in background tasks
+    direct_blob_url = None
+    if exam.answer_key:
+        direct_blob_url = exam.answer_key.url
+    else:
+        from .models import Question
+        questions = Question.objects.filter(exam=exam)
+        if not questions.exists() and exam.selected_papers.exists():
+            paper = exam.selected_papers.first()
+            if paper.answer_key:
+                direct_blob_url = paper.answer_key.url
+            elif paper.file:
+                direct_blob_url = paper.file.url
+
+    for cid in checker_ids:
+        try:
+            checker = User.objects.get(id=cid)
+            log = AnswerKeyDistributionLog.objects.create(
+                exam=exam, sent_to=checker,
+                link_expires=timezone.now() + timedelta(hours=48)
+            )
+            token = hashlib.sha256(
+                f"{log.id}{settings.SECRET_KEY}".encode('utf-8')
+            ).hexdigest()
+            path = f"/api/v1/answer-key/{exam.id}/?token={log.id}_{token}"
+            signed_url = f"{base_url.rstrip('/')}{path}"
+            signed_url = signed_url.replace('localhost', '127.0.0.1')
+            
+            # Send direct blob URL if available, fallback to signed API link
+            url_to_send = direct_blob_url if direct_blob_url else signed_url
+            send_answer_key_email(checker, exam, url_to_send)
+            sent_count += 1
+        except Exception as e:
+            logger.error(
+                f"Failed sending answer key to user {cid} for exam {exam.id}: {e}"
+            )
+
+    logger.info(
+        f"Auto-distributed answer keys to {sent_count}/{len(checker_ids)} "
+        f"checkers for exam '{exam.title}'"
+    )
+    return sent_count

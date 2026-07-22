@@ -270,6 +270,10 @@ def detect_missing_scans(branch_id, date_str=None):
         ).select_related('user')
 
         processed = 0
+        from batches.models import TimetableSlot
+        current_time = timezone.localtime(timezone.now()).time()
+        current_dow = timezone.localtime(timezone.now()).weekday()
+
         for student in students:
             # Get all attendance records for the day (supports multiple sessions)
             day_records = list(AttendanceRecord.objects.filter(
@@ -279,9 +283,26 @@ def detect_missing_scans(branch_id, date_str=None):
 
             has_any_checkin = any(r.checked_in_at for r in day_records)
             open_sessions = [r for r in day_records if r.checked_in_at and not r.checked_out_at]
+            
+            # Check if student has a scheduled class today that has started
+            enrolled_batch_ids = list(student.batch_enrollments.values_list('batch_id', flat=True))
+            primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
+            if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
+                enrolled_batch_ids.append(primary_batch_id)
+                
+            today_slots = TimetableSlot.objects.filter(
+                batch_id__in=enrolled_batch_ids,
+                day_of_week=current_dow,
+            )
+            
+            past_slots = [s for s in today_slots if s.start_time and s.start_time <= current_time]
 
             if not has_any_checkin:
-                # CASE 2: Missing check-in scan (no_show) — avoid duplicate alerts
+                # CASE 2: Missing check-in scan (no_show)
+                if not past_slots:
+                    # Student had no scheduled classes that have started yet today, so skip
+                    continue
+
                 if AlertLog.objects.filter(
                     student=student,
                     alert_type='missing_checkin_scan',
@@ -313,6 +334,17 @@ def detect_missing_scans(branch_id, date_str=None):
             elif open_sessions:
                 # CASE 1: Has check-in but missing checkout
                 for open_rec in open_sessions:
+                    # Skip if the class is still ongoing
+                    if open_rec.timetable_slot and open_rec.timetable_slot.end_time:
+                        if current_time <= open_rec.timetable_slot.end_time:
+                            continue
+                    else:
+                        # If no slot is mapped, assume ongoing if checked in within the last 8 hours
+                        import datetime
+                        now = timezone.now()
+                        if open_rec.checked_in_at and (now - open_rec.checked_in_at) < datetime.timedelta(hours=8):
+                            continue
+
                     if AlertLog.objects.filter(
                         student=student,
                         alert_type='missing_checkout_scan',

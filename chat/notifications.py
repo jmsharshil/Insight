@@ -37,6 +37,8 @@ def _get_access_token() -> Optional[str]:
         from google.oauth2 import service_account
         import google.auth.transport.requests as google_requests
 
+        import requests
+        
         # Resolve the service account JSON path
         sa_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH', None) or \
                   os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')
@@ -49,17 +51,32 @@ def _get_access_token() -> Optional[str]:
                 if os.path.exists(auto_path):
                     sa_path = auto_path
 
-        if not sa_path or not os.path.exists(sa_path):
-            logger.warning(
-                "FCM: firebase_service_account.json not found. "
-                "Set FIREBASE_SERVICE_ACCOUNT_PATH in .env or place the file next to manage.py."
-            )
+        if not sa_path:
+            logger.warning("FCM: firebase_service_account.json not found.")
             return None
 
-        credentials = service_account.Credentials.from_service_account_file(
-            sa_path,
-            scopes=[_FCM_SCOPE],
-        )
+        # If it's a URL, fetch it and load from info dict
+        if sa_path.startswith('http://') or sa_path.startswith('https://'):
+            try:
+                resp = requests.get(sa_path, timeout=10)
+                resp.raise_for_status()
+                info = resp.json()
+                credentials = service_account.Credentials.from_service_account_info(
+                    info, scopes=[_FCM_SCOPE]
+                )
+                print("INFO:",info)
+            except Exception as e:
+                logger.error("FCM: Failed to fetch service account from URL: %s", e)
+                return None
+        elif os.path.exists(sa_path):
+            credentials = service_account.Credentials.from_service_account_file(
+                sa_path,
+                scopes=[_FCM_SCOPE],
+            )
+        else:
+            logger.warning("FCM: firebase_service_account.json not found at %s", sa_path)
+            return None
+
         credentials.refresh(google_requests.Request())
         return credentials.token
 
@@ -70,6 +87,8 @@ def _get_access_token() -> Optional[str]:
 
 def _get_project_id() -> Optional[str]:
     """Read project_id from the service account JSON file."""
+    import requests
+    
     sa_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH', None) or \
               os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')
 
@@ -80,10 +99,17 @@ def _get_project_id() -> Optional[str]:
             if os.path.exists(auto_path):
                 sa_path = auto_path
 
-    if sa_path and os.path.exists(sa_path):
+    if sa_path:
         try:
-            with open(sa_path) as f:
-                data = json.load(f)
+            if sa_path.startswith('http://') or sa_path.startswith('https://'):
+                resp = requests.get(sa_path, timeout=5)
+                resp.raise_for_status()
+                data = resp.json()
+            elif os.path.exists(sa_path):
+                with open(sa_path) as f:
+                    data = json.load(f)
+            else:
+                return None
             return data.get('project_id')
         except Exception:
             pass
@@ -332,54 +358,54 @@ def send_system_notification(
     If the user has an FCM token, it will send a push notification.
     """
     def _send_task():
-        from django.contrib.auth import get_user_model
-        from core.sender import send_email
-        User = get_user_model()
         try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            logger.warning("Notification failed: User %s not found.", user_id)
-            return
+            from django.contrib.auth import get_user_model
+            from core.sender import send_email
+            User = get_user_model()
+            try:
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                logger.warning("Notification failed: User %s not found.", user_id)
+                return
 
-        # 1. Send FCM Push Notification
-        if getattr(user, 'fcm_token', None):
+            # 1. Send FCM Push Notification (and save NotificationHistory)
             send_fcm_notification(
-                token=user.fcm_token,
+                token=getattr(user, 'fcm_token', None),
                 title=title,
                 body=body,
                 data=metadata or {},
                 user_id=str(user.id)
             )
 
-        # 2. Send Email Notification
-        if email_template and getattr(user, 'email', None):
-            subject = email_subject or title
-            ctx = email_context or {}
-            # Fallbacks for some basic context if not provided
-            if 'user_name' not in ctx:
-                ctx['user_name'] = user.name
-                
-            org = getattr(user, 'organization', None)
-            
-            try:
-                send_email(
-                    to=user.email,
-                    subject=subject,
-                    text=body,
-                    template=email_template,
-                    template_context=ctx,
-                    organization=org,
-                )
-            except Exception as e:
-                logger.error("Failed to send system email to %s: %s", user.email, e)
+            # 2. Send Email Notification
+            if email_template and getattr(user, 'email', None):
+                subject = email_subject or title
+                ctx = email_context or {}
+                # Fallbacks for some basic context if not provided
+                if 'user_name' not in ctx:
+                    ctx['user_name'] = user.name
 
+                org = getattr(user, 'organization', None)
 
+                try:
+                    send_email(
+                        to=user.email,
+                        subject=subject,
+                        text=body,
+                        template=email_template,
+                        template_context=ctx,
+                        organization=org,
+                    )
+                except Exception as e:
+                    logger.error("Failed to send system email to %s: %s", user.email, e)
+
+            # 3. Send WhatsApp Notification (independent of email)
             try:
                 if whatsapp_template and getattr(user, 'phone', None):
                     send_whatsapp_template(
                         to=user.phone,
                         template_name=whatsapp_template,
-                        language_code= whatsapp_template_lang_code or 'en_US',
+                        language_code=whatsapp_template_lang_code or 'en_US',
                         components=[{"type": "body", "parameters": [{"type": "text", "text": str(whatsapp_context.get(k, ''))} for k in whatsapp_context]}] if whatsapp_context else [],
                         user_id=str(user.id),
                         delay_seconds=delay_seconds or 0
@@ -400,6 +426,9 @@ def send_system_notification(
                     send_whatsapp_text(to=user.phone, body=body, user_id=str(user.id))
             except Exception as e:
                 logger.error("Failed to send WhatsApp notification to %s: %s", user.id, e)
+
+        except Exception as e:
+            logger.error("send_system_notification thread crashed for user %s: %s", user_id, e, exc_info=True)
 
     thread = threading.Thread(target=_send_task, daemon=True)
     thread.start()

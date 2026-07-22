@@ -563,3 +563,77 @@ def get_next_session_details(student, current_slot=None):
         }
 
     return {'message': 'No upcoming sessions scheduled.'}
+
+
+def get_active_timetable_slot_for_scan(student, slot_id=None):
+    """
+    If `slot_id` (timetable_slot UUID) is passed via the QR scan API, return
+    that TimetableSlot *directly* (no time-based query across all enrolled
+    batches/slots). This fulfills the optimization request.
+
+    Otherwise falls back to original auto-detection (current time window,
+    day_of_week, unattended slots first, primary batch fallback).
+
+    Returns (timetable_slot: TimetableSlot|None, batch: Batch|None)
+    """
+    from batches.models import TimetableSlot, Batch, BatchStudent
+    from django.utils import timezone
+    from .models import AttendanceRecord
+
+    now = timezone.localtime()
+
+    if slot_id is not None:
+        try:
+            slot = TimetableSlot.objects.select_related('batch', 'subject').get(id=slot_id)
+            return slot, getattr(slot, 'batch', None)
+        except (TimetableSlot.DoesNotExist, ValueError, TypeError, AttributeError):
+            # Graceful fallback to auto-detect if bad slot_id
+            pass
+
+    # ── Original time-based search (only reached if no valid slot_id) ──
+    current_dow = now.weekday()
+    current_time = now.time()
+    enrolled_batch_ids = list(
+        BatchStudent.objects.filter(
+            student=student,
+            batch__is_active=True
+        ).values_list('batch_id', flat=True)
+    )
+    primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
+    if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
+        enrolled_batch_ids.append(primary_batch_id)
+
+    buffered_time = (now + timedelta(minutes=15)).time()
+
+    matching_slots = TimetableSlot.objects.filter(
+        batch_id__in=enrolled_batch_ids,
+        day_of_week=current_dow,
+        start_time__lte=buffered_time,
+        end_time__gte=current_time
+    ).select_related('batch', 'subject').order_by('start_time')
+
+    attended_slot_ids = set(
+        AttendanceRecord.objects.filter(
+            student=student, date=now.date(), timetable_slot__isnull=False
+        ).values_list('timetable_slot_id', flat=True)
+    )
+
+    active_slot = None
+    for slot in matching_slots:
+        if slot.id not in attended_slot_ids:
+            active_slot = slot
+            break
+
+    if not active_slot and matching_slots.exists():
+        active_slot = matching_slots.last()
+
+    batch = None
+    if active_slot and getattr(active_slot, 'batch', None):
+        batch = active_slot.batch
+    else:
+        if primary_batch_id:
+            batch = Batch.objects.filter(id=primary_batch_id).first()
+        if not batch and enrolled_batch_ids:
+            batch = Batch.objects.filter(id=enrolled_batch_ids[0]).first()
+
+    return active_slot, batch
