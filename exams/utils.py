@@ -240,7 +240,7 @@ def assign_papers_to_checker(exam_id, checker_ids=None):
     """
     from results.models import MarkSheet
     from .models import Exam
-    from .emails import send_checker_assignment_email
+    # from .emails import send_checker_assignment_email  # commented per request to stop assignment emails (spam)
 
     exam = Exam.objects.select_related('branch').get(id=exam_id)
 
@@ -269,22 +269,32 @@ def assign_papers_to_checker(exam_id, checker_ids=None):
         return 0
 
     assigned_count = 0
+    assigned_checkers_map = {}
+    
     for i, sheet in enumerate(sheets):
         checker_id = checker_ids[i % len(checker_ids)]
         sheet.paper_checker_id = checker_id
         sheet.save(update_fields=['paper_checker_id'])
         generate_checker_token(sheet)
-        send_checker_assignment_email(sheet)
-        # v2: in-app notification stub (FRD §4.6.2)
+        
+        # v2: in-app notification (now says "to check" per request)
         notify(
             checker_id,
-            title="Paper assigned",
-            body=f"You have been assigned papers for {exam.title}",
+            title="Papers assigned for checking",
+            body=f"Papers have been assigned to you to check for {exam.title}",
             metadata={"exam_id": str(exam_id), "marksheet_id": str(sheet.id)},
         )
+        
+        if checker_id not in assigned_checkers_map:
+            assigned_checkers_map[checker_id] = sheet
+            
         assigned_count += 1
 
-    logger.info(f"Auto-assigned {assigned_count} papers to {len(set(checker_ids))} checkers for exam {exam.title}")
+    from .emails import send_checker_assignment_email
+    for checker_id, first_sheet in assigned_checkers_map.items():
+        send_checker_assignment_email(first_sheet)
+
+    logger.info(f"Auto-assigned {assigned_count} papers to {len(set(checker_ids))} checkers for exam {exam.title} (email sent once per checker)")
     return assigned_count
 
 
@@ -376,6 +386,21 @@ def distribute_answer_keys(exam):
 
     sent_count = 0
     base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8000')
+    
+    # Try to resolve the direct blob storage URL first to avoid base_url issues in background tasks
+    direct_blob_url = None
+    if exam.answer_key:
+        direct_blob_url = exam.answer_key.url
+    else:
+        from .models import Question
+        questions = Question.objects.filter(exam=exam)
+        if not questions.exists() and exam.selected_papers.exists():
+            paper = exam.selected_papers.first()
+            if paper.answer_key:
+                direct_blob_url = paper.answer_key.url
+            elif paper.file:
+                direct_blob_url = paper.file.url
+
     for cid in checker_ids:
         try:
             checker = User.objects.get(id=cid)
@@ -389,7 +414,10 @@ def distribute_answer_keys(exam):
             path = f"/api/v1/answer-key/{exam.id}/?token={log.id}_{token}"
             signed_url = f"{base_url.rstrip('/')}{path}"
             signed_url = signed_url.replace('localhost', '127.0.0.1')
-            send_answer_key_email(checker, exam, signed_url)
+            
+            # Send direct blob URL if available, fallback to signed API link
+            url_to_send = direct_blob_url if direct_blob_url else signed_url
+            send_answer_key_email(checker, exam, url_to_send)
             sent_count += 1
         except Exception as e:
             logger.error(

@@ -75,7 +75,6 @@ def test_system_notification():
         # Optional WhatsApp (will use plain text fallback if no template)
         # whatsapp_template=None,
         # whatsapp_context=None,
-        sync=True,  # Critical for test reliability with SQLite + scheduler
     )
 
     # Poll for the record (handles any transient DB contention from scheduler)
