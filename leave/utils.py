@@ -126,7 +126,7 @@ def initialize_leave_balances_for_year(branch, year):
                     carried = min(remaining, Decimal(policy.max_carry_days))
                     carried = max(carried, Decimal(0))
 
-            _, was_created = LeaveBalance.objects.get_or_create(
+            balance, was_created = LeaveBalance.objects.get_or_create(
                 user=user, leave_type=policy.leave_type, year=year,
                 defaults={
                     'total_days': Decimal(policy.annual_quota),
@@ -135,6 +135,10 @@ def initialize_leave_balances_for_year(branch, year):
             )
             if was_created:
                 created_count += 1
+            else:
+                # Update existing balance according to changed policy
+                balance.total_days = Decimal(policy.annual_quota)
+                balance.save(update_fields=['total_days'])
 
     logger.info(f"Initialized {created_count} leave balances for branch={branch.id}, year={year}")
     return created_count
