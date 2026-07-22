@@ -592,17 +592,9 @@ class LeavePolicyView(APIView):
                 defaults=ser.validated_data,
             )
             
-            # Auto-create or update balances for all staff in this branch
-            from django.utils import timezone
-            from .utils import initialize_leave_balances_for_year
-            
-            branch = Branch.objects.filter(id=bid).first()
-            if branch:
-                initialize_leave_balances_for_year(branch, timezone.now().year)
-                
             return Response({
                 'success': True,
-                'message': 'Policy created and balances updated.' if created else 'Policy updated and balances synced.',
+                'message': 'Policy created.' if created else 'Policy updated.',
                 'data': LeavePolicySerializer(policy).data,
             }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
         except Exception as e:
