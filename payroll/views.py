@@ -87,6 +87,11 @@ class PayrollListCreateView(APIView):
         try:
             y_int = int(year)
             m_int = int(month)
+            
+            if y_int > now.year or (y_int == now.year and m_int > now.month):
+                # Skip auto-generation for future dates
+                raise ValueError("Pyslips for future dates can't be generated.")
+
             from faculty.models import FacultyProfile
             from django.contrib.auth import get_user_model
             User = get_user_model()
@@ -193,6 +198,11 @@ class PayrollListCreateView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         d = ser.validated_data
+        
+        now = timezone.now()
+        if d['year'] > now.year or (d['year'] == now.year and d['month'] > now.month):
+            return Response({'success': False, 'message': 'Cannot generate payroll for future months.'}, status=status.HTTP_400_BAD_REQUEST)
+
         from faculty.models import FacultyProfile
         from django.contrib.auth import get_user_model
         User = get_user_model()
