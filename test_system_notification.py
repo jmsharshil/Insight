@@ -49,10 +49,10 @@ def test_system_notification():
     test_user = User.objects.filter(role='super_admin', is_active=True).first()
 
     if not test_user:
-        print("❌ No active users found in database.")
+        print("[FAIL] No active users found in database.")
         return False
 
-    print(f"✅ Using test user: {test_user.email} (ID: {test_user.id}, Role: {test_user.role})")
+    print(f"[OK] Using test user: {test_user.email} (ID: {test_user.id}, Role: {test_user.role})")
     
     title = "Test System Notification"
     body = f"This is a test in-app notification sent at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. Check your app or notification history."
@@ -107,19 +107,19 @@ def test_system_notification():
             print(f"Created At: {notif.created_at}")
             print("-" * 60)
         
-        print("\n✅ TEST PASSED: NotificationHistory record successfully created by send_system_notification().")
+        print("\n[OK] TEST PASSED: NotificationHistory record successfully created by send_system_notification().")
         print("   (FCM path taken if token present; history created regardless.)")
         if getattr(test_user, 'fcm_token', None):
-            print("   FCM token present — check logs for send_fcm_notification() success.")
+            print("   FCM token present - check logs for send_fcm_notification() success.")
         return True
     else:
         # Fallback diagnostics
-        print("⚠️ No matching test record found. Showing latest 5 notifications for user:")
+        print("[WARNING] No matching test record found. Showing latest 5 notifications for user:")
         fallback = NotificationHistory.objects.filter(user=test_user).order_by('-created_at')[:5]
         for notif in fallback:
-            print(f"  • {notif.title} | {notif.created_at} | data_test_id={notif.data.get('test_id')} | read={notif.is_read}")
+            print(f"  * {notif.title} | {notif.created_at} | data_test_id={notif.data.get('test_id')} | read={notif.is_read}")
         
-        print("\n❌ TEST FAILED: No NotificationHistory record was created for this test.")
+        print("\n[FAIL] TEST FAILED: No NotificationHistory record was created for this test.")
         print("   Possible causes: DB lock during scheduler startup, missing user, or exception in _send_task.")
         print("   (The sync=True + polling should have mitigated most transient issues.)")
         return False
@@ -129,23 +129,27 @@ if __name__ == "__main__":
     print("System Notification Test Harness")
     print("=" * 60)
     
-    # Ensure Firebase path from .env is respected
+    # Ensure Firebase credentials are provided
+    raw_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
     firebase_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
-    if firebase_path:
+    
+    if raw_json:
+        print("Firebase credentials provided via FIREBASE_CREDENTIALS_JSON in env.")
+    elif firebase_path:
         clean_path = firebase_path.strip('"').strip()
         print("Firebase service account path from env:", clean_path)
-        if not os.path.exists(clean_path):
-            print("⚠️ Warning: Service account JSON not found at path. FCM may fail (but history should still be created).")
+        if not clean_path.startswith("http") and not os.path.exists(clean_path):
+            print("[WARNING] Service account JSON not found at path. FCM may fail (but history should still be created).")
     else:
-        print("⚠️ No FIREBASE_SERVICE_ACCOUNT_PATH in env. FCM will be skipped.")
+        print("[WARNING] No FIREBASE_CREDENTIALS_JSON or FIREBASE_SERVICE_ACCOUNT_PATH in env. FCM will be skipped.")
     
     success = test_system_notification()
     
     print("\n" + "=" * 60)
     if success:
-        print("🎉 Test completed successfully.")
+        print("[SUCCESS] Test completed successfully.")
         sys.exit(0)
     else:
-        print("💡 Tip: Check django_errors.log for 'Failed to save notification history' or DB lock errors.")
+        print("[INFO] Tip: Check django_errors.log for 'Failed to save notification history' or DB lock errors.")
         print("   The scheduler reconciliation can lock SQLite; sync=True mitigates this.")
         sys.exit(1)
