@@ -48,6 +48,11 @@ def _get_access_token() -> Optional[str]:
                 info = json.loads(raw_json)
             else:
                 info = raw_json
+                
+            # Fix potentially escaped newlines in private_key (common issue with ENV vars)
+            if 'private_key' in info and isinstance(info['private_key'], str):
+                info['private_key'] = info['private_key'].replace('\\n', '\n')
+                
             credentials = service_account.Credentials.from_service_account_info(
                 info, scopes=[_FCM_SCOPE]
             )
@@ -76,6 +81,11 @@ def _get_access_token() -> Optional[str]:
                 resp = requests.get(sa_path, timeout=10)
                 resp.raise_for_status()
                 info = resp.json()
+                
+                # Fix potentially escaped newlines in private_key
+                if 'private_key' in info and isinstance(info['private_key'], str):
+                    info['private_key'] = info['private_key'].replace('\\n', '\n')
+                    
                 credentials = service_account.Credentials.from_service_account_info(
                     info, scopes=[_FCM_SCOPE]
                 )
@@ -166,19 +176,27 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
         except Exception as e:
             logger.error("FCM: Failed to save notification history: %s", e)
 
+    print(f"\n[FCM DEBUG] {'-'*40}")
+    print(f"[FCM DEBUG] Sending notification to token: {token[:40]}... (length: {len(token) if token else 0})")
+    print(f"[FCM DEBUG] Title: '{title}', Body: '{body}'")
+
     if not token:
+        print("[FCM DEBUG] ABORT: Token is empty")
         return
 
     access_token = _get_access_token()
     if not access_token:
+        print("[FCM DEBUG] ABORT: Failed to get access token")
         return  # Warning already logged inside _get_access_token
 
     project_id = _get_project_id()
     if not project_id:
+        print("[FCM DEBUG] ABORT: Could not determine Firebase project_id")
         logger.warning("FCM: Could not determine Firebase project_id.")
         return
 
     url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+    print(f"[FCM DEBUG] URL: {url}")
 
     payload = {
         "message": {
@@ -205,6 +223,8 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
             },
         }
     }
+    
+    print(f"[FCM DEBUG] Payload generated successfully")
 
     try:
         response = requests.post(
@@ -216,9 +236,13 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
             },
             timeout=5,
         )
+        print(f"[FCM DEBUG] Response Status Code: {response.status_code}")
+        
         if response.status_code == 200:
+            print(f"[FCM DEBUG] ✅ SUCCESS!")
             logger.info("FCM: Notification sent to token %s...", token[:20])
         else:
+            print(f"[FCM DEBUG] ❌ FAILED! Response: {response.text[:500]}")
             logger.warning("FCM: Send failed (%s): %s", response.status_code, response.text[:200])
             
         try:
@@ -227,8 +251,11 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
             return {"status_code": response.status_code, "response": response.text}
             
     except requests.RequestException as exc:
+        print(f"[FCM DEBUG] 💥 Request Exception: {exc}")
         logger.error("FCM: Request error: %s", exc)
         return {"error": str(exc)}
+    finally:
+        print(f"[FCM DEBUG] {'-'*40}\n")
 
 
 def notify_new_message(*, room_id: str, message_id: str, sender_name: str, content: str, participant_ids: list, target_user_ids: list = None, sender_id: str = None):

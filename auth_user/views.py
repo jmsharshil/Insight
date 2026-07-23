@@ -706,22 +706,43 @@ class TestNotificationAPIView(APIView):
         title = request.data.get("title", "Test Notification")
         body = request.data.get("body", "This is a test message from the API!")
         user_id = request.data.get("user_id")
+        manual_token = request.data.get("fcm_token")
+        
+        target_email = "manual token"
+        target_user_id = None
 
-        if user_id:
-            target_user = get_object_or_404(User, id=user_id)
+        if manual_token:
+            actual_token = manual_token
+            if user_id:
+                try:
+                    target_user = User.objects.get(id=user_id)
+                    target_email = target_user.email
+                    target_user_id = target_user.id
+                except User.DoesNotExist:
+                    pass
         else:
-            target_user = request.user
+            if user_id:
+                target_user = get_object_or_404(User, id=user_id)
+            else:
+                target_user = request.user
+                
+            # Ensure we have the absolute latest data from DB
+            target_user.refresh_from_db()
+            target_email = target_user.email
+            target_user_id = target_user.id
 
-        # Ensure we have the absolute latest data from DB
-        target_user.refresh_from_db()
+            actual_token = getattr(target_user, 'fcm_token', '')
+            if not actual_token or not actual_token.strip():
+                return Response(
+                    {"success": False, "message": f"User {target_email} does not have an FCM token registered."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        actual_token = getattr(target_user, 'fcm_token', '')
-        if not actual_token or not actual_token.strip():
-            return Response(
-                {"success": False, "message": f"User {target_user.email} does not have an FCM token registered."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+        print(f"\n[{'='*50}]")
+        print(f"DEBUG: Triggering Test Notification")
+        print(f"DEBUG: Target Email: {target_email}")
+        print(f"DEBUG: Using Token: {actual_token[:40]}... (length: {len(actual_token)})")
+        
         # Import the helper we already have
         from chat.notifications import send_fcm_notification
         
@@ -730,12 +751,15 @@ class TestNotificationAPIView(APIView):
             title=title,
             body=body,
             data={"type": "test_notification"},
-            user_id=target_user.id
+            user_id=target_user_id
         )
+
+        print(f"DEBUG: Final FCM Response: {fcm_response}")
+        print(f"[{'='*50}]\n")
 
         return Response({
             "success": True, 
-            "message": f"Push notification triggered for {target_user.email}.",
+            "message": f"Push notification triggered for {target_email}.",
             "fcm_response": fcm_response
         }, status=status.HTTP_200_OK)
 
