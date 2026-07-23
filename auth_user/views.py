@@ -724,23 +724,19 @@ class TestNotificationAPIView(APIView):
 
         # Import the helper we already have
         from chat.notifications import send_fcm_notification
-        import threading
         
-        def _send():
-            send_fcm_notification(
-                token=actual_token,
-                title=title,
-                body=body,
-                data={"type": "test_notification"},
-                user_id=target_user.id
-            )
-            
-        # Send asynchronously so the API responds instantly
-        threading.Thread(target=_send, daemon=True).start()
+        fcm_response = send_fcm_notification(
+            token=actual_token,
+            title=title,
+            body=body,
+            data={"type": "test_notification"},
+            user_id=target_user.id
+        )
 
         return Response({
             "success": True, 
-            "message": f"Push notification triggered for {target_user.email}."
+            "message": f"Push notification triggered for {target_user.email}.",
+            "fcm_response": fcm_response
         }, status=status.HTTP_200_OK)
 
 

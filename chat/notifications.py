@@ -229,8 +229,15 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
             logger.info("FCM: Notification sent to token %s...", token[:20])
         else:
             logger.warning("FCM: Send failed (%s): %s", response.status_code, response.text[:200])
+            
+        try:
+            return {"status_code": response.status_code, "response": response.json()}
+        except Exception:
+            return {"status_code": response.status_code, "response": response.text}
+            
     except requests.RequestException as exc:
         logger.error("FCM: Request error: %s", exc)
+        return {"error": str(exc)}
 
 
 def notify_new_message(*, room_id: str, message_id: str, sender_name: str, content: str, participant_ids: list, target_user_ids: list = None, sender_id: str = None):
