@@ -97,12 +97,20 @@ def initialize_leave_balances_for_year(branch, year):
     User = get_user_model()
 
     staff_roles = [
-        'faculty', 'branch_manager', 'admin_senior_executive', 'admin_executive',
+        'super_admin', 'faculty', 'branch_manager', 'admin_senior_executive', 'admin_executive',
         'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
         'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
         # house_keeping/security have no leave option (special Sunday attendance rules instead)
     ]
-    staff = User.objects.filter(role__in=staff_roles, is_active=True)
+    
+    # Filter users to only those in the given branch (or if they are super_admin and want to test)
+    from .views import _user_branch_id
+    all_staff = User.objects.filter(role__in=staff_roles, is_active=True)
+    staff = []
+    for u in all_staff:
+        u_bid = _user_branch_id(u)
+        if str(u_bid) == str(branch.id) or u.role == 'super_admin':
+            staff.append(u)
     policies = LeavePolicy.objects.filter(branch=branch, is_active=True)
 
     created_count = 0
@@ -118,7 +126,7 @@ def initialize_leave_balances_for_year(branch, year):
                     carried = min(remaining, Decimal(policy.max_carry_days))
                     carried = max(carried, Decimal(0))
 
-            _, was_created = LeaveBalance.objects.get_or_create(
+            balance, was_created = LeaveBalance.objects.get_or_create(
                 user=user, leave_type=policy.leave_type, year=year,
                 defaults={
                     'total_days': Decimal(policy.annual_quota),
@@ -127,6 +135,10 @@ def initialize_leave_balances_for_year(branch, year):
             )
             if was_created:
                 created_count += 1
+            else:
+                # Update existing balance according to changed policy
+                balance.total_days = Decimal(policy.annual_quota)
+                balance.save(update_fields=['total_days'])
 
     logger.info(f"Initialized {created_count} leave balances for branch={branch.id}, year={year}")
     return created_count

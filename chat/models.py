@@ -136,3 +136,45 @@ class MessageReadReceipt(models.Model):
 
     def __str__(self) -> str:
         return f"Read by {self.user_id} at {self.read_at}"
+
+class WhatsAppMessage(models.Model):
+    """
+    Persists inbound (and optionally outbound) WhatsApp messages
+    received via the Meta Cloud API webhook.
+    """
+
+    DIRECTION_CHOICES = [
+        ('inbound', 'Inbound'),
+        ('outbound', 'Outbound'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    wa_message_id = models.CharField(
+        max_length=255, unique=True, db_index=True,
+        help_text="Meta's wamid (WhatsApp message ID).",
+    )
+    sender_wa_id = models.CharField(
+        max_length=20,
+        help_text="Sender's WhatsApp ID (phone number without +).",
+    )
+    sender_name = models.CharField(max_length=255, blank=True, default='')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='whatsapp_messages',
+        help_text="Matched system user (if phone is recognized).",
+    )
+    message_type = models.CharField(
+        max_length=20, default='text',
+        help_text="text, image, document, video, audio, location, interactive, button, reaction",
+    )
+    content = models.TextField(blank=True, default='')
+    extra_data = models.JSONField(default=dict, blank=True, help_text="Media IDs, reply metadata, etc.")
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='inbound')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'whatsapp_messages'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.direction}] {self.sender_wa_id} ({self.message_type}) @ {self.created_at}"

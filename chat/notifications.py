@@ -38,8 +38,23 @@ def _get_access_token() -> Optional[str]:
         import google.auth.transport.requests as google_requests
 
         import requests
+        import json
         
-        # Resolve the service account JSON path
+        # 1. Check if raw JSON string (or dict) is provided via env
+        raw_json = getattr(settings, 'FIREBASE_CREDENTIALS_JSON', None) or \
+                   os.environ.get('FIREBASE_CREDENTIALS_JSON', '')
+        if raw_json:
+            if isinstance(raw_json, str):
+                info = json.loads(raw_json)
+            else:
+                info = raw_json
+            credentials = service_account.Credentials.from_service_account_info(
+                info, scopes=[_FCM_SCOPE]
+            )
+            credentials.refresh(google_requests.Request())
+            return credentials.token
+
+        # 2. Otherwise, resolve the service account JSON path
         sa_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH', None) or \
                   os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')
 
@@ -64,7 +79,6 @@ def _get_access_token() -> Optional[str]:
                 credentials = service_account.Credentials.from_service_account_info(
                     info, scopes=[_FCM_SCOPE]
                 )
-                print("INFO:",info)
             except Exception as e:
                 logger.error("FCM: Failed to fetch service account from URL: %s", e)
                 return None
@@ -88,7 +102,22 @@ def _get_access_token() -> Optional[str]:
 def _get_project_id() -> Optional[str]:
     """Read project_id from the service account JSON file."""
     import requests
+    import json
     
+    # 1. Check if raw JSON string (or dict) is provided via env
+    raw_json = getattr(settings, 'FIREBASE_CREDENTIALS_JSON', None) or \
+               os.environ.get('FIREBASE_CREDENTIALS_JSON', '')
+    if raw_json:
+        try:
+            if isinstance(raw_json, str):
+                info = json.loads(raw_json)
+            else:
+                info = raw_json
+            return info.get('project_id')
+        except Exception as e:
+            logger.error("FCM: Failed to parse FIREBASE_CREDENTIALS_JSON: %s", e)
+
+    # 2. Otherwise fallback to path/URL
     sa_path = getattr(settings, 'FIREBASE_SERVICE_ACCOUNT_PATH', None) or \
               os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH', '')
 
@@ -264,9 +293,6 @@ def send_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, user_id=No
     task = queue_whatsapp_text(to=to, body=body, delay_seconds=delay_seconds)
     task_id = str(task.id) if task else None
  
-    if user_id and task_id:
-        _record_history(user_id=user_id, title="WhatsApp", body=body, task_id=task_id)
- 
     return task_id
  
  
@@ -284,11 +310,6 @@ def send_whatsapp_template(*, to: str, template_name: str, language_code: str = 
     )
     task_id = str(task.id) if task else None
  
-    if user_id and task_id:
-        _record_history(
-            user_id=user_id, title="WhatsApp template", body=template_name, task_id=task_id
-        )
- 
     return task_id
  
  
@@ -303,9 +324,6 @@ def send_whatsapp_media(*, to: str, media_type: str, link: str = None, media_id:
         caption=caption, filename=filename, delay_seconds=delay_seconds,
     )
     task_id = str(task.id) if task else None
- 
-    if user_id and task_id:
-        _record_history(user_id=user_id, title="WhatsApp media", body=media_type, task_id=task_id)
  
     return task_id
  
