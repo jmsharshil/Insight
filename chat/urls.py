@@ -18,6 +18,7 @@ from .views import (
     MessageDetailAPIView,
     RoomListView,RoomDetailView,GroupMembersView,GroupDeleteView
 )
+from .webhook import WhatsAppWebhookView
 
 urlpatterns = [
     path("chat/rooms/direct/", DirectRoomView.as_view(), name="chat-room-direct"),
@@ -30,4 +31,6 @@ urlpatterns = [
     path("chat/rooms/<uuid:room_id>/update-group/", GroupUpdateView.as_view(), name="chat-group-update"),
     path("chat/messages/<uuid:message_id>/", MessageDetailAPIView.as_view(), name="chat-message-detail"),
     path("chat/upload/", FileUploadView.as_view(), name="chat-upload"),
+    # WhatsApp Cloud API Webhook (Meta)
+    path("whatsapp/webhook/", WhatsAppWebhookView.as_view(), name="whatsapp-webhook"),
 ]
