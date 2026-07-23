@@ -493,5 +493,6 @@ class NotificationHistorySerializer(serializers.ModelSerializer):
 
     def get_route(self, obj):
         if isinstance(obj.data, dict):
-            return obj.data.get('route')
-        return None
+            # Fallback to the 'type' field or empty string if 'route' is missing/null
+            return obj.data.get('route') or obj.data.get('type') or ""
+        return ""
