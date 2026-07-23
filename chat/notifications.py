@@ -116,11 +116,15 @@ def _get_project_id() -> Optional[str]:
     return None
 
 
-def send_fcm_notification(*, token: str, title: str, body: str, data: dict = None, user_id=None):
+def send_fcm_notification(*, token: str, title: str, body: str, data: dict = None, route: str = None, user_id=None):
     """
     Send a push notification to a single FCM device token using the HTTP v1 API.
     Also saves a record in NotificationHistory.
     """
+    data_payload = data or {}
+    if route:
+        data_payload["route"] = route
+
     if user_id:
         try:
             from auth_user.models import NotificationHistory
@@ -128,7 +132,7 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
                 user_id=user_id,
                 title=title,
                 body=body,
-                data=data or {}
+                data=data_payload
             )
         except Exception as e:
             logger.error("FCM: Failed to save notification history: %s", e)
@@ -154,9 +158,9 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
                 "title": title,
                 "body": body,
             },
-            "data": {str(k): str(v) for k, v in (data or {}).items()},
+            "data": {str(k): str(v) for k, v in data_payload.items()},
             "android": {
-                "priority": "high",
+                "priority": "HIGH",
                 "notification": {
                     "sound": "default",
                     "channel_id": "insight_default",
@@ -343,6 +347,7 @@ def send_system_notification(
     title: str,
     body: str,
     metadata: dict = None,
+    route: str = None,
     email_template: str = None,
     email_context: dict = None,
     email_subject: str = None,
@@ -374,6 +379,7 @@ def send_system_notification(
                 title=title,
                 body=body,
                 data=metadata or {},
+                route=route,
                 user_id=str(user.id)
             )
 

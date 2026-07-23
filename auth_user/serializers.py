@@ -480,12 +480,18 @@ from .models import NotificationHistory
 
 class NotificationHistorySerializer(serializers.ModelSerializer):
     notification_type = serializers.SerializerMethodField()
+    route = serializers.SerializerMethodField()
 
     class Meta:
         model = NotificationHistory
-        fields = ['id', 'title', 'body', 'data', 'notification_type', 'is_read', 'created_at']
+        fields = ['id', 'title', 'body', 'data', 'notification_type', 'route', 'is_read', 'created_at']
 
     def get_notification_type(self, obj):
         if isinstance(obj.data, dict):
             return obj.data.get('type', 'general')
         return 'general'
+
+    def get_route(self, obj):
+        if isinstance(obj.data, dict):
+            return obj.data.get('route')
+        return None
