@@ -45,7 +45,10 @@ def _get_access_token() -> Optional[str]:
                    os.environ.get('FIREBASE_CREDENTIALS_JSON', '')
         if raw_json:
             if isinstance(raw_json, str):
-                info = json.loads(raw_json)
+                # Production servers (like Azure) sometimes include the surrounding quotes
+                # in the environment variable. We must strip them before parsing.
+                clean_json_str = raw_json.strip().strip('\'"').strip()
+                info = json.loads(clean_json_str)
             else:
                 info = raw_json
                 
@@ -120,7 +123,8 @@ def _get_project_id() -> Optional[str]:
     if raw_json:
         try:
             if isinstance(raw_json, str):
-                info = json.loads(raw_json)
+                clean_json_str = raw_json.strip().strip('\'"').strip()
+                info = json.loads(clean_json_str)
             else:
                 info = raw_json
             return info.get('project_id')
