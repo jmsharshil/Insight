@@ -192,23 +192,14 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
                 "priority": "HIGH",
                 "notification": {
                     "sound": "default",
-                    "channel_id": "insight_default",
-                    "default_vibrate_timings": True,
-                    "default_light_settings": True,
-                    "notification_priority": "PRIORITY_HIGH",
-                },
-                "direct_boot_ok": True,
+                    "channel_id": "insight_default"
+                }
             },
             "apns": {
-                "headers": {
-                    "apns-priority": "10",
-                    "apns-push-type": "alert",
-                },
                 "payload": {
                     "aps": {
                         "sound": "default",
-                        "content-available": 1,
-                        "mutable-content": 1,
+                        "content-available": 1
                     }
                 }
             },
