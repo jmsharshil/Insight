@@ -8,6 +8,7 @@ from .views import (
     BankAccountListView, BankAccountDetailView,
     FeeReportView,
     StudentFeeSummaryView,
+    MyFeesAPIView,
 )
 
 urlpatterns = [
@@ -42,4 +43,7 @@ urlpatterns = [
 
     # ── Reports ────────────────────────────────────────────────────────────
     path('fees/report/', FeeReportView.as_view(), name='fee-report'),
+    
+    # ── Token-based My Fees API ────────────────────────────────────────────
+    path('fees/my-fees/', MyFeesAPIView.as_view(), name='my-fees'),
 ]

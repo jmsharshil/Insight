@@ -892,3 +892,73 @@ class StudentFeeSummaryView(APIView):
             })
 
         return Response({'success': True, 'data': results})
+
+def _user_role(user):
+    return getattr(user, 'role', None)
+
+class MyFeesAPIView(APIView):
+    """
+    Returns the fee and payment records for the authenticated student based on their token.
+    """
+    # permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        role = _user_role(user)
+        
+        if role not in ['student', 'parents']:
+            return Response({'success': False, 'message': 'Only students or parents can access this API.'}, status=403)
+            
+        from students.models import Student, ParentLink
+        try:
+            if role == 'student':
+                student = Student.objects.get(user=user)
+            else:
+                student_id = request.GET.get('student_id')
+                if student_id:
+                    link = ParentLink.objects.get(parent=user, student_id=student_id)
+                    student = link.student
+                else:
+                    link = ParentLink.objects.filter(parent=user).first()
+                    if not link:
+                        return Response({'success': False, 'message': 'No linked students found.'}, status=404)
+                    student = link.student
+        except (Student.DoesNotExist, ParentLink.DoesNotExist):
+            return Response({'success': False, 'message': 'Student profile not found or access denied.'}, status=404)
+            
+        student_fees = StudentFee.objects.select_related('fee_structure').filter(student=student).order_by('-created_at')
+        payments = Payment.objects.filter(student=student).order_by('-payment_date', '-created_at')
+        
+        from .models import InstallmentPlan, Refund
+        from .serializers import InstallmentPlanListSerializer, RefundListSerializer
+        
+        installment_plans = InstallmentPlan.objects.filter(student_fee__student=student).order_by('-created_at')
+        refunds = Refund.objects.filter(payment__student=student).order_by('-created_at')
+        
+        fee_serializer = StudentFeeListSerializer(student_fees, many=True)
+        payment_serializer = PaymentListSerializer(payments, many=True)
+        installment_serializer = InstallmentPlanListSerializer(installment_plans, many=True)
+        refund_serializer = RefundListSerializer(refunds, many=True)
+        
+        # Summary
+        total_billed = student_fees.aggregate(total=Sum('total_amount'))['total'] or 0
+        total_discount = student_fees.aggregate(total=Sum('discount'))['total'] or 0
+        total_paid = student_fees.aggregate(total=Sum('amount_paid'))['total'] or 0
+        
+        return Response({
+            'success': True, 
+            'role': role, 
+            'student_id': str(student.id),
+            'data': {
+                'summary': {
+                    'total_billed': total_billed,
+                    'total_discount': total_discount,
+                    'total_paid': total_paid,
+                    'total_due': max(0, total_billed - total_discount - total_paid),
+                },
+                'fees': fee_serializer.data,
+                'installments': installment_serializer.data,
+                'payments': payment_serializer.data,
+                'refunds': refund_serializer.data
+            }
+        })

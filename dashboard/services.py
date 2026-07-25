@@ -306,6 +306,14 @@ def _get_student_dashboard(user, now, today, month_start):
         total_due=Sum(F('total_amount') - F('discount') - F('amount_paid'), output_field=FloatField()),
         count=Count('id')
     )
+        
+    from fees.models import InstallmentItem
+    pending_installments = list(
+        InstallmentItem.objects.filter(
+            plan__student_fee__student=student, is_paid=False
+        ).order_by('due_date')[:5]
+        .values('id', 'amount', 'due_date', 'plan__student_fee__fee_structure__name')
+    )
 
     # Upcoming exams for my batch
     upcoming = list(
@@ -340,7 +348,8 @@ def _get_student_dashboard(user, now, today, month_start):
         'timetable': _get_student_timetable(student),
         'fee_details': {
             'due_count': fees_due.get('count') or 0,
-            'next_due_date': None,
+            'next_due_date': pending_installments[0]['due_date'] if pending_installments else None,
+            'pending_installments': pending_installments,
         },
         'charts': {
             'my_performance': _get_student_performance_trend(student),
@@ -490,19 +499,39 @@ def _get_simple_trend(days=7, bq=None):
 
 
 def _get_student_timetable(student):
-    """Real student timetable from TimetableSlot (no static data)."""
+    """Real student timetable from TimetableSlot (no static data).
+    Returns slots starting from today's day of week through the rest of the week.
+    On Sunday it wraps around (Sun → Sat).
+    """
     if not student or not student.batch:
         return []
+
+    # Django's weekday(): Monday=0 … Sunday=6
+    # TimetableSlot day_of_week: 0=Monday … 6=Sunday (same convention)
+    today_dow = timezone.now().weekday()  # 0=Mon … 6=Sun
+
+    # Build ordered list of day_of_week values starting from today
+    if today_dow == 6:  # Sunday → show Sun(6), Mon(0)…Sat(5)
+        ordered_days = [6, 0, 1, 2, 3, 4, 5]
+    else:              # e.g. Wednesday(2) → [2, 3, 4, 5, 6]
+        ordered_days = list(range(today_dow, 7))
+
     slots = list(
         TimetableSlot.objects.filter(
-            batch=student.batch, is_recurring=True
+            batch=student.batch, is_recurring=True,
+            day_of_week__in=ordered_days,
         ).select_related('subject', 'faculty__user', 'classroom')
-        .order_by('day_of_week', 'start_time')[:10]
+        .order_by('day_of_week', 'start_time')
         .values(
             'day_of_week', 'start_time', 'end_time',
             'subject__name', 'faculty__user__name', 'session_type'
         )
     )
+
+    # Re-sort so they follow the ordered_days sequence (not simple numeric order)
+    day_order = {d: i for i, d in enumerate(ordered_days)}
+    slots.sort(key=lambda s: (day_order.get(s['day_of_week'], 99), str(s['start_time'])))
+
     day_map = {0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 3: 'Thursday',
                4: 'Friday', 5: 'Saturday', 6: 'Sunday'}
     return [
