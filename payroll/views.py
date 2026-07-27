@@ -724,8 +724,8 @@ class LatePolicyView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in LATE_POLICY_VIEW_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        # if role not in LATE_POLICY_VIEW_ROLES:
+        #     return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         bid = _user_branch_id(request.user)
         qs = LateEntryPolicy.objects.select_related('branch').all()
         if getattr(request.user, 'organization', None):
