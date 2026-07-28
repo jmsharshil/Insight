@@ -198,6 +198,8 @@ class LeadListView(APIView):
                     "name":                lead.first_name,
                     "stage":               lead.current_stage,
                     "stage_display":       STAGE_DISPLAY.get(lead.current_stage),
+                    "assigned_to_id":      str(lead.assigned_to.id) if lead.assigned_to else None,
+                    "assigned_to_name":    lead.assigned_to.name if lead.assigned_to else None,
                 }
             },
             status=status.HTTP_201_CREATED
@@ -805,3 +807,93 @@ class LeadAssignView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+from .serializers import LeadTransferRequestSerializer, LeadTransferApprovalSerializer
+from .models import LeadTransferRequest
+from auth_user.models import User
+
+class LeadTransferRequestListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role not in SENIOR_ROLES:
+            return Response({"error": "Permission denied. Only senior roles can view transfer requests."}, status=status.HTTP_403_FORBIDDEN)
+        
+        status_filter = request.query_params.get('status')
+        queryset = LeadTransferRequest.objects.all()
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+            
+        return paginate_queryset(request, queryset, LeadTransferRequestSerializer)
+
+    def post(self, request):
+        lead_id = request.data.get('lead_id')
+        try:
+            lead = Lead.objects.get(id=lead_id)
+        except Lead.DoesNotExist:
+            return Response({"error": "Lead not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        if lead.assigned_to != request.user:
+            return Response({"error": "You can only request transfer for leads assigned to you."}, status=status.HTTP_403_FORBIDDEN)
+            
+        reason = request.data.get('reason', '')
+        
+        transfer_request = LeadTransferRequest.objects.create(
+            lead=lead,
+            requested_by=request.user,
+            reason=reason
+        )
+        
+        serializer = LeadTransferRequestSerializer(transfer_request)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class LeadTransferRequestReviewView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        if request.user.role not in SENIOR_ROLES:
+            return Response({"error": "Permission denied. Only senior roles can review transfer requests."}, status=status.HTTP_403_FORBIDDEN)
+            
+        try:
+            transfer_request = LeadTransferRequest.objects.get(id=pk)
+        except LeadTransferRequest.DoesNotExist:
+            return Response({"error": "Request not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        if transfer_request.status != 'pending':
+            return Response({"error": "Only pending requests can be reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        serializer = LeadTransferApprovalSerializer(data=request.data)
+        if serializer.is_valid():
+            status_decision = serializer.validated_data['status']
+            assigned_to_id = serializer.validated_data.get('assigned_to')
+            
+            transfer_request.status = status_decision
+            transfer_request.reviewed_by = request.user
+            
+            if status_decision == 'approved':
+                lead = transfer_request.lead
+                old_assignee = lead.assigned_to
+                try:
+                    new_assignee = User.objects.get(id=assigned_to_id)
+                except User.DoesNotExist:
+                    return Response({"error": "Counsellor not found."}, status=status.HTTP_404_NOT_FOUND)
+                    
+                lead.assigned_to = new_assignee
+                lead.save()
+                
+                LeadAssignmentLog.objects.create(
+                    lead=lead,
+                    assigned_from=old_assignee,
+                    assigned_to=new_assignee,
+                    changed_by=request.user,
+                    note=f"Approved transfer request #{transfer_request.id}"
+                )
+                
+                transfer_request.assigned_to = new_assignee
+            
+            transfer_request.save()
+            return Response(LeadTransferRequestSerializer(transfer_request).data)
+            
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
