@@ -37,6 +37,55 @@ from leads.models import Lead
 from leads.serializers import LeadDetailSerializer
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+ROLES_REQUIRING_LOGIN_OTP_BYPASS = {'student', 'parents'}
+
+
+def build_login_success_response(user, request):
+    """Builds the same response payload the old LoginAPIView returned directly."""
+    refresh = RefreshToken.for_user(user)
+
+    profile_pic_url = None
+    if user.profile_pic and hasattr(user.profile_pic, 'url'):
+        profile_pic_url = request.build_absolute_uri(user.profile_pic.url)
+
+    from students.models import Student, ParentLink
+    actual_student_ids = []
+    if user.role == 'student':
+        student_profile = Student.objects.filter(user=user).first()
+        if student_profile:
+            actual_student_ids = [str(student_profile.id)]
+    elif user.role == 'parents':
+        parent_links = ParentLink.objects.filter(parent=user).select_related('student')
+        actual_student_ids = [str(pl.student.id) for pl in parent_links if pl.student]
+
+    from auth_user.permissions import get_role_config
+    role_config = get_role_config(user.role)
+    accessible_modules = getattr(user, 'accessible_modules', None)
+    if accessible_modules is None:
+        accessible_modules = role_config.get('default_modules', [])
+
+    return {
+        "message": "Login successful",
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "phone": user.phone,
+            "name": user.name,
+            "role": user.role,
+            "role_display": user.get_role_display(),
+            "profile_pic": profile_pic_url,
+            "organization": str(user.organization.id) if user.organization else None,
+            "organization_name": user.organization.name if user.organization else None,
+            "linked_students": actual_student_ids,
+            "accessible_modules": accessible_modules,
+            "canDelete": role_config.get('canDelete', False),
+            "canExport": role_config.get('canExport', False),
+        }
+    }
+
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -117,60 +166,62 @@ class LoginAPIView(APIView):
                     "error": "Incorrect email or password"
                 }, status=400)
             if not user.is_active:
-                return Response({
-                    "error": "Account is not verified"
-                }, status=400)
-            refresh = RefreshToken.for_user(user)
+                return Response({"error": "Account is not verified"}, status=400)
 
-            # Build profile pic URL
-            profile_pic_url = None
-            if user.profile_pic and hasattr(user.profile_pic, 'url'):
-                profile_pic_url = request.build_absolute_uri(user.profile_pic.url)
+            # ── Existing behavior preserved exactly for student/parent ──
+            if user.role in ROLES_REQUIRING_LOGIN_OTP_BYPASS:
+                return Response(build_login_success_response(user, request))
 
-            # Determine the actual Student Profile IDs (UUIDs) - prefer ParentLink as source of truth
-            from students.models import Student, ParentLink
-            actual_student_ids = []
-            if user.role == 'student':
-                student_profile = Student.objects.filter(user=user).first()
-                if student_profile:
-                    actual_student_ids = [str(student_profile.id)]
-            elif user.role == 'parents':
-                parent_links = ParentLink.objects.filter(parent=user).select_related('student')
-                actual_student_ids = [str(pl.student.id) for pl in parent_links if pl.student]
-
-            # Build RBAC permissions for the frontend
-            from auth_user.permissions import get_role_config
-            role_config = get_role_config(user.role)
-            
-            accessible_modules = getattr(user, 'accessible_modules', None)
-            if accessible_modules is None:
-                accessible_modules = role_config.get('default_modules', [])
+            # ── Everyone else: require a second OTP step ──
+            otp = EmailOTP.generate_otp()
+            EmailOTP.objects.create(user=user, otp=otp)
+            from .utils import send_login_otp
+            send_login_otp(user, otp)
 
             return Response({
-                "message": "Login successful",
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "user": {
-                    "id": str(user.id),
-                    "username": user.username,
-                    "email": user.email,
-                    "phone": user.phone,
-                    "name": user.name,
-                    "role": user.role,
-                    "role_display": user.get_role_display(),
-                    "profile_pic": profile_pic_url,
-                    "organization": str(user.organization.id) if user.organization else None,
-                    "organization_name": user.organization.name if user.organization else None,
-                    "linked_students": actual_student_ids,
-                    "accessible_modules": accessible_modules,
-                    "canDelete": role_config.get('canDelete', False),
-                    "canExport": role_config.get('canExport', False),
-                }
+                "otp_required": True,
+                "message": "OTP sent to your registered email/WhatsApp. Please verify to complete login.",
+                "email": user.email,
+                "organization": str(user.organization.id) if user.organization else None,
+                "organization_name": user.organization.name if user.organization else None,
             })
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LoginVerifyOTPAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = VerifyOTPSerializer(data=request.data)  # just email + otp, already exists
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            otp = serializer.validated_data['otp']
+            organization_id = request.data.get('organization')
+
+            candidates = User.objects.filter(email=email)
+            if organization_id:
+                candidates = candidates.filter(organization_id=organization_id)
+
+            otp_obj = EmailOTP.objects.filter(
+                user__in=candidates, otp=otp, is_verified=False
+            ).order_by('-created_at').first()
+
+            if not otp_obj:
+                return Response({"error": "Invalid OTP"}, status=400)
+            if otp_obj.is_expired():
+                return Response({"error": "OTP expired"}, status=400)
+
+            otp_obj.is_verified = True
+            otp_obj.save()
+
+            user = otp_obj.user
+            if not user.is_active:
+                return Response({"error": "Account is not verified"}, status=400)
+
+            return Response(build_login_success_response(user, request))
+
+        return Response(serializer.errors, status=400)
 
 
 class OrganizationCreateAPIView(APIView):
