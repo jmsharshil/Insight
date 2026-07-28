@@ -13,13 +13,14 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 
-from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday
+from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday, StudentLeaveApplication
 from .serializers import (
     LeavePolicySerializer, LeavePolicyInputSerializer,
     LeaveBalanceSerializer, LeaveApplicationListSerializer,
     LeaveApplicationDetailSerializer, LeaveApplicationCreateSerializer,
     LateEntryRecordSerializer, LateEntryCreateSerializer,
     PublicHolidaySerializer, PublicHolidayCreateSerializer,
+    StudentLeaveListSerializer, StudentLeaveDetailSerializer, StudentLeaveCreateSerializer,
 )
 from .utils import calculate_leave_days, check_leave_overlap, check_late_entry_threshold
 
@@ -1035,14 +1036,9 @@ class PublicHolidayDetailView(APIView):
 # GET    /api/v1/leave/student/<id>/      — detail
 # PATCH  /api/v1/leave/student/<id>/      — edit (student, while pending)
 # DELETE /api/v1/leave/student/<id>/      — cancel (student, while pending)
-# POST   /api/v1/leave/student/<id>/approve/ — approve (admin)
-# POST   /api/v1/leave/student/<id>/reject/  — reject (admin)
+# POST   /api/v1/leave/student/<id>/approve/ — approve (parent or admin)
+# POST   /api/v1/leave/student/<id>/reject/  — reject (parent or admin)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-from .models import StudentLeaveApplication
-from .serializers import (
-    StudentLeaveListSerializer, StudentLeaveDetailSerializer, StudentLeaveCreateSerializer,
-)
 
 STUDENT_LEAVE_ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']
 
@@ -1256,12 +1252,8 @@ class StudentLeaveDetailView(APIView):
             except Exception:
                 return False
         elif role == 'parents':
-            try:
-                from students.models import Student
-                students = Student.objects.filter(parent_links__parent=request.user)
-                return students.filter(id=app.student_id).exists()
-            except Exception:
-                return False
+            # Use shared helper for parent link check
+            return _is_parent_of(request.user, app.student if hasattr(app, 'student') else None)
         return False
 
     def get(self, request, leave_id):
@@ -1355,7 +1347,7 @@ class StudentLeaveApproveView(APIView):
         # - If applied by student: parent_consulted=False → first parent must approve, then admin
         if not getattr(app, 'parent_consulted', False):
             # Student-applied leave: parent approval step
-            if role == 'parents' and self._is_parent_of(request.user, app.student):
+            if role == 'parents' and _is_parent_of(request.user, app.student):
                 app.parent_consulted = True
                 app.parent_signature_date = now.date()
                 if not app.received_by:
@@ -1419,11 +1411,9 @@ class StudentLeaveRejectView(APIView):
 
     def post(self, request, leave_id):
         role = _user_role(request.user)
-        if role not in STUDENT_LEAVE_ADMIN_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            app = StudentLeaveApplication.objects.get(id=leave_id)
+            app = StudentLeaveApplication.objects.select_related('student', 'student__branch').get(id=leave_id)
         except StudentLeaveApplication.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1434,11 +1424,64 @@ class StudentLeaveRejectView(APIView):
         if not rejection_reason:
             return Response({'success': False, 'message': 'rejection_reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        now = timezone.now()
+        is_parent_approver = role == 'parents' and _is_parent_of(request.user, app.student)
+
+        # Allow parents to reject at parent-approval stage; admins anytime for pending
+        if not is_parent_approver and role not in STUDENT_LEAVE_ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # If parent rejecting a student-submitted leave (before consulting)
+        if is_parent_approver and not getattr(app, 'parent_consulted', False):
+            app.rejection_reason = rejection_reason
+            app.reviewed_by = request.user
+            app.reviewed_at = now
+            app.status = 'rejected'
+            app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+            # Notify student
+            try:
+                if hasattr(app.student, 'user') and app.student.user:
+                    notify(
+                        str(app.student.user.id),
+                        title="Student Leave Rejected by Parent",
+                        body=f"Your {app.leave_type} leave request was rejected by parent. Reason: {rejection_reason}",
+                        metadata={"student_leave_id": str(app.id), "status": "rejected"},
+                    )
+            except Exception:
+                pass
+            return Response({
+                'success': True,
+                'message': 'Leave rejected by parent.',
+                'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+            })
+
+        # Admin rejection (for any pending, including after parent approval)
         app.status = 'rejected'
         app.reviewed_by = request.user
-        app.reviewed_at = timezone.now()
+        app.reviewed_at = now
         app.rejection_reason = rejection_reason
         app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+        # Notify student and parents
+        try:
+            from students.models import ParentLink
+            if hasattr(app.student, 'user') and app.student.user and app.student.user.id:
+                notify(
+                    str(app.student.user.id),
+                    title="Leave Application Rejected",
+                    body=f"Your {app.leave_type} leave has been rejected. Reason: {rejection_reason}",
+                    metadata={"student_leave_id": str(app.id), "status": "rejected"},
+                )
+            for pl in ParentLink.objects.filter(student=app.student, parent__is_active=True):
+                notify(
+                    str(pl.parent.id),
+                    title="Student Leave Rejected",
+                    body=f"Leave request for {app.student} was rejected. Reason: {rejection_reason}",
+                    metadata={"student_leave_id": str(app.id), "status": "rejected"},
+                )
+        except Exception:
+            pass
 
         return Response({
             'success': True,
