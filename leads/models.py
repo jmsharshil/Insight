@@ -216,3 +216,33 @@ class LeadStage(models.Model):
     def __str__(self):
         changed_by = self.changed_by.get_username() if self.changed_by else 'System'
         return f"{self.lead} → {self.stage} by {changed_by}"
+
+
+class LeadTransferRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='transfer_requests')
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='initiated_transfers'
+    )
+    reason = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_transfers'
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='transferred_leads',
+        help_text="The counsellor assigned upon approval."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'lead_transfer_requests'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Transfer Request for {self.lead} by {self.requested_by}"

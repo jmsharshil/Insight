@@ -1,7 +1,7 @@
 # leads/serializers.py
 
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -309,6 +309,16 @@ class LeadListSerializer(serializers.ModelSerializer):
         ]
 
 
+class LeadAssignmentLogSerializer(serializers.ModelSerializer):
+    assigned_from_name = serializers.CharField(source='assigned_from.name', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.name', read_only=True)
+
+    class Meta:
+        model = LeadAssignmentLog
+        fields = '__all__'
+
+
 class LeadDetailSerializer(serializers.ModelSerializer):
     form_type_display = serializers.CharField(source='get_form_type_display', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
@@ -324,6 +334,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     # ── Assignment display ───────────────────────────────────────────────
     assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, allow_null=True)
+    assignment_history = LeadAssignmentLogSerializer(source='assignment_logs', many=True, read_only=True)
 
     class Meta:
         model = Lead
@@ -379,3 +390,27 @@ class LeadReassignSerializer(serializers.Serializer):
             return User.objects.get(id=value)
         except User.DoesNotExist:
             raise serializers.ValidationError("User not found for the given assigned_to UUID.")
+
+
+class LeadTransferRequestSerializer(serializers.ModelSerializer):
+    requested_by_name = serializers.CharField(source='requested_by.name', read_only=True)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.name', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
+    lead_name = serializers.CharField(source='lead.first_name', read_only=True)
+    
+    class Meta:
+        model = LeadTransferRequest
+        fields = '__all__'
+        read_only_fields = ['requested_by', 'status', 'reviewed_by', 'assigned_to']
+
+
+class LeadTransferApprovalSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=[('approved', 'Approved'), ('rejected', 'Rejected')])
+    assigned_to = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        status = attrs.get('status')
+        assigned_to = attrs.get('assigned_to')
+        if status == 'approved' and not assigned_to:
+            raise serializers.ValidationError({"assigned_to": "assigned_to is required when approving a transfer request."})
+        return attrs
