@@ -144,6 +144,8 @@ class StudentFeeListView(APIView):
         student_id = request.GET.get('student_id')
         status_filter = request.GET.get('status')
         fee_structure_id = request.GET.get('fee_structure_id')
+        branch_id = request.GET.get("branch_id")
+        batch_id = request.GET.get("batch_id")
 
         if student_id:
             queryset = queryset.filter(student_id=student_id)
@@ -151,6 +153,10 @@ class StudentFeeListView(APIView):
             queryset = queryset.filter(status=status_filter)
         if fee_structure_id:
             queryset = queryset.filter(fee_structure_id=fee_structure_id)
+        if branch_id:
+            queryset = queryset.filter(student__branch_id=branch_id)
+        if batch_id:
+            queryset = queryset.filter(student__batch_id=batch_id)
 
         queryset = apply_filters(self, request, queryset)
 

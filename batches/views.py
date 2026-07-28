@@ -770,13 +770,13 @@ class ClassroomDetailView(APIView):
 
 class TimetableListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject', 'batch__course', 'session_type']
+    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject', 'batch__course', 'session_type','batch__barnch']
     search_fields = []
     ordering_fields = '__all__'
 
     def get(self, request):
         queryset = TimetableSlot.objects.select_related(
-            'batch', 'batch__course', 'subject', 'faculty', 'classroom'
+            'batch', 'batch__course', 'subject', 'faculty', 'classroom', 'batch__branch'
         ).all()
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(organization=request.user.organization)
@@ -787,6 +787,7 @@ class TimetableListView(APIView):
         subject_id = request.GET.get('subject_id')
         course_id = request.GET.get('course_id')
         session_type = request.GET.get('session_type')
+        branch_id = request.GET.get('branch_id')
 
         if batch_id:
             # allow comma-separated batch IDs for E4 filter
@@ -802,6 +803,8 @@ class TimetableListView(APIView):
             queryset = queryset.filter(batch__course_id=course_id)
         if session_type:
             queryset = queryset.filter(session_type=session_type)
+        if branch_id:
+            queryset = queryset.filter(batch__branch_id=branch_id)
 
         queryset = apply_filters(self, request, queryset)
 

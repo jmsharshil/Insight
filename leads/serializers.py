@@ -137,6 +137,7 @@ class InquirySerializer(ContactSerializer):
     reference    = serializers.ChoiceField(choices=REFERENCE_TYPE_CHOICES)
     location     = serializers.CharField(max_length=100)
     inquiry_date = serializers.DateField()
+    reference_name = serializers.CharField(max_length=100,required=False,allow_blank=True)
 
     tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES)
     tenth_school     = serializers.CharField(max_length=200)

@@ -69,6 +69,7 @@ REFERENCE_TYPE_CHOICES = [
     ('google', 'Seen on Google'),
     ('seminar', 'Seminar'),
     ('none', 'None of the above'),
+    ("other","Other"),
 ]
 
 STAGE_NEW = 'new'
@@ -134,6 +135,7 @@ class Lead(models.Model):
     qualification = models.CharField(max_length=20, choices=QUALIFICATION_TYPE_CHOICES, blank=True)
     reference    = models.CharField(max_length=20, choices=REFERENCE_TYPE_CHOICES, blank=True)
     inquiry_date = models.DateField(null=True, blank=True)
+    reference_name = models.CharField(max_length=100,blank=True)
 
     # ── Section 3: 10th Education (Inquiry only) ──────────────────────────────
     tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)

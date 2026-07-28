@@ -257,26 +257,50 @@ class LeaveListCreateView(APIView):
             supporting_document=d.get('supporting_document'),
         )
 
-        # FRD §4.9.2: Push notification to ASE (Step 1 approver)
+        # ── Notify the correct approver(s) based on applicant role ──
         from django.contrib.auth import get_user_model
         User = get_user_model()
-        ase_users = User.objects.filter(role='admin_senior_executive', is_active=True)
-        if bid:
-            ase_users_branch = ase_users  # filter by branch if branch field exists on User
-        for ase in ase_users:
+        org = getattr(request.user, 'organization', None)
+        notif_body = f"{request.user.name} has applied for {d['leave_type']} leave from {d['from_date']} to {d['to_date']}"
+        notif_ctx = {
+            'applicant_name': request.user.name,
+            'leave_type': d['leave_type'],
+            'from_date': d['from_date'],
+            'to_date': d['to_date'],
+            'reason': d['reason'],
+        }
+
+        if role == 'branch_manager':
+            # BM's leave → notify only super_admin(s) in the same organization
+            approvers = User.objects.filter(role='super_admin', is_active=True)
+            if org:
+                approvers = approvers.filter(organization=org)
+        elif role == 'admin_senior_executive':
+            # ASE's leave → notify branch_manager(s) and super_admin(s)
+            bm_q = User.objects.filter(role='branch_manager', is_active=True)
+            sa_q = User.objects.filter(role='super_admin', is_active=True)
+            if org:
+                bm_q = bm_q.filter(organization=org)
+                sa_q = sa_q.filter(organization=org)
+            if bid:
+                bm_q = bm_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+            approvers = (bm_q | sa_q).distinct()
+        else:
+            # Regular staff → notify branch-scoped ASE(s) only
+            approvers = User.objects.filter(role='admin_senior_executive', is_active=True)
+            if org:
+                approvers = approvers.filter(organization=org)
+            if bid:
+                approvers = approvers.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+
+        for approver in approvers:
             notify(
-                str(ase.id),
+                str(approver.id),
                 title="Leave request pending approval",
-                body=f"{request.user.name} has applied for {d['leave_type']} leave from {d['from_date']} to {d['to_date']}",
+                body=notif_body,
                 metadata={"leave_id": str(app.id), "approval_step": 1},
                 email_template='emails/leave_applied.html',
-                email_context={
-                    'applicant_name': request.user.name,
-                    'leave_type': d['leave_type'],
-                    'from_date': d['from_date'],
-                    'to_date': d['to_date'],
-                    'reason': d['reason']
-                }
+                email_context=notif_ctx,
             )
 
         return Response({

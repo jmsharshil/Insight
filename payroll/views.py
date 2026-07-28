@@ -79,6 +79,7 @@ class PayrollListCreateView(APIView):
         year = request.GET.get('year', str(now.year))
         month = request.GET.get('month', str(now.month))
         req_branch_id = request.GET.get('branch_id')
+        role_filter = request.GET.get('role')
         bid = _user_branch_id(request.user)
 
         target_branch_id = bid if (role != 'super_admin' and bid) else req_branch_id
@@ -117,6 +118,13 @@ class PayrollListCreateView(APIView):
                 staff_users = User.objects.filter(
                     branch_id=br_id, role__in=EMPLOYEE_ROLES, is_active=True
                 ).exclude(id__in=faculty_user_ids)
+
+                if role_filter:
+                    if role_filter == 'faculty':
+                        staff_users = qs.none()
+                    else:
+                        faculty_user_ids = {}
+                        staff_users = staff_users.filter(role=role_filter)
 
                 if not faculty_list.exists() and not staff_users.exists():
                     continue

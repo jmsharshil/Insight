@@ -60,7 +60,7 @@ def _not_found(student_id):
 
 class StudentListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'course', 'branch', 'current_batch_name']
+    filterset_fields = ['status', 'course', 'branch', 'current_batch_name','batch']
     search_fields = ['first_name', 'surname', 'admission_number', 'email', 'phone_student']
     ordering_fields = '__all__'
 
@@ -70,9 +70,12 @@ class StudentListView(APIView):
             qs = qs.filter(branch__organization=request.user.organization)
 
         # Retain custom param mapping for backwards compatibility
-        batch_name = request.GET.get('batch')
+        batch_name = request.GET.get('batch_name')
+        batch = request.GET.get('batch')
         if batch_name:
             qs = qs.filter(current_batch_name=batch_name)
+        if batch:
+            qs = qs.filter(batch=batch)
 
         qs = apply_filters(self, request, qs)
 

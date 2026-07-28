@@ -177,7 +177,7 @@ def _setup_payment_bank_and_notify(admission):
 # ── GET  /api/admissions/   — list all admissions (with optional filters)
 class AdmissionListView(APIView):
 
-    filterset_fields = ['status', 'course', 'attempt_year']
+    filterset_fields = ['status', 'course', 'attempt_year','branch','batch_attempt']
     search_fields = ['first_name', 'surname', 'email', 'phone_student']
     ordering_fields = '__all__'
 
@@ -263,11 +263,17 @@ class AdmissionListView(APIView):
         # Optional filters
         adm_status = request.GET.get('status')
         course     = request.GET.get('course')
+        branch  = request.GET.get("branch")
+        batch_attempt = request.GET.get("batch_attempt")
 
         if adm_status:
             queryset = queryset.filter(status=adm_status)
         if course:
             queryset = queryset.filter(course=course)
+        if branch:
+            queryset = queryset.filter(branch=branch)
+        if batch_attempt:
+            queryset = queryset.filter(batch_attempt=batch_attempt)
 
         queryset = apply_filters(self, request, queryset)
 
