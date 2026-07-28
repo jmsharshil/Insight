@@ -424,7 +424,10 @@ def _get_leave_dashboard_data(user, role, today, month_start):
     }
 
     if role in ('student', 'parents'):
-        # Student/parent leave data using StudentLeaveApplication
+        # Student/parent leave data using StudentLeaveApplication.
+        # Uses `parent_consulted` (per model constraint) to distinguish flows:
+        # - parent_consulted=False + pending → Parent Approval Pending (for parents)
+        # - parent_consulted=True + pending → Admin Approval Pending
         student = None
         if role == 'parents':
             try:
@@ -437,7 +440,7 @@ def _get_leave_dashboard_data(user, role, today, month_start):
                     ).first()
                 if parent_link:
                     student = parent_link.student
-            except:
+            except Exception:
                 pass
         else:
             try:
@@ -447,17 +450,34 @@ def _get_leave_dashboard_data(user, role, today, month_start):
 
         if student:
             student_leaves_qs = StudentLeaveApplication.objects.filter(student=student)
-            leave_data['pending_count'] = student_leaves_qs.filter(
-                status__in=['parent_pending', 'internal_pending']
-            ).count()
-            leave_data['recent_leaves'] = list(
+            # Role-specific pending count (what the user needs to act on)
+            if role == 'parents':
+                # Parents only care about leaves needing their approval
+                pending_qs = student_leaves_qs.filter(
+                    status='pending', parent_consulted=False
+                )
+            else:
+                # Students see all their pending leaves
+                pending_qs = student_leaves_qs.filter(status='pending')
+            leave_data['pending_count'] = pending_qs.count()
+
+            recent_list = list(
                 student_leaves_qs.order_by('-created_at')[:5].values(
                     'id', 'leave_type', 'from_date', 'to_date', 'status',
-                    'reason', 'applied_by_type', 'parent_approved', 'created_at'
+                    'reason', 'parent_consulted', 'parent_signature_date', 'created_at'
                 )
             )
+            # Compute status_display using parent_consulted (matches serializer logic)
+            for leave in recent_list:
+                if leave.get('status') == 'pending':
+                    if not leave.get('parent_consulted', True):
+                        leave['status_display'] = 'Parent Approval Pending'
+                    else:
+                        leave['status_display'] = 'Admin Approval Pending'
+                else:
+                    leave['status_display'] = leave.get('status', '').replace('_', ' ').title()
+            leave_data['recent_leaves'] = recent_list
             leave_data['type'] = 'student'
-            # Add to kpis if we want, but since merged later, leave as top level
         else:
             leave_data['message'] = 'No student profile linked for leave data'
     else:
@@ -503,6 +523,20 @@ def _get_leave_dashboard_data(user, role, today, month_start):
             leave_data['team_pending'] = LeaveApplication.objects.filter(
                 bq, status='approval_pending'
             ).count()
+
+            # Student leaves pending - uses parent_consulted internally for workflow stages
+            # (admins see all pending regardless of parent step)
+            student_bq = Q(status='pending')
+            if role != 'super_admin':
+                bid = getattr(user, 'branch_id', None)
+                if bid:
+                    student_bq &= Q(student__branch_id=bid)
+            leave_data['student_pending'] = StudentLeaveApplication.objects.filter(
+                student_bq
+            ).count()
+            leave_data['total_pending'] = (
+                leave_data.get('team_pending', 0) + leave_data.get('student_pending', 0)
+            )
 
             # Staff currently on leave today
             leave_data['team_on_leave_today'] = LeaveApplication.objects.filter(
