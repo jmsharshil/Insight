@@ -38,6 +38,7 @@ from leads.serializers import LeadDetailSerializer
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 ROLES_REQUIRING_LOGIN_OTP_BYPASS = {'student', 'parents'}
+RESEND_OTP_COOLDOWN_SECONDS = 30
 
 
 def build_login_success_response(user, request):
@@ -222,7 +223,69 @@ class LoginVerifyOTPAPIView(APIView):
             return Response(build_login_success_response(user, request))
 
         return Response(serializer.errors, status=400)
-
+  
+class ResendLoginOTPAPIView(APIView):
+    """
+    POST /api/auth/login/resend-otp/
+ 
+    Issues a fresh login-verification OTP for a user already mid-login
+    (i.e. password already checked, waiting on 2nd factor).
+ 
+    Body: { "email": "...", "organization": "optional-uuid" }
+ 
+    Notes:
+      - Does NOT re-check the password. This assumes the frontend only
+        shows a "resend code" button on the OTP-entry screen, which is
+        only reachable after LoginAPIView already returned otp_required.
+      - Old unverified LoginOTP rows are left in place but become dead:
+        LoginVerifyOTPAPIView only ever checks the most recent one
+        (order_by('-created_at').first()), so a stale code silently
+        stops working the moment a new one is issued.
+      - A short cooldown prevents spamming the email/WhatsApp send.
+    """
+    permission_classes = [AllowAny]
+ 
+    def post(self, request):
+        email = request.data.get('email')
+ 
+        if not email:
+            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+ 
+        candidates = User.objects.filter(email=email)
+        
+        user = candidates.first()
+        if not user:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+ 
+        if not user.is_active:
+            return Response({"error": "Account is not verified"}, status=status.HTTP_400_BAD_REQUEST)
+ 
+        if user.role in ROLES_REQUIRING_LOGIN_OTP_BYPASS:
+            return Response(
+                {"error": "This account does not require OTP verification."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+ 
+        # ── Cooldown: block rapid repeat requests ──
+        last_otp = EmailOTP.objects.filter(user=user).order_by('-created_at').first()
+        if last_otp:
+            seconds_since = (timezone.now() - last_otp.created_at).total_seconds()
+            if seconds_since < RESEND_OTP_COOLDOWN_SECONDS:
+                wait = int(RESEND_OTP_COOLDOWN_SECONDS - seconds_since)
+                return Response(
+                    {"error": f"Please wait {wait} seconds before requesting another code."},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+ 
+        otp = EmailOTP.generate_otp()
+        EmailOTP.objects.create(user=user, otp=otp)
+        from .utils import send_login_otp_resend
+        send_login_otp_resend(user, otp)
+ 
+        return Response({
+            "message": "A new verification code has been sent to your registered email/WhatsApp.",
+            "email": user.email,
+        })
 
 class OrganizationCreateAPIView(APIView):
     permission_classes = [AllowAny]
