@@ -17,6 +17,7 @@ from leads.models import Lead
 from batches.models import Batch, TimetableSlot
 from faculty.models import FacultyProfile, SessionReport, FacultyQRScanLog
 from payroll.models import PaySlip
+from leave.models import LeaveApplication, LeaveBalance, StudentLeaveApplication
 
 
 def _get_cache_key(user):
@@ -79,6 +80,10 @@ def get_role_dashboard(user):
         data = _get_sales_dashboard(user, now, today, month_start)
     else:
         data = _get_default_dashboard(user, now, today)
+
+    # Add leave data for ALL roles (staff, faculty, student, management, sales, etc.)
+    leave_summary = _get_leave_dashboard_data(user, role, today, month_start)
+    data.update(leave_summary)
 
     # Merge common data
     data.update(common_data)
@@ -401,6 +406,124 @@ def _get_default_dashboard(user, now, today):
         'kpis': {'message': 'Dashboard ready for your role'},
         'recent_notifications': [],
     }
+
+
+def _get_leave_dashboard_data(user, role, today, month_start):
+    """Leave data integrated for ALL roles in dashboard.
+    - Management: team pending leaves, staff on leave today
+    - Staff/Faculty: personal leave balances, pending applications, recent leaves
+    - Students/Parents: student leave applications status
+    - Sales: personal leave summary
+    Optimized with aggregates and limited querysets.
+    """
+    leave_data = {
+        'pending_count': 0,
+        'recent_leaves': [],
+        'balances': [],
+        'type': 'staff',
+    }
+
+    if role in ('student', 'parents'):
+        # Student/parent leave data using StudentLeaveApplication
+        student = None
+        if role == 'parents':
+            try:
+                parent_link = ParentLink.objects.select_related('student').filter(
+                    parent=user, is_primary=True
+                ).first()
+                if not parent_link:
+                    parent_link = ParentLink.objects.select_related('student').filter(
+                        parent=user
+                    ).first()
+                if parent_link:
+                    student = parent_link.student
+            except:
+                pass
+        else:
+            try:
+                student = Student.objects.select_related('user').get(user=user)
+            except Student.DoesNotExist:
+                pass
+
+        if student:
+            student_leaves_qs = StudentLeaveApplication.objects.filter(student=student)
+            leave_data['pending_count'] = student_leaves_qs.filter(
+                status__in=['parent_pending', 'internal_pending']
+            ).count()
+            leave_data['recent_leaves'] = list(
+                student_leaves_qs.order_by('-created_at')[:5].values(
+                    'id', 'leave_type', 'from_date', 'to_date', 'status',
+                    'reason', 'applied_by_type', 'parent_approved', 'created_at'
+                )
+            )
+            leave_data['type'] = 'student'
+            # Add to kpis if we want, but since merged later, leave as top level
+        else:
+            leave_data['message'] = 'No student profile linked for leave data'
+    else:
+        # Staff, faculty, management, sales roles - use staff Leave models
+        # Personal leave balances
+        balances_qs = LeaveBalance.objects.filter(
+            user=user, year=today.year
+        )
+        if balances_qs.exists():
+            balances = list(balances_qs.values(
+                'leave_type', 'total_days', 'used_days', 'carried_forward'
+            ))
+            leave_data['balances'] = [
+                {
+                    'leave_type': b['leave_type'],
+                    'total': float(b['total_days']),
+                    'used': float(b['used_days']),
+                    'carried_forward': float(b['carried_forward']),
+                    'remaining': float(b['total_days'] + b['carried_forward'] - b['used_days']),
+                } for b in balances
+            ]
+            leave_data['total_remaining_days'] = sum(b['remaining'] for b in leave_data['balances'])
+        else:
+            leave_data['balances'] = []
+            leave_data['total_remaining_days'] = 0.0
+
+        # Personal pending and recent leaves
+        my_leaves_qs = LeaveApplication.objects.filter(applied_by=user)
+        leave_data['pending_count'] = my_leaves_qs.filter(status='approval_pending').count()
+        leave_data['recent_leaves'] = list(
+            my_leaves_qs.order_by('-created_at')[:5].values(
+                'id', 'leave_type', 'from_date', 'to_date', 'status',
+                'total_days', 'reason', 'created_at'
+            )
+        )
+        leave_data['type'] = 'staff'
+
+        # For management/admin roles - add team-wide leave insights
+        if role in ('super_admin', 'branch_manager', 'admin_senior_executive',
+                   'admin_executive', 'accountant'):
+            bq = _branch_filter(user, LeaveApplication)
+            # Team pending approvals (all staff leaves pending)
+            leave_data['team_pending'] = LeaveApplication.objects.filter(
+                bq, status='approval_pending'
+            ).count()
+
+            # Staff currently on leave today
+            leave_data['team_on_leave_today'] = LeaveApplication.objects.filter(
+                bq,
+                status='approved',
+                from_date__lte=today,
+                to_date__gte=today
+            ).count()
+
+            # Team recent leaves (limited)
+            leave_data['team_recent_leaves'] = list(
+                LeaveApplication.objects.filter(bq)
+                .select_related('applied_by')
+                .order_by('-created_at')[:5]
+                .values(
+                    'id', 'applied_by__name', 'leave_type', 'from_date',
+                    'to_date', 'status', 'total_days'
+                )
+            )
+
+    return {'leave': leave_data}
 
 
 # Helper functions for trends and charts - cached where possible
