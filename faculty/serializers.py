@@ -227,6 +227,9 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(max_length=20, required=False)
     branch_id = serializers.UUIDField(required=False, write_only=True)
     branch = serializers.UUIDField(required=False, write_only=True)
+    work_start_time = serializers.TimeField(required=False)
+    work_end_time = serializers.TimeField(required=False)
+    
 
     class Meta:
         model = FacultyProfile

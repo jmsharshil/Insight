@@ -347,6 +347,29 @@ class LeaveDetailView(APIView):
 class LeaveApproveView(APIView):
     # permission_classes = [IsAuthenticated]
 
+    def _finalise_approval(self, app, approver, now):
+        """Deduct leave balance and notify the applicant."""
+        balance = LeaveBalance.objects.filter(
+            user=app.applied_by, leave_type=app.leave_type, year=app.from_date.year,
+        ).first()
+        if balance:
+            balance.used_days += app.total_days
+            balance.save(update_fields=['used_days'])
+
+        notify(
+            str(app.applied_by.id),
+            title="Leave Approved",
+            body=f"Your {app.leave_type} leave from {app.from_date} to {app.to_date} has been approved.",
+            metadata={"leave_id": str(app.id), "status": "approved"},
+            email_template='emails/leave_status_update.html',
+            email_context={
+                'applicant_name': app.applied_by.name,
+                'leave_type': app.leave_type,
+                'status': 'Approved',
+                'reviewer_name': approver.name,
+            },
+        )
+
     def post(self, request, leave_id):
         role = _user_role(request.user)
         if role not in LEAVE_APPROVE_ROLES + ['super_admin']:
@@ -367,6 +390,43 @@ class LeaveApproveView(APIView):
             return Response({'success': False, 'message': 'Only pending leaves can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
+        applicant_role = _user_role(app.applied_by)
+
+        # ── One-step approval: leave applied by branch_manager ──────────
+        # Only super_admin can approve a branch_manager's leave (single step).
+        if applicant_role == 'branch_manager':
+            if role != 'super_admin':
+                return Response(
+                    {'success': False, 'message': 'Only super_admin can approve a branch manager\'s leave.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            app.first_approver = request.user
+            app.first_approved_at = now
+            app.status = 'approved'
+            app.reviewed_by = request.user
+            app.reviewed_at = now
+            app.save()
+            self._finalise_approval(app, request.user, now)
+            return Response({'success': True, 'message': 'Leave approved (branch manager leave — super_admin).'})
+
+        # ── One-step approval: leave applied by admin_senior_executive ──
+        # branch_manager or super_admin can approve in a single step.
+        if applicant_role == 'admin_senior_executive':
+            if role not in ('branch_manager', 'super_admin'):
+                return Response(
+                    {'success': False, 'message': 'Only branch_manager or super_admin can approve an ASE\'s leave.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            app.first_approver = request.user
+            app.first_approved_at = now
+            app.status = 'approved'
+            app.reviewed_by = request.user
+            app.reviewed_at = now
+            app.save()
+            self._finalise_approval(app, request.user, now)
+            return Response({'success': True, 'message': 'Leave approved (ASE leave — single step).'})
+
+        # ── Two-step approval: regular staff ────────────────────────────
 
         # Step 1: admin_senior_executive first approval
         if role == 'admin_senior_executive':
@@ -390,20 +450,7 @@ class LeaveApproveView(APIView):
                 app.reviewed_by = request.user
                 app.reviewed_at = now
                 app.save()
-                
-                notify(
-                    str(app.applied_by.id),
-                    title="Leave Approved",
-                    body=f"Your leave from {app.from_date} to {app.to_date} has been approved.",
-                    metadata={"leave_id": str(app.id), "status": "approved"},
-                    email_template='emails/leave_status_update.html',
-                    email_context={
-                        'applicant_name': app.applied_by.name,
-                        'leave_type': app.leave_type,
-                        'status': 'Approved',
-                        'reviewer_name': request.user.name
-                    }
-                )
+                self._finalise_approval(app, request.user, now)
                 return Response({'success': True, 'message': 'Leave approved successfully (no branch manager found).'})
 
             for bm in bm_users:
@@ -424,7 +471,7 @@ class LeaveApproveView(APIView):
 
             return Response({'success': True, 'message': 'First approval done. Awaiting branch manager.'})
 
-        # Step 2: branch_manager second approval
+        # Step 2: branch_manager second approval (regular staff)
         if role == 'branch_manager':
             if not app.first_approver:
                 return Response({'success': False, 'message': 'First approval by admin_senior_executive is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -434,33 +481,10 @@ class LeaveApproveView(APIView):
             app.reviewed_by = request.user
             app.reviewed_at = now
             app.save()
-
-            # Deduct balance
-            balance = LeaveBalance.objects.filter(
-                user=app.applied_by, leave_type=app.leave_type, year=app.from_date.year,
-            ).first()
-            if balance:
-                balance.used_days += app.total_days
-                balance.save(update_fields=['used_days'])
-
-            # FRD §4.9.2: Push notification to applicant
-            notify(
-                str(app.applied_by.id),
-                title="Leave Approved",
-                body=f"Your {app.leave_type} leave from {app.from_date} to {app.to_date} has been approved.",
-                metadata={"leave_id": str(app.id), "status": "approved"},
-                email_template='emails/leave_status_update.html',
-                email_context={
-                    'applicant_name': app.applied_by.name,
-                    'leave_type': app.leave_type,
-                    'status': 'Approved',
-                    'reviewer_name': request.user.name
-                }
-            )
-
+            self._finalise_approval(app, request.user, now)
             return Response({'success': True, 'message': 'Leave approved.'})
 
-        # super_admin can do both steps at once
+        # super_admin can do both steps at once (regular staff)
         if role == 'super_admin':
             app.first_approver = app.first_approver or request.user
             app.first_approved_at = app.first_approved_at or now
@@ -470,28 +494,7 @@ class LeaveApproveView(APIView):
             app.reviewed_by = request.user
             app.reviewed_at = now
             app.save()
-
-            balance = LeaveBalance.objects.filter(
-                user=app.applied_by, leave_type=app.leave_type, year=app.from_date.year,
-            ).first()
-            if balance:
-                balance.used_days += app.total_days
-                balance.save(update_fields=['used_days'])
-
-            notify(
-                str(app.applied_by.id),
-                title="Leave Approved",
-                body=f"Your {app.leave_type} leave from {app.from_date} to {app.to_date} has been approved.",
-                metadata={"leave_id": str(app.id), "status": "approved"},
-                email_template='emails/leave_status_update.html',
-                email_context={
-                    'applicant_name': app.applied_by.name,
-                    'leave_type': app.leave_type,
-                    'status': 'Approved',
-                    'reviewer_name': request.user.name
-                }
-            )
-
+            self._finalise_approval(app, request.user, now)
             return Response({'success': True, 'message': 'Leave approved (super_admin).'})
 
         return Response({'success': False, 'message': 'Invalid role for approval.'}, status=status.HTTP_403_FORBIDDEN)
