@@ -190,6 +190,39 @@ class ChatConsumer(AsyncWebsocketConsumer):
             target_user_ids = [target_user_ids] if target_user_ids else []
         target_user_ids = [str(tid).strip() for tid in target_user_ids if str(tid).strip()]
 
+        # Faculty reply rules in group rooms:
+        # 1. Must provide a reply_to_message_id that explicitly tags this faculty.
+        # 2. The target is auto-derived from that message's sender — faculty cannot
+        #    choose their own targets.
+        # 3. If multiple messages tag them, they may reply to each one individually.
+        user_role = getattr(self.user, "role", None)
+        if user_role == FACULTY_ROLE:
+            room_type = await self._get_room_type(self.room_id)
+            if room_type == "group":
+                reply_to_message_id = data.get("reply_to_message_id")
+                if not reply_to_message_id:
+                    await self._send_error(
+                        "REPLY_TO_REQUIRED",
+                        "Faculty must reply to a specific message that mentions them (@mention)."
+                    )
+                    return
+
+                # Validate the message exists and tags this faculty
+                sender_id = await self._validate_faculty_reply_message(
+                    self.room_id, reply_to_message_id, str(self.user.id)
+                )
+                if sender_id is None:
+                    await self._send_error(
+                        "INVALID_REPLY_MESSAGE",
+                        "The referenced message does not exist or does not mention you."
+                    )
+                    return
+
+                # Override target_user_ids with the sender of the replied-to message.
+                # Faculty cannot choose their own targets.
+                target_user_ids = [sender_id]
+
+
         if existing_message_id:
             # Message was already saved via REST POST — just broadcast, don't save again.
             # (e.g. after using the /upload/ + messages POST flow)
@@ -578,6 +611,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return ChatRoom.objects.values_list("room_type", flat=True).get(id=room_id)
         except ChatRoom.DoesNotExist:
             return ""
+
+    @database_sync_to_async
+    def _validate_faculty_reply_message(self, room_id: str, message_id: str, faculty_user_id: str):
+        """
+        Validate that `message_id` is a message in `room_id` that explicitly
+        tags `faculty_user_id`. Returns the sender's user ID (as string) if
+        valid, or None if the message doesn't exist or doesn't tag this faculty.
+        Faculty replies are auto-directed to the sender of this message.
+        """
+        from .models import Message
+        try:
+            msg = (
+                Message.objects
+                .filter(
+                    id=message_id,
+                    room_id=room_id,
+                    targets__id=faculty_user_id,
+                    is_deleted=False,
+                )
+                .values_list("sender_id", flat=True)
+                .first()
+            )
+            return str(msg) if msg else None
+        except Exception:
+            return None
+
 
     @database_sync_to_async
     def _get_room_participant_ids(self, room_id: str) -> list:

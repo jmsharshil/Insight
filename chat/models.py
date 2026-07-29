@@ -51,9 +51,18 @@ class ChatRoom(models.Model):
         """Return queryset of non-deleted messages visible to this user (respects M2M `targets`)."""
         qs = self.messages.filter(is_deleted=False).select_related("sender")
         role = getattr(user, "role", None)
-        if role != "super_admin":
+        if role == "super_admin":
+            # super_admin sees everything
+            return qs
+        if role == "faculty":
+            # Faculty ONLY see messages where they are the sender or explicitly tagged.
+            # They do NOT see general group messages.
             qs = qs.annotate(num_targets=Count("targets")).filter(
-                # Normal messages or ones where user is sender or a target
+                Q(sender=user) | Q(targets=user)
+            )
+        else:
+            qs = qs.annotate(num_targets=Count("targets")).filter(
+                # Normal messages (no targets) or ones where user is sender or a target
                 Q(num_targets=0) | Q(sender=user) | Q(targets=user)
             )
         return qs
