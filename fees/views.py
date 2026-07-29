@@ -160,9 +160,9 @@ class StudentFeeListView(APIView):
         if batch_id:
             queryset = queryset.filter(student__batch_id=batch_id)
         if date_from:
-            queryset = queryset.filter(created_at__gte=date_from)
+            queryset = queryset.filter(due_date__gte=date_from)
         if date_to:
-            queryset = queryset.filter(created_at__lte=date_to)
+            queryset = queryset.filter(due_date__lte=date_to)
 
         queryset = apply_filters(self, request, queryset)
 
