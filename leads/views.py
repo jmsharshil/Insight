@@ -825,7 +825,7 @@ class LeadTransferRequestListCreateView(APIView):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
             
-        return paginate_queryset(request, queryset, LeadTransferRequestSerializer)
+        return paginate_queryset(queryset, request, LeadTransferRequestSerializer)
 
     def post(self, request):
         lead_id = request.data.get('lead_id')
