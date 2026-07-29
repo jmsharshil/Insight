@@ -18,21 +18,9 @@ logger = logging.getLogger(__name__)
 
 @receiver(post_save, sender=Student)
 def on_student_created(sender, instance, created, **kwargs):
-    """Trigger batch assignment and fee creation on first student creation."""
-    if not created:
-        return
-
-    from batches.services import auto_assign_batch
-    from fees.services import create_student_fee
-
-    for fn, label in [
-        (auto_assign_batch, 'auto_assign_batch'),
-        (create_student_fee, 'create_student_fee'),
-    ]:
-        try:
-            fn(instance)
-        except Exception as e:
-            logger.error(
-                f"{label} failed for student {instance.pk}: {e}",
-                exc_info=True,
-            )
+    """
+    (Deprecated) Trigger batch assignment and fee creation on first student creation.
+    These are now called explicitly at the end of StudentService.create_from_admission
+    to ensure ParentLinks and other related objects exist beforehand.
+    """
+    pass

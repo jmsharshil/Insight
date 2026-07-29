@@ -204,8 +204,18 @@ def send_payment_receipt(payment):
         from .pdf_services import generate_payment_receipt_pdf
 
         # --- Build recipient list first so we can always send at least a text email ---
+        recipients = set()
         parent_email = getattr(payment.student, 'email_parent', None)
-        recipients = [parent_email] if parent_email else get_recipient_emails(payment.student)
+        if parent_email:
+            recipients.add(parent_email)
+            
+        student_email = getattr(payment.student, 'email', None)
+        if student_email:
+            recipients.add(student_email)
+            
+        recipients = list(recipients)
+        if not recipients:
+            recipients = get_recipient_emails(payment.student)
         if not recipients:
             logger.warning(
                 f"No email recipients found for payment {payment.id} "
