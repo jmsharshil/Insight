@@ -173,6 +173,7 @@ class Batch(models.Model):
     auto_sequence   = models.PositiveIntegerField(null=True, blank=True)
     is_auto_created = models.BooleanField(default=False)
     qr_image       = models.ImageField(upload_to='batches/qrcodes/', null=True, blank=True)
+    chat_room      = models.OneToOneField('chat.ChatRoom', on_delete=models.SET_NULL, null=True, blank=True, related_name='batch')
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
 
