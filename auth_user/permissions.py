@@ -32,7 +32,7 @@ import re
 
 ROLE_PERMISSIONS = {
     'super_admin': {
-        'default_modules': [
+        'default_modules': ['support', 
             'crm', 'students', 'courses_batches', 'timetable', 'attendance',
             'fees', 'exams', 'results', 'faculty', 'leave', 'chat',
             'inventory', 'notifications', 'audit_logs', 'payroll',
@@ -42,7 +42,7 @@ ROLE_PERMISSIONS = {
         'canExport': True,
     },
     'branch_manager': {
-        'default_modules': [
+        'default_modules': ['support', 
             'crm', 'students', 'courses_batches', 'timetable', 'attendance',
             'fees', 'exams', 'results', 'faculty', 'payroll', 'leave',
             'chat', 'notifications', 'audit_logs', 'settings',
@@ -51,7 +51,7 @@ ROLE_PERMISSIONS = {
         'canExport': True,
     },
     'admin_senior_executive': {
-        'default_modules': [
+        'default_modules': ['support', 
             'crm', 'students', 'courses_batches', 'timetable', 'attendance',
             'fees', 'exams', 'results', 'leave', 'chat', 'notifications',
             'payroll', 'settings',
@@ -60,7 +60,7 @@ ROLE_PERMISSIONS = {
         'canExport': True,
     },
     'admin_executive': {
-        'default_modules': [
+        'default_modules': ['support', 
             'students', 'attendance', 'courses_batches', 'timetable',
             'payroll', 'settings', 'notifications', 'leave',
         ],
@@ -68,32 +68,32 @@ ROLE_PERMISSIONS = {
         'canExport': False,
     },
     'front_desk': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'counsellor': {
-        'default_modules': ['crm', 'students', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'default_modules': ['support', 'crm', 'students', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'tele_caller': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'sales_senior_executive': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': True,
     },
     'sales_executive': {
-        'default_modules': ['crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
         'canDelete': False,
         'canExport': False,
     },
     'student': {
-        'default_modules': [
+        'default_modules': ['support', 
             'timetable', 'attendance', 'courses_batches', 'exams', 'fees',
             'leave', 'chat', 'notifications', 'settings',
         ],
@@ -101,7 +101,7 @@ ROLE_PERMISSIONS = {
         'canExport': False,
     },
     'parents': {
-        'default_modules': [
+        'default_modules': ['support', 
             'timetable', 'attendance', 'courses_batches', 'fees', 'exams',
             'leave', 'chat', 'notifications', 'settings',
         ],
@@ -109,7 +109,7 @@ ROLE_PERMISSIONS = {
         'canExport': False,
     },
     'faculty': {
-        'default_modules': [
+        'default_modules': ['support', 
             'timetable', 'attendance', 'exams', 'leave', 'chat',
             'notifications', 'payroll', 'settings',
         ],
@@ -117,28 +117,28 @@ ROLE_PERMISSIONS = {
         'canExport': False,
     },
     'exam_supervisor': {
-        'default_modules': [
+        'default_modules': ['support', 
             'attendance', 'exams', 'notifications', 'payroll', 'settings', 'leave',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'paper_checker': {
-        'default_modules': [
+        'default_modules': ['support', 
             'exams', 'notifications', 'payroll', 'settings', 'leave',
         ],
         'canDelete': False,
         'canExport': False,
     },
     'accountant': {
-        'default_modules': [
+        'default_modules': ['support', 
             'attendance', 'fees', 'payroll', 'notifications', 'settings', 'leave',
         ],
         'canDelete': False,
         'canExport': True,
     },
     'security': {
-        'default_modules': [
+        'default_modules': ['support', 
             'attendance', 'payroll', 'leave', 'chat', 'notifications',
             'settings',
         ],
@@ -146,7 +146,7 @@ ROLE_PERMISSIONS = {
         'canExport': False,
     },
     'house_keeping': {
-        'default_modules': [
+        'default_modules': ['support', 
             'attendance', 'payroll', 'leave', 'chat', 'notifications',
             'settings',
         ],
@@ -273,7 +273,7 @@ def is_bypass_path(path):
 def get_role_config(role):
     """Return the permissions dict for a role, with safe defaults."""
     return ROLE_PERMISSIONS.get(role, {
-        'default_modules': ['settings'],
+        'default_modules': ['support', 'settings'],
         'canDelete': False,
         'canExport': False,
     })
