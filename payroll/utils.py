@@ -516,10 +516,6 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             attendance_bonus = daily_rate
 
     basic_salary = fac_salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
-    retention_deduction = Decimal(0)
-    if faculty_profile.salary_retention_percentage > 0:
-        gross_salary = basic_salary + hour_based_amount
-        retention_deduction = gross_salary * (faculty_profile.salary_retention_percentage / Decimal(100))
 
     leave_encashment = Decimal(0)
     if month == 3:
@@ -532,18 +528,24 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 bal.used_days += bal.remaining_days
                 bal.save(update_fields=['used_days'])
 
-    # 9. Compute net salary
+    # 9. Compute net salary (retention is applied AFTER all other deductions)
     if faculty_profile.employment_type == 'full_time':
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = leave_deductions
-        net = (basic_salary + applied_hour_based_amount + attendance_bonus + leave_encashment
+        net_before_retention = (basic_salary + applied_hour_based_amount + attendance_bonus + leave_encashment
                - late_penalty - absence_deductions
-               - applied_leave_deductions - retention_deduction)
+               - applied_leave_deductions)
     else:
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = Decimal(0)
-        net = applied_hour_based_amount + attendance_bonus + leave_encashment - late_penalty - absence_deductions - retention_deduction
+        net_before_retention = applied_hour_based_amount + attendance_bonus + leave_encashment - late_penalty - absence_deductions
 
+    # Retention is calculated AFTER all other deductions
+    retention_deduction = Decimal(0)
+    if faculty_profile.salary_retention_percentage > 0:
+        retention_deduction = net_before_retention * (faculty_profile.salary_retention_percentage / Decimal(100))
+
+    net = net_before_retention - retention_deduction
     net = max(net, Decimal(0))
 
     deduction_note_str = build_deduction_note(
@@ -980,10 +982,6 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             attendance_bonus = daily_rate
 
     basic_salary = fac_salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
-    retention_deduction = Decimal(0)
-    if faculty_profile.salary_retention_percentage > 0:
-        gross_salary = basic_salary + hour_based_amount
-        retention_deduction = gross_salary * (faculty_profile.salary_retention_percentage / Decimal(100))
 
     leave_encashment = Decimal(0)
     if month == 3:
@@ -993,17 +991,24 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             if bal.remaining_days > Decimal(0):
                 leave_encashment += bal.remaining_days * daily_rate
 
+    # Compute net salary (retention is applied AFTER all other deductions)
     if faculty_profile.employment_type == 'full_time':
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = leave_deductions
-        net = (basic_salary + applied_hour_based_amount + attendance_bonus + leave_encashment
+        net_before_retention = (basic_salary + applied_hour_based_amount + attendance_bonus + leave_encashment
                - late_penalty - absence_deductions
-               - applied_leave_deductions - retention_deduction)
+               - applied_leave_deductions)
     else:
         applied_hour_based_amount = hour_based_amount
         applied_leave_deductions = Decimal(0)
-        net = applied_hour_based_amount + attendance_bonus + leave_encashment - late_penalty - absence_deductions - retention_deduction
+        net_before_retention = applied_hour_based_amount + attendance_bonus + leave_encashment - late_penalty - absence_deductions
 
+    # Retention is calculated AFTER all other deductions
+    retention_deduction = Decimal(0)
+    if faculty_profile.salary_retention_percentage > 0:
+        retention_deduction = net_before_retention * (faculty_profile.salary_retention_percentage / Decimal(100))
+
+    net = net_before_retention - retention_deduction
     net = max(net, Decimal(0))
 
     return {

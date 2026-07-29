@@ -146,6 +146,15 @@ class StudentService:
                 f"(admission {admission.id}): {exc}. Student profile created successfully; "
                 "fees can be assigned manually."
             )
+        try:
+            from batches.services import auto_assign_batch
+            auto_assign_batch(student)
+        except Exception as exc:
+            logger.error(
+                f"Auto-assign batch failed for student {student.admission_number} "
+                f"(admission {admission.id}): {exc}. Student profile created successfully; "
+                "batch can be assigned manually."
+            )
 
         logger.info(f"Student created: {student.admission_number} from admission {admission.id}")
         return student

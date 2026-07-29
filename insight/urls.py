@@ -41,6 +41,7 @@ urlpatterns = [
     path('api/v1/', include('chat.urls')),
     path('api/v1/inventory/', include('inventory.urls')),
     path('api/v1/dashboard/', include('dashboard.urls')),
+    path('api/v1/support/', include('support.urls')),
 ]
 
 if settings.DEBUG:

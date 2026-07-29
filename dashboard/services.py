@@ -831,9 +831,25 @@ def _get_exam_stats(bq):
         total=Count('id'),
         passed=Count('id', filter=Q(is_pass=True)),
         avg_percentage=Avg('percentage'),
+        exempt_count=Count('id', filter=Q(percentage__gte=60)),
+        aggregate_count=Count('id', filter=Q(percentage__gte=50, percentage__lt=60)),
+        pass_count=Count('id', filter=Q(percentage__gte=40, percentage__lt=50)),
+        fail_count=Count('id', filter=Q(percentage__lt=40)),
     )
     total_results = pr_agg.get('total') or 0
     pass_pct = round((pr_agg.get('passed') or 0) / max(total_results, 1) * 100, 2)
+
+    # Absent count across all recent exams
+    total_absent = MarkSheet.objects.filter(
+        exam__in=recent_exams, is_absent=True
+    ).count()
+    total_marksheets = MarkSheet.objects.filter(exam__in=recent_exams).count()
+    absent_pct = round(total_absent / max(total_marksheets, 1) * 100, 2)
+
+    exempt_c = pr_agg.get('exempt_count') or 0
+    aggregate_c = pr_agg.get('aggregate_count') or 0
+    pass_c = pr_agg.get('pass_count') or 0
+    fail_c = pr_agg.get('fail_count') or 0
 
     return {
         'avg_exam_attendance_pct': round(
@@ -843,6 +859,33 @@ def _get_exam_stats(bq):
         'avg_result_percentage': round(float(pr_agg.get('avg_percentage') or 0), 2),
         'total_exams_completed': len(list(recent_exams)),
         'total_published_results': total_results,
+        'grade_distribution': {
+            'exempt': {
+                'count': exempt_c,
+                'percentage': round(exempt_c / max(total_results, 1) * 100, 2),
+                'label': 'Exempt (60%+)',
+            },
+            'aggregate': {
+                'count': aggregate_c,
+                'percentage': round(aggregate_c / max(total_results, 1) * 100, 2),
+                'label': 'Aggregate (50–60%)',
+            },
+            'pass': {
+                'count': pass_c,
+                'percentage': round(pass_c / max(total_results, 1) * 100, 2),
+                'label': 'Pass (40–50%)',
+            },
+            'fail': {
+                'count': fail_c,
+                'percentage': round(fail_c / max(total_results, 1) * 100, 2),
+                'label': 'Fail (<40%)',
+            },
+            'absent': {
+                'count': total_absent,
+                'percentage': absent_pct,
+                'label': 'Absent',
+            },
+        },
     }
 
 

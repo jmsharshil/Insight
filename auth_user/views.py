@@ -169,6 +169,9 @@ class LoginAPIView(APIView):
             if not user.is_active:
                 return Response({"error": "Account is not verified"}, status=400)
 
+            #for testing:
+            return Response(build_login_success_response(user, request)) #for live remove it
+
             # ── Existing behavior preserved exactly for student/parent ──
             if user.role in ROLES_REQUIRING_LOGIN_OTP_BYPASS:
                 return Response(build_login_success_response(user, request))
@@ -936,15 +939,16 @@ class PopupNotificationAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        try:
-            limit = int(request.query_params.get('limit', 5))
-        except (TypeError, ValueError):
-            limit = 5
-        limit = max(1, min(limit, 50))  # sane bounds
+        # try:
+        #     limit = int(request.query_params.get('limit', 5))
+        # except (TypeError, ValueError):
+        #     limit = 5
+        # limit = max(1, min(limit, 50))  # sane bounds
 
         unread_qs = NotificationHistory.objects.filter(user=request.user, is_read=False)
         total_unread = unread_qs.count()
-        notifications = list(unread_qs.order_by('-created_at')[:limit])
+        # notifications = list(unread_qs.order_by('-created_at')[:limit])
+        notifications = list(unread_qs.order_by('-created_at'))
 
         serializer = NotificationHistorySerializer(notifications, many=True)
         return Response({

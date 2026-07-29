@@ -18,12 +18,14 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     exam_questions = serializers.SerializerMethodField()
     no_of_questions = serializers.SerializerMethodField()
     percentage = serializers.SerializerMethodField()
+    grade_status = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'paper_checker', 'checker_name', 'marks_obtained', 'percentage',
+            'grade_status',
             'is_pass',
             'remarks', 'checked_at', 'is_submitted', 'is_rechecked', 'is_absent',
             'has_open_query',
@@ -99,6 +101,31 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             if not total or total == 0:
                 return None
             return round(float(obj.marks_obtained) / total * 100, 2)
+        except Exception:
+            return None
+
+    def get_grade_status(self, obj):
+        """Determine grade status based on percentage:
+        - Absent: student did not appear
+        - Fail: < 40%
+        - Pass: 40% <= percentage < 50%
+        - Aggregate: 50% <= percentage < 60%
+        - Exempt: >= 60%
+        """
+        try:
+            if obj.is_absent:
+                return 'absent'
+            pct = self.get_percentage(obj)
+            if pct is None:
+                return None
+            if pct < 40:
+                return 'fail'
+            elif pct < 50:
+                return 'pass'
+            elif pct < 60:
+                return 'aggregate'
+            else:
+                return 'exempt'
         except Exception:
             return None
 
@@ -210,12 +237,14 @@ class PublishedResultSerializer(serializers.ModelSerializer):
     mcq_breakdown = serializers.SerializerMethodField()
     question_marks = serializers.SerializerMethodField()
     percentile = serializers.SerializerMethodField()
+    grade_status = serializers.SerializerMethodField()
 
     class Meta:
         model = PublishedResult
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
             'marks_obtained', 'total_marks', 'percentage', 'percentile',
+            'grade_status',
             'is_pass',
             'rank', 'published_at', 'recheck_requests', 'mcq_breakdown',
             'question_marks',
@@ -261,6 +290,29 @@ class PublishedResultSerializer(serializers.ModelSerializer):
                 exam=obj.exam, marks_obtained__lte=obj.marks_obtained
             ).count()
             return round(at_or_below / total * 100, 2)
+        except Exception:
+            return None
+
+    def get_grade_status(self, obj):
+        """Determine grade status based on percentage:
+        - Fail: < 40%
+        - Pass: 40% <= percentage < 50%
+        - Aggregate: 50% <= percentage < 60%
+        - Exempt: >= 60%
+        """
+        try:
+            pct = obj.percentage
+            if pct is None:
+                return None
+            pct = float(pct)
+            if pct < 40:
+                return 'fail'
+            elif pct < 50:
+                return 'pass'
+            elif pct < 60:
+                return 'aggregate'
+            else:
+                return 'exempt'
         except Exception:
             return None
 
