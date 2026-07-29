@@ -755,6 +755,11 @@ class RegisterFCMTokenView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Bug fix: clear this token from other users to prevent cross-user notifications on shared devices.
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        User.objects.filter(fcm_token=fcm_token).exclude(id=request.user.id).update(fcm_token="")
+
         request.user.fcm_token = fcm_token
         request.user.save(update_fields=["fcm_token"])
 
