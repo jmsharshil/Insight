@@ -112,6 +112,9 @@ class Exam(models.Model):
         blank=True,
         help_text='Uploaded answer key (PDF/image). Must be present before allowing recheck requests or bulk recheck.'
     )
+    
+    grace_marks = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text='Grace marks added to the total of all students for this exam.')
+    grace_marks_note = models.TextField(blank=True, help_text='Reason/note for providing grace marks (will be appended to marksheet remarks).')
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='created_exams')
     is_deleted = models.BooleanField(default=False)

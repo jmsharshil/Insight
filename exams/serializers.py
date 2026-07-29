@@ -158,6 +158,7 @@ class ExamListSerializer(serializers.ModelSerializer):
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'status', 'status_display', 'batch', 'batch_name', 'subject', 'subject_name',
             'faculty', 'faculty_id', 'faculty_name', 'branch', 'created_by', 'created_by_name', 'created_at',
+            'grace_marks', 'grace_marks_note',
             # v2 fields
             'geo_radius_meters', 'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
@@ -404,7 +405,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'title', 'exam_type', 'exam_mode', 'batch', 'subject', 'faculty', 'total_marks', 'pass_marks',
             'duration_minutes', 'scheduled_date', 'start_time', 'end_time',
             'instructions', 'geo_lat', 'geo_lon', 'geo_radius_meters',
-            'status',
+            'status', 'grace_marks', 'grace_marks_note',
             # v2 fields
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',

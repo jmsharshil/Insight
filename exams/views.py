@@ -3,6 +3,7 @@ from core.pagination import paginate_queryset
 import uuid
 import hashlib
 from django.utils import timezone
+import decimal
 from django.db import transaction
 from django.db.models import Q
 from django.conf import settings as django_settings
@@ -1408,4 +1409,94 @@ class ExamUploadMaterialsView(APIView):
         return Response({
             'success': True,
             'message': msg
+        })
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13. POST  /api/v1/exams/{exam_id}/grace-marks/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ExamGraceMarksView(APIView):
+    """
+    API to add grace marks to an exam and auto-update results.
+    Payload: { 'grace_marks': 5, 'grace_marks_note': 'Due to out of syllabus question' }
+    """
+    def post(self, request, exam_id):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        qs = Exam.objects.filter(is_deleted=False)
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+            
+        try:
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Parse payload
+        grace_marks_val = request.data.get('grace_marks')
+        grace_marks_note = request.data.get('grace_marks_note', '')
+        
+        try:
+            from decimal import Decimal
+            grace_marks_val = Decimal(str(grace_marks_val))
+            if grace_marks_val < 0:
+                raise ValueError
+        except (TypeError, ValueError, decimal.InvalidOperation):
+            return Response({'success': False, 'message': 'Invalid grace_marks. Must be a positive number.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Apply to Exam
+        exam.grace_marks = grace_marks_val
+        exam.grace_marks_note = grace_marks_note
+        exam.save(update_fields=['grace_marks', 'grace_marks_note'])
+
+        # Apply to MarkSheets
+        from results.models import MarkSheet, PublishedResult
+        
+        updated_marksheets = 0
+        marksheets = MarkSheet.objects.filter(exam=exam, is_submitted=True, is_absent=False)
+        for ms in marksheets:
+            if ms.marks_obtained is not None:
+                new_marks = ms.marks_obtained + grace_marks_val
+                # Cap at total marks if applicable
+                if exam.total_marks:
+                    if new_marks > exam.total_marks:
+                        new_marks = Decimal(str(exam.total_marks))
+                ms.marks_obtained = new_marks
+                ms.is_pass = new_marks >= (exam.pass_marks or 0)
+                
+                # Append note
+                if grace_marks_note:
+                    if ms.remarks:
+                        if "Grace Marks:" not in ms.remarks:
+                            ms.remarks += f" | Grace Marks: {grace_marks_note}"
+                    else:
+                        ms.remarks = f"Grace Marks: {grace_marks_note}"
+                        
+                ms.save(update_fields=['marks_obtained', 'is_pass', 'remarks'])
+                updated_marksheets += 1
+                
+        # Apply to PublishedResult (if any exist yet)
+        updated_published = 0
+        published = PublishedResult.objects.filter(exam=exam)
+        for pr in published:
+            new_marks = pr.marks_obtained + grace_marks_val
+            if pr.total_marks and new_marks > pr.total_marks:
+                new_marks = Decimal(str(pr.total_marks))
+            pr.marks_obtained = new_marks
+            pr.is_pass = new_marks >= (exam.pass_marks or 0)
+            if pr.total_marks and pr.total_marks > 0:
+                pr.percentage = round(float(new_marks) / pr.total_marks * 100, 2)
+            pr.save(update_fields=['marks_obtained', 'is_pass', 'percentage'])
+            updated_published += 1
+            
+        # Re-calculate ranks if published results exist
+        if updated_published > 0:
+            from results.utils import calculate_ranks
+            calculate_ranks(exam_id)
+
+        return Response({
+            'success': True,
+            'message': f'Grace marks of {grace_marks_val} added to Exam and applied to {updated_marksheets} student results.'
         })
