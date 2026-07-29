@@ -10,10 +10,12 @@ class SupportQueryMessageSerializer(serializers.ModelSerializer):
 
 class SupportQuerySerializer(serializers.ModelSerializer):
     messages = SupportQueryMessageSerializer(many=True, read_only=True)
+    requested_by_name = serializers.CharField(source='user.name', read_only=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
 
     class Meta:
         model = SupportQuery
-        fields = ['id', 'user', 'organization', 'assigned_to', 'title', 'description', 'attachment', 'status', 'created_at', 'messages']
+        fields = ['id', 'user', 'organization', 'assigned_to', 'title', 'description', 'attachment', 'status', 'created_at', 'messages', 'assigned_to_name', 'requested_by_name']
         read_only_fields = ['id', 'user', 'organization', 'assigned_to', 'status', 'created_at']
 
     def create(self, validated_data):
