@@ -89,10 +89,41 @@ class SubjectPaperSerializer(serializers.ModelSerializer):
         help_text='Total number of questions in this paper. Must be at least 1.'
     )
 
+    answer_key = serializers.SerializerMethodField()
+
     class Meta:
         model = SubjectPaper
         fields = ['id', 'subject', 'subject_name', 'set_name', 'file', 'answer_key', 'no_of_questions', 'created_at']
         read_only_fields = ['id', 'created_at', 'subject_name']
+
+    def get_answer_key(self, obj):
+        if not obj.answer_key:
+            return None
+            
+        request = self.context.get('request')
+        if not request or getattr(request.user, 'role', None) != 'student':
+            return obj.answer_key.url
+            
+        exam = self.context.get('exam')
+        if not exam:
+            # If not in an exam context, just return it (or maybe hide it? Better to return if they somehow access it elsewhere)
+            return obj.answer_key.url
+            
+        if exam.status != 'results_published':
+            return None
+            
+        from results.models import PublishedResult
+        from django.utils import timezone
+        import datetime
+        
+        pr = PublishedResult.objects.filter(exam=exam, student__user=request.user).first()
+        if not pr:
+            return None
+            
+        if timezone.now() > pr.published_at + datetime.timedelta(hours=24):
+            return None
+            
+        return obj.answer_key.url
 
 
 class ExamListSerializer(serializers.ModelSerializer):
@@ -110,7 +141,8 @@ class ExamListSerializer(serializers.ModelSerializer):
     result_release_mode_display = serializers.CharField(source="get_result_release_mode_display", read_only=True)
     paper_checkers = serializers.SerializerMethodField()
     supervisors = serializers.SerializerMethodField()
-    selected_papers = SubjectPaperSerializer(many=True, read_only=True)
+    selected_papers = serializers.SerializerMethodField()
+    answer_key = serializers.SerializerMethodField()
     can_start_exam = serializers.SerializerMethodField()
     questions_count = serializers.SerializerMethodField()
     is_upcoming = serializers.SerializerMethodField()
@@ -133,9 +165,38 @@ class ExamListSerializer(serializers.ModelSerializer):
             'result_release_mode',
             'exam_type_display', 'exam_mode_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers', 'supervisors',
-            'selected_papers',
+            'selected_papers', 'answer_key',
             'can_start_exam', 'questions_count', 'is_upcoming', 'is_submitted',
             'classroom', 'classroom_name', 'attendance_percentage']
+
+    def get_selected_papers(self, obj):
+        context = self.context.copy()
+        context['exam'] = obj
+        return SubjectPaperSerializer(obj.selected_papers.all(), many=True, context=context).data
+
+    def get_answer_key(self, obj):
+        if not obj.answer_key:
+            return None
+            
+        request = self.context.get('request')
+        if not request or getattr(request.user, 'role', None) != 'student':
+            return obj.answer_key.url
+            
+        if obj.status != 'results_published':
+            return None
+            
+        from results.models import PublishedResult
+        from django.utils import timezone
+        import datetime
+        
+        pr = PublishedResult.objects.filter(exam=obj, student__user=request.user).first()
+        if not pr:
+            return None
+            
+        if timezone.now() > pr.published_at + datetime.timedelta(hours=24):
+            return None
+            
+        return obj.answer_key.url
 
     def get_is_submitted(self, obj):
         request = self.context.get('request')

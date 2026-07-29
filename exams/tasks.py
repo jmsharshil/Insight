@@ -186,3 +186,42 @@ def auto_expire_exam_sessions():
 
     logger.info(f"Auto-submitted {count} expired sessions")
     return f"{count} sessions auto-submitted"
+
+
+def send_exam_material_upload_reminders():
+    """Daily: remind faculty to upload missing question paper and answer key for scheduled exams."""
+    from .models import Exam
+    from chat.notifications import send_system_notification
+
+    # Only look at exams that are scheduled or draft, not completed
+    # It should have a faculty assigned
+    upcoming_exams = Exam.objects.filter(
+        status__in=['draft', 'scheduled'],
+        is_deleted=False,
+        faculty__isnull=False
+    ).select_related('faculty__user').prefetch_related('selected_papers', 'questions')
+
+    count = 0
+    for exam in upcoming_exams:
+        if not exam.faculty or not exam.faculty.user:
+            continue
+            
+        missing = []
+        if exam.exam_mode == 'offline' and not exam.selected_papers.exists():
+            missing.append("Question Paper")
+        
+        if not exam.answer_key:
+            missing.append("Answer Key")
+
+        if missing:
+            missing_str = " and ".join(missing)
+            send_system_notification(
+                user_id=str(exam.faculty.user.id),
+                title='Reminder: Upload Exam Materials',
+                body=f"Reminder: Please upload the {missing_str} for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
+                metadata={'exam_id': str(exam.id)}
+            )
+            count += 1
+
+    logger.info(f"Sent {count} exam material upload reminders")
+    return f"{count} reminders sent"

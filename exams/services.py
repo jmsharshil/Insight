@@ -63,6 +63,24 @@ def notify_exam_scheduled(exam):
             metadata={'exam_id': str(exam.id)}
         )
 
+    # Notify faculty to upload materials if missing
+    if exam.faculty and exam.faculty.user:
+        missing = []
+        if not exam.selected_papers.exists():
+            missing.append("Question Paper")
+        # Online exams might use `questions` but often still need an answer key or we can just ask for answer key for both if missing
+        if not exam.answer_key:
+            missing.append("Answer Key")
+            
+        if missing:
+            missing_str = " and ".join(missing)
+            send_system_notification(
+                user_id=str(exam.faculty.user.id),
+                title='Action Required: Upload Exam Materials',
+                body=f"Please upload the {missing_str} for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
+                metadata={'exam_id': str(exam.id)}
+            )
+
 def exam_reminders_task(*args, **kwargs):
     """
     Background task to send 1-day and 1-hour reminders for scheduled exams.
