@@ -169,6 +169,9 @@ class LoginAPIView(APIView):
             if not user.is_active:
                 return Response({"error": "Account is not verified"}, status=400)
 
+            #for testing:
+            return Response(build_login_success_response(user, request)) #for live remove it
+
             # ── Existing behavior preserved exactly for student/parent ──
             if user.role in ROLES_REQUIRING_LOGIN_OTP_BYPASS:
                 return Response(build_login_success_response(user, request))
