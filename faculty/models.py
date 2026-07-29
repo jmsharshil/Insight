@@ -6,7 +6,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 LEVEL_CHOICES = [('executive', 'Executive'), ('professional', 'Professional')]
 EMPLOYMENT_TYPE_CHOICES = [
-    ('full_time', 'Full Time'), ('part_time', 'Part Time'), ('contract', 'Contract'), ('visiting', 'Visiting')
+    ('full_time', 'Full Time'), ('part_time', 'Part Time'), ('visiting', 'Visiting')
 ]
 SCAN_TYPE_CHOICES = [('check_in', 'Check In'), ('check_out', 'Check Out')]
 SESSION_STATUS_CHOICES = [('in_progress', 'In Progress'), ('completed', 'Completed')]

@@ -379,7 +379,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     half_day_dates = []
     total_late_penalty_minutes = 0
 
-    if faculty_profile.employment_type in ('visiting', 'part_time', 'contract'):
+    if faculty_profile.employment_type in ('visiting', 'part_time'):
         # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
         # Session-based deviation
         for d_date, d_delay in daily_delays.items():
@@ -886,7 +886,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         if total_session_diff > 0:
             daily_delays[s.session_date] += total_session_diff
 
-    if faculty_profile.employment_type in ('visiting', 'part_time', 'contract'):
+    if faculty_profile.employment_type in ('visiting', 'part_time'):
         # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
         for d_date, d_delay in daily_delays.items():
             d_str = d_date.strftime('%Y-%m-%d')

@@ -209,7 +209,7 @@ class FacultyCreateSerializer(serializers.Serializer):
     specialization = serializers.CharField(max_length=200)
     subject_expertise = serializers.CharField(max_length=300, required=False, default='')
     level = serializers.ChoiceField(choices=['executive', 'professional'], default='executive')
-    employment_type = serializers.ChoiceField(choices=['full_time', 'part_time', 'contract'], default='full_time')
+    employment_type = serializers.ChoiceField(choices=['full_time', 'part_time', 'visiting'], default='full_time')
     joining_date = serializers.DateField()
     salary = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
     hourly_rate = serializers.DecimalField(max_digits=8, decimal_places=2, default=0)
@@ -227,8 +227,8 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(max_length=20, required=False)
     branch_id = serializers.UUIDField(required=False, write_only=True)
     branch = serializers.UUIDField(required=False, write_only=True)
-    work_start_time = serializers.TimeField(required=False)
-    work_end_time = serializers.TimeField(required=False)
+    work_start_time = serializers.TimeField(required=False, allow_null=True)
+    work_end_time = serializers.TimeField(required=False, allow_null=True)
     
 
     class Meta:
@@ -240,6 +240,13 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
             'full_name', 'name', 'email', 'phone', 'branch_id', 'branch',
             'work_start_time', 'work_end_time', 'salary_retention_percentage',
         ]
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        for f in ['work_start_time', 'work_end_time']:
+            if f in data and data[f] in ['', 'null', 'undefined', None]:
+                data[f] = None
+        return super().to_internal_value(data)
 
     def update(self, instance, validated_data):
         user_data_keys = ['full_name', 'name', 'email', 'phone']

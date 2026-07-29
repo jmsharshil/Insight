@@ -218,6 +218,8 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     organization = serializers.PrimaryKeyRelatedField(
         queryset=Organization.objects.all(), required=False, allow_null=True
     )
+    work_start_time = serializers.TimeField(required=False, allow_null=True)
+    work_end_time = serializers.TimeField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -348,6 +350,8 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         queryset=Organization.objects.all(), required=False, allow_null=True
     )
     profile_pic = serializers.ImageField(required=False, allow_null=True)
+    work_start_time = serializers.TimeField(required=False, allow_null=True)
+    work_end_time = serializers.TimeField(required=False, allow_null=True)
 
     class Meta:
         model = User
