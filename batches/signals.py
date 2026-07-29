@@ -66,6 +66,8 @@ def auto_create_batch_chat_room(sender, instance, created, **kwargs):
 
         # Use update to avoid triggering post_save again
         Batch.objects.filter(pk=instance.pk).update(chat_room=room)
+        instance.chat_room_id = room.id
+        instance.chat_room = room
         logger.info(f"Auto-created ChatRoom {room.id} for Batch {instance.batch_code}")
     except Exception as e:
         logger.error(f"Failed to auto-create ChatRoom for Batch {instance.batch_code}: {e}")
