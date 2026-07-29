@@ -931,15 +931,16 @@ class PopupNotificationAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        try:
-            limit = int(request.query_params.get('limit', 5))
-        except (TypeError, ValueError):
-            limit = 5
-        limit = max(1, min(limit, 50))  # sane bounds
+        # try:
+        #     limit = int(request.query_params.get('limit', 5))
+        # except (TypeError, ValueError):
+        #     limit = 5
+        # limit = max(1, min(limit, 50))  # sane bounds
 
         unread_qs = NotificationHistory.objects.filter(user=request.user, is_read=False)
         total_unread = unread_qs.count()
-        notifications = list(unread_qs.order_by('-created_at')[:limit])
+        # notifications = list(unread_qs.order_by('-created_at')[:limit])
+        notifications = list(unread_qs.order_by('-created_at'))
 
         serializer = NotificationHistorySerializer(notifications, many=True)
         return Response({
