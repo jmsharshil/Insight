@@ -1379,6 +1379,7 @@ class ExamUploadMaterialsView(APIView):
 
         answer_key = request.FILES.get('answer_key')
         question_paper = request.FILES.get('question_paper')
+        no_of_questions = request.data.get('no_of_questions')
 
         if not answer_key and not question_paper:
             return Response({'success': False, 'message': 'Please provide either answer_key or question_paper file.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1400,7 +1401,8 @@ class ExamUploadMaterialsView(APIView):
             sp = SubjectPaper.objects.create(
                 subject=exam.subject,
                 file=question_paper,
-                set_name=f"Exam Set for {exam.title}"
+                set_name=f"Exam Set for {exam.title}",
+                no_of_questions=no_of_questions
             )
             exam.selected_papers.add(sp)
             uploaded.append('Question Paper')
