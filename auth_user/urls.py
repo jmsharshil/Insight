@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from .views import (RegisterAPIView,VerifyOTPAPIView,LoginAPIView,ForgotPasswordAPIView,ResetPasswordAPIView,ParentStudentProfileAPIView,UpdateUserAPIView,DeleteUserAPIView,UserListAPIView,UserProfileAPIView,PasswordSetAPIView,AddUserAPIView,OrganizationCreateAPIView,OrganizationDetailAPIView,ChangePasswordAPIView,RegisterFCMTokenView,ToggleUserStatusAPIView,TestNotificationAPIView,NotificationHistoryAPIView,LoginVerifyOTPAPIView,ResendLoginOTPAPIView
+from .views import (RegisterAPIView,VerifyOTPAPIView,LoginAPIView,ForgotPasswordAPIView,ResetPasswordAPIView,ParentStudentProfileAPIView,UpdateUserAPIView,DeleteUserAPIView,UserListAPIView,UserProfileAPIView,PasswordSetAPIView,AddUserAPIView,OrganizationCreateAPIView,OrganizationDetailAPIView,ChangePasswordAPIView,RegisterFCMTokenView,ToggleUserStatusAPIView,TestNotificationAPIView,NotificationHistoryAPIView,LoginVerifyOTPAPIView,ResendLoginOTPAPIView,PopupNotificationAPIView
 )
 
 urlpatterns = [
@@ -26,5 +26,6 @@ urlpatterns = [
     path('fcm-token/', RegisterFCMTokenView.as_view(), name='fcm-token'),
     path('test-notification/', TestNotificationAPIView.as_view(), name='test-notification'),
     path('notifications/', NotificationHistoryAPIView.as_view(), name='notification-history'),
+    path('notifications/popup/', PopupNotificationAPIView.as_view(), name='notifications-popup'),
 ]
 

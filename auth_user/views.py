@@ -912,3 +912,51 @@ class NotificationHistoryAPIView(APIView):
             "success": True,
             "message": f"Marked {updated} notifications as read."
         }, status=status.HTTP_200_OK)
+
+class PopupNotificationAPIView(APIView):
+    """
+    GET /api/auth/notifications/popup/
+    Returns the latest unread notifications to show as a popup on app open.
+    Does NOT mark them as read — that happens explicitly via POST when the
+    popup is dismissed, so a crash/early-close doesn't silently lose them.
+
+    Query params:
+        limit (optional, default 5) — max notifications to return.
+
+    POST /api/auth/notifications/popup/
+    Marks the given notification(s) as read (called when the popup is closed).
+    Body: { "ids": ["uuid1", "uuid2", ...] }
+    If "ids" is omitted, marks ALL currently unread notifications as read.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get('limit', 5))
+        except (TypeError, ValueError):
+            limit = 5
+        limit = max(1, min(limit, 50))  # sane bounds
+
+        unread_qs = NotificationHistory.objects.filter(user=request.user, is_read=False)
+        total_unread = unread_qs.count()
+        notifications = list(unread_qs.order_by('-created_at')[:limit])
+
+        serializer = NotificationHistorySerializer(notifications, many=True)
+        return Response({
+            "success": True,
+            "total_unread": total_unread,
+            "data": serializer.data,
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        ids = request.data.get('ids')
+
+        qs = NotificationHistory.objects.filter(user=request.user, is_read=False)
+        if ids:
+            qs = qs.filter(id__in=ids)
+
+        updated = qs.update(is_read=True)
+        return Response({
+            "success": True,
+            "message": f"Marked {updated} notification(s) as read.",
+        }, status=status.HTTP_200_OK)
