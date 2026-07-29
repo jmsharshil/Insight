@@ -423,6 +423,13 @@ def _get_sales_dashboard(user, now, today, month_start):
     bq = _branch_filter(user)
 
     lead_qs = Lead.objects.filter(bq)
+
+    # Junior sales roles only see leads assigned to them.
+    # Senior roles (sales_senior_executive) see all branch leads.
+    individual_roles = ('sales_executive', 'tele_caller', 'counsellor', 'front_desk')
+    if user.role in individual_roles:
+        lead_qs = lead_qs.filter(assigned_to=user)
+
     lead_agg = lead_qs.aggregate(
         total_leads=Count('id'),
         new_leads=Count('id', filter=Q(created_at__gte=month_start)),
