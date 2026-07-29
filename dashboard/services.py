@@ -136,8 +136,20 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
             filter=Q(status__in=['approval_pending', 'partial', 'overdue']),
             output_field=FloatField()
         ),
+        total_billed=Sum('total_amount'),
+        total_discount=Sum('discount'),
         overdue_count=Count('id', filter=Q(status='overdue')),
     )
+
+    total_billed = float(fee_agg.get('total_billed') or 0)
+    total_discount = float(fee_agg.get('total_discount') or 0)
+    net_billed = total_billed - total_discount
+    
+    total_collected = float(fee_agg.get('total_collected') or 0)
+    total_due = float(fee_agg.get('total_due') or 0)
+    
+    collected_pct = round((total_collected / net_billed) * 100, 2) if net_billed > 0 else 0
+    due_pct = round((total_due / net_billed) * 100, 2) if net_billed > 0 else 0
 
     # Upcoming exams - limited and optimized
     upcoming_exams = list(
@@ -161,8 +173,8 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
             'total_active_students': student_agg['total_active'] or 0,
             'new_admissions': student_agg['new_this_month'] or 0,
             'attendance_rate': f"{att_agg.get('present') or 0}/{att_agg.get('total_records') or 0} ({att_rate}%)",
-            'fee_collected': float(fee_agg['total_collected'] or 0),
-            'pending_fees': float(fee_agg['total_due'] or 0),
+            'fee_collected': f"{total_collected} ({collected_pct}%)",
+            'pending_fees': f"{total_due} ({due_pct}%)",
             'overdue_fees': fee_agg['overdue_count'] or 0,
             'open_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
         },

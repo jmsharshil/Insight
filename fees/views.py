@@ -160,9 +160,9 @@ class StudentFeeListView(APIView):
         if batch_id:
             queryset = queryset.filter(student__batch_id=batch_id)
         if date_from:
-            queryset = queryset.filter(due_date__gte=date_from)
+            queryset = queryset.filter(due_date__gte=date_from[:10])
         if date_to:
-            queryset = queryset.filter(due_date__lte=date_to)
+            queryset = queryset.filter(due_date__lte=date_to[:10])
 
         queryset = apply_filters(self, request, queryset)
 
@@ -432,9 +432,9 @@ class PaymentListView(APIView):
         if payment_mode:
             queryset = queryset.filter(payment_mode=payment_mode)
         if date_from:
-            queryset = queryset.filter(payment_date__gte=date_from)
+            queryset = queryset.filter(payment_date__gte=date_from[:10])
         if date_to:
-            queryset = queryset.filter(payment_date__lte=date_to)
+            queryset = queryset.filter(payment_date__lte=date_to[:10])
 
         queryset = apply_filters(self, request, queryset)
 
@@ -776,6 +776,10 @@ class FeeReportView(APIView):
         total_paid = sf_qs.aggregate(total=Sum('amount_paid'))['total'] or 0
         total_pending = max(0, total_billed - total_discount - total_paid)
         
+        net_billed = total_billed - total_discount
+        collected_pct = round((total_paid / net_billed) * 100, 2) if net_billed > 0 else 0
+        pending_pct = round((total_pending / net_billed) * 100, 2) if net_billed > 0 else 0
+        
         total_overdue = sf_qs.filter(status='overdue').aggregate(
             total=Sum('total_amount') - Sum('discount') - Sum('amount_paid')
         )['total'] or 0
@@ -852,7 +856,9 @@ class FeeReportView(APIView):
         data = {
             'total_billed': total_billed,
             'total_collected': total_paid,
+            'collected_percentage': collected_pct,
             'total_pending': total_pending,
+            'pending_percentage': pending_pct,
             "total_discount":total_discount,
             'total_overdue': total_overdue,
             'total_partial': total_partial,
@@ -892,6 +898,10 @@ class StudentFeeSummaryView(APIView):
             t_paid = item['total_paid'] or 0
             t_discount = item['total_discount'] or 0
             amount_due = max(0, t_amount - t_discount - t_paid)
+            
+            net_amount = max(0, t_amount - t_discount)
+            paid_pct = round((t_paid / net_amount) * 100, 2) if net_amount > 0 else 0
+            due_pct = round((amount_due / net_amount) * 100, 2) if net_amount > 0 else 0
 
             results.append({
                 'status': item['status'],
@@ -899,8 +909,10 @@ class StudentFeeSummaryView(APIView):
                 'student_count': item['student_count'],
                 'total_amount': t_amount,
                 'total_paid': t_paid,
+                'paid_percentage': paid_pct,
                 'total_discount': t_discount,
-                'amount_due': amount_due
+                'amount_due': amount_due,
+                'due_percentage': due_pct
             })
 
         return Response({'success': True, 'data': results})
