@@ -1401,7 +1401,7 @@ class ExamUploadMaterialsView(APIView):
             sp = SubjectPaper.objects.create(
                 subject=exam.subject,
                 file=question_paper,
-                set_name=f"Exam Set for {exam.title}",
+                set_name=f"{exam.title}" if len(exam.title) < 10 else f"{exam.title}"[:10],
                 no_of_questions=no_of_questions
             )
             exam.selected_papers.add(sp)
