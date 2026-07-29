@@ -17,12 +17,14 @@ class MarkSheetSerializer(serializers.ModelSerializer):
     uploaded_answer_sheet_url = serializers.SerializerMethodField()
     exam_questions = serializers.SerializerMethodField()
     no_of_questions = serializers.SerializerMethodField()
+    percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = MarkSheet
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
-            'paper_checker', 'checker_name', 'marks_obtained', 'is_pass',
+            'paper_checker', 'checker_name', 'marks_obtained', 'percentage',
+            'is_pass',
             'remarks', 'checked_at', 'is_submitted', 'is_rechecked', 'is_absent',
             'has_open_query',
             'exam_title', 'exam_scheduled_date', 'exam_total_marks',
@@ -85,7 +87,21 @@ class MarkSheetSerializer(serializers.ModelSerializer):
             return obj.exam.subject.name if obj.exam.subject else None
         except Exception:
             return None
-        
+
+    def get_percentage(self, obj):
+        """Compute percentage: (marks_obtained / total_marks) * 100.
+        Returns None if marks not submitted or total_marks is 0.
+        """
+        try:
+            if obj.marks_obtained is None or not obj.is_submitted:
+                return None
+            total = obj.exam.total_marks
+            if not total or total == 0:
+                return None
+            return round(float(obj.marks_obtained) / total * 100, 2)
+        except Exception:
+            return None
+
     def get_queries(self, obj):
         """Return a list of queries related to this marksheet."""
         queries = obj.queries.all()
@@ -193,12 +209,14 @@ class PublishedResultSerializer(serializers.ModelSerializer):
     recheck_requests = serializers.SerializerMethodField()
     mcq_breakdown = serializers.SerializerMethodField()
     question_marks = serializers.SerializerMethodField()
+    percentile = serializers.SerializerMethodField()
 
     class Meta:
         model = PublishedResult
         fields = [
             'id', 'exam', 'student', 'student_name', 'roll_number',
-            'marks_obtained', 'total_marks', 'percentage', 'is_pass',
+            'marks_obtained', 'total_marks', 'percentage', 'percentile',
+            'is_pass',
             'rank', 'published_at', 'recheck_requests', 'mcq_breakdown',
             'question_marks',
         ]
@@ -227,6 +245,24 @@ class PublishedResultSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return []
+
+    def get_percentile(self, obj):
+        """Compute percentile: % of students in the same exam who scored <= this student's marks.
+        Formula: (number of students with marks <= this student / total students) * 100
+        This gives the student's relative standing within the exam cohort.
+        """
+        try:
+            if obj.marks_obtained is None:
+                return None
+            total = PublishedResult.objects.filter(exam=obj.exam).count()
+            if total == 0:
+                return None
+            at_or_below = PublishedResult.objects.filter(
+                exam=obj.exam, marks_obtained__lte=obj.marks_obtained
+            ).count()
+            return round(at_or_below / total * 100, 2)
+        except Exception:
+            return None
 
     def get_recheck_requests(self, obj):
         rechecks = RecheckRequest.objects.filter(

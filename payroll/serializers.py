@@ -49,7 +49,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'retention_deduction', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
-            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary',
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
 
     hourly_rate = serializers.SerializerMethodField()
@@ -57,6 +57,13 @@ class PaySlipSerializer(serializers.ModelSerializer):
     employment_type = serializers.SerializerMethodField()
     session_hours = serializers.SerializerMethodField()
     salary = serializers.SerializerMethodField()
+    visiting_count = serializers.SerializerMethodField()
+
+    def get_visiting_count(self, obj):
+        if self.get_employment_type(obj) != 'full_time':
+            return obj.working_days
+        return 0
+
 
     def get_hourly_rate(self, obj):
         if obj.faculty and obj.faculty.hourly_rate > 0:
@@ -211,6 +218,6 @@ class MyPaySlipSerializer(PaySlipSerializer):
             'retention_deduction', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
-            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary',
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
 

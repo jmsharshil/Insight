@@ -154,6 +154,21 @@ class LeaveListCreateView(APIView):
                     'message': 'Leave applications blocked during peak admission months (Mar-Jun).'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Friday 12 PM deadline for next week leaves (staff only, except sick leave)
+        if role not in ['student', 'parents'] and d['leave_type'] != 'sick':
+            from datetime import time, timedelta
+            now = timezone.now()
+            leave_start = d['from_date']
+            leave_monday = leave_start - timedelta(days=leave_start.weekday())
+            prev_friday = leave_monday - timedelta(days=3)
+            # Make sure we use the current timezone for deadline creation
+            deadline = timezone.make_aware(datetime.combine(prev_friday, time(12, 0)))
+            if now > deadline:
+                return Response({
+                    'success': False,
+                    'message': 'Leave applications for the upcoming week must be submitted before 12:00 PM on Friday of the preceding week.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         # Past date check (except sick leave or students)
         if d['leave_type'] != 'sick' and d['from_date'] < today and role not in ['student', 'parents']:
             return Response({'success': False, 'message': 'Leave date cannot be in the past.'}, status=status.HTTP_400_BAD_REQUEST)

@@ -167,6 +167,7 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
             'open_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
         },
         'upcoming_exams': upcoming_exams,
+        'exam_stats': _get_exam_stats(bq),
         'attendance_trend': _get_attendance_trend(bq, 7),  # last 7 days
         'fee_collection_trend': _get_fee_trend(user, 30),
         'lead_pipeline': lead_pipeline,
@@ -245,6 +246,16 @@ def _get_faculty_dashboard(user, now, today, month_start):
         ).aggregate(avg_comp=Avg('completion_percentage'))
         avg_completion = round(float(comp_agg.get('avg_comp') or 0), 1)
 
+    visiting_count = 0
+    if faculty and faculty.employment_type != 'full_time':
+        qr_dates = set(FacultyQRScanLog.objects.filter(
+            faculty=faculty, scanned_at__gte=month_start
+        ).dates('scanned_at', 'day'))
+        session_dates = set(SessionReport.objects.filter(
+            faculty=faculty, session_date__gte=month_start.date()
+        ).values_list('session_date', flat=True))
+        visiting_count = len(qr_dates | session_dates)
+
     return {
         'kpis': {
             'today_sessions': len(today_sessions),
@@ -254,9 +265,11 @@ def _get_faculty_dashboard(user, now, today, month_start):
             'attendance_rate': my_att_rate,
             'pending_tasks': len(pending_tasks),
             'avg_session_completion': avg_completion,
+            'visiting_count': visiting_count,
         },
         'today_schedule': today_sessions,
         'pending_tasks': pending_tasks,
+        'exam_performance': _get_faculty_exam_performance(user, faculty),
         'recent_sessions': list(
             SessionReport.objects.filter(faculty=faculty)
             .select_related('batch', 'subject')
@@ -336,6 +349,26 @@ def _get_student_dashboard(user, now, today, month_start):
         .order_by('-published_at')[:5]
         .values('id', 'exam__title', 'marks_obtained', 'total_marks', 'percentage', 'is_pass', 'rank')
     )
+
+    # Enrich recent_results with percentile for each result
+    for result in recent_results:
+        try:
+            exam_id = result.get('exam_id') or PublishedResult.objects.filter(
+                student=student, id=result['id']
+            ).values_list('exam_id', flat=True).first()
+            if exam_id:
+                total = PublishedResult.objects.filter(exam_id=exam_id).count()
+                if total > 0 and result.get('marks_obtained') is not None:
+                    at_or_below = PublishedResult.objects.filter(
+                        exam_id=exam_id, marks_obtained__lte=result['marks_obtained']
+                    ).count()
+                    result['percentile'] = round(at_or_below / total * 100, 2)
+                else:
+                    result['percentile'] = None
+            else:
+                result['percentile'] = None
+        except Exception:
+            result['percentile'] = None
 
     return {
         'kpis': {
@@ -717,4 +750,126 @@ def _get_student_performance_trend(student):
     return {
         'subjects': [p.get('exam__subject__name', 'Unknown') for p in perf],
         'scores': [round(float(p.get('avg_score', 0)), 1) for p in perf],
+    }
+
+
+def _get_exam_stats(bq):
+    """Compute aggregate exam statistics for management dashboard.
+    Returns avg attendance %, avg pass %, and avg result % across recent exams.
+    """
+    from students.models import Student
+    # Recent completed/published exams (last 20 for performance)
+    recent_exams = Exam.objects.filter(
+        bq if bq else Q(),
+        is_deleted=False,
+        status__in=['completed', 'results_published'],
+    ).select_related('batch').order_by('-scheduled_date')[:20]
+
+    attendance_rates = []
+    for exam in recent_exams:
+        if not exam.batch_id:
+            continue
+        total_enrolled = Student.objects.filter(
+            batch_id=exam.batch_id, status='active'
+        ).count()
+        if total_enrolled == 0:
+            continue
+        total_attended = MarkSheet.objects.filter(
+            exam=exam, is_absent=False
+        ).count()
+        attendance_rates.append(round(total_attended / total_enrolled * 100, 2))
+
+    # Pass rate and avg percentage from published results
+    pr_agg = PublishedResult.objects.filter(
+        bq if bq else Q(),
+    ).aggregate(
+        total=Count('id'),
+        passed=Count('id', filter=Q(is_pass=True)),
+        avg_percentage=Avg('percentage'),
+    )
+    total_results = pr_agg.get('total') or 0
+    pass_pct = round((pr_agg.get('passed') or 0) / max(total_results, 1) * 100, 2)
+
+    return {
+        'avg_exam_attendance_pct': round(
+            sum(attendance_rates) / len(attendance_rates), 2
+        ) if attendance_rates else None,
+        'avg_pass_percentage': pass_pct,
+        'avg_result_percentage': round(float(pr_agg.get('avg_percentage') or 0), 2),
+        'total_exams_completed': len(list(recent_exams)),
+        'total_published_results': total_results,
+    }
+
+
+def _get_faculty_exam_performance(user, faculty):
+    """Exam performance stats for faculty dashboard.
+    Returns attendance %, pass %, avg percentage for exams assigned to this faculty.
+    """
+    from students.models import Student
+    if not faculty:
+        return {'exams': [], 'summary': {}}
+
+    # Exams for this faculty (completed/published)
+    exams = Exam.objects.filter(
+        faculty=faculty,
+        is_deleted=False,
+        status__in=['completed', 'results_published'],
+    ).select_related('batch', 'subject').order_by('-scheduled_date')[:10]
+
+    exam_data = []
+    for exam in exams:
+        total_enrolled = 0
+        attendance_pct = None
+        if exam.batch_id:
+            total_enrolled = Student.objects.filter(
+                batch_id=exam.batch_id, status='active'
+            ).count()
+            if total_enrolled > 0:
+                total_attended = MarkSheet.objects.filter(
+                    exam=exam, is_absent=False
+                ).count()
+                attendance_pct = round(total_attended / total_enrolled * 100, 2)
+
+        # Result stats from published results
+        pr_agg = PublishedResult.objects.filter(exam=exam).aggregate(
+            total=Count('id'),
+            passed=Count('id', filter=Q(is_pass=True)),
+            avg_pct=Avg('percentage'),
+        )
+        total_pr = pr_agg.get('total') or 0
+        pass_pct = round((pr_agg.get('passed') or 0) / max(total_pr, 1) * 100, 2)
+
+        exam_data.append({
+            'exam_id': str(exam.id),
+            'title': exam.title,
+            'subject': exam.subject.name if exam.subject else None,
+            'batch': exam.batch.name if exam.batch else None,
+            'scheduled_date': exam.scheduled_date.isoformat() if exam.scheduled_date else None,
+            'attendance_percentage': attendance_pct,
+            'pass_percentage': pass_pct,
+            'avg_result_percentage': round(float(pr_agg.get('avg_pct') or 0), 2),
+            'total_students': total_pr,
+        })
+
+    # Summary across all faculty exams
+    all_pr = PublishedResult.objects.filter(
+        exam__faculty=faculty,
+        exam__status__in=['completed', 'results_published'],
+    ).aggregate(
+        total=Count('id'),
+        passed=Count('id', filter=Q(is_pass=True)),
+        avg_pct=Avg('percentage'),
+    )
+    total_all = all_pr.get('total') or 0
+
+    return {
+        'exams': exam_data,
+        'summary': {
+            'total_exams': len(exam_data),
+            'overall_pass_percentage': round(
+                (all_pr.get('passed') or 0) / max(total_all, 1) * 100, 2
+            ),
+            'overall_avg_percentage': round(float(all_pr.get('avg_pct') or 0), 2),
+            'total_students_evaluated': total_all,
+        }
     }
