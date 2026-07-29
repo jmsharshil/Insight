@@ -358,6 +358,7 @@ class BatchListView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         batch = serializer.save()
+        batch.refresh_from_db()
         return Response(
             {'success': True, 'message': 'Batch created successfully.',
              'data': BatchDetailSerializer(batch).data},
@@ -390,6 +391,7 @@ class BatchDetailView(APIView):
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
+        batch.refresh_from_db()
         return Response({'success': True, 'message': 'Batch updated.', 'data': BatchDetailSerializer(batch).data})
 
     def delete(self, request, pk):

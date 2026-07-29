@@ -46,6 +46,24 @@ def auto_create_batch_chat_room(sender, instance, created, **kwargs):
             name=f"{instance.batch_code} — {instance.name}",
             room_type='group',
         )
+        
+        # Auto-add admin roles to the batch chat room
+        from django.contrib.auth import get_user_model
+        from django.db.models import Q
+        User = get_user_model()
+        admins_qs = User.objects.filter(
+            role__in=['super_admin', 'admin_senior_executive', 'branch_manager'], 
+            is_active=True
+        )
+        if instance.branch_id:
+            admins_qs = admins_qs.filter(Q(branch_id=instance.branch_id) | Q(role='super_admin'))
+        elif instance.organization_id:
+            admins_qs = admins_qs.filter(Q(organization_id=instance.organization_id) | Q(role='super_admin'))
+        
+        admins = list(admins_qs)
+        if admins:
+            room.participants.add(*admins)
+
         # Use update to avoid triggering post_save again
         Batch.objects.filter(pk=instance.pk).update(chat_room=room)
         logger.info(f"Auto-created ChatRoom {room.id} for Batch {instance.batch_code}")
@@ -66,6 +84,12 @@ def add_student_to_batch_chat(sender, instance, created, **kwargs):
         if user:
             batch.chat_room.participants.add(user)
             logger.info(f"Added student user {user.id} to ChatRoom for Batch {batch.batch_code}")
+            
+        # Add parents to the chat room
+        parents = [link.parent for link in instance.student.parent_links.select_related('parent').all() if link.parent]
+        if parents:
+            batch.chat_room.participants.add(*parents)
+            logger.info(f"Added {len(parents)} parent(s) to ChatRoom for Batch {batch.batch_code}")
     except Exception as e:
         logger.error(f"Failed to add student to batch chat: {e}")
 
@@ -81,6 +105,12 @@ def remove_student_from_batch_chat(sender, instance, **kwargs):
         if user:
             batch.chat_room.participants.remove(user)
             logger.info(f"Removed student user {user.id} from ChatRoom for Batch {batch.batch_code}")
+            
+        # Remove parents from the chat room
+        parents = [link.parent for link in instance.student.parent_links.select_related('parent').all() if link.parent]
+        if parents:
+            batch.chat_room.participants.remove(*parents)
+            logger.info(f"Removed {len(parents)} parent(s) from ChatRoom for Batch {batch.batch_code}")
     except Exception as e:
         logger.error(f"Failed to remove student from batch chat: {e}")
 
