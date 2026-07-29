@@ -79,6 +79,7 @@ class PayrollListCreateView(APIView):
         year = request.GET.get('year', str(now.year))
         month = request.GET.get('month', str(now.month))
         req_branch_id = request.GET.get('branch_id')
+        role_filter = request.GET.get('role')
         bid = _user_branch_id(request.user)
 
         target_branch_id = bid if (role != 'super_admin' and bid) else req_branch_id
@@ -118,6 +119,13 @@ class PayrollListCreateView(APIView):
                     branch_id=br_id, role__in=EMPLOYEE_ROLES, is_active=True
                 ).exclude(id__in=faculty_user_ids)
 
+                if role_filter:
+                    if role_filter == 'faculty':
+                        staff_users = staff_users.none()
+                    else:
+                        faculty_list = faculty_list.none()
+                        staff_users = staff_users.filter(role=role_filter)
+
                 if not faculty_list.exists() and not staff_users.exists():
                     continue
 
@@ -140,14 +148,21 @@ class PayrollListCreateView(APIView):
 
                 elif pr.status == 'draft':
                     # Already exists as draft → regenerate payslips so edited salary/rate is reflected
-                    pr.payslips.all().delete()
-                    total = Decimal(0)
+                    if role_filter:
+                        if role_filter == 'faculty':
+                            pr.payslips.filter(faculty__isnull=False).delete()
+                        else:
+                            pr.payslips.filter(user__role=role_filter).delete()
+                    else:
+                        pr.payslips.all().delete()
+
                     for fp in faculty_list:
-                        ps = compute_payslip_for_faculty(fp, m_int, y_int, pr)
-                        total += ps.net_salary
+                        compute_payslip_for_faculty(fp, m_int, y_int, pr)
                     for u in staff_users:
-                        ps = compute_payslip_for_user(u, m_int, y_int, pr)
-                        total += ps.net_salary
+                        compute_payslip_for_user(u, m_int, y_int, pr)
+                    
+                    # Recalculate total from ALL payslips in the run
+                    total = sum(ps.net_salary for ps in pr.payslips.all())
                     pr.total_amount = total
                     pr.save(update_fields=['total_amount'])
                 
@@ -394,6 +409,8 @@ class PayrollPayslipsView(APIView):
         if getattr(request.user, 'organization', None) and pr.branch.organization != request.user.organization:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        role_filter = request.GET.get('role')
+
         if pr.status == 'draft':
             try:
                 from faculty.models import FacultyProfile
@@ -423,6 +440,12 @@ class PayrollPayslipsView(APIView):
         if getattr(request.user, 'organization', None):
             slips = slips.filter(payroll_run__branch__organization=request.user.organization)
             
+        if role_filter:
+            if role_filter == 'faculty':
+                slips = slips.filter(faculty__isnull=False)
+            else:
+                slips = slips.filter(user__role=role_filter)
+                
         serialized_data = PaySlipSerializer(slips, many=True).data
         
         # Calculate expected total salary across all profiles

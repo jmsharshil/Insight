@@ -137,6 +137,7 @@ class InquirySerializer(ContactSerializer):
     reference    = serializers.ChoiceField(choices=REFERENCE_TYPE_CHOICES)
     location     = serializers.CharField(max_length=100)
     inquiry_date = serializers.DateField()
+    reference_name = serializers.CharField(max_length=100,required=False,allow_blank=True)
 
     tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES)
     tenth_school     = serializers.CharField(max_length=200)
@@ -413,4 +414,4 @@ class LeadTransferApprovalSerializer(serializers.Serializer):
         assigned_to = attrs.get('assigned_to')
         if status == 'approved' and not assigned_to:
             raise serializers.ValidationError({"assigned_to": "assigned_to is required when approving a transfer request."})
-        return attrs
+        return attrs

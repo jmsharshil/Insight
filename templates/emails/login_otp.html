@@ -1,0 +1,23 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Login OTP Verification Code</h2>
+
+<p>Hello {{ user_name }},</p>
+
+<p>A login attempt was made on your account. Please use the verification code below to complete your login. This step
+    keeps your account secure.</p>
+
+<div class="info-box" style="text-align: center; font-size: 24px; letter-spacing: 5px;">
+    <strong>{{ otp_code }}</strong>
+</div>
+
+<p>This OTP is valid for the next 5 minutes.</p>
+
+<p>If you did not attempt to log in, please change your password immediately and contact your administrator.</p>
+
+<p>Best Regards,<br />
+    {{ organization_name }} Team</p>
+
+<p>This is an automated message, please do not reply to this email.</p>
+{% endblock %}

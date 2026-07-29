@@ -131,6 +131,7 @@ class Admission(models.Model):
     qualification = models.CharField(max_length=20, choices=QUALIFICATION_TYPE_CHOICES)
     reference     = models.CharField(max_length=20, choices=REFERENCE_TYPE_CHOICES)
     consent       = models.BooleanField(default=False)
+    reference_name = models.CharField(max_length=100,blank=True)
 
     # ── 10th Education ────────────────────────────────────────────────────────
     tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES)

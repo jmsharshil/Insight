@@ -191,3 +191,68 @@ Best Regards,
         send_whatsapp_text(to=parent_user.phone,body=text_content,parent_id=str(parent_user.id))
     except Exception as e:
         print(e)
+
+def send_login_otp(user, otp):
+    subject = "Your Login Verification Code"
+    text_content = f"""
+Hello {user.name},
+
+A login attempt was made on your {user.organization.name if user.organization else 'Insight ERP'} account.
+
+Verification Code: {otp}
+
+This code is valid for the next 10 minutes. If this wasn't you, please change your password immediately.
+
+Best Regards,
+{user.organization.name if user.organization else 'Insight ERP'} Team
+"""
+
+    send_email(
+        to=user.email,
+        subject=subject,
+        text=text_content,
+        template='emails/login_otp.html',
+        template_context={'user_name': user.name, 'otp_code': otp, 'organization_name':user.organization.name},
+        organization=user.organization,
+    )
+
+    try:
+        send_whatsapp_text(to=user.phone, body=text_content, user_id=str(user.id))
+    except Exception as e:
+        print(e)
+
+def send_login_otp_resend(user, otp):
+    subject = "Your New Login Verification Code"
+    text_content = f"""
+Hello {user.name},
+
+As requested, here is your new login verification code for your {user.organization.name if user.organization else 'Insight ERP'} account.
+
+Verification Code: {otp}
+
+This code is valid for the next 10 minutes. Your previous code is no longer valid.
+
+If you did not request this, please change your password immediately.
+
+Best Regards,
+{user.organization.name if user.organization else 'Insight ERP'} Team
+"""
+
+    send_email(
+        to=user.email,
+        subject=subject,
+        text=text_content,
+        template='emails/resend_login_otp.html',
+        template_context={
+            'user_name': user.name,
+            'otp_code': otp,
+            'organization': user.organization,
+            "organization_name": user.organization.name
+        },
+        organization=user.organization,
+    )
+
+    try:
+        send_whatsapp_text(to=user.phone, body=text_content, user_id=str(user.id))
+    except Exception as e:
+        print(e)

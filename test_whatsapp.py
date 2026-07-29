@@ -132,8 +132,12 @@ def test_sender():
     try:
         print("Initializing pooled WhatsAppSender...")
         with WhatsAppSender(config) as wa:
-            print("✅ Sender ready. Sending text message to", TARGET_NUMBER, "...")
-            response = wa.send_text(to=TARGET_NUMBER, body=message)
+            print("✅ Sender ready. Sending template message to", TARGET_NUMBER, "...")
+            response = wa.send_template(
+                to=TARGET_NUMBER,
+                template_name="no_one_institute_in_gujarat_",
+                language_code="en_US"
+            )
             print("✅ SUCCESS! API Response:", json.dumps(response, indent=2))
             print("Message sent successfully.")
             return True

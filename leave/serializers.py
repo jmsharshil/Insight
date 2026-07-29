@@ -224,7 +224,7 @@ class PublicHolidayCreateSerializer(serializers.Serializer):
 class StudentLeaveListSerializer(serializers.ModelSerializer):
     """Compact list view — used in admin list and student dashboard."""
     leave_type_display = serializers.CharField(source='get_leave_type_display', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status_display = serializers.SerializerMethodField()
     student_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     proof_document_url = serializers.SerializerMethodField()
@@ -254,11 +254,19 @@ class StudentLeaveListSerializer(serializers.ModelSerializer):
             return obj.proof_document.url
         return None
 
+    def get_status_display(self, obj):
+        """Custom display reflecting the approval flow without changing models."""
+        if obj.status == 'pending':
+            if not getattr(obj, 'parent_consulted', True):
+                return 'Parent Approval Pending'
+            return 'Admin Approval Pending'
+        return obj.get_status_display() if hasattr(obj, 'get_status_display') else obj.status
+
 
 class StudentLeaveDetailSerializer(serializers.ModelSerializer):
     """Full detail view including reviewer, parent info and proof."""
     leave_type_display = serializers.CharField(source='get_leave_type_display', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status_display = serializers.SerializerMethodField()
     student_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     reviewed_by_name = serializers.SerializerMethodField()
@@ -300,6 +308,14 @@ class StudentLeaveDetailSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.proof_document.url)
             return obj.proof_document.url
         return None
+
+    def get_status_display(self, obj):
+        """Custom display reflecting the approval flow without changing models."""
+        if obj.status == 'pending':
+            if not getattr(obj, 'parent_consulted', True):
+                return 'Parent Approval Pending'
+            return 'Admin Approval Pending'
+        return obj.get_status_display() if hasattr(obj, 'get_status_display') else obj.status
 
 
 class StudentLeaveCreateSerializer(serializers.Serializer):

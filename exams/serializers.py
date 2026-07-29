@@ -117,6 +117,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     is_submitted = serializers.SerializerMethodField()
     classroom = serializers.SerializerMethodField()
     classroom_name = serializers.SerializerMethodField()
+    attendance_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
@@ -133,7 +134,8 @@ class ExamListSerializer(serializers.ModelSerializer):
             'exam_type_display', 'exam_mode_display', 'status_display', 'screen_lock_action_display',
             'split_screen_action_display', 'result_release_mode_display', 'paper_checkers', 'supervisors',
             'selected_papers',
-            'can_start_exam', 'questions_count', 'is_upcoming', 'is_submitted','classroom','classroom_name']
+            'can_start_exam', 'questions_count', 'is_upcoming', 'is_submitted',
+            'classroom', 'classroom_name', 'attendance_percentage']
 
     def get_is_submitted(self, obj):
         request = self.context.get('request')
@@ -292,6 +294,32 @@ class ExamListSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'timetable_slot') and obj.timetable_slot and obj.timetable_slot.classroom:
             return obj.timetable_slot.classroom.name
         return None
+
+    def get_attendance_percentage(self, obj):
+        """Compute exam attendance %: (attended students / total enrolled) * 100.
+        Uses MarkSheet records — students not marked absent are considered attended.
+        Returns None for exams not yet conducted (draft/scheduled).
+        """
+        if obj.status in ('draft', 'scheduled'):
+            return None
+        try:
+            from results.models import MarkSheet
+            from students.models import Student
+            # Total enrolled = students in the batch
+            if not obj.batch_id:
+                return None
+            total_enrolled = Student.objects.filter(
+                batch_id=obj.batch_id, status='active'
+            ).count()
+            if total_enrolled == 0:
+                return None
+            # Attended = marksheets that are NOT absent
+            total_attended = MarkSheet.objects.filter(
+                exam=obj, is_absent=False
+            ).count()
+            return round(total_attended / total_enrolled * 100, 2)
+        except Exception:
+            return None
 
 
 class ExamCreateSerializer(serializers.ModelSerializer):

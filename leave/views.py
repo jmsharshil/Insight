@@ -13,13 +13,14 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 
-from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday
+from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday, StudentLeaveApplication
 from .serializers import (
     LeavePolicySerializer, LeavePolicyInputSerializer,
     LeaveBalanceSerializer, LeaveApplicationListSerializer,
     LeaveApplicationDetailSerializer, LeaveApplicationCreateSerializer,
     LateEntryRecordSerializer, LateEntryCreateSerializer,
     PublicHolidaySerializer, PublicHolidayCreateSerializer,
+    StudentLeaveListSerializer, StudentLeaveDetailSerializer, StudentLeaveCreateSerializer,
 )
 from .utils import calculate_leave_days, check_leave_overlap, check_late_entry_threshold
 
@@ -83,6 +84,15 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
             email_context=email_context,
             email_subject=email_subject,
         )
+
+
+def _is_parent_of(user, student):
+    """Check if the user is a linked parent of the student (shared helper)."""
+    try:
+        from students.models import ParentLink
+        return ParentLink.objects.filter(parent=user, student=student).exists()
+    except Exception:
+        return False
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GET & POST  /api/v1/leave/
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -142,6 +152,21 @@ class LeaveListCreateView(APIView):
                 return Response({
                     'success': False,
                     'message': 'Leave applications blocked during peak admission months (Mar-Jun).'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Friday 12 PM deadline for next week leaves (staff only, except sick leave)
+        if role not in ['student', 'parents'] and d['leave_type'] != 'sick':
+            from datetime import time, timedelta
+            now = timezone.now()
+            leave_start = d['from_date']
+            leave_monday = leave_start - timedelta(days=leave_start.weekday())
+            prev_friday = leave_monday - timedelta(days=3)
+            # Make sure we use the current timezone for deadline creation
+            deadline = timezone.make_aware(datetime.combine(prev_friday, time(12, 0)))
+            if now > deadline:
+                return Response({
+                    'success': False,
+                    'message': 'Leave applications for the upcoming week must be submitted before 12:00 PM on Friday of the preceding week.'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         # Past date check (except sick leave or students)
@@ -257,26 +282,50 @@ class LeaveListCreateView(APIView):
             supporting_document=d.get('supporting_document'),
         )
 
-        # FRD §4.9.2: Push notification to ASE (Step 1 approver)
+        # ── Notify the correct approver(s) based on applicant role ──
         from django.contrib.auth import get_user_model
         User = get_user_model()
-        ase_users = User.objects.filter(role='admin_senior_executive', is_active=True)
-        if bid:
-            ase_users_branch = ase_users  # filter by branch if branch field exists on User
-        for ase in ase_users:
+        org = getattr(request.user, 'organization', None)
+        notif_body = f"{request.user.name} has applied for {d['leave_type']} leave from {d['from_date']} to {d['to_date']}"
+        notif_ctx = {
+            'applicant_name': request.user.name,
+            'leave_type': d['leave_type'],
+            'from_date': d['from_date'],
+            'to_date': d['to_date'],
+            'reason': d['reason'],
+        }
+
+        if role == 'branch_manager':
+            # BM's leave → notify only super_admin(s) in the same organization
+            approvers = User.objects.filter(role='super_admin', is_active=True)
+            if org:
+                approvers = approvers.filter(organization=org)
+        elif role == 'admin_senior_executive':
+            # ASE's leave → notify branch_manager(s) and super_admin(s)
+            bm_q = User.objects.filter(role='branch_manager', is_active=True)
+            sa_q = User.objects.filter(role='super_admin', is_active=True)
+            if org:
+                bm_q = bm_q.filter(organization=org)
+                sa_q = sa_q.filter(organization=org)
+            if bid:
+                bm_q = bm_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+            approvers = (bm_q | sa_q).distinct()
+        else:
+            # Regular staff → notify branch-scoped ASE(s) only
+            approvers = User.objects.filter(role='admin_senior_executive', is_active=True)
+            if org:
+                approvers = approvers.filter(organization=org)
+            if bid:
+                approvers = approvers.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+
+        for approver in approvers:
             notify(
-                str(ase.id),
+                str(approver.id),
                 title="Leave request pending approval",
-                body=f"{request.user.name} has applied for {d['leave_type']} leave from {d['from_date']} to {d['to_date']}",
+                body=notif_body,
                 metadata={"leave_id": str(app.id), "approval_step": 1},
                 email_template='emails/leave_applied.html',
-                email_context={
-                    'applicant_name': request.user.name,
-                    'leave_type': d['leave_type'],
-                    'from_date': d['from_date'],
-                    'to_date': d['to_date'],
-                    'reason': d['reason']
-                }
+                email_context=notif_ctx,
             )
 
         return Response({
@@ -1002,14 +1051,9 @@ class PublicHolidayDetailView(APIView):
 # GET    /api/v1/leave/student/<id>/      — detail
 # PATCH  /api/v1/leave/student/<id>/      — edit (student, while pending)
 # DELETE /api/v1/leave/student/<id>/      — cancel (student, while pending)
-# POST   /api/v1/leave/student/<id>/approve/ — approve (admin)
-# POST   /api/v1/leave/student/<id>/reject/  — reject (admin)
+# POST   /api/v1/leave/student/<id>/approve/ — approve (parent or admin)
+# POST   /api/v1/leave/student/<id>/reject/  — reject (parent or admin)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-from .models import StudentLeaveApplication
-from .serializers import (
-    StudentLeaveListSerializer, StudentLeaveDetailSerializer, StudentLeaveCreateSerializer,
-)
 
 STUDENT_LEAVE_ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']
 
@@ -1101,12 +1145,35 @@ class StudentLeaveListCreateView(APIView):
             if not student_id:
                 return Response({'success': False, 'message': 'student_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                from students.models import Student
-                student = Student.objects.get(id=student_id, parent_links__parent=request.user)
+                from students.models import Student, ParentLink
+                student = Student.objects.get(id=student_id)
+                if not ParentLink.objects.filter(parent=request.user, student=student).exists():
+                    return Response({'success': False, 'message': 'Student not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
             except Exception:
                 return Response({'success': False, 'message': 'Student not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
         else:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Role-based parent approval logic (per requirement):
+        # - If applied by parent: set parent_consulted=True → only 1 approval (admin)
+        # - If applied by student: set parent_consulted=False → first requires parent approval
+        now = timezone.now()
+        today = now.date()
+        if role == 'parents':
+            parent_consulted = True
+            parent_signature_date = d.get('parent_signature_date') or today
+            received_by = request.user
+            create_message = 'Leave application submitted by parent (direct to admin approval).'
+        elif role == 'student':
+            parent_consulted = False
+            parent_signature_date = None
+            received_by = None
+            create_message = 'Leave application submitted by student. Parent approval required first.'
+        else:
+            parent_consulted = d.get('parent_consulted', False)
+            parent_signature_date = d.get('parent_signature_date')
+            received_by = request.user
+            create_message = 'Leave application submitted.'
 
         app = StudentLeaveApplication.objects.create(
             student=student,
@@ -1118,13 +1185,61 @@ class StudentLeaveListCreateView(APIView):
             reason=d['reason'],
             is_capable_of_proof=d.get('is_capable_of_proof', False),
             proof_document=d.get('proof_document'),
-            parent_consulted=d.get('parent_consulted', False),
-            parent_signature_date=d.get('parent_signature_date'),
+            parent_consulted=parent_consulted,
+            parent_signature_date=parent_signature_date,
+            received_by=received_by,
         )
+
+        # Notifications based on who applied
+        if role == 'student':
+            # Notify all linked parents for approval
+            try:
+                from students.models import ParentLink
+                parents = ParentLink.objects.filter(
+                    student=student, parent__is_active=True
+                ).select_related('parent')
+                for pl in parents:
+                    notify(
+                        str(pl.parent.id),
+                        title="Student Leave Request - Parent Approval Needed",
+                        body=f"{student.full_name or student.first_name} applied for {d['leave_type']} leave ({d['from_date']} to {d['to_date']}). Please review and approve via the app.",
+                        metadata={"student_leave_id": str(app.id), "step": "parent_approval"},
+                    )
+            except:
+                pass
+        elif role == 'parents':
+            # Notify admins
+            try:
+                admins = []
+                org = getattr(request.user, 'organization', None)
+                bid = _user_branch_id(request.user)
+                if org:
+                    from django.contrib.auth import get_user_model
+                    User = get_user_model()
+                    admin_qs = User.objects.filter(
+                        role__in=STUDENT_LEAVE_ADMIN_ROLES,
+                        is_active=True,
+                        organization=org
+                    )
+                    if bid:
+                        admin_qs = admin_qs.filter(
+                            models.Q(branch_id=bid) | models.Q(branch_id__isnull=True)
+                        )
+                    admins = list(admin_qs)
+                for admin_user in admins:
+                    if admin_user.id != request.user.id:
+                        notify(
+                            str(admin_user.id),
+                            title="New Student Leave Application by Parent",
+                            body=f"Parent has submitted leave for student. Ready for your approval.",
+                            metadata={"student_leave_id": str(app.id), "step": "admin_approval"},
+                        )
+            except:
+                pass
 
         return Response({
             'success': True,
-            'message': 'Leave application submitted.',
+            'message': create_message,
             'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
         }, status=status.HTTP_201_CREATED)
 
@@ -1152,12 +1267,8 @@ class StudentLeaveDetailView(APIView):
             except Exception:
                 return False
         elif role == 'parents':
-            try:
-                from students.models import Student
-                students = Student.objects.filter(parent_links__parent=request.user)
-                return students.filter(id=app.student_id).exists()
-            except Exception:
-                return False
+            # Use shared helper for parent link check
+            return _is_parent_of(request.user, app.student if hasattr(app, 'student') else None)
         return False
 
     def get(self, request, leave_id):
@@ -1206,28 +1317,107 @@ class StudentLeaveDetailView(APIView):
 
 class StudentLeaveApproveView(APIView):
 
+    def _notify_admins(self, app):
+        """Notify relevant admins that parent approval is complete."""
+        try:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            org = getattr(getattr(app.student, 'branch', None), 'organization', None)
+            bid = getattr(app.student, 'branch_id', None)
+            admin_qs = User.objects.filter(
+                role__in=STUDENT_LEAVE_ADMIN_ROLES,
+                is_active=True
+            )
+            if org:
+                admin_qs = admin_qs.filter(organization=org)
+            if bid:
+                admin_qs = admin_qs.filter(
+                    models.Q(branch_id=bid) | models.Q(branch_id__isnull=True)
+                )
+            for admin_user in admin_qs:
+                notify(
+                    str(admin_user.id),
+                    title="Student Leave Ready for Admin Approval",
+                    body=f"Parent approval completed for {app.student}'s {app.leave_type} leave. Please review.",
+                    metadata={"student_leave_id": str(app.id), "step": "admin_approval"},
+                )
+        except Exception:
+            pass  # non-blocking
+
     def post(self, request, leave_id):
         role = _user_role(request.user)
-        if role not in STUDENT_LEAVE_ADMIN_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            app = StudentLeaveApplication.objects.get(id=leave_id)
+            app = StudentLeaveApplication.objects.select_related('student', 'student__branch').get(id=leave_id)
         except StudentLeaveApplication.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         if app.status != 'pending':
             return Response({'success': False, 'message': f'Cannot approve a leave with status "{app.status}".'}, status=status.HTTP_400_BAD_REQUEST)
 
+        now = timezone.now()
+
+        # Core business logic per requirement:
+        # - If applied by parent: parent_consulted=True at creation → direct admin approval (1 approval)
+        # - If applied by student: parent_consulted=False → first parent must approve, then admin
+        if not getattr(app, 'parent_consulted', False):
+            # Student-applied leave: parent approval step
+            if role == 'parents' and _is_parent_of(request.user, app.student):
+                app.parent_consulted = True
+                app.parent_signature_date = now.date()
+                if not app.received_by:
+                    app.received_by = request.user
+                app.save(update_fields=['parent_consulted', 'parent_signature_date', 'received_by'])
+
+                self._notify_admins(app)
+
+                return Response({
+                    'success': True,
+                    'message': 'Parent approval recorded. Leave now pending final admin approval.',
+                    'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'This leave (applied by student) requires parent approval first.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+        # Parent has consulted/approved (or was applied by parent): admin final approval (one approval total)
+        if role not in STUDENT_LEAVE_ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Permission denied. Admin role required for final approval.'}, status=status.HTTP_403_FORBIDDEN)
+
         app.status = 'approved'
         app.reviewed_by = request.user
-        app.reviewed_at = timezone.now()
-        app.received_by = request.user
+        app.reviewed_at = now
+        if not app.received_by:
+            app.received_by = request.user
         app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'received_by'])
+
+        # Notify student and parents
+        try:
+            from students.models import ParentLink
+            # Notify student if they have a user account
+            if hasattr(app.student, 'user') and app.student.user and app.student.user.id:
+                notify(
+                    str(app.student.user.id),
+                    title="Leave Application Approved",
+                    body=f"Your {app.leave_type_display if hasattr(app, 'leave_type_display') else app.leave_type} leave has been approved.",
+                    metadata={"student_leave_id": str(app.id), "status": "approved"},
+                )
+            # Notify parents
+            for pl in ParentLink.objects.filter(student=app.student, parent__is_active=True):
+                notify(
+                    str(pl.parent.id),
+                    title="Student Leave Approved",
+                    body=f"Leave request for {app.student} ({app.leave_type}) from {app.from_date} to {app.to_date} has been approved.",
+                    metadata={"student_leave_id": str(app.id), "status": "approved"},
+                )
+        except Exception:
+            pass
 
         return Response({
             'success': True,
-            'message': 'Student leave approved.',
+            'message': 'Student leave approved successfully.',
             'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
         })
 
@@ -1236,11 +1426,9 @@ class StudentLeaveRejectView(APIView):
 
     def post(self, request, leave_id):
         role = _user_role(request.user)
-        if role not in STUDENT_LEAVE_ADMIN_ROLES:
-            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            app = StudentLeaveApplication.objects.get(id=leave_id)
+            app = StudentLeaveApplication.objects.select_related('student', 'student__branch').get(id=leave_id)
         except StudentLeaveApplication.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1251,11 +1439,64 @@ class StudentLeaveRejectView(APIView):
         if not rejection_reason:
             return Response({'success': False, 'message': 'rejection_reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        now = timezone.now()
+        is_parent_approver = role == 'parents' and _is_parent_of(request.user, app.student)
+
+        # Allow parents to reject at parent-approval stage; admins anytime for pending
+        if not is_parent_approver and role not in STUDENT_LEAVE_ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # If parent rejecting a student-submitted leave (before consulting)
+        if is_parent_approver and not getattr(app, 'parent_consulted', False):
+            app.rejection_reason = rejection_reason
+            app.reviewed_by = request.user
+            app.reviewed_at = now
+            app.status = 'rejected'
+            app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+            # Notify student
+            try:
+                if hasattr(app.student, 'user') and app.student.user:
+                    notify(
+                        str(app.student.user.id),
+                        title="Student Leave Rejected by Parent",
+                        body=f"Your {app.leave_type} leave request was rejected by parent. Reason: {rejection_reason}",
+                        metadata={"student_leave_id": str(app.id), "status": "rejected"},
+                    )
+            except Exception:
+                pass
+            return Response({
+                'success': True,
+                'message': 'Leave rejected by parent.',
+                'data': StudentLeaveDetailSerializer(app, context={'request': request}).data,
+            })
+
+        # Admin rejection (for any pending, including after parent approval)
         app.status = 'rejected'
         app.reviewed_by = request.user
-        app.reviewed_at = timezone.now()
+        app.reviewed_at = now
         app.rejection_reason = rejection_reason
         app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+        # Notify student and parents
+        try:
+            from students.models import ParentLink
+            if hasattr(app.student, 'user') and app.student.user and app.student.user.id:
+                notify(
+                    str(app.student.user.id),
+                    title="Leave Application Rejected",
+                    body=f"Your {app.leave_type} leave has been rejected. Reason: {rejection_reason}",
+                    metadata={"student_leave_id": str(app.id), "status": "rejected"},
+                )
+            for pl in ParentLink.objects.filter(student=app.student, parent__is_active=True):
+                notify(
+                    str(pl.parent.id),
+                    title="Student Leave Rejected",
+                    body=f"Leave request for {app.student} was rejected. Reason: {rejection_reason}",
+                    metadata={"student_leave_id": str(app.id), "status": "rejected"},
+                )
+        except Exception:
+            pass
 
         return Response({
             'success': True,

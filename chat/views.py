@@ -282,25 +282,18 @@ class MessageListCreateView(APIView):
         limit = min(int(request.query_params.get("limit", 50)), 100)
         search = request.query_params.get("search", "").strip()
 
+        try:
+            room = ChatRoom.objects.get(id=room_id, is_active=True)
+        except ChatRoom.DoesNotExist:
+            return Response({"detail": "Room not found."}, status=status.HTTP_404_NOT_FOUND)
+
         # Base queryset
         qs = (
-            Message.objects
-            .filter(room_id=room_id, is_deleted=False)
+            room.get_visible_messages_qs(request.user)
             .select_related("sender")
             .prefetch_related("targets", "read_receipts__user")
             .order_by("-created_at")
         )
-
-        # Visibility filter for targeted (private-to-faculty) messages.
-        # Now supports *multiple* targets via ManyToMany.
-        role = getattr(request.user, 'role', None)
-        if role != 'super_admin':
-            qs = qs.annotate(num_targets=Count("targets")).filter(
-                # Normal group messages (no targets) OR messages involving current user
-                Q(num_targets=0) |
-                Q(sender=request.user) |
-                Q(targets=request.user)
-            )
 
         qs = apply_filters(self, request, qs)
 
@@ -360,6 +353,39 @@ class MessageListCreateView(APIView):
 
         target_user_ids = [str(tid).strip() for tid in target_user_ids if str(tid).strip()]
 
+        try:
+            room = ChatRoom.objects.get(id=room_id, is_active=True)
+        except ChatRoom.DoesNotExist:
+            return Response(
+                {"detail": "Room not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Faculty reply rules in group rooms:
+        # 1. Must provide a reply_to_message_id that explicitly tags this faculty.
+        # 2. The target is auto-derived from that message's sender.
+        user_role = getattr(request.user, "role", None)
+        if user_role == "faculty" and room.room_type == "group":
+            reply_to_message_id = request.data.get("reply_to_message_id")
+            if not reply_to_message_id:
+                return Response(
+                    {"detail": "Faculty must reply to a specific message that mentions them (@mention)."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                msg = Message.objects.get(
+                    id=reply_to_message_id,
+                    room_id=room_id,
+                    targets=request.user,
+                    is_deleted=False
+                )
+                target_user_ids = [str(msg.sender_id)]
+            except Message.DoesNotExist:
+                return Response(
+                    {"detail": "The referenced message does not exist or does not mention you."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         # ── Resolve multiple targets if provided (student -> specific faculty) ───────
         targets = []
         if target_user_ids:
@@ -381,7 +407,6 @@ class MessageListCreateView(APIView):
                     )
 
                 # Must be participants of the same group
-                room = ChatRoom.objects.get(id=room_id, is_active=True)
                 target_ids = {str(t.id) for t in targets}
                 if not all(room.participants.filter(id=tid).exists() for tid in target_ids):
                     return Response(
@@ -396,10 +421,10 @@ class MessageListCreateView(APIView):
                         tgt_role = getattr(tgt, 'role', None)
                         if tgt_role not in ['faculty', 'paper_checker', 'admin_senior_executive']:
                             logger.warning(f"Student {request.user.id} targeting non-faculty {tgt.id}")
-            except ChatRoom.DoesNotExist:
+            except Exception as e:
                 return Response(
-                    {"detail": "Room not found."},
-                    status=status.HTTP_404_NOT_FOUND,
+                    {"detail": "Error processing target users."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
         # ── Handle direct file upload ─────────────────────────────────────

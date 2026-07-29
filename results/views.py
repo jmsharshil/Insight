@@ -119,7 +119,29 @@ class PaperView(APIView):
 
         qs = apply_filters(self, request, qs)
 
-        return Response({'success': True, 'count': qs.count(), 'data': MarkSheetSerializer(qs, many=True).data})
+        # Compute exam attendance percentage
+        exam_att_pct = None
+        try:
+            from exams.models import Exam as ExamModel
+            from students.models import Student
+            exam_obj = ExamModel.objects.get(id=exam_id)
+            if exam_obj.batch_id and exam_obj.status not in ('draft', 'scheduled'):
+                total_enrolled = Student.objects.filter(
+                    batch_id=exam_obj.batch_id, status='active'
+                ).count()
+                if total_enrolled > 0:
+                    total_attended = MarkSheet.objects.filter(
+                        exam_id=exam_id, is_absent=False
+                    ).count()
+                    exam_att_pct = round(total_attended / total_enrolled * 100, 2)
+        except Exception:
+            pass
+
+        return Response({
+            'success': True, 'count': qs.count(),
+            'exam_attendance_percentage': exam_att_pct,
+            'data': MarkSheetSerializer(qs, many=True).data,
+        })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -469,7 +491,28 @@ class ResultView(APIView):
 
         qs = apply_filters(self, request, qs)
 
-        return Response({'success': True, 'count': qs.count(), 'data': PublishedResultSerializer(qs, many=True).data})
+        # Compute exam attendance percentage
+        exam_att_pct = None
+        try:
+            exam_obj = Exam.objects.get(id=exam_id)
+            if exam_obj.batch_id and exam_obj.status not in ('draft', 'scheduled'):
+                from students.models import Student
+                total_enrolled = Student.objects.filter(
+                    batch_id=exam_obj.batch_id, status='active'
+                ).count()
+                if total_enrolled > 0:
+                    total_attended = MarkSheet.objects.filter(
+                        exam_id=exam_id, is_absent=False
+                    ).count()
+                    exam_att_pct = round(total_attended / total_enrolled * 100, 2)
+        except Exception:
+            pass
+
+        return Response({
+            'success': True, 'count': qs.count(),
+            'exam_attendance_percentage': exam_att_pct,
+            'data': PublishedResultSerializer(qs, many=True).data,
+        })
 
 
 class ResultDeleteView(APIView):

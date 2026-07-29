@@ -379,7 +379,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     half_day_dates = []
     total_late_penalty_minutes = 0
 
-    if faculty_profile.employment_type in ('visiting', 'part_time', 'contract'):
+    if faculty_profile.employment_type in ('visiting', 'part_time'):
         # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
         # Session-based deviation
         for d_date, d_delay in daily_delays.items():
@@ -430,14 +430,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 if d_delay >= 15:
                     days_late_15_mins += 1
 
-                if d_delay > grace:
-                    penalty_min = d_delay - grace
-                    day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                    late_penalty += day_penalty
-                    total_late_penalty_minutes += penalty_min
-                    late_dates.append(d_str)
-                    daily_stats[d_str]['penalty_minutes'] = penalty_min
-                    daily_stats[d_str]['deduction'] += day_penalty
+                # Full-time faculty do not get per-minute deduction
+                # if d_delay > grace:
+                #     penalty_min = d_delay - grace
+                #     day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                #     late_penalty += day_penalty
+                #     total_late_penalty_minutes += penalty_min
+                #     late_dates.append(d_str)
+                #     daily_stats[d_str]['penalty_minutes'] = penalty_min
+                #     daily_stats[d_str]['deduction'] += day_penalty
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
@@ -579,7 +580,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
-        working_days=working_days,
+        working_days=days_with_attendance if faculty_profile.employment_type != 'full_time' else working_days,
         sessions_conducted=sessions_count,
     )
 
@@ -885,7 +886,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         if total_session_diff > 0:
             daily_delays[s.session_date] += total_session_diff
 
-    if faculty_profile.employment_type in ('visiting', 'part_time', 'contract'):
+    if faculty_profile.employment_type in ('visiting', 'part_time'):
         # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
         for d_date, d_delay in daily_delays.items():
             d_str = d_date.strftime('%Y-%m-%d')
@@ -929,13 +930,14 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 if d_delay >= 15:
                     days_late_15_mins += 1
 
-                if d_delay > grace:
-                    penalty_min = d_delay - grace
-                    day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                    late_penalty += day_penalty
-                    total_late_penalty_minutes += penalty_min
-                    daily_stats[d_str]['penalty_minutes'] = penalty_min
-                    daily_stats[d_str]['deduction'] += day_penalty
+                # Full-time faculty do not get per-minute deduction
+                # if d_delay > grace:
+                #     penalty_min = d_delay - grace
+                #     day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                #     late_penalty += day_penalty
+                #     total_late_penalty_minutes += penalty_min
+                #     daily_stats[d_str]['penalty_minutes'] = penalty_min
+                #     daily_stats[d_str]['deduction'] += day_penalty
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
@@ -1020,7 +1022,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         'other_deductions': "0.00",
         'net_salary': str(round(net, 2)),
         'leaves_taken': int(leave_days),
-        'working_days': working_days,
+        'working_days': days_with_attendance if faculty_profile.employment_type != 'full_time' else working_days,
         'sessions_conducted': sessions_count,
     }
 

@@ -14,9 +14,11 @@ from fees.models import StudentFee, Payment
 from exams.models import Exam
 from results.models import MarkSheet, PublishedResult
 from leads.models import Lead
+from onboarding.models import Admission
 from batches.models import Batch, TimetableSlot
 from faculty.models import FacultyProfile, SessionReport, FacultyQRScanLog
 from payroll.models import PaySlip
+from leave.models import LeaveApplication, LeaveBalance, StudentLeaveApplication
 
 
 def _get_cache_key(user):
@@ -80,6 +82,10 @@ def get_role_dashboard(user):
     else:
         data = _get_default_dashboard(user, now, today)
 
+    # Add leave data for ALL roles (staff, faculty, student, management, sales, etc.)
+    leave_summary = _get_leave_dashboard_data(user, role, today, month_start)
+    data.update(leave_summary)
+
     # Merge common data
     data.update(common_data)
     data['role'] = role
@@ -107,6 +113,9 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         total_inactive=Count('id', filter=Q(status='inactive')),
         new_this_month=Count('id', filter=Q(created_at__gte=month_start)),
     )
+    
+    adm_qs = Admission.objects.filter(bq)
+    admissions_other_ref_count = adm_qs.filter(reference='other').count()
 
     # Attendance aggregate - optimized, no non-existent fields
     att_qs = AttendanceRecord.objects.filter(
@@ -131,8 +140,20 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
             filter=Q(status__in=['approval_pending', 'partial', 'overdue']),
             output_field=FloatField()
         ),
+        total_billed=Sum('total_amount'),
+        total_discount=Sum('discount'),
         overdue_count=Count('id', filter=Q(status='overdue')),
     )
+
+    total_billed = float(fee_agg.get('total_billed') or 0)
+    total_discount = float(fee_agg.get('total_discount') or 0)
+    net_billed = total_billed - total_discount
+    
+    total_collected = float(fee_agg.get('total_collected') or 0)
+    total_due = float(fee_agg.get('total_due') or 0)
+    
+    collected_pct = round((total_collected / net_billed) * 100, 2) if net_billed > 0 else 0
+    due_pct = round((total_due / net_billed) * 100, 2) if net_billed > 0 else 0
 
     # Upcoming exams - limited and optimized
     upcoming_exams = list(
@@ -155,13 +176,15 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         'kpis': {
             'total_active_students': student_agg['total_active'] or 0,
             'new_admissions': student_agg['new_this_month'] or 0,
-            'attendance_rate': att_rate,
-            'fee_collected': float(fee_agg['total_collected'] or 0),
-            'pending_fees': float(fee_agg['total_due'] or 0),
+            'attendance_rate': f"{att_agg.get('present') or 0}/{att_agg.get('total_records') or 0} ({att_rate}%)",
+            'fee_collected': f"{total_collected} ({collected_pct}%)",
+            'pending_fees': f"{total_due} ({due_pct}%)",
             'overdue_fees': fee_agg['overdue_count'] or 0,
             'open_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
+            'admissions_other_ref': admissions_other_ref_count,
         },
         'upcoming_exams': upcoming_exams,
+        'exam_stats': _get_exam_stats(bq),
         'attendance_trend': _get_attendance_trend(bq, 7),  # last 7 days
         'fee_collection_trend': _get_fee_trend(user, 30),
         'lead_pipeline': lead_pipeline,
@@ -194,6 +217,7 @@ def _get_faculty_dashboard(user, now, today, month_start):
 
     # My attendance rate - real computation from QR scans (no static)
     my_att_rate = 100.0
+    scan_agg = {}
     if faculty:
         scan_agg = FacultyQRScanLog.objects.filter(
             faculty=faculty, scanned_at__gte=month_start
@@ -240,18 +264,30 @@ def _get_faculty_dashboard(user, now, today, month_start):
         ).aggregate(avg_comp=Avg('completion_percentage'))
         avg_completion = round(float(comp_agg.get('avg_comp') or 0), 1)
 
+    visiting_count = 0
+    if faculty and faculty.employment_type != 'full_time':
+        qr_dates = set(FacultyQRScanLog.objects.filter(
+            faculty=faculty, scanned_at__gte=month_start
+        ).dates('scanned_at', 'day'))
+        session_dates = set(SessionReport.objects.filter(
+            faculty=faculty, session_date__gte=month_start.date()
+        ).values_list('session_date', flat=True))
+        visiting_count = len(qr_dates | session_dates)
+
     return {
         'kpis': {
             'today_sessions': len(today_sessions),
             'monthly_sessions': SessionReport.objects.filter(
                 faculty=faculty, session_date__gte=month_start.date()
             ).count() if faculty else 0,
-            'attendance_rate': my_att_rate,
+            'attendance_rate': f"{scan_agg.get('ontime') or 0}/{scan_agg.get('total') or 0} ({my_att_rate}%)",
             'pending_tasks': len(pending_tasks),
-            'avg_session_completion': avg_completion,
+            'avg_session_completion': f"{avg_completion}%",
+            'visiting_count': visiting_count,
         },
         'today_schedule': today_sessions,
         'pending_tasks': pending_tasks,
+        'exam_performance': _get_faculty_exam_performance(user, faculty),
         'recent_sessions': list(
             SessionReport.objects.filter(faculty=faculty)
             .select_related('batch', 'subject')
@@ -299,6 +335,13 @@ def _get_student_dashboard(user, now, today, month_start):
     )
     att_rate = round((attendance['present'] or 0) / (attendance['total'] or 1) * 100, 2)
 
+    # Exam attendance rate
+    exam_attendance = MarkSheet.objects.filter(student=student).aggregate(
+        total=Count('id'),
+        present=Count('id', filter=Q(is_absent=False))
+    )
+    exam_att_rate = round((exam_attendance['present'] or 0) / (exam_attendance['total'] or 1) * 100, 2)
+
     # Fees due - use amount_due logic
     fees_due = StudentFee.objects.filter(
         student=student, status__in=['approval_pending', 'partial', 'overdue']
@@ -332,16 +375,39 @@ def _get_student_dashboard(user, now, today, month_start):
         .values('id', 'exam__title', 'marks_obtained', 'total_marks', 'percentage', 'is_pass', 'rank')
     )
 
+    # Enrich recent_results with percentile for each result
+    for result in recent_results:
+        try:
+            exam_id = result.get('exam_id') or PublishedResult.objects.filter(
+                student=student, id=result['id']
+            ).values_list('exam_id', flat=True).first()
+            if exam_id:
+                total = PublishedResult.objects.filter(exam_id=exam_id).count()
+                if total > 0 and result.get('marks_obtained') is not None:
+                    at_or_below = PublishedResult.objects.filter(
+                        exam_id=exam_id, marks_obtained__lte=result['marks_obtained']
+                    ).count()
+                    result['percentile'] = round(at_or_below / total * 100, 2)
+                else:
+                    result['percentile'] = None
+            else:
+                result['percentile'] = None
+        except Exception:
+            result['percentile'] = None
+
+    avg_score = round(
+        float(PublishedResult.objects.filter(student=student).aggregate(
+            avg_p=Avg('percentage')
+        )['avg_p'] or 0), 2
+    )
+
     return {
         'kpis': {
-            'attendance_rate': att_rate,
+            'attendance_rate': f"{attendance.get('present') or 0}/{attendance.get('total') or 0} ({att_rate}%)",
+            'exam_attendance': f"{exam_attendance.get('present') or 0}/{exam_attendance.get('total') or 0} ({exam_att_rate}%)",
             'fees_due': float(fees_due.get('total_due') or 0),
             'upcoming_exams_count': len(upcoming),
-            'avg_score': round(
-                float(PublishedResult.objects.filter(student=student).aggregate(
-                    avg_p=Avg('percentage')
-                )['avg_p'] or 0), 2
-            ),
+            'avg_score': f"{avg_score}%",
         },
         'upcoming_exams': upcoming,
         'recent_results': recent_results,
@@ -362,6 +428,13 @@ def _get_sales_dashboard(user, now, today, month_start):
     bq = _branch_filter(user)
 
     lead_qs = Lead.objects.filter(bq)
+
+    # Junior sales roles only see leads assigned to them.
+    # Senior roles (sales_senior_executive) see all branch leads.
+    individual_roles = ('sales_executive', 'tele_caller', 'counsellor', 'front_desk')
+    if user.role in individual_roles:
+        lead_qs = lead_qs.filter(assigned_to=user)
+
     lead_agg = lead_qs.aggregate(
         total_leads=Count('id'),
         new_leads=Count('id', filter=Q(created_at__gte=month_start)),
@@ -385,7 +458,7 @@ def _get_sales_dashboard(user, now, today, month_start):
         'kpis': {
             'total_leads': lead_agg['total_leads'] or 0,
             'new_leads_this_month': lead_agg['new_leads'] or 0,
-            'conversion_rate': round((lead_agg['converted'] or 0) / (lead_agg['total_leads'] or 1) * 100, 2),
+            'conversion_rate': f"{lead_agg.get('converted') or 0}/{lead_agg.get('total_leads') or 0} ({round((lead_agg.get('converted') or 0) / (lead_agg.get('total_leads') or 1) * 100, 2)}%)",
             'active_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
         },
         'pipeline': pipeline,
@@ -401,6 +474,158 @@ def _get_default_dashboard(user, now, today):
         'kpis': {'message': 'Dashboard ready for your role'},
         'recent_notifications': [],
     }
+
+
+def _get_leave_dashboard_data(user, role, today, month_start):
+    """Leave data integrated for ALL roles in dashboard.
+    - Management: team pending leaves, staff on leave today
+    - Staff/Faculty: personal leave balances, pending applications, recent leaves
+    - Students/Parents: student leave applications status
+    - Sales: personal leave summary
+    Optimized with aggregates and limited querysets.
+    """
+    leave_data = {
+        'pending_count': 0,
+        'recent_leaves': [],
+        'balances': [],
+        'type': 'staff',
+    }
+
+    if role in ('student', 'parents'):
+        # Student/parent leave data using StudentLeaveApplication.
+        # Uses `parent_consulted` (per model constraint) to distinguish flows:
+        # - parent_consulted=False + pending → Parent Approval Pending (for parents)
+        # - parent_consulted=True + pending → Admin Approval Pending
+        student = None
+        if role == 'parents':
+            try:
+                parent_link = ParentLink.objects.select_related('student').filter(
+                    parent=user, is_primary=True
+                ).first()
+                if not parent_link:
+                    parent_link = ParentLink.objects.select_related('student').filter(
+                        parent=user
+                    ).first()
+                if parent_link:
+                    student = parent_link.student
+            except Exception:
+                pass
+        else:
+            try:
+                student = Student.objects.select_related('user').get(user=user)
+            except Student.DoesNotExist:
+                pass
+
+        if student:
+            student_leaves_qs = StudentLeaveApplication.objects.filter(student=student)
+            # Role-specific pending count (what the user needs to act on)
+            if role == 'parents':
+                # Parents only care about leaves needing their approval
+                pending_qs = student_leaves_qs.filter(
+                    status='pending', parent_consulted=False
+                )
+            else:
+                # Students see all their pending leaves
+                pending_qs = student_leaves_qs.filter(status='pending')
+            leave_data['pending_count'] = pending_qs.count()
+
+            recent_list = list(
+                student_leaves_qs.order_by('-created_at')[:5].values(
+                    'id', 'leave_type', 'from_date', 'to_date', 'status',
+                    'reason', 'parent_consulted', 'parent_signature_date', 'created_at'
+                )
+            )
+            # Compute status_display using parent_consulted (matches serializer logic)
+            for leave in recent_list:
+                if leave.get('status') == 'pending':
+                    if not leave.get('parent_consulted', True):
+                        leave['status_display'] = 'Parent Approval Pending'
+                    else:
+                        leave['status_display'] = 'Admin Approval Pending'
+                else:
+                    leave['status_display'] = leave.get('status', '').replace('_', ' ').title()
+            leave_data['recent_leaves'] = recent_list
+            leave_data['type'] = 'student'
+        else:
+            leave_data['message'] = 'No student profile linked for leave data'
+    else:
+        # Staff, faculty, management, sales roles - use staff Leave models
+        # Personal leave balances
+        balances_qs = LeaveBalance.objects.filter(
+            user=user, year=today.year
+        )
+        if balances_qs.exists():
+            balances = list(balances_qs.values(
+                'leave_type', 'total_days', 'used_days', 'carried_forward'
+            ))
+            leave_data['balances'] = [
+                {
+                    'leave_type': b['leave_type'],
+                    'total': float(b['total_days']),
+                    'used': float(b['used_days']),
+                    'carried_forward': float(b['carried_forward']),
+                    'remaining': float(b['total_days'] + b['carried_forward'] - b['used_days']),
+                } for b in balances
+            ]
+            leave_data['total_remaining_days'] = sum(b['remaining'] for b in leave_data['balances'])
+        else:
+            leave_data['balances'] = []
+            leave_data['total_remaining_days'] = 0.0
+
+        # Personal pending and recent leaves
+        my_leaves_qs = LeaveApplication.objects.filter(applied_by=user)
+        leave_data['pending_count'] = my_leaves_qs.filter(status='approval_pending').count()
+        leave_data['recent_leaves'] = list(
+            my_leaves_qs.order_by('-created_at')[:5].values(
+                'id', 'leave_type', 'from_date', 'to_date', 'status',
+                'total_days', 'reason', 'created_at'
+            )
+        )
+        leave_data['type'] = 'staff'
+
+        # For management/admin roles - add team-wide leave insights
+        if role in ('super_admin', 'branch_manager', 'admin_senior_executive',
+                   'admin_executive', 'accountant'):
+            bq = _branch_filter(user, LeaveApplication)
+            # Team pending approvals (all staff leaves pending)
+            leave_data['team_pending'] = LeaveApplication.objects.filter(
+                bq, status='approval_pending'
+            ).count()
+
+            # Student leaves pending - uses parent_consulted internally for workflow stages
+            # (admins see all pending regardless of parent step)
+            student_bq = Q(status='pending')
+            if role != 'super_admin':
+                bid = getattr(user, 'branch_id', None)
+                if bid:
+                    student_bq &= Q(student__branch_id=bid)
+            leave_data['student_pending'] = StudentLeaveApplication.objects.filter(
+                student_bq
+            ).count()
+            leave_data['total_pending'] = (
+                leave_data.get('team_pending', 0) + leave_data.get('student_pending', 0)
+            )
+
+            # Staff currently on leave today
+            leave_data['team_on_leave_today'] = LeaveApplication.objects.filter(
+                bq,
+                status='approved',
+                from_date__lte=today,
+                to_date__gte=today
+            ).count()
+
+            # Team recent leaves (limited)
+            leave_data['team_recent_leaves'] = list(
+                LeaveApplication.objects.filter(bq)
+                .select_related('applied_by')
+                .order_by('-created_at')[:5]
+                .values(
+                    'id', 'applied_by__name', 'leave_type', 'from_date',
+                    'to_date', 'status', 'total_days'
+                )
+            )
+
+    return {'leave': leave_data}
 
 
 # Helper functions for trends and charts - cached where possible
@@ -560,4 +785,136 @@ def _get_student_performance_trend(student):
     return {
         'subjects': [p.get('exam__subject__name', 'Unknown') for p in perf],
         'scores': [round(float(p.get('avg_score', 0)), 1) for p in perf],
+    }
+
+
+def _get_exam_stats(bq):
+    """Compute aggregate exam statistics for management dashboard.
+    Returns avg attendance %, avg pass %, and avg result % across recent exams.
+    """
+    from students.models import Student
+    # Recent completed/published exams (last 20 for performance)
+    recent_exams = Exam.objects.filter(
+        bq if bq else Q(),
+        is_deleted=False,
+        status__in=['completed', 'results_published'],
+    ).select_related('batch').order_by('-scheduled_date')[:20]
+
+    attendance_rates = []
+    for exam in recent_exams:
+        if not exam.batch_id:
+            continue
+        total_enrolled = Student.objects.filter(
+            batch_id=exam.batch_id, status='active'
+        ).count()
+        if total_enrolled == 0:
+            continue
+        total_attended = MarkSheet.objects.filter(
+            exam=exam, is_absent=False
+        ).count()
+        attendance_rates.append(round(total_attended / total_enrolled * 100, 2))
+
+    # Pass rate and avg percentage from published results
+    pr_bq = Q()
+    if bq and bq.children:
+        for child in bq.children:
+            if isinstance(child, tuple):
+                key, val = child
+                if key.startswith('branch'):
+                    pr_bq &= Q(**{f"exam__{key}": val})
+                else:
+                    pr_bq &= Q(**{key: val})
+
+    pr_agg = PublishedResult.objects.filter(
+        pr_bq,
+    ).aggregate(
+        total=Count('id'),
+        passed=Count('id', filter=Q(is_pass=True)),
+        avg_percentage=Avg('percentage'),
+    )
+    total_results = pr_agg.get('total') or 0
+    pass_pct = round((pr_agg.get('passed') or 0) / max(total_results, 1) * 100, 2)
+
+    return {
+        'avg_exam_attendance_pct': round(
+            sum(attendance_rates) / len(attendance_rates), 2
+        ) if attendance_rates else None,
+        'avg_pass_percentage': pass_pct,
+        'avg_result_percentage': round(float(pr_agg.get('avg_percentage') or 0), 2),
+        'total_exams_completed': len(list(recent_exams)),
+        'total_published_results': total_results,
+    }
+
+
+def _get_faculty_exam_performance(user, faculty):
+    """Exam performance stats for faculty dashboard.
+    Returns attendance %, pass %, avg percentage for exams assigned to this faculty.
+    """
+    from students.models import Student
+    if not faculty:
+        return {'exams': [], 'summary': {}}
+
+    # Exams for this faculty (completed/published)
+    exams = Exam.objects.filter(
+        faculty=faculty,
+        is_deleted=False,
+        status__in=['completed', 'results_published'],
+    ).select_related('batch', 'subject').order_by('-scheduled_date')[:10]
+
+    exam_data = []
+    for exam in exams:
+        total_enrolled = 0
+        attendance_pct = None
+        if exam.batch_id:
+            total_enrolled = Student.objects.filter(
+                batch_id=exam.batch_id, status='active'
+            ).count()
+            if total_enrolled > 0:
+                total_attended = MarkSheet.objects.filter(
+                    exam=exam, is_absent=False
+                ).count()
+                attendance_pct = round(total_attended / total_enrolled * 100, 2)
+
+        # Result stats from published results
+        pr_agg = PublishedResult.objects.filter(exam=exam).aggregate(
+            total=Count('id'),
+            passed=Count('id', filter=Q(is_pass=True)),
+            avg_pct=Avg('percentage'),
+        )
+        total_pr = pr_agg.get('total') or 0
+        pass_pct = round((pr_agg.get('passed') or 0) / max(total_pr, 1) * 100, 2)
+
+        exam_data.append({
+            'exam_id': str(exam.id),
+            'title': exam.title,
+            'subject': exam.subject.name if exam.subject else None,
+            'batch': exam.batch.name if exam.batch else None,
+            'scheduled_date': exam.scheduled_date.isoformat() if exam.scheduled_date else None,
+            'attendance_percentage': attendance_pct,
+            'pass_percentage': pass_pct,
+            'avg_result_percentage': round(float(pr_agg.get('avg_pct') or 0), 2),
+            'total_students': total_pr,
+        })
+
+    # Summary across all faculty exams
+    all_pr = PublishedResult.objects.filter(
+        exam__faculty=faculty,
+        exam__status__in=['completed', 'results_published'],
+    ).aggregate(
+        total=Count('id'),
+        passed=Count('id', filter=Q(is_pass=True)),
+        avg_pct=Avg('percentage'),
+    )
+    total_all = all_pr.get('total') or 0
+
+    return {
+        'exams': exam_data,
+        'summary': {
+            'total_exams': len(exam_data),
+            'overall_pass_percentage': round(
+                (all_pr.get('passed') or 0) / max(total_all, 1) * 100, 2
+            ),
+            'overall_avg_percentage': round(float(all_pr.get('avg_pct') or 0), 2),
+            'total_students_evaluated': total_all,
+        }
     }

@@ -265,13 +265,15 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
             q = Q(id__in=target_ids)
             if sender_id:
                 q &= ~Q(id=sender_id)
-            recipients = User.objects.filter(q).exclude(fcm_token='').values('id', 'name', 'fcm_token')
+            recipients = User.objects.filter(q).exclude(fcm_token='').values('id', 'name', 'fcm_token', 'role')
         else:
-            # Normal group message: notify all participants (except sender)
+            # Normal group message: notify all participants except sender AND faculty.
+            # Faculty are in the room but only receive notifications when explicitly tagged (@mentioned).
             qs = User.objects.filter(id__in=participant_ids)
             if sender_id:
                 qs = qs.exclude(id=sender_id)
-            recipients = qs.exclude(fcm_token='').values('id', 'name', 'fcm_token')
+            qs = qs.exclude(role='faculty')  # Faculty ignore untagged group messages
+            recipients = qs.exclude(fcm_token='').values('id', 'name', 'fcm_token', 'role')
 
         # Truncate long message previews
         preview = content[:100] + '...' if len(content) > 100 else content
