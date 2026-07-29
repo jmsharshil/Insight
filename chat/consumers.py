@@ -475,10 +475,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # Privacy filter for targeted messages (now supports *multiple* targets via m2m).
         # Only sender, any listed target, and super_admin receive the WS event.
         targets = msg.get("targets", [])
-        if targets:
-            user_role = getattr(self.user, 'role', None)
-            user_id_str = str(self.user.id)
-            sender_id = msg.get("sender", {}).get("id")
+        user_role = getattr(self.user, 'role', None)
+        user_id_str = str(self.user.id)
+        sender_id = msg.get("sender", {}).get("id")
+
+        if not targets:
+            # Faculty cannot see global group messages (unless they sent it themselves)
+            if user_role == 'faculty' and user_id_str != sender_id:
+                return
+        else:
             target_ids = {
                 str(t.get("id")) for t in targets
                 if isinstance(t, dict) and t.get("id")
