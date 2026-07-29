@@ -1340,3 +1340,72 @@ class ExamScheduleView(APIView):
             'message': 'Exam has been scheduled successfully.',
             'data': ExamListSerializer(exam).data
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12. POST  /api/v1/exams/{exam_id}/upload-materials/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ExamUploadMaterialsView(APIView):
+    """
+    Dedicated API to upload answer_key and/or question_paper directly to an Exam.
+    Accepts multipart/form-data.
+    """
+    def post(self, request, exam_id):
+        role = _user_role(request.user)
+        # Check if the user is authorized (super_admin, ASE, branch_manager, OR the assigned faculty)
+        qs = Exam.objects.filter(is_deleted=False)
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+            
+        try:
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        is_faculty = False
+        if role == 'faculty':
+            from faculty.models import FacultyProfile
+            try:
+                fp = FacultyProfile.objects.get(user=request.user)
+                if exam.faculty_id != fp.id:
+                    return Response({'success': False, 'message': 'You are not assigned to this exam.'}, status=status.HTTP_403_FORBIDDEN)
+                is_faculty = True
+            except Exception:
+                return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_403_FORBIDDEN)
+        elif role not in EXAM_EDIT_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        answer_key = request.FILES.get('answer_key')
+        question_paper = request.FILES.get('question_paper')
+
+        if not answer_key and not question_paper:
+            return Response({'success': False, 'message': 'Please provide either answer_key or question_paper file.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        uploaded = []
+        if answer_key:
+            exam.answer_key = answer_key
+            exam.save(update_fields=['answer_key'])
+            uploaded.append('Answer Key')
+            
+        if question_paper:
+            if not exam.subject:
+                return Response({
+                    'success': False, 
+                    'message': 'Cannot upload a question paper directly because this exam has no Subject assigned.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+            from .models import SubjectPaper
+            sp = SubjectPaper.objects.create(
+                subject=exam.subject,
+                file=question_paper,
+                set_name=f"Exam Set for {exam.title}"
+            )
+            exam.selected_papers.add(sp)
+            uploaded.append('Question Paper')
+
+        msg = " and ".join(uploaded) + " uploaded successfully."
+        return Response({
+            'success': True,
+            'message': msg
+        })
