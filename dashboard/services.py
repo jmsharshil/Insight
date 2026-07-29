@@ -14,6 +14,7 @@ from fees.models import StudentFee, Payment
 from exams.models import Exam
 from results.models import MarkSheet, PublishedResult
 from leads.models import Lead
+from onboarding.models import Admission
 from batches.models import Batch, TimetableSlot
 from faculty.models import FacultyProfile, SessionReport, FacultyQRScanLog
 from payroll.models import PaySlip
@@ -112,6 +113,9 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         total_inactive=Count('id', filter=Q(status='inactive')),
         new_this_month=Count('id', filter=Q(created_at__gte=month_start)),
     )
+    
+    adm_qs = Admission.objects.filter(bq)
+    admissions_other_ref_count = adm_qs.filter(reference='other').count()
 
     # Attendance aggregate - optimized, no non-existent fields
     att_qs = AttendanceRecord.objects.filter(
@@ -177,6 +181,7 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
             'pending_fees': f"{total_due} ({due_pct}%)",
             'overdue_fees': fee_agg['overdue_count'] or 0,
             'open_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
+            'admissions_other_ref': admissions_other_ref_count,
         },
         'upcoming_exams': upcoming_exams,
         'exam_stats': _get_exam_stats(bq),
