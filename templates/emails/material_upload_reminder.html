@@ -1,0 +1,39 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Action Required: Upload Exam Materials</h2>
+
+<p>Dear {{ faculty_name }},</p>
+
+<p>This is a reminder to upload the following material(s) before the exam date:</p>
+
+<div class="info-box">
+    <h3 style="margin-top: 0; margin-bottom: 4px; color: {{ primary_color }};">{{ exam_title }}</h3>
+    <p style="margin: 0; color: #6b7280;">Scheduled on {{ exam_date }}</p>
+</div>
+
+<p><strong>Missing material(s):</strong></p>
+<ul>
+    {% for item in missing_items %}
+    <li>{{ item }}</li>
+    {% endfor %}
+</ul>
+
+<p>Please upload them as soon as possible by clicking the button below:</p>
+
+<div style="text-align: center; margin: 28px 0;">
+    <a href="{{ exam_link }}"
+       style="display: inline-block; background-color: {{ primary_color }}; color: #ffffff;
+              text-decoration: none; padding: 12px 28px; border-radius: 6px;
+              font-weight: 600; font-size: 15px;">
+        Upload Materials
+    </a>
+</div>
+
+<p style="font-size: 12px; color: #9ca3af;">
+    If the button above does not work, copy and paste this link into your browser:<br>
+    <a href="{{ exam_link }}" style="color: {{ primary_color }};">{{ exam_link }}</a>
+</p>
+
+<p>Thank you for your prompt action.</p>
+{% endblock %}

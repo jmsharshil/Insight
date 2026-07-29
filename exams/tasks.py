@@ -191,6 +191,7 @@ def auto_expire_exam_sessions():
 def send_exam_material_upload_reminders():
     """Daily: remind faculty to upload missing question paper and answer key for scheduled exams."""
     from .models import Exam
+    from .emails import send_material_upload_reminder_email
     from chat.notifications import send_system_notification
 
     # Only look at exams that are scheduled or draft, not completed
@@ -205,22 +206,33 @@ def send_exam_material_upload_reminders():
     for exam in upcoming_exams:
         if not exam.faculty or not exam.faculty.user:
             continue
-            
+
+        faculty_user = exam.faculty.user
+
         missing = []
         if exam.exam_mode == 'offline' and not exam.selected_papers.exists():
             missing.append("Question Paper")
-        
+
         if not exam.answer_key:
             missing.append("Answer Key")
 
         if missing:
             missing_str = " and ".join(missing)
+
+            # In-app notification
             send_system_notification(
-                user_id=str(exam.faculty.user.id),
+                user_id=str(faculty_user.id),
                 title='Reminder: Upload Exam Materials',
                 body=f"Reminder: Please upload the {missing_str} for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
                 metadata={'exam_id': str(exam.id)}
             )
+
+            # Email + WhatsApp with frontend deep-link
+            try:
+                send_material_upload_reminder_email(faculty_user, exam, missing)
+            except Exception as e:
+                logger.error(f"Failed to send material upload reminder email for exam {exam.id}: {e}")
+
             count += 1
 
     logger.info(f"Sent {count} exam material upload reminders")

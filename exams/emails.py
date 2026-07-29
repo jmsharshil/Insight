@@ -126,6 +126,55 @@ def send_submission_reminder_email(marksheet):
         print(e)
 
 
+def send_material_upload_reminder_email(faculty_user, exam, missing_items):
+    """
+    Remind faculty to upload missing exam materials (Question Paper / Answer Key).
+    Includes a direct frontend link to the exam detail/upload page.
+    """
+    from django.conf import settings
+
+    frontend_base = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+    # Deep-link to the exam upload page on the faculty portal
+    exam_link = f"{frontend_base}/exams/{exam.id}/upload"
+
+    missing_str = " and ".join(missing_items)
+    subject = f"Action Required: Upload {missing_str} for '{exam.title}'"
+    text_content = (
+        f"Dear {faculty_user.name},\n\n"
+        f"This is a reminder to upload the following material(s) for the exam "
+        f"'{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}:\n\n"
+        f"  • {chr(10).join('  • ' + item for item in missing_items)}\n\n"
+        f"Please upload them as soon as possible using the link below:\n"
+        f"{exam_link}\n\n"
+        f"Thank you."
+    )
+
+    send_email(
+        to=faculty_user.email,
+        subject=subject,
+        text=text_content,
+        template='emails/material_upload_reminder.html',
+        template_context={
+            'faculty_name': faculty_user.name,
+            'exam_title': exam.title,
+            'exam_date': exam.scheduled_date.strftime('%d %b %Y'),
+            'missing_items': missing_items,
+            'exam_link': exam_link,
+        },
+        organization=exam.organization if hasattr(exam, 'organization') else None,
+    )
+
+    try:
+        if getattr(faculty_user, 'phone', None):
+            send_whatsapp_text(
+                to=faculty_user.phone,
+                body=text_content,
+                user_id=str(faculty_user.id),
+            )
+    except Exception as e:
+        logger.warning(f"WhatsApp reminder failed for faculty {faculty_user.id}: {e}")
+
+
 def send_recheck_request_notification(recheck_request):
     """
     FRD §4.6.2: notify Admin Senior Executive when student raises recheck.
