@@ -78,7 +78,20 @@
 - `is_rechecked`: Set on recheck approval or query.
 - `is_absent`: True if student did not attend (auto or manual).
 - `is_pass`: Computed as `marks_obtained >= exam.pass_marks`.
+- `grade_status`: Computed field based on percentage — see table below.
 - Open `CheckerQuery` prevents modification for non-admins.
+
+### A.3b Grade Status Values (`grade_status`)
+
+Returned in `MarkSheetSerializer` and `PublishedResultSerializer`.
+
+| Condition | `grade_status` |
+|---|---|
+| `is_absent = True` | `"absent"` |
+| Percentage < 40% | `"fail"` |
+| Percentage 40–50% | `"pass"` |
+| Percentage 50–60% | `"aggregate"` |
+| Percentage ≥ 60% | `"exempt"` |
 
 ### A.4 Role Permissions Summary (Updated)
 | Role | View Papers | Enter Marks | Publish | Review Recheck/Query | Student Recheck | Raise Query |
@@ -103,7 +116,9 @@
 | `CheckerQuery` | Paper checker raises clarification requests | Links to MarkSheet; status (`open`/`resolved`); blocks payroll for rechecked papers until resolved; types include answer_key issues |
 | `SubmissionReminderLog` | Audit for checker reminders | Tracks follow-ups for unsubmitted papers |
 
-**Integration:** Closely tied to `exams` (Exam model with `answer_key` requirement for rechecks, CheckerToken, `calculate_ranks()`, emails), `timetable` (ExamSession for auto-absent), `students` (for visibility/filtering), payroll (via query filters in `compute_payslip_for_user()`).
+**Integration:** Closely tied to `exams` (Exam model with `answer_key` requirement for rechecks, `grace_marks`/`grace_marks_note` fields for bulk result adjustment, CheckerToken, `calculate_ranks()`, emails), `timetable` (ExamSession for auto-absent), `students` (for visibility/filtering), payroll (via query filters in `compute_payslip_for_user()`).
+
+> **Grace Marks Note:** When `POST /api/v1/exams/{exam_id}/grace-marks/` is called, all `MarkSheet.marks_obtained` and `PublishedResult.marks_obtained`/`percentage`/`is_pass` values are updated automatically. Results are re-ranked after the adjustment. This is additive — calling the API again with new `grace_marks` will apply on top of the current stored value.
 
 ---
 
@@ -171,6 +186,8 @@ All examples use the actual serializers (`MarkSheetSerializer`, `RecheckRequestS
       "paper_checker": "user-uuid",
       "checker_name": "Prof. Anil Sharma",
       "marks_obtained": 42.5,
+      "percentage": 85.0,
+      "grade_status": "exempt",
       "is_pass": true,
       "is_absent": false,
       "remarks": "Good attempt on theory",
@@ -381,6 +398,7 @@ All examples use the actual serializers (`MarkSheetSerializer`, `RecheckRequestS
       "marks_obtained": 85.5,
       "total_marks": 100,
       "percentage": 85.5,
+      "grade_status": "exempt",
       "is_pass": true,
       "rank": 1,
       "published_at": "2026-06-22T10:00:00Z"
@@ -879,7 +897,7 @@ Update frontend to add export buttons calling this endpoint (e.g., with `type=su
 ```bash
 python manage.py makemigrations results
 python manage.py migrate results
-python manage.py migrate exams  # for any Exam FK updates
+python manage.py migrate exams  # for grace_marks, grace_marks_note fields
 ```
 
 **Note on Code Style:** `results/views.py` now uses consistent role constants, organization guards, and annotation-based aggregation (no legacy model views). This documentation has been updated to reflect **all current endpoints**, removal of dedicated aggregate models, and the new on-the-fly analytics (matching style of `timetable_procedure_guide.md`).

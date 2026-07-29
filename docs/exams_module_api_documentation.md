@@ -6,13 +6,13 @@ This document provides a comprehensive list of all APIs available in the `exams`
 
 ## 1. Exam Creation & Management
 
-**NEW: Automatic `total_marks` Calculation**  
-`Exam.total_marks` is now **auto-derived** as `SUM(Question.marks)` across all linked questions (MCQ, subjective, true_false all support per-question `marks`).  
-- `ExamCreateSerializer` treats `total_marks` as effectively read-only on input (initial value accepted for validation but overridden by questions).  
-- `pass_marks <= total_marks` validation is retained.  
-- On any Question create/update/delete (via dedicated endpoints), `exam.recalculate_total_marks()` runs atomically to sync the value (removes manual drift).  
-- List/Detail/Start-Exam responses now always return up-to-date computed `total_marks`.  
-- `questions_count` is available in list views.  
+**NEW: Automatic `total_marks` Calculation**
+`Exam.total_marks` is now **auto-derived** as `SUM(Question.marks)` across all linked questions (MCQ, subjective, true_false all support per-question `marks`).
+- `ExamCreateSerializer` treats `total_marks` as effectively read-only on input (initial value accepted for validation but overridden by questions).
+- `pass_marks <= total_marks` validation is retained.
+- On any Question create/update/delete (via dedicated endpoints), `exam.recalculate_total_marks()` runs atomically to sync the value (removes manual drift).
+- List/Detail/Start-Exam responses now always return up-to-date computed `total_marks`.
+- `questions_count` is available in list views.
 - Existing exams are unaffected until next question mutation.
 
 Exams are created automatically through the **Timetable** module when scheduling class tests, prelims, or custom sessions.
@@ -25,7 +25,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 
 **Note:** `paper_checkers` specified in the timetable slot are **automatically synced** to the generated `Exam.paper_checkers` M2M field. No separate step is required.
 
-**POST Request Body Example (E4 — no legacy `timetable_exam_type`):**
+**POST Request Body Example:**
 ```json
 {
     "batch": "uuid-of-batch",
@@ -41,7 +41,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
         "title": "Company Law — Class Test",
         "exam_type": "mcq",
         "exam_mode": "online",
-        "total_marks": 50,  // initial; overridden by recalculate_total_marks() from questions
+        "total_marks": 50,
         "pass_marks": 18,
         "duration_minutes": 90,
         "instructions": "Attempt all questions. Time: 90 minutes.",
@@ -55,20 +55,48 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 ```
 
 ### 1.2 List Exams
-**Endpoint:** `/api/v1/exams/`
-**Methods:** `GET`
+**Endpoint:** `GET /api/v1/exams/`
+
+**Response includes:** `grace_marks`, `grace_marks_note`, `answer_key` (URL or `null` for students after 24h window), `selected_papers`.
 
 ### 1.3 Retrieve, Update & Delete Exam
 **Endpoint:** `/api/v1/exams/{exam_id}/`
 **Methods:** `GET`, `PATCH`, `DELETE`
 
-**PATCH Request Body:** (Partial fields of Exam creation)
+**PATCH Request Body:** (Partial fields of Exam creation — also accepts `grace_marks`, `grace_marks_note`)
+
+### 1.4 Add Grace Marks
+**Endpoint:** `POST /api/v1/exams/{exam_id}/grace-marks/`
+**Permission:** `super_admin`, `admin_senior_executive`, `branch_manager`
+
+Applies grace marks to an exam and **automatically recalculates** `MarkSheet.marks_obtained`, `is_pass`, `PublishedResult.marks_obtained`, `percentage`, and re-ranks all students. Final marks are capped at `exam.total_marks`.
+
+**Request Body:**
+```json
+{
+    "grace_marks": 5,
+    "grace_marks_note": "Out of syllabus question in section B"
+}
+```
+
+**Success Response:**
+```json
+{
+    "success": true,
+    "message": "Grace marks of 5 added to Exam and applied to 45 student results."
+}
+```
+
+**Error Responses:**
+- `400`: `"Invalid grace_marks. Must be a positive number."`
+- `403`: `"Permission denied."`
+- `404`: `"Exam not found."`
 
 ---
 
 ## 2. Questions Management
 
-**Note:** Adding, updating, or deleting questions automatically triggers `Exam.recalculate_total_marks()` (see section 1). This ensures `total_marks` always equals the sum of all `Question.marks`. Questions support independent `marks` values (no longer forced to uniform value).
+**Note:** Adding, updating, or deleting questions automatically triggers `Exam.recalculate_total_marks()`. Questions support independent `marks` values.
 
 ### List & Add Questions
 **Endpoint:** `/api/v1/exams/{exam_id}/questions/`
@@ -83,14 +111,8 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
         "marks": 5,
         "order": 1,
         "choices": [
-            {
-                "text": "Paris",
-                "is_correct": true
-            },
-            {
-                "text": "London",
-                "is_correct": false
-            }
+            {"text": "Paris", "is_correct": true},
+            {"text": "London", "is_correct": false}
         ]
     },
     {
@@ -116,7 +138,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 **Endpoint:** `/api/v1/exams/{exam_id}/questions/{question_id}/`
 **Methods:** `PATCH`, `DELETE`
 
-**Note:** PATCH (including on `marks`) or DELETE will trigger recalculation of parent `Exam.total_marks` (via Django signals + explicit call). Responses now include the updated `total_marks`.
+**Note:** PATCH or DELETE triggers recalculation of parent `Exam.total_marks`. Responses include the updated `total_marks`.
 
 ---
 
@@ -168,7 +190,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 **Request Body:**
 ```json
 {
-    "student_lat": 19.076090, // Required if exam has geo_radius_meters > 0
+    "student_lat": 19.076090,
     "student_lon": 72.877426
 }
 ```
@@ -182,7 +204,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
     "geo_check_interval_minutes": 5,
     "exam_title": "Midterm",
     "total_marks": 100,
-    "questions": [ ... ]
+    "questions": []
 }
 ```
 
@@ -194,17 +216,8 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 ```json
 {
     "question_id": "uuid-of-question",
-    "selected_choice_id": "uuid-of-choice", // For MCQ
-    "text_answer": "" // For subjective
-}
-```
-
-**Success Response:**
-```json
-{
-    "saved": true,
-    "question_id": "uuid-of-question",
-    "remaining_seconds": 3500
+    "selected_choice_id": "uuid-of-choice",
+    "text_answer": ""
 }
 ```
 
@@ -220,14 +233,6 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 }
 ```
 
-**Success Response:**
-```json
-{
-    "geo_check": "passed",
-    "distance_m": 15.5
-}
-```
-
 ### Screen Lock & Split Screen Events
 **Endpoint:** `/api/v1/exams/{exam_id}/sessions/{session_id}/screen-event/`
 **Method:** `POST`
@@ -235,18 +240,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 **Request Body:**
 ```json
 {
-    "event": "lock_breach" // or "split_screen"
-}
-```
-
-**Success Response:**
-```json
-{
-    "event_logged": true,
-    "warning": true,
-    "violations": 1,
-    "remaining_before_action": 2,
-    "action": "warning_issued"
+    "event": "lock_breach"
 }
 ```
 
@@ -282,15 +276,42 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 
 ## 5. Malpractice & Answer Keys
 
-### Answer Key Distribution
-**Endpoint:** `/api/v1/exams/{exam_id}/answer-key/distribute/`
-**Method:** `POST`
-*Sends an email link to assigned paper checkers with a secure token.*
+### Answer Key Distribution (to Paper Checkers)
+**Endpoint:** `POST /api/v1/exams/{exam_id}/answer-key/distribute/`
+*Sends a secure token email link to assigned paper checkers.*
 
-### View Answer Key (Public with Token)
-**Endpoint:** `/api/v1/answer-key/{exam_id}/?token=log_hash`
-**Method:** `GET`
-*Exempt from authentication if a valid token is provided.*
+### View Answer Key (Public Token-Based)
+**Endpoint:** `GET /api/v1/answer-key/{exam_id}/?token=log_hash`
+*Exempt from authentication. Valid for 48 hours after distribution.*
+
+### Answer Key Visibility for Students
+- The `answer_key` field is returned in the Exam detail/list response.
+- **For students:** The URL is `null` unless:
+  1. The exam status is `results_published`, AND
+  2. The student's `PublishedResult.published_at` is **within the last 24 hours**.
+- After 24 hours from result publication, the field returns `null` automatically (no separate API call needed).
+- **For admins/faculty:** Always visible.
+
+### Upload Exam Materials (Answer Key / Question Paper)
+**Endpoint:** `POST /api/v1/exams/{exam_id}/upload-materials/`
+**Permission:** Assigned faculty, `super_admin`, `admin_senior_executive`, `branch_manager`
+**Content-Type:** `multipart/form-data`
+
+| Field | Type | Description |
+|---|---|---|
+| `answer_key` | file | Uploads directly to `Exam.answer_key`. Visible to students for 24h after result publishing. |
+| `question_paper` | file | Auto-creates a `SubjectPaper` and links it to `Exam.selected_papers`. Exam must have a `subject` assigned. |
+
+**Success Response:**
+```json
+{
+    "success": true,
+    "message": "Answer Key and Question Paper uploaded successfully."
+}
+```
+
+### Faculty Material Upload Notifications
+When an exam is created/scheduled and either `answer_key` or `question_paper` is missing, the **assigned faculty** automatically receives a notification to upload the missing material. A **daily Celery task** (`send_exam_material_upload_reminders`) also sends reminders for all draft/scheduled exams with missing materials until they are uploaded.
 
 ### Report Malpractice
 **Endpoint:** `/api/v1/exams/{exam_id}/malpractice/`
@@ -301,15 +322,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 {
     "student_id": "uuid-of-student",
     "description": "Student was looking at a hidden phone.",
-    "severity": "major" // choices: minor, major, disqualified
-}
-```
-
-**POST Success Response:**
-```json
-{
-    "success": true,
-    "report_id": "uuid-of-report"
+    "severity": "major"
 }
 ```
 
@@ -321,23 +334,22 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 
 ## 6. Subject Papers (Reusable Paper Library)
 
-Papers are now managed at the **Subject** level rather than per-exam, making them reusable across multiple exams. An exam admin links one or more subject papers to an exam via `selected_papers`. When a student starts the exam, a paper is automatically assigned using a **round-robin** strategy to ensure even distribution.
-
----
+Papers are managed at the **Subject** level, making them reusable across multiple exams. An exam admin links one or more subject papers to an exam via `selected_papers`. When a student starts the exam, a paper is automatically assigned using a **round-robin** strategy.
 
 ### 6.1 Upload / List Subject Papers
 
-**Endpoint:** `POST /api/v1/subjects/{subject_id}/papers/`  
-**Endpoint:** `GET  /api/v1/subjects/{subject_id}/papers/`  
+**Endpoint:** `POST /api/v1/subjects/{subject_id}/papers/`
+**Endpoint:** `GET  /api/v1/subjects/{subject_id}/papers/`
 **Permission:** Admin / Senior Executive roles
 
 **POST Request (multipart/form-data):**
 
-| Field        | Type     | Required | Description                         |
-|--------------|----------|----------|-------------------------------------|
-| `set_name`   | string   | Yes      | e.g., `"Set A"`, `"Morning Shift"` |
-| `file`       | file     | Yes      | PDF / document to upload            |
-| `answer_key` | file     | No       | Answer key PDF (optional)           |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `set_name` | string | Yes | e.g., `"Set A"`, `"Morning Shift"` |
+| `file` | file | Yes | PDF / document to upload |
+| `answer_key` | file | No | Answer key PDF (optional) |
+| `no_of_questions` | integer | Yes | Total number of questions |
 
 > `subject` is inferred from the URL — do not pass it in the body.
 
@@ -357,20 +369,16 @@ Papers are now managed at the **Subject** level rather than per-exam, making the
 }
 ```
 
----
-
 ### 6.2 Retrieve / Update / Delete a Subject Paper
 
-**Endpoint:** `/api/v1/subjects/{subject_id}/papers/{paper_id}/`  
+**Endpoint:** `/api/v1/subjects/{subject_id}/papers/{paper_id}/`
 **Methods:** `GET`, `PATCH`, `DELETE`
 
 `PATCH` accepts any subset of `set_name`, `file`, `answer_key`.
 
----
-
 ### 6.3 Link Papers to an Exam (`selected_papers`)
 
-When creating or updating an exam, pass `selected_papers` as a list of `SubjectPaper` UUIDs to associate them with the exam. These must belong to any subject (no subject restriction enforced at this layer).
+When creating or updating an exam, pass `selected_papers` as a list of `SubjectPaper` UUIDs.
 
 **PATCH `/api/v1/exams/{exam_id}/`:**
 ```json
@@ -379,51 +387,9 @@ When creating or updating an exam, pass `selected_papers` as a list of `SubjectP
 }
 ```
 
-**GET `/api/v1/exams/{exam_id}/` response now includes:**
-```json
-{
-    "selected_papers": [
-        {
-            "id": "uuid-of-paper-1",
-            "subject": "uuid-of-subject",
-            "subject_name": "Company Law",
-            "set_name": "Set A",
-            "file": "/media/subject_papers/set_a.pdf",
-            "answer_key": null,
-            "created_at": "2026-06-29T10:00:00Z"
-        }
-    ]
-}
-```
-
----
-
 ### 6.4 Round-Robin Paper Assignment at Exam Start
 
-When a student hits `POST /api/v1/exams/{exam_id}/start/`, the system:
-
-1. Retrieves all `selected_papers` for the exam (ordered by `set_name`).
-2. Counts how many sessions already have each paper assigned.
-3. Assigns the paper with the **lowest assignment count** to the new session.
-
-This guarantees even distribution across all paper sets for the duration of the exam.
-
-**Start Exam Response now includes `assigned_paper_id`:**
-```json
-{
-    "session_id": "uuid-of-session",
-    "remaining_seconds": 3600,
-    "autosave_interval_seconds": 30,
-    "geo_check_interval_minutes": 5,
-    "exam_title": "Midterm",
-    "total_marks": 100,
-    "questions": [ "..." ]
-}
-```
-
-> `ExamSession.assigned_paper` stores the paper assigned to the student. Use this to show/download the correct paper file during the exam session.
-
----
+When a student hits `POST /api/v1/exams/{exam_id}/start/`, the system assigns the paper with the **lowest assignment count** to ensure even distribution.
 
 ### 6.5 Workflow Summary
 
@@ -434,37 +400,46 @@ This guarantees even distribution across all paper sets for the duration of the 
 2. Link papers to an exam:
    PATCH /api/v1/exams/<exam_id>/  { "selected_papers": ["uuid-1", "uuid-2"] }
 
-3. Student starts exam → paper auto-assigned (round-robin):
+3. [Optional] Upload question paper directly to exam:
+   POST /api/v1/exams/<exam_id>/upload-materials/  { question_paper: <file> }
+
+4. Student starts exam → paper auto-assigned (round-robin):
    POST /api/v1/exams/<exam_id>/start/
 ```
 
 ---
 
-## 7. Exam v2 Fields, Proctoring Config, Paper Checkers & Result Release Mode
+## 7. Exam Model Fields Reference
 
-The `Exam` model (v2) supports full proctoring, geo-fencing, screen monitoring, configurable result release, reusable subject papers, and M2M paper_checkers. These are populated via `exam_data` from timetable slot creation (see `TimetableSlotCreateUpdateSerializer._handle_exam()` and `Exam.ensure_paper_checkers()`).
+The `Exam` model supports full proctoring, geo-fencing, screen monitoring, configurable result release, reusable subject papers, M2M paper_checkers, and grace marks.
 
 ### Key Model Fields (from `exams/models.py`)
-- `exam_mode`: `'online'` (proctored) or `'offline'` (paper-based with uploaded papers)
-- **Geo**: `geo_lat`, `geo_lon`, `geo_radius_meters` (0=disabled), `geo_check_interval_minutes` (for periodic checks during exam)
-- **Screen**: `screen_lock_max_violations`, `screen_lock_action` (`flag_only` or `auto_submit`), `split_screen_max_warnings`, `split_screen_action`
-- `result_release_mode`: `'instant'` (auto-grade MCQs on `/submit/`, publish if no subjective components) or `'manual'` (admin triggers via publish endpoint)
-- `selected_papers`: M2M to `SubjectPaper` (round-robin assignment at start)
-- `paper_checkers`: M2M to users with `role='paper_checker'` (early sync via `ensure_paper_checkers()` from timetable or branch fallback)
-- `answer_key`: File upload (required before student recheck requests)
+
+| Field | Type | Description |
+|---|---|---|
+| `exam_mode` | choice | `'online'` (proctored) or `'offline'` (paper-based) |
+| `geo_lat`, `geo_lon`, `geo_radius_meters` | decimal | Geo-fence coordinates; `0` disables geo check |
+| `geo_check_interval_minutes` | int | Periodic geo validation interval during exam |
+| `screen_lock_max_violations` | int | Max screen-lock violations before action |
+| `screen_lock_action` | choice | `'flag_only'` or `'auto_submit'` |
+| `split_screen_max_warnings` | int | Max split-screen warnings before action |
+| `split_screen_action` | choice | `'flag_only'` or `'auto_submit'` |
+| `result_release_mode` | choice | `'instant'` (auto-grade MCQ on submit) or `'manual'` (admin publishes) |
+| `selected_papers` | M2M | Links to `SubjectPaper` objects |
+| `paper_checkers` | M2M | Users with `role='paper_checker'` |
+| `answer_key` | FileField | Exam-level answer key upload |
+| `grace_marks` | decimal | Grace marks added to all student results (**new**) |
+| `grace_marks_note` | text | Reason for awarding grace marks (**new**) |
 
 ### Methods
-- `recalculate_total_marks()`: Sum of `Question.marks` (auto via Django signals on Question CRUD). Offline exams can override manually.
-- `ensure_paper_checkers()`: Populates `paper_checkers` M2M **early** on Exam create (called from serializer and post_save). 
-
-**Delayed Round-Robin Assignment:** Actual per-student paper assignment (to `ExamSession.assigned_paper` and `MarkSheet.paper_checker`) happens **post-exam** via Celery task after `auto_mark_absent()`. This uses availability matching timetable slot times.
+- `recalculate_total_marks()`: Sum of `Question.marks` (auto via Django signals on Question CRUD).
+- `ensure_paper_checkers()`: Populates `paper_checkers` M2M early on Exam create.
 
 **Proctoring Flow:**
 - `/start/` validates geo if configured, creates `ExamSession`.
 - Periodic `/geo-check/` and `/screen-event/` log violations, trigger actions per thresholds.
 - On submit, if `result_release_mode=instant` and MCQ-only, auto-grade and publish.
 
-See `timetable_procedure_guide.md` (Appendix A.4/A.8) for `exam_data` examples, `results_module_api_documentation.md` for marking/publishing/recheck integration, and `exams/signals.py` for auto-recalculate.
+See `timetable_procedure_guide.md` for `exam_data` examples, `results_module_api_documentation.md` for marking/publishing/recheck integration.
 
-**Migration Note:** Run `python manage.py migrate exams` after updates to pick up new fields (geo/screen/result_release_mode, M2Ms, answer_key).
-
+**Migration Note:** After pulling latest code, run `python manage.py migrate exams` to pick up new fields (`grace_marks`, `grace_marks_note`).
