@@ -227,6 +227,8 @@ URL_MODULE_MAP = [
     (r'^api/auth/users/', 'users'),
     (r'^api/auth/user/', 'users'),
     (r'^api/auth/add-user/', 'users'),
+    # Support Queries
+    (r'^api/v1/support/', 'support'),
 ]
 
 # Paths that are always allowed regardless of role/module
@@ -283,10 +285,13 @@ def get_user_modules(user):
     Uses accessible_modules from the user object if set, otherwise falls back to default_modules from ROLE_PERMISSIONS.
     """
     if hasattr(user, 'accessible_modules') and user.accessible_modules is not None:
-        return set(user.accessible_modules)
+        modules = set(user.accessible_modules)
+    else:
+        config = get_role_config(getattr(user, 'role', ''))
+        modules = set(config.get('default_modules', []))
         
-    config = get_role_config(getattr(user, 'role', ''))
-    modules = set(config.get('default_modules', []))
+    # Every authenticated user can access the support module to raise queries
+    modules.add('support')
     return modules
 
 
