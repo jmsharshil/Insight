@@ -770,7 +770,7 @@ class ClassroomDetailView(APIView):
 
 class TimetableListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject', 'batch__course', 'session_type','batch__barnch']
+    filterset_fields = ['batch', 'day_of_week', 'faculty', 'subject', 'batch__course', 'session_type','batch__branch']
     search_fields = []
     ordering_fields = '__all__'
 

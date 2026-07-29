@@ -160,7 +160,7 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         'kpis': {
             'total_active_students': student_agg['total_active'] or 0,
             'new_admissions': student_agg['new_this_month'] or 0,
-            'attendance_rate': att_rate,
+            'attendance_rate': f"{att_agg.get('present') or 0}/{att_agg.get('total_records') or 0} ({att_rate}%)",
             'fee_collected': float(fee_agg['total_collected'] or 0),
             'pending_fees': float(fee_agg['total_due'] or 0),
             'overdue_fees': fee_agg['overdue_count'] or 0,
@@ -200,6 +200,7 @@ def _get_faculty_dashboard(user, now, today, month_start):
 
     # My attendance rate - real computation from QR scans (no static)
     my_att_rate = 100.0
+    scan_agg = {}
     if faculty:
         scan_agg = FacultyQRScanLog.objects.filter(
             faculty=faculty, scanned_at__gte=month_start
@@ -262,9 +263,9 @@ def _get_faculty_dashboard(user, now, today, month_start):
             'monthly_sessions': SessionReport.objects.filter(
                 faculty=faculty, session_date__gte=month_start.date()
             ).count() if faculty else 0,
-            'attendance_rate': my_att_rate,
+            'attendance_rate': f"{scan_agg.get('ontime') or 0}/{scan_agg.get('total') or 0} ({my_att_rate}%)",
             'pending_tasks': len(pending_tasks),
-            'avg_session_completion': avg_completion,
+            'avg_session_completion': f"{avg_completion}%",
             'visiting_count': visiting_count,
         },
         'today_schedule': today_sessions,
@@ -316,6 +317,13 @@ def _get_student_dashboard(user, now, today, month_start):
         present=Count('id', filter=Q(status__in=['present', 'late'])),
     )
     att_rate = round((attendance['present'] or 0) / (attendance['total'] or 1) * 100, 2)
+
+    # Exam attendance rate
+    exam_attendance = MarkSheet.objects.filter(student=student).aggregate(
+        total=Count('id'),
+        present=Count('id', filter=Q(is_absent=False))
+    )
+    exam_att_rate = round((exam_attendance['present'] or 0) / (exam_attendance['total'] or 1) * 100, 2)
 
     # Fees due - use amount_due logic
     fees_due = StudentFee.objects.filter(
@@ -370,16 +378,19 @@ def _get_student_dashboard(user, now, today, month_start):
         except Exception:
             result['percentile'] = None
 
+    avg_score = round(
+        float(PublishedResult.objects.filter(student=student).aggregate(
+            avg_p=Avg('percentage')
+        )['avg_p'] or 0), 2
+    )
+
     return {
         'kpis': {
-            'attendance_rate': att_rate,
+            'attendance_rate': f"{attendance.get('present') or 0}/{attendance.get('total') or 0} ({att_rate}%)",
+            'exam_attendance': f"{exam_attendance.get('present') or 0}/{exam_attendance.get('total') or 0} ({exam_att_rate}%)",
             'fees_due': float(fees_due.get('total_due') or 0),
             'upcoming_exams_count': len(upcoming),
-            'avg_score': round(
-                float(PublishedResult.objects.filter(student=student).aggregate(
-                    avg_p=Avg('percentage')
-                )['avg_p'] or 0), 2
-            ),
+            'avg_score': f"{avg_score}%",
         },
         'upcoming_exams': upcoming,
         'recent_results': recent_results,
@@ -423,7 +434,7 @@ def _get_sales_dashboard(user, now, today, month_start):
         'kpis': {
             'total_leads': lead_agg['total_leads'] or 0,
             'new_leads_this_month': lead_agg['new_leads'] or 0,
-            'conversion_rate': round((lead_agg['converted'] or 0) / (lead_agg['total_leads'] or 1) * 100, 2),
+            'conversion_rate': f"{lead_agg.get('converted') or 0}/{lead_agg.get('total_leads') or 0} ({round((lead_agg.get('converted') or 0) / (lead_agg.get('total_leads') or 1) * 100, 2)}%)",
             'active_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
         },
         'pipeline': pipeline,
@@ -780,8 +791,18 @@ def _get_exam_stats(bq):
         attendance_rates.append(round(total_attended / total_enrolled * 100, 2))
 
     # Pass rate and avg percentage from published results
+    pr_bq = Q()
+    if bq and bq.children:
+        for child in bq.children:
+            if isinstance(child, tuple):
+                key, val = child
+                if key.startswith('branch'):
+                    pr_bq &= Q(**{f"exam__{key}": val})
+                else:
+                    pr_bq &= Q(**{key: val})
+
     pr_agg = PublishedResult.objects.filter(
-        bq if bq else Q(),
+        pr_bq,
     ).aggregate(
         total=Count('id'),
         passed=Count('id', filter=Q(is_pass=True)),
