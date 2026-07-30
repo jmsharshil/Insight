@@ -906,6 +906,176 @@ class TimetableListView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+from django.http import HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+
+class TimetableExportExcelView(TimetableListView):
+    def get(self, request):
+        queryset = TimetableSlot.objects.select_related(
+            'batch', 'batch__course', 'subject', 'faculty', 'classroom', 'batch__branch'
+        ).all()
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(organization=request.user.organization)
+
+        # Role-based constraints
+        role = getattr(request.user, 'role', None)
+        if role == 'student':
+            from batches.models import BatchStudent
+            try:
+                from students.models import Student
+                student = Student.objects.get(user=request.user)
+                batch_ids = BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True)
+                queryset = queryset.filter(batch_id__in=batch_ids)
+            except Exception:
+                queryset = queryset.none()
+        elif role == 'faculty':
+            try:
+                from faculty.models import FacultyProfile
+                faculty = FacultyProfile.objects.get(user=request.user)
+                queryset = queryset.filter(faculty_id=faculty.id)
+            except Exception:
+                queryset = queryset.none()
+        elif role in ['parents', 'parent']:
+            from batches.models import BatchStudent
+            try:
+                from students.models import ParentLink
+                linked_students = ParentLink.objects.filter(parent=request.user).values_list('student_id', flat=True)
+                batch_ids = BatchStudent.objects.filter(student_id__in=linked_students).values_list('batch_id', flat=True)
+                queryset = queryset.filter(batch_id__in=batch_ids)
+            except Exception:
+                queryset = queryset.none()
+        elif role not in ['super_admin']:
+            # For branch managers and other admins, filter by branch if applicable
+            bid = getattr(request.user, 'branch_id', None)
+            if not bid and hasattr(request.user, 'profile'):
+                bid = getattr(request.user.profile, 'branch_id', None)
+            if bid:
+                queryset = queryset.filter(batch__branch_id=bid)
+
+        batch_id = request.GET.get('batch_id')
+        day_of_week = request.GET.get('day_of_week')
+        faculty_id = request.GET.get('faculty_id')
+        subject_id = request.GET.get('subject_id')
+        course_id = request.GET.get('course_id')
+        session_type = request.GET.get('session_type')
+        branch_id = request.GET.get('branch_id')
+
+        if batch_id:
+            batch_ids = [b.strip() for b in batch_id.split(',')]
+            queryset = queryset.filter(batch_id__in=batch_ids)
+        if day_of_week is not None:
+            queryset = queryset.filter(day_of_week=int(day_of_week))
+        if faculty_id:
+            queryset = queryset.filter(faculty_id=faculty_id)
+        if subject_id:
+            queryset = queryset.filter(subject_id=subject_id)
+        if course_id:
+            queryset = queryset.filter(batch__course_id=course_id)
+        if session_type:
+            queryset = queryset.filter(session_type=session_type)
+        if branch_id:
+            queryset = queryset.filter(batch__branch_id=branch_id)
+
+        import datetime
+        from django.utils import timezone
+        from django.db import models
+        
+        today = timezone.now().date()
+        date_from_str = request.GET.get('date_from')
+        date_to_str = request.GET.get('date_to')
+        
+        if not date_from_str and not date_to_str:
+            date_from = today - datetime.timedelta(days=today.weekday())
+            date_to = date_from + datetime.timedelta(days=6)
+        else:
+            date_from = datetime.datetime.strptime(date_from_str, "%Y-%m-%d").date() if date_from_str else None
+            date_to = datetime.datetime.strptime(date_to_str, "%Y-%m-%d").date() if date_to_str else None
+
+        q_filter = models.Q()
+        if date_from and date_to:
+            q_filter = models.Q(session_date__range=[date_from, date_to]) | (
+                models.Q(is_recurring=True) &
+                (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True)) &
+                (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
+            )
+        elif date_from:
+            q_filter = models.Q(session_date__gte=date_from) | (
+                models.Q(is_recurring=True) &
+                (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
+            )
+        elif date_to:
+            q_filter = models.Q(session_date__lte=date_to) | (
+                models.Q(is_recurring=True) &
+                (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True))
+            )
+
+        if q_filter:
+            queryset = queryset.filter(q_filter)
+
+        queryset = apply_filters(self, request, queryset)
+        
+        # Ensure ordering
+        queryset = queryset.order_by('day_of_week', 'start_time')
+
+        # Generate Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Weekly Timetable"
+
+        headers = [
+            "Batch", "Course", "Branch", "Day of Week", "Date", 
+            "Start Time", "End Time", "Subject", "Faculty", 
+            "Classroom", "Session Type"
+        ]
+        
+        ws.append(headers)
+        
+        # Style headers
+        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        for col_num, cell in enumerate(ws[1], 1):
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[cell.column_letter].width = 20
+            
+        day_map = {
+            0: "Monday", 1: "Tuesday", 2: "Wednesday", 
+            3: "Thursday", 4: "Friday", 5: "Saturday", 6: "Sunday"
+        }
+            
+        for slot in queryset:
+            slot_date_str = "-"
+            if getattr(slot, 'session_date', None):
+                slot_date_str = slot.session_date.strftime("%Y-%m-%d")
+            elif slot.is_recurring and slot.day_of_week is not None and date_from and date_to:
+                curr = date_from
+                # Find the matching weekday within the filtered range
+                while curr <= date_to:
+                    if curr.weekday() == slot.day_of_week:
+                        slot_date_str = curr.strftime("%Y-%m-%d")
+                        break
+                    curr += datetime.timedelta(days=1)
+
+            ws.append([
+                slot.batch.name if slot.batch else "-",
+                slot.batch.course.name if slot.batch and slot.batch.course else "-",
+                slot.batch.branch.name if slot.batch and slot.batch.branch else "-",
+                day_map.get(slot.day_of_week, "-") if slot.day_of_week is not None else "-",
+                slot_date_str,
+                slot.start_time.strftime("%I:%M %p") if slot.start_time else "-",
+                slot.end_time.strftime("%I:%M %p") if slot.end_time else "-",
+                slot.subject.name if slot.subject else "-",
+                slot.faculty.user.name if slot.faculty and hasattr(slot.faculty, 'user') else "-",
+                slot.classroom.name if slot.classroom else "-",
+                slot.get_session_type_display() if slot.session_type else "-"
+            ])
+            
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename="Timetable_Export.xlsx"'
+        wb.save(response)
+        return response
 
 class TimetableDetailView(APIView):
 

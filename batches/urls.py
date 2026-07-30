@@ -11,7 +11,7 @@ from .views import (
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
     ChapterListView, ChapterDetailView,
-    AcademicDropdownsView, TimetablePublishView
+    AcademicDropdownsView, TimetablePublishView, TimetableExportExcelView
 )
 
 urlpatterns = [
@@ -44,6 +44,7 @@ urlpatterns = [
 
     # ── Timetable ───────────────────────────────────────────────────────────
     path('timetable/', TimetableListView.as_view(), name='timetable-list'),
+    path('timetable/export/', TimetableExportExcelView.as_view(), name='timetable-export-excel'),
     path('timetable/confirm/', TimetableConfirmView.as_view(), name='timetable-confirm'),
     path('timetable/<uuid:pk>/', TimetableDetailView.as_view(), name='timetable-detail'),
     path('timetable/faculty/<uuid:faculty_id>/', FacultyTimetableView.as_view(), name='faculty-timetable'),
