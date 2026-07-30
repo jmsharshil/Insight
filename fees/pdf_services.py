@@ -178,8 +178,8 @@ def _reportlab_receipt_pdf(context):
                 'Shreeji Society, Behind Gautam Nagar Bus Stand,<br/>'
                 'Naranpura, Ahmedabad - 380013', small_style),
             Paragraph(
-                'FOR, Insight Institute of Professional Studies<br/><br/><br/><br/>'
-                '___________________________<br/>'
+                'FOR, Insight Institute of Professional Studies<br/><br/><br/>'
+                '<i>(Digitally Signed)</i><br/><br/>'
                 '<b>Authorised Signatory</b>',
                 ParagraphStyle('Footer', parent=small_style, alignment=TA_RIGHT)),
         ]
@@ -285,6 +285,40 @@ def generate_payment_receipt_pdf(payment):
         except Exception:
             batch_name = 'N/A'
 
+        # Process signature to remove white background (if any)
+        raw_sig_url = 'https://insightsinstitutes.blob.core.windows.net/media/WhatsApp%20Image%202026-05-28%20at%2010.00.48%20PM.jpeg'
+        processed_sig_url = raw_sig_url
+        try:
+            import requests
+            import base64
+            from PIL import Image
+            resp = requests.get(raw_sig_url, timeout=5)
+            if resp.status_code == 200:
+                img = Image.open(BytesIO(resp.content)).convert("RGBA")
+                datas = img.getdata()
+                new_data = []
+                for item in datas:
+                    # Calculate luminance
+                    lum = (item[0]*299 + item[1]*587 + item[2]*114) / 1000
+                    if lum > 160:  # Light background threshold
+                        new_data.append((255, 255, 255, 0))
+                    else:
+                        # Make the pen strokes solid
+                        new_data.append((item[0], item[1], item[2], 255))
+                img.putdata(new_data)
+                
+                # Crop the bounding box of the signature to remove excess transparent padding
+                bbox = img.getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                processed_sig_url = f"data:image/png;base64,{b64}"
+        except Exception as e:
+            logger.warning(f"Failed to strip background from signature: {e}")
+
         context = {
             'receipt_no': payment.receipt_number or f"REC-{payment.id}",
             'receipt_date': receipt_date_str,
@@ -301,6 +335,7 @@ def generate_payment_receipt_pdf(payment):
             # 'school_name': getattr(settings, 'SCHOOL_NAME', 'Your School Name'),
             # 'school_address': getattr(settings, 'SCHOOL_ADDRESS', ''),
             'logo_url': 'https://insightsinstitutes.blob.core.windows.net/media/insight.png',
+            'signature_url': processed_sig_url,
         }
         
         html = template.render(context)

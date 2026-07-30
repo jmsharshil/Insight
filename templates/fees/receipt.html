@@ -235,10 +235,18 @@
             </div>
             <div style="float: right; width: 50%; text-align: right;">
                 <div class="sign-area">
-                    <div style="color: #ed7c31; font-size: 12px; margin-bottom: 40px;">
+                    <div style="color: #ed7c31; font-size: 12px; margin-bottom: 20px;">
                         FOR, Insight Institute of Professional Studies
                     </div>
-                    <div class="sign-line">Authorised Signatory</div>
+                    {% if signature_url %}
+                    <img src="{{ signature_url }}" alt="Digitally Signed" style="max-height: 45px; margin-bottom: 5px; opacity: 0.9;">
+                    <div class="sign-line" style="margin-top: 0; border-top: none;"><b>Authorised Signatory</b></div>
+                    {% else %}
+                    <div style="font-size: 12px; font-style: italic; color: #555; margin-bottom: 10px;">
+                        (Digitally Signed)
+                    </div>
+                    <div class="sign-line" style="margin-top: 0; border-top: none;"><b>Authorised Signatory</b></div>
+                    {% endif %}
                 </div>
             </div>
             <div style="clear:both;"></div>
