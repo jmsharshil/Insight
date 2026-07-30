@@ -980,33 +980,45 @@ class TimetableExportExcelView(TimetableListView):
         import datetime
         from django.utils import timezone
         from django.db import models
-        
+
         today = timezone.now().date()
         date_from_str = request.GET.get('date_from')
         date_to_str = request.GET.get('date_to')
-        
+
         if not date_from_str and not date_to_str:
             date_from = today - datetime.timedelta(days=today.weekday())
             date_to = date_from + datetime.timedelta(days=6)
         else:
-            date_from = datetime.datetime.strptime(date_from_str, "%Y-%m-%d").date() if date_from_str else None
-            date_to = datetime.datetime.strptime(date_to_str, "%Y-%m-%d").date() if date_to_str else None
+            try:
+                date_from = datetime.datetime.strptime(date_from_str, "%Y-%m-%d").date() if date_from_str else None
+            except ValueError:
+                date_from = None
+            try:
+                date_to = datetime.datetime.strptime(date_to_str, "%Y-%m-%d").date() if date_to_str else None
+            except ValueError:
+                date_to = None
 
+        # ── Build Q filter ───────────────────────────────────────────────────
+        # For non-recurring (session_date) slots: filter directly on session_date.
+        # For recurring slots: use effective_from / effective_to range.
+        #   NOTE: slots with effective_from=NULL & effective_to=NULL would match
+        #   any date range via the isnull=True OR clauses, so we post-filter
+        #   recurring slots below using day_of_week vs. the date window.
         q_filter = models.Q()
         if date_from and date_to:
             q_filter = models.Q(session_date__range=[date_from, date_to]) | (
-                models.Q(is_recurring=True) &
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
                 (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True)) &
                 (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
             )
         elif date_from:
             q_filter = models.Q(session_date__gte=date_from) | (
-                models.Q(is_recurring=True) &
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
                 (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
             )
         elif date_to:
             q_filter = models.Q(session_date__lte=date_to) | (
-                models.Q(is_recurring=True) &
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
                 (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True))
             )
 
@@ -1014,7 +1026,29 @@ class TimetableExportExcelView(TimetableListView):
             queryset = queryset.filter(q_filter)
 
         queryset = apply_filters(self, request, queryset)
-        
+
+        # ── Post-filter: recurring slots whose day_of_week doesn't fall in range ──
+        # Recurring slots with effective_from=NULL & effective_to=NULL always pass
+        # the DB-level Q filter above, so we must validate day_of_week in Python.
+        # Build the set of weekday integers (0=Mon … 6=Sun) present in [date_from, date_to].
+        if date_from and date_to:
+            days_in_range = set()
+            cur = date_from
+            while cur <= date_to and len(days_in_range) < 7:
+                days_in_range.add(cur.weekday())
+                cur += datetime.timedelta(days=1)
+
+            filtered_ids = []
+            for slot in queryset:
+                if slot.is_recurring and slot.session_date is None:
+                    # Only keep if this slot's weekday is actually in the range
+                    if slot.day_of_week is not None and slot.day_of_week not in days_in_range:
+                        continue
+                filtered_ids.append(slot.pk)
+
+            queryset = queryset.filter(pk__in=filtered_ids)
+        # ─────────────────────────────────────────────────────────────────────
+
         # Ensure ordering
         queryset = queryset.order_by('day_of_week', 'start_time')
 
@@ -1045,32 +1079,65 @@ class TimetableExportExcelView(TimetableListView):
             3: "Thursday", 4: "Friday", 5: "Saturday", 6: "Sunday"
         }
             
+        export_rows = []
+
+        # If we have a bounded range, we can expand recurring slots into actual dates.
+        # If the range is unbounded, we fall back to 1 row per slot to prevent infinite loops.
+        is_bounded = bool(date_from and date_to)
+
         for slot in queryset:
-            slot_date_str = "-"
-            if getattr(slot, 'session_date', None):
-                slot_date_str = slot.session_date.strftime("%Y-%m-%d")
-            elif slot.is_recurring and slot.day_of_week is not None and date_from and date_to:
+            batch_name = slot.batch.name if slot.batch else "-"
+            course_name = slot.batch.course.name if slot.batch and slot.batch.course else "-"
+            branch_name = slot.batch.branch.name if slot.batch and slot.batch.branch else "-"
+            day_str = day_map.get(slot.day_of_week, "-") if slot.day_of_week is not None else "-"
+            start_str = slot.start_time.strftime("%I:%M %p") if slot.start_time else "-"
+            end_str = slot.end_time.strftime("%I:%M %p") if slot.end_time else "-"
+            subject_name = slot.subject.name if slot.subject else "-"
+            faculty_name = slot.faculty.user.name if slot.faculty and hasattr(slot.faculty, 'user') else "-"
+            classroom_name = slot.classroom.name if slot.classroom else "-"
+            session_type = slot.get_session_type_display() if slot.session_type else "-"
+
+            base_row = [
+                batch_name, course_name, branch_name, day_str,
+                "-", # placeholder for date
+                start_str, end_str, subject_name, faculty_name,
+                classroom_name, session_type
+            ]
+            
+            # Use datetime.time.min for sorting if start_time is None
+            sort_time = slot.start_time if slot.start_time else datetime.time.min
+
+            if slot.session_date:
+                # Non-recurring: one exact date
+                row = list(base_row)
+                row[4] = slot.session_date.strftime("%Y-%m-%d")
+                export_rows.append((slot.session_date, sort_time, row))
+            elif slot.is_recurring and slot.day_of_week is not None and is_bounded:
+                # Recurring bounded: generate a row for EVERY matching weekday in the range
                 curr = date_from
-                # Find the matching weekday within the filtered range
                 while curr <= date_to:
                     if curr.weekday() == slot.day_of_week:
-                        slot_date_str = curr.strftime("%Y-%m-%d")
-                        break
+                        # Check effective_from / effective_to bounds for this specific date
+                        if slot.effective_from and curr < slot.effective_from:
+                            pass
+                        elif slot.effective_to and curr > slot.effective_to:
+                            pass
+                        else:
+                            row = list(base_row)
+                            row[4] = curr.strftime("%Y-%m-%d")
+                            export_rows.append((curr, sort_time, row))
                     curr += datetime.timedelta(days=1)
+            else:
+                # Fallback for unbounded recurring slots (just output one generic row)
+                row = list(base_row)
+                row[4] = "Recurring (Every " + day_str + ")"
+                export_rows.append((datetime.date.min, sort_time, row))
 
-            ws.append([
-                slot.batch.name if slot.batch else "-",
-                slot.batch.course.name if slot.batch and slot.batch.course else "-",
-                slot.batch.branch.name if slot.batch and slot.batch.branch else "-",
-                day_map.get(slot.day_of_week, "-") if slot.day_of_week is not None else "-",
-                slot_date_str,
-                slot.start_time.strftime("%I:%M %p") if slot.start_time else "-",
-                slot.end_time.strftime("%I:%M %p") if slot.end_time else "-",
-                slot.subject.name if slot.subject else "-",
-                slot.faculty.user.name if slot.faculty and hasattr(slot.faculty, 'user') else "-",
-                slot.classroom.name if slot.classroom else "-",
-                slot.get_session_type_display() if slot.session_type else "-"
-            ])
+        # Sort all rows chronologically by Date (x[0]), then Time (x[1])
+        export_rows.sort(key=lambda x: (x[0], x[1]))
+
+        for _, _, row in export_rows:
+            ws.append(row)
             
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = 'attachment; filename="Timetable_Export.xlsx"'
