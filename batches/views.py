@@ -1007,19 +1007,15 @@ class TimetableExportExcelView(TimetableListView):
         q_filter = models.Q()
         if date_from and date_to:
             q_filter = models.Q(session_date__range=[date_from, date_to]) | (
-                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
-                (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True)) &
-                (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True)
             )
         elif date_from:
             q_filter = models.Q(session_date__gte=date_from) | (
-                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
-                (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True)
             )
         elif date_to:
             q_filter = models.Q(session_date__lte=date_to) | (
-                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
-                (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True))
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True)
             )
 
         if q_filter:
@@ -1117,15 +1113,9 @@ class TimetableExportExcelView(TimetableListView):
                 curr = date_from
                 while curr <= date_to:
                     if curr.weekday() == slot.day_of_week:
-                        # Check effective_from / effective_to bounds for this specific date
-                        if slot.effective_from and curr < slot.effective_from:
-                            pass
-                        elif slot.effective_to and curr > slot.effective_to:
-                            pass
-                        else:
-                            row = list(base_row)
-                            row[4] = curr.strftime("%Y-%m-%d")
-                            export_rows.append((curr, sort_time, row))
+                        row = list(base_row)
+                        row[4] = curr.strftime("%Y-%m-%d")
+                        export_rows.append((curr, sort_time, row))
                     curr += datetime.timedelta(days=1)
             else:
                 # Fallback for unbounded recurring slots (just output one generic row)
