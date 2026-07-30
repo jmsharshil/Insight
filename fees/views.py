@@ -159,10 +159,16 @@ class StudentFeeListView(APIView):
             queryset = queryset.filter(student__branch_id=branch_id)
         if batch_id:
             queryset = queryset.filter(student__batch_id=batch_id)
-        if date_from:
-            queryset = queryset.filter(due_date__gte=date_from[:10])
-        if date_to:
-            queryset = queryset.filter(due_date__lte=date_to[:10])
+        if date_from or date_to:
+            date_q = Q()
+            item_q = Q(installment_plans__items__is_paid=False)
+            if date_from:
+                date_q &= Q(due_date__gte=date_from[:10])
+                item_q &= Q(installment_plans__items__due_date__gte=date_from[:10])
+            if date_to:
+                date_q &= Q(due_date__lte=date_to[:10])
+                item_q &= Q(installment_plans__items__due_date__lte=date_to[:10])
+            queryset = queryset.filter(date_q | item_q).distinct()
 
         queryset = apply_filters(self, request, queryset)
 
