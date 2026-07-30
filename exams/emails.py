@@ -159,7 +159,7 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
             'exam_date': exam.scheduled_date.strftime('%d %b %Y'),
             'missing_items': missing_items,
         },
-        organization=exam.organization if hasattr(exam, 'organization') else None,
+        organization=exam.branch.organization if hasattr(exam, 'branch') and exam.branch else None,
     )
 
     # Save to NotificationHistory so the reminder appears in the in-app notification feed
