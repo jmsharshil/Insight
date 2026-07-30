@@ -164,6 +164,20 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
         organization=exam.organization if hasattr(exam, 'organization') else None,
     )
 
+    # Save to NotificationHistory so the reminder appears in the in-app notification feed
+    # (Email path bypasses send_fcm_notification, so we record it explicitly here)
+    try:
+        from auth_user.models import NotificationHistory
+        missing_str = " and ".join(missing_items)
+        NotificationHistory.objects.create(
+            user=faculty_user,
+            title='Reminder: Upload Exam Materials',
+            body=f"Please upload the {missing_str} for '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}. Link: {exam_link}",
+            data={'exam_id': str(exam.id), 'exam_link': exam_link, 'missing_items': missing_items, 'channel': 'email'},
+        )
+    except Exception as e:
+        logger.warning(f"Failed to save NotificationHistory for faculty {faculty_user.id}: {e}")
+
     try:
         if getattr(faculty_user, 'phone', None):
             send_whatsapp_text(

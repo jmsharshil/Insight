@@ -81,6 +81,7 @@ class SchedulerConfig(AppConfig):
             update_exam_statuses,
             send_pending_submission_reminders,
             auto_expire_exam_sessions,
+            send_exam_material_upload_reminders,
         )
         from auditlog.tasks import cleanup_old_audit_logs
         from auth_user.tasks import cleanup_old_notifications
@@ -94,6 +95,7 @@ class SchedulerConfig(AppConfig):
         TaskScheduler.register("update_exam_statuses", update_exam_statuses)
         TaskScheduler.register("send_pending_submission_reminders", send_pending_submission_reminders)
         TaskScheduler.register("auto_expire_exam_sessions", auto_expire_exam_sessions)
+        TaskScheduler.register("send_exam_material_upload_reminders", send_exam_material_upload_reminders)
         TaskScheduler.register("cleanup_old_audit_logs", cleanup_old_audit_logs)
         TaskScheduler.register("cleanup_old_notifications", cleanup_old_notifications)
         TaskScheduler.register("detect_missing_scans_all_branches", detect_missing_scans_all_branches)
@@ -147,6 +149,12 @@ class SchedulerConfig(AppConfig):
                 "task_type": "detect_missing_scans_all_branches",
                 "interval_seconds": 86400,       # nightly (every 24h)
                 "delay_seconds": 82800,          # ~23:00 after midnight startup
+                "max_retries": 3,
+            },
+            {
+                "task_type": "send_exam_material_upload_reminders",
+                "interval_seconds": 86400,       # daily
+                "delay_seconds": 600,            # 10 min after startup
                 "max_retries": 3,
             },
         ]

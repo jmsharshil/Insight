@@ -236,7 +236,7 @@ class SubjectPaper(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     subject = models.ForeignKey('batches.Subject', on_delete=models.CASCADE, related_name='papers')
     set_name = models.CharField(
-        max_length=50,
+        max_length=500,
         blank=True,
         default='',
         help_text='e.g., Set A, Morning Shift. Auto-derived from filename if left blank.'
