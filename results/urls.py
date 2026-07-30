@@ -6,7 +6,7 @@ from .views import (
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
     MarkAbsentView, MarkAllAbsentView, BulkRecheckRequestView, PaperCheckerQueryView,
     SubjectWiseResultView, FacultyWiseResultView, BatchWiseResultView, ResultAnalyticsView,
-    ResultExportView,
+    ResultExportView, ResultDelayFlowView
 )
 
 urlpatterns = [
@@ -39,6 +39,9 @@ urlpatterns = [
     path('results/batch-wise/', BatchWiseResultView.as_view(), name='batch-wise-results'),
     path('results/summary/', ResultAnalyticsView.as_view(), name='result-summary'),
     path('results/analytics/', ResultAnalyticsView.as_view(), name='result-analytics'),
+    
+    # NEW: Delay Flow tracking report
+    path('results/delay-flow/', ResultDelayFlowView.as_view(), name='result-delay-flow'),
     
     # NEW: Export API for results/aggregates (CSV download)
     path('results/export/', ResultExportView.as_view(), name='results-export'),

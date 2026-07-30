@@ -1,4 +1,6 @@
 import logging
+import datetime
+from datetime import timedelta
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -1552,3 +1554,155 @@ class ResultExportView(APIView):
             'success': False,
             'message': 'Invalid export type. Use: exam, subject-wise, faculty-wise, batch-wise, analytics.'
         }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResultDelayFlowView(APIView):
+    """
+    API endpoint for the "Result Delay Flow" report to track the exam results pipeline delays.
+    Matches the spreadsheet layout and calculates "X DAYS LATE" or "ON TIME".
+    """
+    # permission_classes = [IsAuthenticated]
+    
+    def _calc_delay_status(self, expected_date, actual_date):
+        if not expected_date:
+            return "PENDING"
+        if not actual_date:
+            return "PENDING"
+        
+        expected = expected_date.date() if isinstance(expected_date, datetime.datetime) else expected_date
+        actual = actual_date.date() if isinstance(actual_date, datetime.datetime) else actual_date
+        
+        delay_days = (actual - expected).days
+        if delay_days > 0:
+            return f"{delay_days} DAYS LATE"
+        return "ON TIME"
+
+    def get(self, request):
+        role = _user_role(request.user)
+        if role not in ['super_admin', 'admin_senior_executive']:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        qs = Exam.objects.exclude(status='draft')
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+            
+        qs = qs.select_related('batch', 'subject').prefetch_related(
+            'paper_checkers', 'marksheets__paper_checker', 'answer_key_logs', 'published_results'
+        ).order_by('-scheduled_date')
+        
+        data = []
+        for exam in qs:
+            cs_level_batch = exam.batch.name if exam.batch else ""
+            subject_name = exam.subject.name if exam.subject else ""
+            chapters = exam.title
+            exam_date = exam.scheduled_date
+            
+            checkers = set(exam.paper_checkers.values_list('name', flat=True))
+            for ms in exam.marksheets.all():
+                if ms.paper_checker:
+                    checkers.add(ms.paper_checker.name)
+            name_of_paper_checker = ", ".join(checkers)
+            
+            # 1. Answer Key Readiness
+            expected_answerkey_date = exam_date
+            actual_answerkey_date = None
+            if exam.answer_key:
+                log = exam.answer_key_logs.first()
+                if log:
+                    actual_answerkey_date = log.sent_at.date()
+                else:
+                    actual_answerkey_date = exam.created_at.date() # Fallback
+            
+            status_answerkey = self._calc_delay_status(expected_answerkey_date, actual_answerkey_date)
+            
+            # 2. Submission to Paper Checker
+            expected_submission_date = exam_date + timedelta(days=1)
+            actual_submission_date = None
+            if exam.marksheets.filter(paper_checker__isnull=False).exists():
+                token = CheckerToken.objects.filter(marksheet__exam=exam).order_by('created_at').first()
+                if token:
+                    actual_submission_date = token.created_at.date()
+                else:
+                    actual_submission_date = expected_submission_date
+
+            status_submission = self._calc_delay_status(expected_submission_date, actual_submission_date)
+            
+            # 3. Delivery by Paper Checker (checking done)
+            if actual_submission_date:
+                expected_delivery_by_checker = actual_submission_date + timedelta(days=5)
+            else:
+                expected_delivery_by_checker = expected_submission_date + timedelta(days=5)
+                
+            actual_delivery_by_checker = None
+            unsubmitted = exam.marksheets.filter(is_submitted=False).count()
+            if unsubmitted == 0 and exam.marksheets.exists():
+                max_checked_at = exam.marksheets.aggregate(Max('checked_at'))['checked_at__max']
+                if max_checked_at:
+                    actual_delivery_by_checker = max_checked_at.date()
+            
+            status_delivery_by_checker = self._calc_delay_status(expected_delivery_by_checker, actual_delivery_by_checker)
+            
+            # 4. Delivery of Checked Answer Keys to Students
+            if actual_delivery_by_checker:
+                expected_delivery_keys_to_students = actual_delivery_by_checker + timedelta(days=1)
+            else:
+                expected_delivery_keys_to_students = expected_delivery_by_checker + timedelta(days=1)
+                
+            actual_delivery_keys_to_students = None
+            if exam.status == 'results_published':
+                first_pub = exam.published_results.aggregate(Min('published_at'))['published_at__min']
+                if first_pub:
+                    actual_delivery_keys_to_students = first_pub.date()
+                    
+            status_delivery_keys = self._calc_delay_status(expected_delivery_keys_to_students, actual_delivery_keys_to_students)
+            
+            # 5. Sending Marks in a Group
+            if actual_delivery_keys_to_students:
+                expected_marks_sharing = actual_delivery_keys_to_students + timedelta(days=2)
+            else:
+                expected_marks_sharing = expected_delivery_keys_to_students + timedelta(days=2)
+                
+            actual_marks_sharing = actual_delivery_keys_to_students # Both tied to results_published for now
+            status_marks_sharing = self._calc_delay_status(expected_marks_sharing, actual_marks_sharing)
+            
+            # 6. Overall Completion
+            expected_completion = exam_date + timedelta(days=7)
+            status_completion = "ON TIME"
+            if exam.status != 'results_published':
+                status_completion = "PENDING"
+            else:
+                if actual_marks_sharing and actual_marks_sharing > expected_completion:
+                    status_completion = f"{(actual_marks_sharing - expected_completion).days} DAYS LATE"
+
+            data.append({
+                'exam_id': str(exam.id),
+                'cs_level_batch': cs_level_batch,
+                'subject': subject_name,
+                'chapters': chapters,
+                'name_of_paper_checker': name_of_paper_checker,
+                'date_of_examination': exam_date.isoformat() if exam_date else None,
+                
+                'date_of_readiness_of_answerkey': actual_answerkey_date.isoformat() if actual_answerkey_date else None,
+                'status_of_readiness_of_answer_keys': status_answerkey,
+                
+                'expected_date_of_submission_to_paper_checker': expected_submission_date.isoformat() if expected_submission_date else None,
+                'date_of_submission_of_papers_to_paper_checker': actual_submission_date.isoformat() if actual_submission_date else None,
+                'status_of_submission_of_papers_to_paper_checker': status_submission,
+                
+                'expected_date_of_delivery_of_papers_by_paper_checker': expected_delivery_by_checker.isoformat() if expected_delivery_by_checker else None,
+                'date_of_delivery_of_papers_by_paper_checker': actual_delivery_by_checker.isoformat() if actual_delivery_by_checker else None,
+                'status_of_delivery_of_papers_by_paper_checker': status_delivery_by_checker,
+                
+                'expected_date_of_delivery_of_checked_answer_keys_to_students': expected_delivery_keys_to_students.isoformat() if expected_delivery_keys_to_students else None,
+                'date_of_delivery_of_checked_answer_keys_to_students': actual_delivery_keys_to_students.isoformat() if actual_delivery_keys_to_students else None,
+                'status_of_delivery_of_checked_answer_keys_to_students': status_delivery_keys,
+                
+                'expected_date_of_sending_marks_in_a_group': expected_marks_sharing.isoformat() if expected_marks_sharing else None,
+                'date_of_sending_marks_in_a_group': actual_marks_sharing.isoformat() if actual_marks_sharing else None,
+                'status_of_sending_marks_in_a_group': status_marks_sharing,
+                
+                'expected_date_completion': expected_completion.isoformat() if expected_completion else None,
+                'status_of_completion_of_process': status_completion,
+            })
+            
+        return Response({'success': True, 'data': data})
