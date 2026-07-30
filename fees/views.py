@@ -137,7 +137,7 @@ class StudentFeeListView(APIView):
 
     def get(self, request):
         # Optimized: prefetch_related for reverse relations
-        queryset = StudentFee.objects.select_related('student', 'fee_structure', 'due_date').prefetch_related('payments', 'installment_plans').all()
+        queryset = StudentFee.objects.select_related('student', 'fee_structure').prefetch_related('payments', 'installment_plans').all()
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(student__branch__organization=request.user.organization)
 
