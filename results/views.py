@@ -1303,9 +1303,14 @@ class ResultAnalyticsView(APIView):
             ),
         ).order_by('-pass_pct')[:5]
 
+        from dashboard.services import _get_result_delay_stats
+        bq = Q(branch__organization=request.user.organization) if getattr(request.user, 'organization', None) else Q()
+        delay_stats = _get_result_delay_stats(bq)
+
         return Response({
             'success': True,
             'data': {
+                'delay_stats': delay_stats,
                 'overall': {
                     'total_students': overall['total_students'],
                     'passed_students': overall['passed'],
