@@ -980,18 +980,30 @@ class TimetableExportExcelView(TimetableListView):
         import datetime
         from django.utils import timezone
         from django.db import models
-        
+
         today = timezone.now().date()
         date_from_str = request.GET.get('date_from')
         date_to_str = request.GET.get('date_to')
-        
+
         if not date_from_str and not date_to_str:
             date_from = today - datetime.timedelta(days=today.weekday())
             date_to = date_from + datetime.timedelta(days=6)
         else:
-            date_from = datetime.datetime.strptime(date_from_str, "%Y-%m-%d").date() if date_from_str else None
-            date_to = datetime.datetime.strptime(date_to_str, "%Y-%m-%d").date() if date_to_str else None
+            try:
+                date_from = datetime.datetime.strptime(date_from_str, "%Y-%m-%d").date() if date_from_str else None
+            except ValueError:
+                date_from = None
+            try:
+                date_to = datetime.datetime.strptime(date_to_str, "%Y-%m-%d").date() if date_to_str else None
+            except ValueError:
+                date_to = None
 
+        # ── Build Q filter ───────────────────────────────────────────────────
+        # For non-recurring (session_date) slots: filter directly on session_date.
+        # For recurring slots: use effective_from / effective_to range.
+        #   NOTE: slots with effective_from=NULL & effective_to=NULL would match
+        #   any date range via the isnull=True OR clauses, so we post-filter
+        #   recurring slots below using day_of_week vs. the date window.
         q_filter = models.Q()
         if date_from and date_to:
             q_filter = models.Q(session_date__range=[date_from, date_to]) | (
@@ -1014,7 +1026,29 @@ class TimetableExportExcelView(TimetableListView):
             queryset = queryset.filter(q_filter)
 
         queryset = apply_filters(self, request, queryset)
-        
+
+        # ── Post-filter: recurring slots whose day_of_week doesn't fall in range ──
+        # Recurring slots with effective_from=NULL & effective_to=NULL always pass
+        # the DB-level Q filter above, so we must validate day_of_week in Python.
+        # Build the set of weekday integers (0=Mon … 6=Sun) present in [date_from, date_to].
+        if date_from and date_to:
+            days_in_range = set()
+            cur = date_from
+            while cur <= date_to and len(days_in_range) < 7:
+                days_in_range.add(cur.weekday())
+                cur += datetime.timedelta(days=1)
+
+            filtered_ids = []
+            for slot in queryset:
+                if slot.is_recurring and slot.session_date is None:
+                    # Only keep if this slot's weekday is actually in the range
+                    if slot.day_of_week is not None and slot.day_of_week not in days_in_range:
+                        continue
+                filtered_ids.append(slot.pk)
+
+            queryset = queryset.filter(pk__in=filtered_ids)
+        # ─────────────────────────────────────────────────────────────────────
+
         # Ensure ordering
         queryset = queryset.order_by('day_of_week', 'start_time')
 
