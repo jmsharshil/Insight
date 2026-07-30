@@ -186,7 +186,10 @@ class LeaveListCreateView(APIView):
             date__lte=d['to_date']
         )
         if branch_obj and getattr(branch_obj, 'organization_id', None):
-            holidays = holidays.filter(branch__organization=branch_obj.organization_id)
+            holidays = holidays.filter(
+                models.Q(organization_id=branch_obj.organization_id) | 
+                models.Q(branch_id=bid)
+            )
         elif bid:
             holidays = holidays.filter(branch_id=bid)
         else:
@@ -1153,6 +1156,36 @@ class StudentLeaveListCreateView(APIView):
                 return Response({'success': False, 'message': 'Student not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
         else:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Holiday check
+        from branch.models import Branch
+        bid = student.branch_id if student else _user_branch_id(request.user)
+        branch_obj = Branch.objects.filter(id=bid).first() if bid else None
+        
+        holidays = PublicHoliday.objects.filter(
+            date__gte=d['from_date'],
+            date__lte=d['to_date']
+        )
+        if branch_obj and getattr(branch_obj, 'organization_id', None):
+            holidays = holidays.filter(
+                models.Q(organization_id=branch_obj.organization_id) | 
+                models.Q(branch_id=bid)
+            )
+        elif bid:
+            holidays = holidays.filter(branch_id=bid)
+        else:
+            holidays = holidays.none()
+            
+        if holidays.exists():
+            unique_holidays = {}
+            for h in holidays:
+                if h.date not in unique_holidays:
+                    unique_holidays[h.date] = h.name
+            holiday_names = ", ".join([f"{name} ({date})" for date, name in unique_holidays.items()])
+            return Response({
+                'success': False,
+                'message': f"Cannot apply for leave on public holidays: {holiday_names}."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Role-based parent approval logic (per requirement):
         # - If applied by parent: set parent_consulted=True → only 1 approval (admin)

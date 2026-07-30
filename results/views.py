@@ -1599,7 +1599,7 @@ class ResultDelayFlowView(APIView):
         for exam in qs:
             cs_level_batch = exam.batch.name if exam.batch else ""
             subject_name = exam.subject.name if exam.subject else ""
-            chapters = exam.title
+            exam_name = exam.title
             exam_date = exam.scheduled_date
             
             checkers = set(exam.paper_checkers.values_list('name', flat=True))
@@ -1683,7 +1683,7 @@ class ResultDelayFlowView(APIView):
                 'exam_id': str(exam.id),
                 'cs_level_batch': cs_level_batch,
                 'subject': subject_name,
-                'chapters': chapters,
+                'exam_name': exam_name,
                 'name_of_paper_checker': name_of_paper_checker,
                 'date_of_examination': exam_date.isoformat() if exam_date else None,
                 

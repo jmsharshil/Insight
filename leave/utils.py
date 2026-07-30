@@ -57,18 +57,17 @@ def calculate_leave_days(from_date, to_date, is_half_day=False,
         weekday = current.weekday()
         is_holiday = current in public_holiday_dates
 
-        if sandwich_rule:
-            # Sandwich: count *all* days (incl. weekends + public holidays) as 1.0
-            days += Decimal(1)
-        elif is_holiday:
+        if is_holiday and not sandwich_rule:
             # Normal mode: skip public holidays
             pass
-        elif weekday == 6:  # Sunday
-            if user_role in SPECIAL_SUNDAY_ROLES:
-                days += Decimal('1.5')  # per correction: Sunday = 1.5 for these roles
-            # else: ignore Sunday for other roles
+        elif weekday == 6 and user_role in SPECIAL_SUNDAY_ROLES:
+            # Sunday is 1.5 for these roles, always (unless it was a free holiday, handled above)
+            days += Decimal('1.5')
+        elif weekday == 6 and not sandwich_rule:
+            # Sunday is free for regular roles in normal mode
+            pass
         else:
-            # Regular working day (Mon-Sat, non-holiday) = 1.0
+            # Regular working day, OR a holiday/weekend that is being sandwiched
             days += Decimal(1)
 
         current += timedelta(days=1)
