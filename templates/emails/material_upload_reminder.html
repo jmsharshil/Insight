@@ -19,21 +19,7 @@
     {% endfor %}
 </ul>
 
-<p>Please upload them as soon as possible by clicking the button below:</p>
-
-<div style="text-align: center; margin: 28px 0;">
-    <a href="{{ exam_link }}"
-       style="display: inline-block; background-color: {{ primary_color }}; color: #ffffff;
-              text-decoration: none; padding: 12px 28px; border-radius: 6px;
-              font-weight: 600; font-size: 15px;">
-        Upload Materials
-    </a>
-</div>
-
-<p style="font-size: 12px; color: #9ca3af;">
-    If the button above does not work, copy and paste this link into your browser:<br>
-    <a href="{{ exam_link }}" style="color: {{ primary_color }};">{{ exam_link }}</a>
-</p>
+<p>Please submit them to the admin as soon as possible before {{exam_date}}.</p>
 
 <p>Thank you for your prompt action.</p>
 {% endblock %}

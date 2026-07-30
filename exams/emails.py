@@ -144,8 +144,7 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
         f"This is a reminder to upload the following material(s) for the exam "
         f"'{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}:\n\n"
         f"  • {chr(10).join('  • ' + item for item in missing_items)}\n\n"
-        f"Please upload them as soon as possible using the link below:\n"
-        f"{exam_link}\n\n"
+        f"Please submit them to the admin as soon as possible.\n\n"
         f"Thank you."
     )
 
@@ -159,7 +158,6 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
             'exam_title': exam.title,
             'exam_date': exam.scheduled_date.strftime('%d %b %Y'),
             'missing_items': missing_items,
-            'exam_link': exam_link,
         },
         organization=exam.organization if hasattr(exam, 'organization') else None,
     )
@@ -171,9 +169,9 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
         missing_str = " and ".join(missing_items)
         NotificationHistory.objects.create(
             user=faculty_user,
-            title='Reminder: Upload Exam Materials',
-            body=f"Please upload the {missing_str} for '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}. Link: {exam_link}",
-            data={'exam_id': str(exam.id), 'exam_link': exam_link, 'missing_items': missing_items, 'channel': 'email'},
+            title='Reminder: Submit Exam Materials',
+            body=f"Please submit the {missing_str} to the admin for '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
+            data={'exam_id': str(exam.id), 'missing_items': missing_items, 'channel': 'email'},
         )
     except Exception as e:
         logger.warning(f"Failed to save NotificationHistory for faculty {faculty_user.id}: {e}")

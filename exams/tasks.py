@@ -222,12 +222,12 @@ def send_exam_material_upload_reminders():
             # In-app notification
             send_system_notification(
                 user_id=str(faculty_user.id),
-                title='Reminder: Upload Exam Materials',
-                body=f"Reminder: Please upload the {missing_str} for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
+                title='Reminder: Submit Exam Materials',
+                body=f"Reminder: Please submit the {missing_str} to the admin for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
                 metadata={'exam_id': str(exam.id)}
             )
 
-            # Email + WhatsApp with frontend deep-link
+            # Email + WhatsApp
             try:
                 send_material_upload_reminder_email(faculty_user, exam, missing)
             except Exception as e:
