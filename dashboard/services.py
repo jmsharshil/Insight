@@ -4,7 +4,7 @@ and role-based data scoping for minimal response times.
 """
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Count, Sum, Q, F, Avg, Case, When, Value, FloatField
+from django.db.models import Count, Sum, Q, F, Avg, Case, When, Value, FloatField, Min
 from django.core.cache import cache
 
 from auth_user.models import User, NotificationHistory
@@ -185,6 +185,7 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         },
         'upcoming_exams': upcoming_exams,
         'exam_stats': _get_exam_stats(bq),
+        'result_delay_stats': _get_result_delay_stats(bq),
         'attendance_trend': _get_attendance_trend(bq, 7),  # last 7 days
         'fee_collection_trend': _get_fee_trend(user, 30),
         'lead_pipeline': lead_pipeline,
@@ -960,4 +961,43 @@ def _get_faculty_exam_performance(user, faculty):
             'overall_avg_percentage': round(float(all_pr.get('avg_pct') or 0), 2),
             'total_students_evaluated': total_all,
         }
+    }
+
+
+def _get_result_delay_stats(bq):
+    """Compute simple high-level result delay stats for the dashboard."""
+    qs = Exam.objects.filter(
+        bq if bq else Q(), is_deleted=False
+    ).exclude(status='draft').order_by('-scheduled_date')[:50]
+    
+    total = qs.count()
+    if total == 0:
+        return {'total': 0, 'on_time': 0, 'late': 0, 'pending': 0}
+
+    on_time = 0
+    late = 0
+    pending = 0
+
+    for exam in qs:
+        expected_completion = exam.scheduled_date + timedelta(days=7)
+        if exam.status != 'results_published':
+            if expected_completion < timezone.now().date():
+                late += 1
+            else:
+                pending += 1
+        else:
+            first_pub = exam.published_results.aggregate(Min('published_at'))['published_at__min']
+            if first_pub:
+                if first_pub.date() > expected_completion:
+                    late += 1
+                else:
+                    on_time += 1
+            else:
+                pending += 1
+                
+    return {
+        'total': total,
+        'on_time': on_time,
+        'late': late,
+        'pending': pending
     }
