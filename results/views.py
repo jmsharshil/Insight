@@ -45,6 +45,8 @@ def _user_role(user):
 
 
 def build_exam_export_workbook(rows):
+    """Build Excel workbook for exam results. Ensures all datetimes are timezone-naive
+    as Excel/openpyxl does not support tzinfo (raises TypeError)."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Results'
@@ -68,7 +70,15 @@ def build_exam_export_workbook(rows):
             highest_percentage = numeric_percentage
 
     for row_index, row in enumerate(rows, start=2):
-        sheet.append(row)
+        # Ensure any datetime in row is naive (remove tzinfo) for Excel compatibility
+        clean_row = []
+        for cell in row:
+            if hasattr(cell, 'tzinfo') and cell.tzinfo is not None and hasattr(cell, 'replace'):
+                clean_row.append(cell.replace(tzinfo=None))
+            else:
+                clean_row.append(cell)
+        sheet.append(clean_row)
+
         marks_obtained = row[2]
         percentage_value = row[4]
         is_absent = row[9] if len(row) > 9 else False
@@ -1368,6 +1378,9 @@ class ResultExportView(APIView):
                     marks_value = float(marks_value) if marks_value is not None else None
                 except (TypeError, ValueError):
                     marks_value = None
+                # Convert timezone-aware datetime to naive for Excel compatibility
+                # (Excel/openpyxl does not support tzinfo in datetime objects)
+                published_at = pr.published_at.replace(tzinfo=None) if pr.published_at else None
                 rows.append([
                     student_name,
                     roll_number,
@@ -1376,7 +1389,7 @@ class ResultExportView(APIView):
                     pr.percentage,
                     getattr(pr, 'rank', 'N/A'),
                     pr.is_pass,
-                    pr.published_at,
+                    published_at,
                     pr.exam.title if pr.exam else ''
                 ])
 
