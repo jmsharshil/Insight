@@ -1007,18 +1007,18 @@ class TimetableExportExcelView(TimetableListView):
         q_filter = models.Q()
         if date_from and date_to:
             q_filter = models.Q(session_date__range=[date_from, date_to]) | (
-                models.Q(is_recurring=True) &
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
                 (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True)) &
                 (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
             )
         elif date_from:
             q_filter = models.Q(session_date__gte=date_from) | (
-                models.Q(is_recurring=True) &
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
                 (models.Q(effective_to__gte=date_from) | models.Q(effective_to__isnull=True))
             )
         elif date_to:
             q_filter = models.Q(session_date__lte=date_to) | (
-                models.Q(is_recurring=True) &
+                models.Q(is_recurring=True) & models.Q(session_date__isnull=True) &
                 (models.Q(effective_from__lte=date_to) | models.Q(effective_from__isnull=True))
             )
 
