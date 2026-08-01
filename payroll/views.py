@@ -58,6 +58,50 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
             email_context=email_context,
             email_subject=email_subject,
         )
+
+def _send_payslip_emails_async(payslips_list):
+    from core.sender import send_email
+    import logging
+    from payroll.pdf_services import generate_payslip_pdf
+    import threading
+    
+    logger = logging.getLogger(__name__)
+    
+    def _send():
+        for ps in payslips_list:
+            recipient_user = ps.faculty.user if ps.faculty else ps.user
+            if not recipient_user or not getattr(recipient_user, 'email', None):
+                continue
+                
+            try:
+                buffer, _ = generate_payslip_pdf(ps)
+                attachments = []
+                if buffer:
+                    filename = f"Payslip_{ps.payroll_run.month}_{ps.payroll_run.year}.pdf"
+                    attachments.append((filename, buffer.getvalue(), 'application/pdf'))
+                
+                ctx = {
+                    'user_name': recipient_user.name,
+                    'month': ps.payroll_run.month,
+                    'year': ps.payroll_run.year,
+                    'net_salary': ps.net_salary,
+                    'sessions': ps.sessions_conducted
+                }
+                send_email(
+                    to=recipient_user.email,
+                    subject=f"Your payslip for {ps.payroll_run.month}/{ps.payroll_run.year} is ready",
+                    text=f"Net salary: {ps.net_salary}. Sessions: {ps.sessions_conducted}.",
+                    template='emails/payslip_generated.html',
+                    template_context=ctx,
+                    organization=getattr(recipient_user, 'organization', None),
+                    attachments=attachments
+                )
+            except Exception as e:
+                logger.error(f"Failed to send payslip email to {recipient_user.email}: {e}")
+                
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. GET & POST  /api/v1/payroll/
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -626,16 +670,11 @@ class PayrollDisburseView(APIView):
                     "net_salary": str(ps.net_salary),
                     "month": pr.month,
                     "year": pr.year,
-                },
-                email_template='emails/payslip_generated.html',
-                email_context={
-                    'user_name': recipient_user.name,
-                    'month': pr.month,
-                    'year': pr.year,
-                    'net_salary': ps.net_salary,
-                    'sessions': ps.sessions_conducted
                 }
             )
+
+        # Send emails async with PDF attachments
+        _send_payslip_emails_async(list(payslips))
 
         return Response({
             'success': True, 'message': 'Payroll disbursed.',
