@@ -154,20 +154,30 @@ class LeaveListCreateView(APIView):
                     'message': 'Leave applications blocked during peak admission months (Mar-Jun).'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Friday 12 PM deadline for next week leaves (staff only, except sick leave)
+        # Friday 12 PM deadline — only blocks leaves for the strictly NEXT calendar week
+        # (Mon–Sun). Current-week and 2+ week-out leaves are not affected.
         if role not in ['student', 'parents'] and d['leave_type'] != 'sick':
             from datetime import time, timedelta
             now = timezone.now()
+            today_local = timezone.localtime(now).date()
             leave_start = d['from_date']
+
+            # Monday of the week the leave falls in
             leave_monday = leave_start - timedelta(days=leave_start.weekday())
-            prev_friday = leave_monday - timedelta(days=3)
-            # Make sure we use the current timezone for deadline creation
-            deadline = timezone.make_aware(datetime.combine(prev_friday, time(12, 0)))
-            if now > deadline:
-                return Response({
-                    'success': False,
-                    'message': 'Leave applications for the upcoming week must be submitted before 12:00 PM on Friday of the preceding week.'
-                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Monday of next calendar week relative to today
+            days_to_next_monday = (7 - today_local.weekday()) % 7 or 7
+            next_monday = today_local + timedelta(days=days_to_next_monday)
+
+            # Only enforce the Friday 12 PM cutoff for next week's leaves
+            if leave_monday == next_monday:
+                prev_friday = leave_monday - timedelta(days=3)
+                deadline = timezone.make_aware(datetime.combine(prev_friday, time(12, 0)))
+                if now > deadline:
+                    return Response({
+                        'success': False,
+                        'message': 'Leave applications for the upcoming week must be submitted before 12:00 PM on Friday of the preceding week.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
         # Past date check (except sick leave or students)
         if d['leave_type'] != 'sick' and d['from_date'] < today and role not in ['student', 'parents']:
