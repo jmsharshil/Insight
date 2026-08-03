@@ -123,7 +123,9 @@ class PaperView(APIView):
         if role not in PAPER_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = MarkSheet.objects.filter(exam_id=exam_id).select_related('student__user', 'paper_checker', 'exam__batch', 'exam__subject').prefetch_related('queries')
+        qs = MarkSheet.objects.filter(
+            exam_id=exam_id, exam__is_deleted=False
+        ).select_related('student__user', 'paper_checker', 'exam__batch', 'exam__subject').prefetch_related('queries')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
         if role == 'paper_checker':
@@ -136,14 +138,14 @@ class PaperView(APIView):
         try:
             from exams.models import Exam as ExamModel
             from students.models import Student
-            exam_obj = ExamModel.objects.get(id=exam_id)
+            exam_obj = ExamModel.objects.filter(is_deleted=False).get(id=exam_id)
             if exam_obj.batch_id and exam_obj.status not in ('draft', 'scheduled'):
                 total_enrolled = Student.objects.filter(
                     batch_id=exam_obj.batch_id, status='active'
                 ).count()
                 if total_enrolled > 0:
                     total_attended = MarkSheet.objects.filter(
-                        exam_id=exam_id, is_absent=False
+                        exam_id=exam_id, exam__is_deleted=False, is_absent=False
                     ).count()
                     exam_att_pct = round(total_attended / total_enrolled * 100, 2)
         except Exception:
@@ -168,7 +170,7 @@ class PaperMarksView(APIView):
         if role not in PAPER_MARK_ROLES:
             return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            qs = MarkSheet.objects.prefetch_related('queries')
+            qs = MarkSheet.objects.filter(exam__is_deleted=False).prefetch_related('queries')
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
@@ -263,7 +265,9 @@ class PaperMarksView(APIView):
 
         # Update published result if exists
         try:
-            pr = PublishedResult.objects.get(exam_id=exam_id, student=ms.student)
+            pr = PublishedResult.objects.filter(exam__is_deleted=False).get(
+                exam_id=exam_id, student=ms.student
+            )
             pr.marks_obtained = marks
             pr.percentage = round((float(marks) / ms.exam.total_marks) * 100, 2) if ms.exam.total_marks else 0
             pr.is_pass = ms.is_pass
@@ -283,7 +287,7 @@ class PaperMarksView(APIView):
         if role not in ['super_admin', 'admin_senior_executive']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            qs = MarkSheet.objects.all()
+            qs = MarkSheet.objects.filter(exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
@@ -307,7 +311,7 @@ class PaperRecheckView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            qs = MarkSheet.objects.all()
+            qs = MarkSheet.objects.filter(exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
@@ -342,7 +346,9 @@ class CheckerStatusView(APIView):
         if role not in CHECKER_STATUS_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        sheets = MarkSheet.objects.filter(exam_id=exam_id).select_related('paper_checker')
+        sheets = MarkSheet.objects.filter(
+            exam_id=exam_id, exam__is_deleted=False
+        ).select_related('paper_checker')
         if getattr(request.user, 'organization', None):
             sheets = sheets.filter(exam__branch__organization=request.user.organization)
         total = sheets.count()
@@ -389,7 +395,9 @@ class CheckerPortalSubmitView(APIView):
             return Response({'success': False, 'message': 'Token required.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            token = CheckerToken.objects.get(token=token_str)
+            token = CheckerToken.objects.filter(
+                token=token_str, marksheet__exam__is_deleted=False
+            ).select_related('marksheet__exam').get()
         except CheckerToken.DoesNotExist:
             return Response({'success': False, 'message': 'Invalid token.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -427,7 +435,7 @@ class PublishResultView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            qs = Exam.objects.all()
+            qs = Exam.objects.filter(is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             exam = qs.get(id=exam_id)
@@ -437,10 +445,10 @@ class PublishResultView(APIView):
         if exam.status == 'results_published':
             return Response({'success': False, 'message': 'Already published.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if MarkSheet.objects.filter(exam=exam, is_submitted=False).exists():
+        if MarkSheet.objects.filter(exam=exam, exam__is_deleted=False, is_submitted=False).exists():
             return Response({'success': False, 'message': 'Not all marksheets submitted.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        sheets = MarkSheet.objects.filter(exam=exam)
+        sheets = MarkSheet.objects.filter(exam=exam, exam__is_deleted=False)
         pubs = []
         for ms in sheets:
             if not PublishedResult.objects.filter(exam=exam, student=ms.student).exists():
@@ -487,7 +495,9 @@ class ResultView(APIView):
 
     def get(self, request, exam_id):
         role = _user_role(request.user)
-        qs = PublishedResult.objects.filter(exam_id=exam_id).select_related('student__user')
+        qs = PublishedResult.objects.filter(
+            exam_id=exam_id, exam__is_deleted=False
+        ).select_related('student__user')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
 
@@ -506,7 +516,7 @@ class ResultView(APIView):
         # Compute exam attendance percentage
         exam_att_pct = None
         try:
-            exam_obj = Exam.objects.get(id=exam_id)
+            exam_obj = Exam.objects.filter(is_deleted=False).get(id=exam_id)
             if exam_obj.batch_id and exam_obj.status not in ('draft', 'scheduled'):
                 from students.models import Student
                 total_enrolled = Student.objects.filter(
@@ -514,7 +524,7 @@ class ResultView(APIView):
                 ).count()
                 if total_enrolled > 0:
                     total_attended = MarkSheet.objects.filter(
-                        exam_id=exam_id, is_absent=False
+                        exam_id=exam_id, exam__is_deleted=False, is_absent=False
                     ).count()
                     exam_att_pct = round(total_attended / total_enrolled * 100, 2)
         except Exception:
@@ -536,7 +546,7 @@ class ResultDeleteView(APIView):
         if role not in PUBLISH_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            qs = PublishedResult.objects.all()
+            qs = PublishedResult.objects.filter(exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             pr = qs.get(id=result_id, exam_id=exam_id)
@@ -571,6 +581,7 @@ class StudentRecheckRequestView(APIView):
 
         rechecks = RecheckRequest.objects.filter(
             marksheet__exam_id=exam_id,
+            marksheet__exam__is_deleted=False,
             requested_by=student
         ).select_related('marksheet')
         
@@ -597,7 +608,9 @@ class StudentRecheckRequestView(APIView):
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Must have PublishedResult
-        pr_qs = PublishedResult.objects.filter(exam_id=exam_id, student=student)
+        pr_qs = PublishedResult.objects.filter(
+            exam_id=exam_id, exam__is_deleted=False, student=student
+        )
         if getattr(request.user, 'organization', None):
             pr_qs = pr_qs.filter(exam__branch__organization=request.user.organization)
         if not pr_qs.exists():
@@ -605,7 +618,7 @@ class StudentRecheckRequestView(APIView):
 
         # NEW: Answer key must be uploaded or distributed
         try:
-            exam = Exam.objects.get(id=exam_id)
+            exam = Exam.objects.filter(is_deleted=False).get(id=exam_id)
             has_answer_key = bool(exam.answer_key) or exam.answer_key_logs.exists()
             if not has_answer_key:
                 return Response({'success': False, 'message': 'Answer key has not been uploaded or distributed yet. Recheck not allowed.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -614,7 +627,7 @@ class StudentRecheckRequestView(APIView):
 
         # Get marksheet
         try:
-            qs = MarkSheet.objects.all()
+            qs = MarkSheet.objects.filter(exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(exam_id=exam_id, student=student)
@@ -718,7 +731,7 @@ class MarkAllAbsentView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            qs = Exam.objects.all()
+            qs = Exam.objects.filter(is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             exam = qs.get(id=exam_id)
@@ -734,7 +747,7 @@ class MarkAllAbsentView(APIView):
         )
 
         # Mark absent all marksheets for students without a completed session
-        marksheets = MarkSheet.objects.filter(exam=exam, is_submitted=False)
+        marksheets = MarkSheet.objects.filter(exam=exam, exam__is_deleted=False, is_submitted=False)
         absent_count = 0
         for ms in marksheets:
             if ms.student_id not in attended_student_ids:
@@ -769,7 +782,7 @@ class BulkRecheckRequestView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            exam = Exam.objects.get(id=exam_id)
+            exam = Exam.objects.filter(is_deleted=False).get(id=exam_id)
             has_answer_key = bool(getattr(exam, 'answer_key', None)) or exam.answer_key_logs.exists()
             if not has_answer_key:
                 return Response({'success': False, 'message': 'Answer key must be uploaded or distributed first for rechecks.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -789,10 +802,10 @@ class BulkRecheckRequestView(APIView):
         created_count = 0
         for student in students:
             try:
-                ms = MarkSheet.objects.get(exam=exam, student=student)
+                ms = MarkSheet.objects.filter(exam__is_deleted=False).get(exam=exam, student=student)
                 if not RecheckRequest.objects.filter(
-                    marksheet=ms, status__in=['approval_pending', 'approved']
-                ).exists() and PublishedResult.objects.filter(exam=exam, student=student).exists():
+                    marksheet=ms, marksheet__exam__is_deleted=False, status__in=['approval_pending', 'approved']
+                ).exists() and PublishedResult.objects.filter(exam=exam, exam__is_deleted=False, student=student).exists():
                     RecheckRequest.objects.create(
                         marksheet=ms,
                         requested_by=student,
@@ -838,7 +851,7 @@ class PaperCheckerQueryView(APIView):
 
         marksheet_id = marksheet_id or request.data.get('marksheet_id')
         try:
-            qs = MarkSheet.objects.all()
+            qs = MarkSheet.objects.filter(exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
@@ -892,7 +905,7 @@ class PaperCheckerQueryView(APIView):
 
         query_id = query_id or request.data.get('query_id')
         try:
-            q_qs = CheckerQuery.objects.select_related('marksheet').all()
+            q_qs = CheckerQuery.objects.select_related('marksheet').filter(marksheet__exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 q_qs = q_qs.filter(marksheet__exam__branch__organization=request.user.organization)
             query_obj = q_qs.get(id=query_id, marksheet__exam_id=exam_id)
@@ -940,7 +953,7 @@ class MarkAbsentView(APIView):
         if role not in ['super_admin', 'admin_senior_executive']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            qs = MarkSheet.objects.all()
+            qs = MarkSheet.objects.filter(exam__is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(exam__branch__organization=request.user.organization)
             ms = qs.get(id=marksheet_id, exam_id=exam_id)
@@ -970,7 +983,7 @@ class RecheckRequestListView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            qs = Exam.objects.all()
+            qs = Exam.objects.filter(is_deleted=False)
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             qs.get(id=exam_id)  # validate exists
@@ -978,7 +991,7 @@ class RecheckRequestListView(APIView):
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         rechecks = RecheckRequest.objects.filter(
-            marksheet__exam_id=exam_id
+            marksheet__exam_id=exam_id, marksheet__exam__is_deleted=False
         ).select_related(
             'marksheet__student__user', 'requested_by', 'reviewed_by', 'new_checker'
         )
@@ -999,7 +1012,9 @@ class RecheckRequestActionView(APIView):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            qs = RecheckRequest.objects.select_related('marksheet', 'marksheet__exam', 'requested_by')
+            qs = RecheckRequest.objects.select_related('marksheet', 'marksheet__exam', 'requested_by').filter(
+                marksheet__exam__is_deleted=False
+            )
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(marksheet__exam__branch__organization=request.user.organization)
             rr = qs.get(id=request_id, marksheet__exam_id=exam_id)
@@ -1092,7 +1107,10 @@ class SubjectWiseResultView(APIView):
 
         qs = PublishedResult.objects.select_related(
             'exam__subject', 'exam__batch', 'exam__branch'
-        ).filter(exam__subject__isnull=False)
+        ).filter(
+            exam__subject__isnull=False,
+            exam__is_deleted=False,
+        )
 
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
@@ -1150,7 +1168,10 @@ class FacultyWiseResultView(APIView):
 
         qs = PublishedResult.objects.select_related(
             'exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch'
-        ).filter(exam__faculty__isnull=False)
+        ).filter(
+            exam__faculty__isnull=False,
+            exam__is_deleted=False,
+        )
 
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
@@ -1209,7 +1230,10 @@ class BatchWiseResultView(APIView):
 
         qs = PublishedResult.objects.select_related(
             'exam__batch', 'exam__subject', 'exam__branch'
-        ).filter(exam__batch__isnull=False)
+        ).filter(
+            exam__batch__isnull=False,
+            exam__is_deleted=False,
+        )
 
         if getattr(request.user, 'organization', None):
             qs = qs.filter(exam__branch__organization=request.user.organization)
@@ -1264,7 +1288,9 @@ class ResultAnalyticsView(APIView):
         if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty')
+        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty').filter(
+            exam__is_deleted=False
+        )
         if getattr(request.user, 'organization', None):
             base_qs = base_qs.filter(exam__branch__organization=request.user.organization)
 
@@ -1364,7 +1390,9 @@ class ResultExportView(APIView):
 
         if export_type == 'exam' and exam_id:
             # Export detailed student results for specific exam (ties to ResultView)
-            qs = PublishedResult.objects.filter(exam_id=exam_id).select_related(
+            qs = PublishedResult.objects.filter(
+                exam_id=exam_id, exam__is_deleted=False
+            ).select_related(
                 'student__user', 'exam'
             )
             if org_filter:
@@ -1409,7 +1437,10 @@ class ResultExportView(APIView):
             # Reuse updated aggregation logic from SubjectWiseResultView (no duplication by subject)
             qs = PublishedResult.objects.select_related(
                 'exam__subject', 'exam__batch', 'exam__branch'
-            ).filter(exam__subject__isnull=False)
+            ).filter(
+                exam__subject__isnull=False,
+                exam__is_deleted=False,
+            )
             if org_filter:
                 qs = qs.filter(exam__branch__organization=org_filter)
             if subject_id:
@@ -1454,7 +1485,9 @@ class ResultExportView(APIView):
         elif export_type == 'faculty-wise':
             # Updated to match FacultyWiseResultView: one record per faculty (overall across subjects)
             writer.writerow(['Faculty ID', 'Faculty Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
-            qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch')
+            qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch').filter(
+                exam__is_deleted=False
+            )
             if org_filter:
                 qs = qs.filter(exam__branch__organization=org_filter)
             if faculty_id:
@@ -1495,7 +1528,9 @@ class ResultExportView(APIView):
 
         elif export_type == 'batch-wise':
             writer.writerow(['Batch ID', 'Batch Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
-            qs = PublishedResult.objects.select_related('exam__batch', 'exam__branch')
+            qs = PublishedResult.objects.select_related('exam__batch', 'exam__branch').filter(
+                exam__is_deleted=False
+            )
             if org_filter:
                 qs = qs.filter(exam__branch__organization=org_filter)
             if batch_id:
@@ -1534,7 +1569,9 @@ class ResultExportView(APIView):
 
         elif export_type in ('summary', 'analytics'):
             # Export overall + top lists (flattened with sections)
-            base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty')
+            base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty').filter(
+                exam__is_deleted=False
+            )
             if org_filter:
                 base_qs = base_qs.filter(exam__branch__organization=org_filter)
 
@@ -1611,7 +1648,7 @@ class ResultDelayFlowView(APIView):
         # delay_status accepted values: ON_TIME, LATE, PENDING
         # ────────────────────────────────────────────────────────────────────────
 
-        qs = Exam.objects.exclude(status='draft')
+        qs = Exam.objects.filter(is_deleted=False).exclude(status='draft')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
 
@@ -1669,8 +1706,8 @@ class ResultDelayFlowView(APIView):
             # 2. Submission to Paper Checker
             expected_submission_date = exam_date + timedelta(days=1)
             actual_submission_date = None
-            if exam.marksheets.filter(paper_checker__isnull=False).exists():
-                token = CheckerToken.objects.filter(marksheet__exam=exam).order_by('created_at').first()
+            if exam.marksheets.filter(exam__is_deleted=False, paper_checker__isnull=False).exists():
+                token = CheckerToken.objects.filter(marksheet__exam=exam, marksheet__exam__is_deleted=False).order_by('created_at').first()
                 if token:
                     actual_submission_date = token.created_at.date()
                 else:
@@ -1685,9 +1722,9 @@ class ResultDelayFlowView(APIView):
                 expected_delivery_by_checker = expected_submission_date + timedelta(days=5)
 
             actual_delivery_by_checker = None
-            unsubmitted = exam.marksheets.filter(is_submitted=False).count()
-            if unsubmitted == 0 and exam.marksheets.exists():
-                max_checked_at = exam.marksheets.aggregate(Max('checked_at'))['checked_at__max']
+            unsubmitted = exam.marksheets.filter(exam__is_deleted=False, is_submitted=False).count()
+            if unsubmitted == 0 and exam.marksheets.filter(exam__is_deleted=False).exists():
+                max_checked_at = exam.marksheets.filter(exam__is_deleted=False).aggregate(Max('checked_at'))['checked_at__max']
                 if max_checked_at:
                     actual_delivery_by_checker = max_checked_at.date()
 
@@ -1701,7 +1738,7 @@ class ResultDelayFlowView(APIView):
 
             actual_delivery_keys_to_students = None
             if exam.status == 'results_published':
-                first_pub = exam.published_results.aggregate(Min('published_at'))['published_at__min']
+                first_pub = exam.published_results.filter(exam__is_deleted=False).aggregate(Min('published_at'))['published_at__min']
                 if first_pub:
                     actual_delivery_keys_to_students = first_pub.date()
 

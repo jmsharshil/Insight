@@ -232,7 +232,7 @@ def _get_faculty_dashboard(user, now, today, month_start):
     pending_tasks = []
     if user.role in ('paper_checker', 'exam_supervisor'):
         raw_tasks = list(MarkSheet.objects.filter(
-            paper_checker=user, is_submitted=False
+            paper_checker=user, is_submitted=False, exam__is_deleted=False
         ).select_related('student', 'exam')[:5].values(
             'id', 'student__first_name', 'student__surname', 'exam__title'
         ))
@@ -336,8 +336,10 @@ def _get_student_dashboard(user, now, today, month_start):
     )
     att_rate = round((attendance['present'] or 0) / (attendance['total'] or 1) * 100, 2)
 
-    # Exam attendance rate
-    exam_attendance = MarkSheet.objects.filter(student=student).aggregate(
+    # Exam attendance rate - exclude deleted exams
+    exam_attendance = MarkSheet.objects.filter(
+        student=student, exam__is_deleted=False
+    ).aggregate(
         total=Count('id'),
         present=Count('id', filter=Q(is_absent=False))
     )
@@ -369,8 +371,11 @@ def _get_student_dashboard(user, now, today, month_start):
     )
 
     # Recent results - use PublishedResult (has percentage, total_marks, marks_obtained; no 'grade')
+    # Exclude soft-deleted exams per consistency requirement for dashboards/summary APIs
     recent_results = list(
-        PublishedResult.objects.filter(student=student)
+        PublishedResult.objects.filter(
+            student=student, exam__is_deleted=False
+        )
         .select_related('exam')
         .order_by('-published_at')[:5]
         .values('id', 'exam__title', 'marks_obtained', 'total_marks', 'percentage', 'is_pass', 'rank')
@@ -397,7 +402,9 @@ def _get_student_dashboard(user, now, today, month_start):
             result['percentile'] = None
 
     avg_score = round(
-        float(PublishedResult.objects.filter(student=student).aggregate(
+        float(PublishedResult.objects.filter(
+            student=student, exam__is_deleted=False
+        ).aggregate(
             avg_p=Avg('percentage')
         )['avg_p'] or 0), 2
     )
@@ -777,7 +784,7 @@ def _get_student_performance_trend(student):
     if not student:
         return {'subjects': [], 'scores': []}
     perf = list(
-        PublishedResult.objects.filter(student=student)
+        PublishedResult.objects.filter(student=student, exam__is_deleted=False)
         .select_related('exam__subject')
         .values('exam__subject__name')
         .annotate(avg_score=Avg('percentage'))
@@ -827,7 +834,7 @@ def _get_exam_stats(bq):
                     pr_bq &= Q(**{key: val})
 
     pr_agg = PublishedResult.objects.filter(
-        pr_bq,
+        pr_bq, exam__is_deleted=False,
     ).aggregate(
         total=Count('id'),
         passed=Count('id', filter=Q(is_pass=True)),
@@ -840,7 +847,7 @@ def _get_exam_stats(bq):
     total_results = pr_agg.get('total') or 0
     pass_pct = round((pr_agg.get('passed') or 0) / max(total_results, 1) * 100, 2)
 
-    # Absent count across all recent exams
+    # Absent count across all recent exams (recent_exams already excludes deleted)
     total_absent = MarkSheet.objects.filter(
         exam__in=recent_exams, is_absent=True
     ).count()
@@ -940,10 +947,11 @@ def _get_faculty_exam_performance(user, faculty):
             'total_students': total_pr,
         })
 
-    # Summary across all faculty exams
+    # Summary across all faculty exams - exclude deleted
     all_pr = PublishedResult.objects.filter(
         exam__faculty=faculty,
         exam__status__in=['completed', 'results_published'],
+        exam__is_deleted=False,
     ).aggregate(
         total=Count('id'),
         passed=Count('id', filter=Q(is_pass=True)),
