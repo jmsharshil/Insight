@@ -1502,3 +1502,198 @@ class ExamGraceMarksView(APIView):
             'success': True,
             'message': f'Grace marks of {grace_marks_val} added to Exam and applied to {updated_marksheets} student results.'
         })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OMR Upload — POST /api/v1/exams/exams/{exam_id}/sessions/{session_id}/omr-upload/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class OMRUploadView(APIView):
+    """
+    Student uploads a scanned OMR answer sheet for an offline MCQ exam.
+
+    The endpoint:
+      1. Validates the exam is offline + mcq and has an answer_key file.
+      2. Reads the existing Exam.answer_key to extract correct answers.
+      3. Reads the uploaded OMR sheet to detect the student's answers.
+      4. Grades the result and updates / creates the student's MarkSheet.
+
+    Request  : multipart/form-data  { "answer_sheet": <image|pdf> }
+               Optional fields      : "n_questions" (int, default from exam.total_marks or 100)
+                                      "marks_per_question" (float, default 1.0)
+                                      "negative_marks" (float, default 0.0)
+
+    Response : {
+        "success": true,
+        "score": 45.0,
+        "total": 60,
+        "breakdown": [...],
+        "marksheet_id": "...",
+        "method": "weasyprint|bubble_detection|ocr"
+    }
+    """
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, exam_id, session_id):
+        from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr
+        from results.models import MarkSheet
+        import tempfile, os
+
+        role = _user_role(request.user)
+
+        # ── 1. Fetch Exam ──────────────────────────────────────────────────
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # ── 2. Validate exam type ──────────────────────────────────────────
+        if exam.exam_mode != 'offline' or exam.exam_type != 'mcq':
+            return Response({
+                'success': False,
+                'message': 'OMR grading is only available for offline MCQ exams.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not exam.answer_key:
+            return Response({
+                'success': False,
+                'message': 'No answer key uploaded for this exam. Please ask your admin to upload one.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── 3. Fetch ExamSession ───────────────────────────────────────────
+        try:
+            session = ExamSession.objects.select_related('student__user').get(
+                id=session_id, exam=exam
+            )
+        except ExamSession.DoesNotExist:
+            return Response({'success': False, 'message': 'Session not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Only the student themselves (or admin) may upload
+        is_own_session = (role == 'student' and session.student.user == request.user)
+        is_admin = role in ADMIN_ROLES
+        if not (is_own_session or is_admin):
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # ── 4. Get uploaded answer sheet ───────────────────────────────────
+        answer_sheet = request.FILES.get('answer_sheet')
+        if not answer_sheet:
+            return Response({'success': False, 'message': 'Please upload an answer_sheet file.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── 5. Parse parameters ────────────────────────────────────────────
+        try:
+            n_questions = int(request.data.get('n_questions', 0)) or exam.total_marks or 100
+        except (TypeError, ValueError):
+            n_questions = exam.total_marks or 100
+
+        try:
+            marks_per_q = float(request.data.get('marks_per_question', 1.0))
+        except (TypeError, ValueError):
+            marks_per_q = 1.0
+
+        try:
+            negative_per_q = float(request.data.get('negative_marks', 0.0))
+        except (TypeError, ValueError):
+            negative_per_q = 0.0
+
+        n_options = 4  # A B C D
+
+        # ── 6. Write uploads to temp files for OpenCV ──────────────────────
+        errors = []
+        answer_key_dict = {}
+        student_answers_dict = {}
+
+        # --- Answer key extraction ---
+        key_suffix = os.path.splitext(exam.answer_key.name)[1] or '.jpg'
+        try:
+            with tempfile.NamedTemporaryFile(suffix=key_suffix, delete=False) as kf:
+                for chunk in exam.answer_key.chunks():
+                    kf.write(chunk)
+                key_tmp = kf.name
+
+            answer_key_dict = extract_answer_key_from_file(key_tmp, n_questions=n_questions, n_options=n_options)
+        except Exception as exc:
+            logger.error("OMR answer key extraction failed for exam %s: %s", exam_id, exc)
+            errors.append(f"Answer key parse error: {exc}")
+        finally:
+            try:
+                os.unlink(key_tmp)
+            except Exception:
+                pass
+
+        if not answer_key_dict:
+            return Response({
+                'success': False,
+                'message': 'Could not parse the answer key file. Ensure it is a clear OMR image or a text/PDF listing answers.',
+                'detail': errors,
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        # --- Student sheet detection ---
+        sheet_suffix = os.path.splitext(answer_sheet.name)[1] or '.jpg'
+        try:
+            with tempfile.NamedTemporaryFile(suffix=sheet_suffix, delete=False) as sf:
+                for chunk in answer_sheet.chunks():
+                    sf.write(chunk)
+                sheet_tmp = sf.name
+
+            # Also save it to the session's uploaded_answer_sheet field
+            session.uploaded_answer_sheet.save(answer_sheet.name, answer_sheet, save=False)
+
+            student_answers_dict = detect_student_answers(sheet_tmp, n_questions=n_questions, n_options=n_options)
+        except Exception as exc:
+            logger.error("OMR student sheet detection failed for session %s: %s", session_id, exc)
+            return Response({
+                'success': False,
+                'message': f'Could not process your answer sheet: {exc}',
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        finally:
+            try:
+                os.unlink(sheet_tmp)
+            except Exception:
+                pass
+
+        # ── 7. Grade ───────────────────────────────────────────────────────
+        score, breakdown = grade_omr(
+            student_answers=student_answers_dict,
+            answer_key=answer_key_dict,
+            marks_per_question=marks_per_q,
+            negative_per_question=negative_per_q,
+        )
+
+        total_possible = len(answer_key_dict) * marks_per_q
+        is_pass = score >= (exam.pass_marks or 0)
+
+        # ── 8. Update / create MarkSheet ──────────────────────────────────
+        from django.utils import timezone as tz
+        ms, _ = MarkSheet.objects.get_or_create(
+            exam=exam,
+            student=session.student,
+            defaults={'remarks': 'OMR auto-graded'},
+        )
+        ms.marks_obtained = score
+        ms.is_pass = is_pass
+        ms.checked_at = tz.now()
+        ms.is_submitted = True
+        ms.remarks = f'OMR auto-graded — {int(score)}/{int(total_possible)}'
+        # Store per-question breakdown in question_marks JSONField
+        ms.question_marks = breakdown
+        ms.save(update_fields=['marks_obtained', 'is_pass', 'checked_at', 'is_submitted', 'remarks', 'question_marks'])
+
+        # Save uploaded sheet reference to session
+        session.is_submitted = True
+        session.submitted_at = tz.now()
+        session.save(update_fields=['uploaded_answer_sheet', 'is_submitted', 'submitted_at'])
+
+        return Response({
+            'success': True,
+            'score': score,
+            'total': total_possible,
+            'is_pass': is_pass,
+            'correct': sum(1 for b in breakdown if b['result'] == 'correct'),
+            'wrong': sum(1 for b in breakdown if b['result'] == 'wrong'),
+            'unanswered': sum(1 for b in breakdown if b['result'] == 'unanswered'),
+            'breakdown': breakdown,
+            'marksheet_id': str(ms.id),
+        }, status=status.HTTP_200_OK)

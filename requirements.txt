@@ -86,3 +86,5 @@ weasyprint==61.2
 playwright==1.51.0
 pydyf==0.10.0
 zope.interface==8.5
+opencv-python-headless==5.0.0
+numpy==2.4.2

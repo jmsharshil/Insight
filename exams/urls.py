@@ -7,7 +7,7 @@ from .views import (
     MalpracticeView, MalpracticeDetailView, ExamScheduleView,
     SubjectPaperListCreateView, SubjectPaperDetailView,
     SubjectQuestionBankView, SubjectQuestionBankDetailView, ExamImportQuestionsView,
-    ExamUploadMaterialsView, ExamGraceMarksView
+    ExamUploadMaterialsView, ExamGraceMarksView, OMRUploadView
 )
 
 urlpatterns = [
@@ -52,4 +52,7 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/answer-key/distribute/', AnswerKeyDistributeView.as_view(), name='exam-answer-key-dist'),
     path('exams/<uuid:exam_id>/malpractice/', MalpracticeView.as_view(), name='exam-malpractice'),
     path('exams/<uuid:exam_id>/malpractice/<uuid:report_id>/', MalpracticeDetailView.as_view(), name='exam-malpractice-detail'),
+
+    # OMR auto-grading for offline MCQ exams
+    path('exams/<uuid:exam_id>/sessions/<uuid:session_id>/omr-upload/', OMRUploadView.as_view(), name='exam-omr-upload'),
 ]
