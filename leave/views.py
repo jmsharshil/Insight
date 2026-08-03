@@ -11,7 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access
 
 from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday, StudentLeaveApplication
 from .serializers import (
@@ -36,40 +36,6 @@ HOLIDAY_EDIT_ROLES = ['branch_manager', 'super_admin']
 
 def _user_role(user):
     return getattr(user, 'role', None)
-
-
-def _user_branch_id(user):
-    if hasattr(user, 'branch_id') and user.branch_id:
-        return user.branch_id
-    if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
-        return user.profile.branch_id
-    # Fallback: check FacultyProfile
-    try:
-        from faculty.models import FacultyProfile
-        fp = FacultyProfile.objects.get(user=user)
-        return fp.branch_id
-    except Exception:
-        pass
-
-    # Fallback: check Student
-    try:
-        from students.models import Student
-        s = Student.objects.get(user=user)
-        return s.branch_id
-    except Exception:
-        pass
-
-    # Fallback: check Parent
-    try:
-        if getattr(user, 'role', None) in ['parent', 'parents'] and user.linked_students.exists():
-            from students.models import Student
-            s = Student.objects.filter(user__in=user.linked_students.all()).first()
-            if s:
-                return s.branch_id
-    except Exception:
-        pass
-
-    return None
 
 
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
@@ -111,9 +77,10 @@ class LeaveListCreateView(APIView):
             qs = LeaveApplication.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            bid = _user_branch_id(request.user)
-            if role != 'super_admin' and bid:
-                qs = qs.filter(branch_id=bid)
+            if role != 'super_admin':
+                branch_ids = get_user_branch_ids(request.user)
+                if branch_ids:
+                    qs = qs.filter(branch_id__in=branch_ids)
         else:
             qs = LeaveApplication.objects.filter(applied_by=request.user)
 
@@ -184,7 +151,7 @@ class LeaveListCreateView(APIView):
             return Response({'success': False, 'message': 'Leave date cannot be in the past.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get branch and policy
-        bid = request.data.get('branch_id') or _user_branch_id(request.user)
+        bid = request.data.get('branch_id') or get_user_branch_id(request.user)
         # Branch validation removed as per request
         
         # Holiday check
@@ -625,7 +592,7 @@ class LeavePolicyView(APIView):
         
         # If no explicit branch is requested, default to the user's branch
         if not bid:
-            bid = _user_branch_id(request.user)
+            bid = get_user_branch_id(request.user)
             
         qs = LeavePolicy.objects.filter(is_active=True)
         if getattr(request.user, 'organization', None):
@@ -643,7 +610,7 @@ class LeavePolicyView(APIView):
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        bid = _user_branch_id(request.user) or request.data.get('branch_id') or request.data.get('branch')
+        bid = get_user_branch_id(request.user) or request.data.get('branch_id') or request.data.get('branch')
         if not bid:
             return Response({'success': False, 'message': 'Branch required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -728,7 +695,7 @@ class LeaveBalanceView(APIView):
         balances = LeaveBalance.objects.filter(user=request.user, year=year)
         
         if not balances.exists():
-            bid = _user_branch_id(request.user)
+            bid = get_user_branch_id(request.user)
             from branch.models import Branch
             if not bid and getattr(request.user, 'organization', None):
                 # Fallback for super_admin who has no specific branch
@@ -768,7 +735,7 @@ class LeaveBalanceUserView(APIView):
             User = get_user_model()
             target_user = User.objects.filter(id=user_id).first()
             if target_user:
-                bid = _user_branch_id(target_user)
+                bid = get_user_branch_id(target_user)
                 from branch.models import Branch
                 if not bid and getattr(target_user, 'organization', None):
                     branch = Branch.objects.filter(organization=target_user.organization).first()
@@ -803,9 +770,10 @@ class LateEntryListCreateView(APIView):
             qs = LateEntryRecord.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            bid = _user_branch_id(request.user)
-            if role != 'super_admin' and bid:
-                qs = qs.filter(branch_id=bid)
+            if role != 'super_admin':
+                branch_ids = get_user_branch_ids(request.user)
+                if branch_ids:
+                    qs = qs.filter(branch_id__in=branch_ids)
         else:
             qs = LateEntryRecord.objects.filter(user=request.user)
 
@@ -843,13 +811,13 @@ class LateEntryListCreateView(APIView):
         expected_dt = datetime.combine(d['date'], d['expected_time'])
         late_min = max(0, int((start_dt - expected_dt).total_seconds() / 60))
 
-        bid = _user_branch_id(request.user) or request.data.get('branch_id')
+        bid = get_user_branch_id(request.user) or request.data.get('branch_id')
         if not bid:
             from django.contrib.auth import get_user_model
             User = get_user_model()
             target_user = User.objects.filter(id=d['user_id']).first()
             if target_user:
-                bid = _user_branch_id(target_user)
+                bid = get_user_branch_id(target_user)
         
         if not bid:
             return Response({'success': False, 'message': 'Branch ID could not be determined. Please provide branch_id.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1084,9 +1052,10 @@ class StudentLeaveListCreateView(APIView):
             qs = StudentLeaveApplication.objects.select_related('student', 'reviewed_by', 'received_by').all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(student__branch__organization=request.user.organization)
-            bid = _user_branch_id(request.user)
-            if role != 'super_admin' and bid:
-                qs = qs.filter(student__branch_id=bid)
+            if role != 'super_admin':
+                branch_ids = get_user_branch_ids(request.user)
+                if branch_ids:
+                    qs = qs.filter(student__branch_id__in=branch_ids)
         elif role == 'student':
             # Student sees only their own
             try:
@@ -1169,7 +1138,7 @@ class StudentLeaveListCreateView(APIView):
 
         # Holiday check
         from branch.models import Branch
-        bid = student.branch_id if student else _user_branch_id(request.user)
+        bid = student.branch_id if student else get_user_branch_id(request.user)
         branch_obj = Branch.objects.filter(id=bid).first() if bid else None
         
         holidays = PublicHoliday.objects.filter(
@@ -1255,7 +1224,7 @@ class StudentLeaveListCreateView(APIView):
             try:
                 admins = []
                 org = getattr(request.user, 'organization', None)
-                bid = _user_branch_id(request.user)
+                bid = get_user_branch_id(request.user)
                 if org:
                     from django.contrib.auth import get_user_model
                     User = get_user_model()

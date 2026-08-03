@@ -6,6 +6,7 @@ previously copy-pasted in attendance, exams, leave, and payroll views.
 """
 
 import logging
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +18,25 @@ def get_user_role(user):
 
 def get_user_branch_id(user):
     """
-    Resolve the branch_id for the given user.
+    Resolve the default branch_id for the given user.
 
     Priority:
       1. user.branch_id   (User model FK)
-      2. user.faculty_profile.branch_id  (FacultyProfile)
+      2. first branch from user.branches M2M
+      3. faculty_profile.branch_id  (FacultyProfile)
     """
-    # Direct FK on User model
     branch_id = getattr(user, 'branch_id', None)
     if branch_id:
         return branch_id
 
-    # Fallback: FacultyProfile
+    if hasattr(user, 'branches'):
+        try:
+            branch_ids = list(user.branches.values_list('id', flat=True))
+            if branch_ids:
+                return branch_ids[0]
+        except Exception:
+            pass
+
     try:
         from faculty.models import FacultyProfile
         fp = FacultyProfile.objects.only('branch_id').get(user=user)
@@ -36,7 +44,91 @@ def get_user_branch_id(user):
     except Exception:
         pass
 
+    try:
+        from students.models import Student
+        student = Student.objects.only('branch_id').get(user=user)
+        if getattr(student, 'branch_id', None):
+            return student.branch_id
+    except Exception:
+        pass
+
+    try:
+        if getattr(user, 'role', None) in ['parent', 'parents'] and hasattr(user, 'linked_students'):
+            from students.models import Student
+            student = Student.objects.filter(user__in=user.linked_students.all()).only('branch_id').first()
+            if student and getattr(student, 'branch_id', None):
+                return student.branch_id
+    except Exception:
+        pass
+
     return None
+
+
+def get_user_branch_ids(user):
+    """Return the accessible branch IDs for a user, or None for super_admin."""
+    if not user:
+        return []
+    if getattr(user, 'role', None) == 'super_admin':
+        return None
+
+    branch_ids = []
+    if hasattr(user, 'branches'):
+        try:
+            branch_ids = list(user.branches.values_list('id', flat=True))
+        except Exception:
+            branch_ids = []
+
+    branch_id = getattr(user, 'branch_id', None)
+    if branch_id and branch_id not in branch_ids:
+        branch_ids.insert(0, branch_id)
+
+    return branch_ids
+
+
+def has_user_branch_access(user, branch_id):
+    """Return True if the user can access the given branch."""
+    if getattr(user, 'role', None) == 'super_admin':
+        return True
+    if not branch_id:
+        return False
+    if str(getattr(user, 'branch_id', None)) == str(branch_id):
+        return True
+    if hasattr(user, 'branches'):
+        try:
+            return user.branches.filter(id=branch_id).exists()
+        except Exception:
+            pass
+    return False
+
+
+def get_user_branch_filter(user, model=None):
+    """Return a Q object for branch scoping a queryset.
+
+    If user is super_admin, returns an empty Q() for no branch restriction.
+    If the user has an organization, it is added to the result if the model does not already presuppose it.
+    Otherwise, filters by accessible branches.
+    """
+    q = Q()
+    org = getattr(user, 'organization', None)
+    if org and model is not None:
+        # If the model has an organization relation, scope by it too.
+        if hasattr(model, 'organization'):
+            q &= Q(organization=org)
+        else:
+            q &= Q(branch__organization=org)
+
+    if getattr(user, 'role', None) == 'super_admin':
+        return q
+
+    branch_ids = get_user_branch_ids(user)
+    if branch_ids is None:
+        return q
+    if branch_ids:
+        if model is not None and hasattr(model, 'branch'):
+            q &= Q(branch_id__in=branch_ids)
+        else:
+            q &= Q(branch_id__in=branch_ids)
+    return q
 
 
 def get_student_profile(user):

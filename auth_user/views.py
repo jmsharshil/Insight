@@ -314,13 +314,27 @@ class AddUserAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if request.user.role != 'super_admin':
+        allowed_roles = {'super_admin', 'branch_manager'}
+        if request.user.role not in allowed_roles:
             return Response({"error": "You do not have permission to add users."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = AddUserSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            # Validate branch for faculty
-            if serializer.validated_data.get('role') == 'faculty' and not serializer.validated_data.get('branch'):
+            role = serializer.validated_data.get('role')
+            primary_branch = serializer.validated_data.get('branch')
+            extra_branches = serializer.validated_data.get('branches', [])
+
+            # branch_manager can only create users for their own branch
+            if request.user.role == 'branch_manager':
+                manager_branch = request.user.branch
+                if not manager_branch:
+                    return Response({"error": "Your account is not assigned to a branch."}, status=status.HTTP_403_FORBIDDEN)
+                # Force primary branch to manager's branch
+                serializer.validated_data['branch'] = manager_branch
+                primary_branch = manager_branch
+
+            # Faculty requires at least a primary branch
+            if role == 'faculty' and not primary_branch and not extra_branches:
                 return Response({"branch": ["Branch is required when creating a faculty user."]}, status=status.HTTP_400_BAD_REQUEST)
 
             user = serializer.save()
@@ -339,9 +353,9 @@ class AddUserAPIView(APIView):
                             user=user,
                             branch=user.branch,
                             employee_id=emp_id,
-                            qualification="N/A",
-                            specialization="N/A",
-                            joining_date=timezone.now().date(),
+                            qualification=user.qualification or 'N/A',
+                            specialization=user.specialization or 'N/A',
+                            joining_date=user.joining_date or timezone.now().date(),
                             employment_type=user.employment_type,
                             hourly_rate=user.hourly_rate,
                             session_hours=user.session_hours,
@@ -350,7 +364,7 @@ class AddUserAPIView(APIView):
                         )
                         if qr_file:
                             fp.qr_code.save(qr_file.name, qr_file, save=True)
-                except Exception as e:
+                except Exception:
                     # If faculty profile fails to create, log it but don't break the user creation
                     pass
 
@@ -360,6 +374,8 @@ class AddUserAPIView(APIView):
             return Response({
                 "message": "User created successfully. Password setup email sent.",
                 "user_id": str(user.id),
+                "branch": str(user.branch.id) if user.branch else None,
+                "branches": [str(b.id) for b in user.branches.all()],
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -634,13 +650,13 @@ class UserListAPIView(APIView):
     def get(self, request):
         from django.db.models import Q
         if request.user.is_superuser:
-            users = User.objects.select_related('branch').all().order_by('-created_at')
+            users = User.objects.select_related('branch').prefetch_related('branches').all().order_by('-created_at')
         elif request.user.role == 'super_admin':
-            users = User.objects.select_related('branch').filter(
+            users = User.objects.select_related('branch').prefetch_related('branches').filter(
                 Q(organization=request.user.organization) | Q(is_superuser=True)
             ).order_by('-created_at')
         else:
-            users = User.objects.select_related('branch').filter(organization=request.user.organization).order_by('-created_at')
+            users = User.objects.select_related('branch').prefetch_related('branches').filter(organization=request.user.organization).order_by('-created_at')
         roles = self.request.query_params.getlist('role')
         is_active = self.request.query_params.get('is_active')
         branch = self.request.query_params.get('branch')  # explicit support for branch param
@@ -655,7 +671,10 @@ class UserListAPIView(APIView):
             users = users.filter(is_active=is_active.lower() in ('true', '1', 'yes') if isinstance(is_active, str) else bool(is_active))
         
         if branch:
-            users = users.filter(branch_id=branch)  # support both ?branch=uuid and via filter backend
+            # Match users whose primary branch OR any assigned multi-branch matches
+            users = users.filter(
+                Q(branch_id=branch) | Q(branches=branch)
+            ).distinct()
 
         users = apply_filters(self, request, users)
         serializer = UserListSerializer(users, many=True)

@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access
 
 from .models import PayrollRun, PaySlip, LateEntryPolicy
 from .serializers import (
@@ -30,20 +30,6 @@ LATE_POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
 
 def _user_role(user):
     return getattr(user, 'role', None)
-
-def _user_branch_id(user):
-    if hasattr(user, 'branch_id') and user.branch_id:
-        return user.branch_id
-    if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
-        return user.profile.branch_id
-    # Fallback: check FacultyProfile
-    try:
-        from faculty.models import FacultyProfile
-        fp = FacultyProfile.objects.get(user=user)
-        return fp.branch_id
-    except Exception:
-        pass
-    return None
 
 
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
@@ -124,9 +110,19 @@ class PayrollListCreateView(APIView):
         month = request.GET.get('month', str(now.month))
         req_branch_id = request.GET.get('branch_id')
         role_filter = request.GET.get('role')
-        bid = _user_branch_id(request.user)
+        branch_ids = get_user_branch_ids(request.user)
 
-        target_branch_id = bid if (role != 'super_admin' and bid) else req_branch_id
+        target_branch_ids = None
+        if role != 'super_admin':
+            if req_branch_id:
+                if not branch_ids or str(req_branch_id) not in [str(b) for b in branch_ids]:
+                    return Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
+                target_branch_ids = [req_branch_id]
+            else:
+                target_branch_ids = branch_ids
+        else:
+            if req_branch_id:
+                target_branch_ids = [req_branch_id]
 
         # ── Auto-generate payroll on GET ──
         try:
@@ -142,8 +138,8 @@ class PayrollListCreateView(APIView):
             User = get_user_model()
 
             # Determine which branches to auto-generate for
-            if target_branch_id:
-                branch_ids = [target_branch_id]
+            if target_branch_ids:
+                branch_ids = target_branch_ids
             else:
                 # super_admin with no branch filter → auto-generate for all branches that have active employees
                 fp_qs = FacultyProfile.objects.filter(is_active=True)
@@ -235,8 +231,8 @@ class PayrollListCreateView(APIView):
         qs = PayrollRun.objects.select_related('branch').all()
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
-        if target_branch_id:
-            qs = qs.filter(branch_id=target_branch_id)
+        if target_branch_ids:
+            qs = qs.filter(branch_id__in=target_branch_ids)
 
         for param, field in [('year', 'year'), ('month', 'month'), ('status', 'status')]:
             val = request.GET.get(param)
@@ -788,12 +784,12 @@ class LatePolicyView(APIView):
         role = _user_role(request.user)
         # if role not in LATE_POLICY_VIEW_ROLES:
         #     return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-        bid = _user_branch_id(request.user)
+        branch_ids = get_user_branch_ids(request.user)
         qs = LateEntryPolicy.objects.select_related('branch').all()
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
-        if role != 'super_admin' and bid:
-            qs = qs.filter(branch_id=bid)
+        if role != 'super_admin' and branch_ids:
+            qs = qs.filter(branch_id__in=branch_ids)
         return Response({'success': True, 'data': LateEntryPolicySerializer(qs, many=True).data})
 
     def post(self, request):
@@ -805,7 +801,12 @@ class LatePolicyView(APIView):
         if not ser.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        bid = _user_branch_id(request.user) or request.data.get('branch_id')
+        branch_id = request.data.get('branch_id')
+        if role != 'super_admin':
+            branch_ids = get_user_branch_ids(request.user)
+            if branch_id and (not branch_ids or str(branch_id) not in [str(b) for b in branch_ids]):
+                return Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
+        bid = branch_id or get_user_branch_id(request.user)
         if not bid:
             return Response({'success': False, 'message': 'Branch required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -879,9 +880,9 @@ class ExtraHoursApprovalListView(APIView):
         
         qs = ExtraHoursApproval.objects.select_related('faculty__user', 'chapter__subject', 'approved_by').all()
         
-        bid = _user_branch_id(request.user)
-        if role != 'super_admin' and bid:
-            qs = qs.filter(faculty__branch_id=bid)
+        branch_ids = get_user_branch_ids(request.user)
+        if role != 'super_admin' and branch_ids:
+            qs = qs.filter(faculty__branch_id__in=branch_ids)
             
         qs = apply_filters(self, request, qs)
         return paginate_queryset(qs, request, ExtraHoursApprovalSerializer)

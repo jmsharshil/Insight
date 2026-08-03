@@ -45,6 +45,8 @@ msgpack==1.1.2
 openpyxl==3.1.5
 packaging==26.2
 pillow==12.2.0
+pytesseract==0.3.13
+pdf2image==1.16.0  # required for PDF rendering of OMR sheets; also install Poppler runtime on the server
 pluggy==1.6.0
 prompt_toolkit==3.0.52
 psycopg2==2.9.10

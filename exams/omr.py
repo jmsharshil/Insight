@@ -21,7 +21,7 @@ Two responsibilities:
 Dependencies (add to requirements.txt if not present):
   opencv-python-headless
   numpy
-  pytesseract   (optional — used as fallback for text-based answer keys)
+  pytesseract   (required for OCR metadata extraction and text fallback)
   Pillow
 """
 
@@ -32,6 +32,35 @@ from io import BytesIO
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_tesseract_cmd():
+    """Try to configure pytesseract with a known tesseract executable path."""
+    try:
+        import pytesseract
+    except ImportError:
+        return
+
+    tesseract_cmd = getattr(pytesseract.pytesseract, 'tesseract_cmd', 'tesseract')
+    if tesseract_cmd and tesseract_cmd != 'tesseract' and os.path.exists(tesseract_cmd):
+        return
+
+    if os.name == 'nt':
+        candidate_paths = [
+            os.environ.get('TESSERACT_CMD', ''),
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ]
+        for candidate in candidate_paths:
+            if candidate and os.path.exists(candidate):
+                pytesseract.pytesseract.tesseract_cmd = candidate
+                return
+    else:
+        import shutil
+        which_path = os.environ.get('TESSERACT_CMD') or shutil.which('tesseract')
+        if which_path:
+            pytesseract.pytesseract.tesseract_cmd = which_path
+            return
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -73,8 +102,10 @@ def _pdf_page_to_image_bytes(pdf_path: str, page: int = 0) -> Optional[bytes]:
         pages[0].save(buf, format='PNG')
         return buf.getvalue()
     except ImportError:
-        logger.warning("pdf2image not installed — cannot render PDF pages. Install pdf2image + poppler.")
-        return None
+        raise ImportError(
+            "pdf2image is required to render PDF OMR sheets. Install pdf2image into your Python environment "
+            "and install the Poppler runtime on the server."
+        )
     except Exception as exc:
         logger.error("PDF→image conversion failed: %s", exc)
         return None
@@ -277,6 +308,97 @@ def extract_answer_key_from_file(file_path: str, n_questions: int = 0, n_options
         logger.error("OCR on image failed: %s", exc)
 
     raise ValueError("Could not extract answer key from image.")
+
+
+def _extract_text_from_image(img_arr):
+    try:
+        import pytesseract
+        from PIL import Image as PILImage
+    except ImportError:
+        raise ImportError("pytesseract is required to extract student metadata from the OMR sheet.")
+
+    _configure_tesseract_cmd()
+
+    if getattr(img_arr, 'ndim', None) is not None:
+        from PIL import Image as PILImage
+        pil_img = PILImage.fromarray(img_arr)
+    else:
+        raise ValueError("Unsupported image type for OCR metadata extraction.")
+
+    try:
+        return pytesseract.image_to_string(pil_img)
+    except pytesseract.pytesseract.TesseractNotFoundError as exc:
+        raise RuntimeError(
+            "Tesseract OCR binary not found. Install Tesseract and ensure it is on PATH "
+            "or set pytesseract.pytesseract.tesseract_cmd to the executable path. "
+            "On Windows, install it at C:\\Program Files\\Tesseract-OCR\\tesseract.exe."
+        ) from exc
+
+
+def _normalize_text_for_match(value: str) -> str:
+    if not value:
+        return ''
+    value = re.sub(r'[\s\u00A0]+', ' ', value).strip()
+    return value
+
+
+def parse_student_identity_from_sheet(source) -> dict:
+    """Parse student metadata like name, roll number, or admission number from the OMR sheet."""
+    if isinstance(source, str) and source.lower().endswith('.pdf'):
+        img_bytes = _pdf_page_to_image_bytes(source)
+        if not img_bytes:
+            raise ValueError("Could not render PDF answer sheet for metadata extraction.")
+        img = _load_image_as_array(img_bytes)
+    else:
+        img = _load_image_as_array(source)
+
+    text = _extract_text_from_image(img)
+    text = text.replace('\r', '\n')
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    def extract_field(regex_list):
+        for regex in regex_list:
+            for line in lines:
+                match = regex.search(line)
+                if match:
+                    return _normalize_text_for_match(match.group(1))
+        return None
+
+    metadata = {
+        'student_name': extract_field([
+            re.compile(r'(?:student\s*name|name)\s*[:\-]\s*(.+)', re.IGNORECASE),
+            re.compile(r'^[Nn]ame\s*[:\-]\s*(.+)$'),
+        ]),
+        'roll_number': extract_field([
+            re.compile(r'(?:roll(?:\s*(?:no|number)\b)|r\b)\s*[:\-]?\s*(\S+)', re.IGNORECASE),
+            re.compile(r'^(?:roll|r)\s*(?:no|number)?\s*(?:[:\-])\s*(\S+)$', re.IGNORECASE),
+        ]),
+        'admission_number': extract_field([
+            re.compile(r'(?:admission(?:\s*(?:no|number)|\s*)|enrollment(?:\s*(?:no|number)|\s*)|adm)\s*[:\-]?\s*(\S+)', re.IGNORECASE),
+            re.compile(r'^(?:admission|admn|enrollment)\s*(?:no|number)?\s*(?:[:\-])\s*(\S+)$', re.IGNORECASE),
+        ]),
+    }
+
+    if not metadata['student_name']:
+        for index, line in enumerate(lines):
+            if re.search(r'\b(student\s*name|name)\b', line, re.IGNORECASE):
+                if ':' in line:
+                    candidate = line.split(':', 1)[1].strip()
+                    if candidate:
+                        metadata['student_name'] = _normalize_text_for_match(candidate)
+                        break
+                elif index + 1 < len(lines):
+                    metadata['student_name'] = _normalize_text_for_match(lines[index + 1])
+                    break
+
+    if not metadata['student_name'] and lines:
+        for line in lines:
+            if len(line) > 2 and all(ch.isalpha() or ch.isspace() or ch in '.-' for ch in line):
+                if 'roll' not in line.lower() and 'admission' not in line.lower() and 'enroll' not in line.lower():
+                    metadata['student_name'] = _normalize_text_for_match(line)
+                    break
+
+    return {k: v for k, v in metadata.items() if v}
 
 
 # ---------------------------------------------------------------------------

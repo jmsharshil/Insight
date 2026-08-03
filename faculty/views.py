@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids
 
 from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHourlyRate
 from .serializers import (
@@ -33,21 +33,6 @@ SUBJECT_RATE_EDIT_ROLES = ['branch_manager', 'admin_senior_executive', 'super_ad
 
 def _user_role(user):
     return getattr(user, 'role', None)
-
-
-def _user_branch_id(user):
-    if hasattr(user, 'branch_id') and user.branch_id:
-        return user.branch_id
-    if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
-        return user.profile.branch_id
-    # Fallback: check FacultyProfile
-    try:
-        from .models import FacultyProfile
-        fp = FacultyProfile.objects.get(user=user)
-        return fp.branch_id
-    except Exception:
-        pass
-    return None
 
 
 # ── Stub notification helper ──────────────────────────────────────────────────
@@ -92,9 +77,10 @@ class FacultyListCreateView(APIView):
         )
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
-        bid = _user_branch_id(request.user)
-        if role not in ('super_admin', 'branch_manager') and bid:
-            qs = qs.filter(branch_id=bid)
+        if role not in ('super_admin', 'branch_manager'):
+            branch_ids = get_user_branch_ids(request.user)
+            if branch_ids:
+                qs = qs.filter(branch_id__in=branch_ids)
 
         for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type'), ('level', 'level')]:
             val = request.GET.get(param)
@@ -124,7 +110,7 @@ class FacultyListCreateView(APIView):
         if User.objects.filter(email=d['email']).exists():
             return Response({'success': False, 'message': 'Email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        branch_id = _user_branch_id(request.user) or request.data.get('branch_id') or request.data.get('branch')
+        branch_id = get_user_branch_id(request.user) or request.data.get('branch_id') or request.data.get('branch')
         if not branch_id:
             return Response({'success': False, 'message': 'Branch is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -766,9 +752,10 @@ class SessionListCreateView(APIView):
             qs = SessionReport.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            bid = _user_branch_id(request.user)
-            if role != 'super_admin' and bid:
-                qs = qs.filter(branch_id=bid)
+            if role != 'super_admin':
+                branch_ids = get_user_branch_ids(request.user)
+                if branch_ids:
+                    qs = qs.filter(branch_id__in=branch_ids)
         else:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 

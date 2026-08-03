@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+import datetime
 from django.contrib.auth import get_user_model
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
@@ -77,6 +78,27 @@ class QuestionInputSerializer(serializers.Serializer):
 
 # ═══ Exam ═════════════════════════════════════════════════════════════════════
 
+def _student_can_see_answer_key(request, exam):
+    if not request or not getattr(request, 'user', None) or not getattr(request.user, 'is_authenticated', False):
+        return False
+    if getattr(request.user, 'role', None) != 'student':
+        return True
+
+    if not exam or exam.status != 'results_published':
+        return False
+
+    from results.models import PublishedResult
+    pr = PublishedResult.objects.filter(exam=exam, student__user=request.user).first()
+    if not pr or not pr.published_at:
+        return False
+
+    published_at = pr.published_at
+    if timezone.is_naive(published_at):
+        published_at = timezone.make_aware(published_at, timezone.get_default_timezone())
+
+    return timezone.now() <= published_at + datetime.timedelta(hours=24)
+
+
 class SubjectPaperSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True)
     set_name = serializers.CharField(
@@ -99,31 +121,12 @@ class SubjectPaperSerializer(serializers.ModelSerializer):
     def get_answer_key(self, obj):
         if not obj.answer_key:
             return None
-            
+
         request = self.context.get('request')
-        if not request or getattr(request.user, 'role', None) != 'student':
-            return obj.answer_key.url
-            
         exam = self.context.get('exam')
-        if not exam:
-            # If not in an exam context, just return it (or maybe hide it? Better to return if they somehow access it elsewhere)
+        if _student_can_see_answer_key(request, exam):
             return obj.answer_key.url
-            
-        if exam.status != 'results_published':
-            return None
-            
-        from results.models import PublishedResult
-        from django.utils import timezone
-        import datetime
-        
-        pr = PublishedResult.objects.filter(exam=exam, student__user=request.user).first()
-        if not pr:
-            return None
-            
-        if timezone.now() > pr.published_at + datetime.timedelta(hours=24):
-            return None
-            
-        return obj.answer_key.url
+        return None
 
 
 class ExamListSerializer(serializers.ModelSerializer):
@@ -178,26 +181,11 @@ class ExamListSerializer(serializers.ModelSerializer):
     def get_answer_key(self, obj):
         if not obj.answer_key:
             return None
-            
+
         request = self.context.get('request')
-        if not request or getattr(request.user, 'role', None) != 'student':
+        if _student_can_see_answer_key(request, obj):
             return obj.answer_key.url
-            
-        if obj.status != 'results_published':
-            return None
-            
-        from results.models import PublishedResult
-        from django.utils import timezone
-        import datetime
-        
-        pr = PublishedResult.objects.filter(exam=obj, student__user=request.user).first()
-        if not pr:
-            return None
-            
-        if timezone.now() > pr.published_at + datetime.timedelta(hours=24):
-            return None
-            
-        return obj.answer_key.url
+        return None
 
     def get_is_submitted(self, obj):
         request = self.context.get('request')

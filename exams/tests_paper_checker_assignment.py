@@ -1,6 +1,9 @@
 from types import SimpleNamespace
+from unittest.mock import patch
+import datetime
 
 from django.test import SimpleTestCase, override_settings
+from django.utils import timezone
 
 from exams.utils import build_absolute_url, requires_paper_checking
 
@@ -41,3 +44,41 @@ class AnswerKeyUrlTests(SimpleTestCase):
             build_absolute_url('/api/v1/answer-key/123/?token=abc'),
             'http://127.0.0.1:8000/api/v1/answer-key/123/?token=abc',
         )
+
+
+class AnswerKeyVisibilityTests(SimpleTestCase):
+    @patch('results.models.PublishedResult.objects.filter')
+    def test_student_can_see_answer_key_within_24_hours(self, mock_filter):
+        mock_result = SimpleNamespace(published_at=timezone.now())
+        mock_filter.return_value.first.return_value = mock_result
+
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=True, role='student'))
+        exam = SimpleNamespace(status='results_published')
+
+        from exams.serializers import _student_can_see_answer_key
+        self.assertTrue(_student_can_see_answer_key(request, exam))
+
+    @patch('results.models.PublishedResult.objects.filter')
+    def test_student_cannot_see_answer_key_after_24_hours(self, mock_filter):
+        mock_result = SimpleNamespace(published_at=timezone.now() - datetime.timedelta(hours=25))
+        mock_filter.return_value.first.return_value = mock_result
+
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=True, role='student'))
+        exam = SimpleNamespace(status='results_published')
+
+        from exams.serializers import _student_can_see_answer_key
+        self.assertFalse(_student_can_see_answer_key(request, exam))
+
+    def test_non_student_always_sees_answer_key(self):
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=True, role='faculty'))
+        exam = SimpleNamespace(status='results_published')
+
+        from exams.serializers import _student_can_see_answer_key
+        self.assertTrue(_student_can_see_answer_key(request, exam))
+
+    def test_anonymous_cannot_see_answer_key(self):
+        request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False, role=None))
+        exam = SimpleNamespace(status='results_published')
+
+        from exams.serializers import _student_can_see_answer_key
+        self.assertFalse(_student_can_see_answer_key(request, exam))

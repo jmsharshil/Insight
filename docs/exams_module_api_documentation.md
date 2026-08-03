@@ -6,16 +6,16 @@ This document provides a comprehensive list of all APIs available in the `exams`
 
 ## 1. Exam Creation & Management
 
-**NEW: Automatic `total_marks` Calculation**
+**NEW: Automatic `total_marks` Calculation & Enhanced List Fields**
 `Exam.total_marks` is now **auto-derived** as `SUM(Question.marks)` across all linked questions (MCQ, subjective, true_false all support per-question `marks`).
 - `ExamCreateSerializer` treats `total_marks` as effectively read-only on input (initial value accepted for validation but overridden by questions).
 - `pass_marks <= total_marks` validation is retained.
 - On any Question create/update/delete (via dedicated endpoints), `exam.recalculate_total_marks()` runs atomically to sync the value (removes manual drift).
-- List/Detail/Start-Exam responses now always return up-to-date computed `total_marks`.
-- `questions_count` is available in list views.
+- List responses now include computed fields: `questions_count`, `can_start_exam`, `is_upcoming`, `is_submitted`, `classroom`/`classroom_name` (pulled from linked `TimetableSlot`), `attendance_percentage` (non-absent MarkSheets / active batch students).
+- `answer_key` visibility for students is strictly limited to 24h after `PublishedResult.published_at`.
 - Existing exams are unaffected until next question mutation.
 
-Exams are created automatically through the **Timetable** module when scheduling class tests, prelims, or custom sessions.
+Exams are created automatically through the **Timetable** module (via `exam_data` + `session_type`) when scheduling class tests, prelims, or custom sessions. `paper_checkers`/`examiners` from slot are synced to `Exam.paper_checkers` / `supervisors`.
 
 ### 1.1 Create Exam via Timetable Slot
 **Endpoint:** `POST /api/v1/timetable/`
@@ -57,7 +57,16 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 ### 1.2 List Exams
 **Endpoint:** `GET /api/v1/exams/`
 
-**Response includes:** `grace_marks`, `grace_marks_note`, `answer_key` (URL or `null` for students after 24h window), `selected_papers`.
+**Response includes:** All core fields + computed values from `ExamListSerializer`:
+- `grace_marks`, `grace_marks_note`
+- `answer_key` (URL or `null` for students — governed by `_student_can_see_answer_key()` using `PublishedResult.published_at + 24h`)
+- `selected_papers` (full paper objects via nested `SubjectPaperSerializer`)
+- `paper_checkers`, `supervisors` (lists of `{id, name, email}`)
+- `questions_count`, `can_start_exam`, `is_upcoming`, `is_submitted`
+- `classroom`, `classroom_name` (from linked timetable slot)
+- `attendance_percentage` (post-exam only)
+
+**Note:** `get_subject*` methods fallback to first `selected_papers` if no direct `subject`. `can_start_exam` includes detailed role/batch/time/submission checks with student profile caching.
 
 ### 1.3 Retrieve, Update & Delete Exam
 **Endpoint:** `/api/v1/exams/{exam_id}/`
@@ -413,7 +422,7 @@ When a student hits `POST /api/v1/exams/{exam_id}/start/`, the system assigns th
 
 The `Exam` model supports full proctoring, geo-fencing, screen monitoring, configurable result release, reusable subject papers, M2M paper_checkers, and grace marks.
 
-### Key Model Fields (from `exams/models.py`)
+### Key Model Fields & Computed Serializer Fields (from `exams/models.py` + `serializers.py`)
 
 | Field | Type | Description |
 |---|---|---|
@@ -425,21 +434,27 @@ The `Exam` model supports full proctoring, geo-fencing, screen monitoring, confi
 | `split_screen_max_warnings` | int | Max split-screen warnings before action |
 | `split_screen_action` | choice | `'flag_only'` or `'auto_submit'` |
 | `result_release_mode` | choice | `'instant'` (auto-grade MCQ on submit) or `'manual'` (admin publishes) |
-| `selected_papers` | M2M | Links to `SubjectPaper` objects |
-| `paper_checkers` | M2M | Users with `role='paper_checker'` |
+| `selected_papers` | M2M | Links to `SubjectPaper` objects (round-robin assignment on `/start/`) |
+| `paper_checkers` | M2M | Users with `role='paper_checker'` (synced from timetable slot) |
+| `supervisors` | M2M | Users with `role='exam_supervisor'` (synced from `examiners` in timetable) |
 | `answer_key` | FileField | Exam-level answer key upload |
-| `grace_marks` | decimal | Grace marks added to all student results (**new**) |
-| `grace_marks_note` | text | Reason for awarding grace marks (**new**) |
+| `grace_marks` | decimal | Grace marks added to all student results |
+| `grace_marks_note` | text | Reason for awarding grace marks |
+| `classroom` / `classroom_name` | (computed) | Pulled from linked `TimetableSlot.classroom` (via `hasattr` check in serializer) |
+| `attendance_percentage` | float | `(non-absent MarkSheet.count() / active batch students) * 100`; `null` for draft/scheduled exams (uses `results.models.MarkSheet`) |
+| `can_start_exam`, `is_upcoming`, `is_submitted` | bool | Student-specific logic with caching (`_cached_student`), time-window checks, and submission status from `ExamSession` |
 
-### Methods
+### Methods & Serializer Helpers
 - `recalculate_total_marks()`: Sum of `Question.marks` (auto via Django signals on Question CRUD).
-- `ensure_paper_checkers()`: Populates `paper_checkers` M2M early on Exam create.
+- `ensure_paper_checkers_for_exam()`: Early population of `paper_checkers` M2M from timetable slot (called in views).
+- `_student_can_see_answer_key(request, exam)`: Controls `answer_key` visibility (admins always see; students only within 24h of `PublishedResult.published_at`).
 
 **Proctoring Flow:**
-- `/start/` validates geo if configured, creates `ExamSession`.
-- Periodic `/geo-check/` and `/screen-event/` log violations, trigger actions per thresholds.
+- `/start/` validates geo if configured, creates `ExamSession`, assigns paper round-robin.
+- Periodic `/geo-check/` and `/screen-event/` log violations (ScreenEventSerializer), trigger actions per thresholds.
+- `ExamListSerializer.get_can_start_exam()` includes student caching, batch match, time window (or `ongoing` status), and no prior submission check.
 - On submit, if `result_release_mode=instant` and MCQ-only, auto-grade and publish.
 
-See `timetable_procedure_guide.md` for `exam_data` examples, `results_module_api_documentation.md` for marking/publishing/recheck integration.
+See `timetable_procedure_guide.md` (updated for `session_type` + nested `exam_data`, clash 409 responses, confirm/export/publish endpoints) for full integration examples. Also see `results_module_api_documentation.md` for marking/publishing/recheck.
 
-**Migration Note:** After pulling latest code, run `python manage.py migrate exams` to pick up new fields (`grace_marks`, `grace_marks_note`).
+**Migration Note:** After pulling latest code, run `python manage.py migrate exams` (new fields: `grace_marks`, `grace_marks_note`, timetable OneToOne link, proctoring config). All changes synced with `ExamListSerializer`, `ExamCreateSerializer`, and `SubjectPaperSerializer`.

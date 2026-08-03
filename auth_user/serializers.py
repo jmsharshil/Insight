@@ -137,7 +137,7 @@ class UserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'organization', 'organization_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'branches', 'organization', 'organization_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
@@ -165,7 +165,7 @@ class UserListSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'branches', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
@@ -223,7 +223,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def validate_role(self, value):
         if value in ['student', 'parents', 'super_admin']:
@@ -232,13 +232,28 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     def create(self, validated_data):
         linked_students = validated_data.pop('linked_students', None)
+        extra_branches = validated_data.pop('branches', None)
         request = self.context.get('request')
         if ('organization' not in validated_data or validated_data['organization'] is None) and request is not None:
             request_org = getattr(request.user, 'organization', None)
             if request_org:
                 validated_data['organization'] = request_org
         user = User.objects.create_user(password=None, is_active=True, **validated_data)
-        
+
+        # ── Sync branch ↔ branches ────────────────────────────────────────
+        # Build the final set of branches from both sources
+        branch_set = list(extra_branches) if extra_branches else []
+        if user.branch and user.branch not in branch_set:
+            branch_set.insert(0, user.branch)   # primary branch first
+
+        if branch_set:
+            user.branches.set(branch_set)
+            # If no primary branch was given, promote first of branches
+            if not user.branch:
+                user.branch = branch_set[0]
+                user.save(update_fields=['branch'])
+        # ─────────────────────────────────────────────────────────────────
+
         if linked_students:
             user.linked_students.set(linked_students)
             # Also create ParentLink records so dashboard and other parent features work
@@ -355,7 +370,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','linked_students','is_active','organization','profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -368,9 +383,27 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
+        extra_branches = validated_data.pop('branches', None)
         linked_students = validated_data.pop('linked_students', None)
         instance = super().update(instance, validated_data)
-        
+
+        # ── Sync branch ↔ branches ────────────────────────────────────────
+        if extra_branches is not None:
+            branch_set = list(extra_branches)
+            # Always keep the primary branch in the M2M set
+            if instance.branch and instance.branch not in branch_set:
+                branch_set.insert(0, instance.branch)
+            instance.branches.set(branch_set)
+
+            # If primary branch was cleared but branches remain, promote first
+            if not instance.branch and branch_set:
+                instance.branch = branch_set[0]
+                instance.save(update_fields=['branch'])
+        elif extra_branches is None and instance.branch:
+            # branches not supplied in this request — ensure FK is still in M2M
+            if not instance.branches.filter(id=instance.branch_id).exists():
+                instance.branches.add(instance.branch)
+        # ─────────────────────────────────────────────────────────────────
         if linked_students is not None:
             # linked_students may be list of User instances or pks (UUIDs)
             instance.linked_students.set(linked_students)
@@ -439,8 +472,8 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names'] + EMPLOYEE_FIELDS
-        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'linked_students', 'organization', 'organization_name', 'linked_student_names'] # These fields cannot be updated via this serializer
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'branches', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names'] + EMPLOYEE_FIELDS
+        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'branches', 'linked_students', 'organization', 'organization_name', 'linked_student_names'] # These fields cannot be updated via this serializer
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

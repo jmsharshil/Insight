@@ -20,8 +20,33 @@
 - `employee_id`: Auto-generated (format: `EMP-YYYY-XXXX`).
 - `work_start_time` / `work_end_time`: Used for late/early penalty calculation during QR scans.
 - `qr_code`: PNG image generated on creation.
-- `hourly_rate` / `salary`: Base rates; subject rates take precedence where defined.
-- `level`, `employment_type`: Executive/Professional and Full-time/Part-time/Contract.
+- `hourly_rate` / `salary`: Base rates; subject rates take precedence where defined. **Conditionally hidden** based on role (see RBAC section below).
+- `level`, `employment_type`: Executive/Professional and Full-time/Part-time/Contract/Visiting.
+
+---
+
+## RBAC & Conditional Field Filtering (EmployeeFieldsMixin)
+
+The `UserSerializer` and `UserListSerializer` (used by faculty endpoints) now use an `EmployeeFieldsMixin` that dynamically filters sensitive payroll fields based on the user's `role` and `employment_type`.
+
+### Hidden Fields by Role
+| Role | Hidden Fields | Notes |
+|------|---------------|-------|
+| Non-employee (e.g. student, parent) | All `EMPLOYEE_FIELDS` (salary, hourly_rate, bank_account, etc.) | Only basic profile shown. |
+| `faculty` (full_time) | `hourly_rate` (unless part_time/visiting), `per_paper_rate` | Salary shown. |
+| `faculty` (part_time/visiting) | `salary` | Hourly rate shown. |
+| `paper_checker`, `exam_supervisor`, `examiner` | `salary` | Per-paper rate may be shown for paper_checker. |
+| Other staff (BM, ASE, etc.) | `specialization`, `subject_expertise`, `session_hours` (if not faculty) | Full employee fields shown. |
+
+**New RBAC Fields Always Injected:**
+- `accessible_modules`: Array from role config (or user override).
+- `canDelete`: Boolean from role config.
+- `canExport`: Boolean from role config.
+- `role_display`, `organization_name`, `profile_pic`.
+
+**In `to_internal_value` / `validate`**: Empty values for choice/numeric fields are normalized (empty → default or None). This prevents validation errors on PATCH.
+
+This ensures frontend receives only fields the user/role is authorized to see, preventing information leakage.
 
 ---
 
@@ -54,7 +79,7 @@
 ### 1. List & Create Faculty
 **`GET /faculty/`** — Paginated list (filters: `is_active`, `employment_type`, `level`; search on name/specialization).
 
-**Example Response:**
+**Example Response (with RBAC fields):**
 ```json
 {
   "success": true,
@@ -66,6 +91,8 @@
       "full_name": "Dr. Anita Sharma",
       "email": "anita@example.com",
       "phone": "9876543210",
+      "role": "faculty",
+      "role_display": "Faculty",
       "branch_name": "Main Branch",
       "level": "professional",
       "employment_type": "full_time",
@@ -74,11 +101,16 @@
       "work_end_time": "17:00:00",
       "photo_url": "https://.../photo.jpg",
       "batch_count": 4,
-      "subjects": ["Math", "Physics"]
+      "subjects": ["Math", "Physics"],
+      "accessible_modules": ["timetable", "exams", "reports"],
+      "canDelete": false,
+      "canExport": true,
+      "salary": 65000.00
     }
   ]
 }
 ```
+**Note:** `salary`, `hourly_rate`, `per_paper_rate` etc. are conditionally excluded per the `EmployeeFieldsMixin` based on role/employment_type (see RBAC section). Non-employees see none of the payroll fields.
 
 **`POST /faculty/`** — Create new faculty (requires branch_manager or super_admin role).
 
@@ -312,6 +344,7 @@ Returns QR code URL (generates on-demand if missing).
 - **Integration:** Closely tied to `batches` (timetable slots), `payroll` (payslip computation), and `leave` (late entry records).
 - **Auto-updates:** Changing salary/rates updates ALL related payslips (including disbursed ones).
 - **Validation:** Session end_time must be after start_time. Cannot edit/delete sessions older than 7 days.
-- Related documentation: `payroll_module_api_documentation.md`, `timetable_procedure_guide.md`, `inventory_api.md` (for faculty allocations).
+- **RBAC in Serializers:** All faculty/user list/detail endpoints now use `EmployeeFieldsMixin` (in `serializers.py`) for role-based field filtering and injection of `accessible_modules`, `canDelete`, `canExport`. See dedicated section above.
+- Related documentation: `payroll_module_api_documentation.md`, `timetable_procedure_guide.md`, `inventory_api.md` (for faculty allocations), `auth_user_procedure_guide.md` (for role configs).
 
-This updated documentation reflects the current implementation in `faculty/views.py`, `serializers.py`, and `models.py`.
+This documentation has been updated to reflect the latest `EmployeeFieldsMixin`, conditional payroll field hiding, RBAC injection, and multi-role support in `serializers.py` (as of latest code changes).

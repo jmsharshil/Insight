@@ -354,14 +354,28 @@ See `exams_module_api_documentation.md` for full Exam CRUD and proctoring endpoi
 }
 ```
 
-##### Error — Faculty Clash (400)
+##### Error — Scheduling Conflict (409 Conflict)
 ```json
 {
   "success": false,
-  "message": "Faculty has a scheduling conflict.",
-  "clashing_slots": ["slot-uuid-existing-001"]
+  "message": "Faculty has a scheduling conflict. | Classroom is already booked...",
+  "conflicts": [
+    "Faculty 'Prof. Ramesh Kumar' is already scheduled from 10:00:00–11:30:00 in batch 'cs_executive_june_2026_0101' on this day."
+  ],
+  "clashing_slots": [
+    {
+      "id": "slot-uuid-existing-001",
+      "batch_name": "cs_executive_june_2026_0101",
+      "faculty_name": "Prof. Ramesh Kumar",
+      "start_time": "10:00:00",
+      "end_time": "11:30:00",
+      "session_date": "2026-06-15"
+    }
+  ],
+  "can_force": true
 }
 ```
+**Note:** Use `POST /api/v1/timetable/confirm/` with the same payload to force-create (bypassing clashes).
 
 ---
 
@@ -690,14 +704,17 @@ Send **only the fields** you want to update. Clash detection runs again on updat
 }
 ```
 
-#### Error — Faculty Clash on Update (400)
+#### Error — Scheduling Conflict on Update (409 Conflict)
 ```json
 {
   "success": false,
   "message": "Faculty has a scheduling conflict.",
-  "clashing_slots": ["slot-uuid-existing-999"]
+  "conflicts": ["Faculty 'Prof. Sunita Verma' is already scheduled..."],
+  "clashing_slots": [{"id": "slot-uuid-existing-999", ...}],
+  "can_force": true
 }
 ```
+Use the dedicated **Confirm Force-Create** endpoint (`POST /api/v1/timetable/confirm/`) to bypass clash detection.
 
 #### Error — Slot Not Found (404)
 ```json
@@ -748,7 +765,7 @@ Duplicates a `regular` session slot to a different `slot_code` / `day_of_week` (
 
 - For P5/P6, also provide `start_time`/`end_time`.
 - Returns the new slot with full details (201 Created).
-- Errors: 400 for non-regular, invalid code, clashes, or missing params.
+- Errors: 400 for non-regular, invalid code, or missing params; **409 Conflict** for scheduling clashes (with `clashing_slots` and `can_force: true`).
 
 #### Example Response (201)
 ```json
@@ -756,6 +773,45 @@ Duplicates a `regular` session slot to a different `slot_code` / `day_of_week` (
   "success": true,
   "message": "Timetable slot duplicated.",
   "data": { ...full TimetableSlotListSerializer output... }
+}
+```
+
+### 2.7 Force-Create (Confirm) — Bypass Clashes
+
+**`POST /api/v1/timetable/confirm/`**
+
+Bypasses all clash detection (batch/faculty/classroom). Use only after receiving `can_force: true` from a normal create/update. Accepts the same payload as the regular POST.
+
+#### Response (201)
+```json
+{
+  "success": true,
+  "message": "Timetable slot force-created (conflicts ignored).",
+  "data": { ...full slot data... }
+}
+```
+
+### 2.8 Excel Export
+
+**`GET /api/v1/timetable/export/`**
+
+Supports query params `date_from`, `date_to` (defaults to current week), `batch_id`, `faculty_id`, etc. Role-based filtering (students see only their batches, faculty see their slots, parents see linked students).
+
+Generates XLSX with expanded recurring slots into actual dates where possible. Includes columns for Batch, Course, Branch, Day, Date, Times, Subject, Faculty, Classroom, Session Type.
+
+### 2.9 Publish Timetable (Notifications)
+
+**`POST /api/v1/timetable/publish/`**
+
+Body: `{"batch_id": "..."}` or `{"branch_id": "..."}`.
+
+Sends system notifications (and emails) to all affected faculty, enrolled students, and their parents. Useful after bulk timetable changes.
+
+#### Response
+```json
+{
+  "success": true,
+  "message": "Timetable published successfully. Notified 45 users."
 }
 ```
 
@@ -913,6 +969,8 @@ Use this to retrieve which subjects a faculty member currently teaches across al
 
 **`GET /api/v1/faculty/<faculty_id>/`**
 
+**Note:** Response uses `UserSerializer` / `EmployeeFieldsMixin`. Payroll fields (`salary`, `hourly_rate`, `per_paper_rate`, `bank_account` etc.) are **conditionally excluded** based on the viewer's role and the faculty's `employment_type` (see `faculty_module_api_documentation.md` RBAC section for matrix). RBAC fields (`accessible_modules`, `canDelete`, `canExport`) are always included.
+
 #### Response (200 OK)
 ```json
 {
@@ -946,7 +1004,10 @@ Use this to retrieve which subjects a faculty member currently teaches across al
       "subject-uuid-001",
       "subject-uuid-002"
     ],
-    "subject_name": "Company Law, Securities Law"
+    "subject_name": "Company Law, Securities Law",
+    "accessible_modules": ["timetable", "batches", "exams"],
+    "canDelete": false,
+    "canExport": true
   }
 }
 ```
@@ -957,12 +1018,14 @@ Use this to retrieve which subjects a faculty member currently teaches across al
 > | `subjects` | `array[UUID]` | Unique Subject UUIDs assigned to this faculty across all batches |
 > | `subject_name` | `string` | Comma-separated display names matching `subjects` |
 > | `batch_name` | `string` | Comma-separated names of all batches this faculty teaches |
+> | `accessible_modules` | array | Role-based modules the user can access |
+> | `canDelete`, `canExport` | bool | RBAC permissions from role config |
 
 ---
 
 ## SECTION 5 — Complete API Endpoint Summary Table (E4 Updated)
 
-**Note:** Legacy `timetable/exam-types/` endpoints and `timetable_exam_type` field have been removed. All exam creation is now driven by `session_type` + inline `exam_data` (see Appendix A.1 and `_handle_exam()`).
+**Note:** Legacy `timetable/exam-types/` endpoints and `timetable_exam_type` field have been removed. All exam creation is now driven by `session_type` + inline `exam_data` (see Appendix A.1 and `_handle_exam()`). New endpoints for confirm, export, and publish added (see sections 2.7–2.9).
 
 | # | Method | Endpoint | Description |
 | :--- | :--- | :--- | :--- |
@@ -973,11 +1036,14 @@ Use this to retrieve which subjects a faculty member currently teaches across al
 | 5 | `PATCH` | `/api/v1/timetable/<slot_id>/` | Partial update (re-runs validation + clash checks; supports updating `exam_data`) |
 | 6 | `DELETE` | `/api/v1/timetable/<slot_id>/` | Delete slot (linked `Exam` record is **preserved**) |
 | 7 | `POST` | `/api/v1/timetable/<slot_id>/duplicate/` | Duplicate regular slot to new `slot_code`/`day_of_week` (or `session_date`); performs clash detection. Only for `regular` sessions |
-| 8 | `GET` | `/api/v1/timetable/faculty/<faculty_id>/` | Faculty's weekly timetable grouped by day label |
-| 9 | `GET` | `/api/v1/timetable/student/<student_id>/` | Student's aggregated timetable (from all enrolled batches), grouped by day |
-| 10 | `GET` | `/api/v1/courses/` | Course CRUD (includes nested levels & subjects via serializers) |
-| 11 | `GET` | `/api/v1/faculty/` | List faculty profiles (annotated with `subjects`, `subject_name`, batch counts) |
-| 12 | `GET` | `/api/v1/faculty/<faculty_id>/` | Faculty detail with subjects taught across batches |
+| 8 | `POST` | `/api/v1/timetable/confirm/` | Force-create slot bypassing clash detection (use after receiving `can_force: true`) |
+| 9 | `GET` | `/api/v1/timetable/export/` | Excel export with date range expansion for recurring slots; role-aware filtering |
+| 10 | `POST` | `/api/v1/timetable/publish/` | Notify faculty, students & parents of timetable updates (by batch or branch) |
+| 11 | `GET` | `/api/v1/timetable/faculty/<faculty_id>/` | Faculty's weekly timetable grouped by day label |
+| 12 | `GET` | `/api/v1/timetable/student/<student_id>/` | Student's aggregated timetable (from all enrolled batches), grouped by day |
+| 13 | `GET` | `/api/v1/courses/` | Course CRUD (includes nested levels & subjects via serializers) |
+| 14 | `GET` | `/api/v1/faculty/` | List faculty profiles (annotated with `subjects`, `subject_name`, batch counts; uses RBAC serializer) |
+| 15 | `GET` | `/api/v1/faculty/<faculty_id>/` | Faculty detail with subjects taught across batches |
 
 See `batches_module_api_documentation.md` for full CRUD on Courses, Subjects, Chapters, Levels, Batches (assign/remove students/faculty), Classrooms.
 
@@ -1062,6 +1128,6 @@ Response includes `subjects` with `chapters` and `papers` arrays.
 
 See `batches_module_api_documentation.md` for full coverage of Courses, Subjects, Chapters (E2), Batches (with auto-naming/QR, assign students/faculty), Classrooms, Levels.
 
-**Current Migration Status:** All E4 changes (session_type matrix, Exam integration, M2M sync in `_handle_exam()`, `AcademicDropdownsView`, duplicate endpoint, updated serializers with per-type validation using `FIXED_SLOTS`/`SESSION_DURATIONS`, `_names` computed fields, CourseLevel/Chapter nesting) have been applied. Run `python manage.py migrate` if any pending. Tests in `batches/tests.py` and `tests_edge_cases.py` cover clash detection, validation rules, and exam creation flows.
+**Current Migration Status:** All E4 changes (session_type matrix, Exam v2 integration with OneToOne, M2M for chapters/examiners/paper_checkers, `_handle_exam()` with selected_papers sync, `AcademicDropdownsView` with nested chapters+papers, duplicate + confirm + export + publish endpoints, updated serializers with per-type validation using `FIXED_SLOTS`/`SESSION_DURATIONS`, computed `_names` fields, CourseLevel/Chapter nesting, RBAC in faculty serializers) have been applied.
 
-**Sync Note:** This guide is now aligned with `TimetableSlotCreateUpdateSerializer.validate()`, `TimetableDuplicateSlotView`, `AcademicDropdownsView`, and `TimetableSlotListSerializer` (as of latest code).
+**Sync Note:** This guide is fully aligned with latest code in `batches/views.py`, `serializers.py` (including `EmployeeFieldsMixin` for faculty profiles), `models.py`, `constants.py`, validators, and tests (`batches/tests.py`, `tests_edge_cases.py`). Clash responses now use 409 with `can_force`. Run `python manage.py migrate` if pending. See `faculty_module_api_documentation.md` for RBAC details on conditional fields.

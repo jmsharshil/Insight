@@ -11,7 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
-from core.utils import apply_filters
+from core.utils import apply_filters, get_user_branch_ids, get_user_branch_id, has_user_branch_access
 
 from .models import AttendanceRecord, QRScanLog, AlertLog, ViolationRecord
 from .serializers import (
@@ -40,20 +40,6 @@ VIOLATION_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
 
 def _user_role(user):
     return getattr(user, 'role', None)
-
-
-def _user_branch_id(user):
-    if hasattr(user, 'branch_id') and user.branch_id:
-        return user.branch_id
-    if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
-        return user.profile.branch_id
-    try:
-        from faculty.models import FacultyProfile
-        fp = FacultyProfile.objects.only('branch_id').get(user=user)
-        return fp.branch_id
-    except Exception:
-        pass
-    return None
 
 
 def _user_batch_ids(user):
@@ -110,9 +96,9 @@ class AttendanceListCreateView(APIView):
             qs = qs.filter(branch__organization=request.user.organization)
 
         if role in ('branch_manager', 'admin_senior_executive', 'admin_executive'):
-            bid = _user_branch_id(user)
-            if bid:
-                qs = qs.filter(branch_id=bid)
+            bids = get_user_branch_ids(user)
+            if bids:
+                qs = qs.filter(branch_id__in=bids)
         if role == 'faculty':
             bids = _user_batch_ids(user)
             qs = qs.filter(batch_id__in=bids) if bids else qs.none()
@@ -159,7 +145,7 @@ class AttendanceListCreateView(APIView):
         #     batch_obj = apps.get_model('batches', 'Batch').objects.get(id=batch_id)
         #     branch_id = batch_obj.branch_id
         # except Exception:
-        #     branch_id = _user_branch_id(user)
+        #     branch_id = get_user_branch_id(user)
         branch_id = data.get('branch_id')
         if not branch_id:
             return Response({'success': False, 'message': 'Branch ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -271,8 +257,7 @@ class QRScanView(APIView):
 
         # Handle Employee Scan
         if role != 'student':
-            user_branch_id = _user_branch_id(user)
-            if str(branch.id) != str(user_branch_id):
+            if not has_user_branch_access(user, branch.id):
                 return Response({'success': False, 'message': 'You are not assigned to this branch.'}, status=status.HTTP_403_FORBIDDEN)
             
             # Record employee attendance
@@ -426,6 +411,11 @@ class QRScanView(APIView):
                         'success': False,
                         'message': 'Must check in first before checking out.',
                     }, status=status.HTTP_400_BAD_REQUEST)
+                if open_record.branch_id and str(open_record.branch_id) != str(branch.id):
+                    return Response({
+                        'success': False,
+                        'message': 'You must check out from the same branch where you checked in.',
+                    }, status=status.HTTP_400_BAD_REQUEST)
                 
                 record = open_record
                 record.checked_out_at = now
@@ -447,7 +437,7 @@ class QRScanView(APIView):
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        student_branch_id = getattr(student, 'branch_id', None) or _user_branch_id(user)
+        student_branch_id = getattr(student, 'branch_id', None) or get_user_branch_id(user)
 
         if str(branch.id) != str(student_branch_id):
             return Response({'success': False, 'message': 'You are not assigned to this branch.'}, status=status.HTTP_403_FORBIDDEN)
@@ -522,7 +512,7 @@ class QRScanView(APIView):
         if should_block_qr(student.id):
             return Response({'success': False, 'message': 'QR blocked due to unresolved violations. Contact admin.'}, status=status.HTTP_403_FORBIDDEN)
 
-        student_branch_id = getattr(student, 'branch_id', None) or getattr(batch, 'branch_id', None) or _user_branch_id(user)
+        student_branch_id = getattr(student, 'branch_id', None) or getattr(batch, 'branch_id', None) or get_user_branch_id(user)
 
         # Geofencing check for students (if lat/long provided and branch has coords)
         student_lat = ser.validated_data.get('latitude')
@@ -755,8 +745,8 @@ class AttendanceCorrectionView(APIView):
         except AttendanceRecord.DoesNotExist:
             return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         if role == 'branch_manager':
-            ub = _user_branch_id(user)
-            if ub and str(record.branch_id) != str(ub):
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids and str(record.branch_id) not in [str(b) for b in branch_ids]:
                 return None, Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
         return record, None
 
@@ -1011,12 +1001,20 @@ class AttendanceReportView(APIView):
         month = request.GET.get('month')
         threshold = float(request.GET.get('threshold', 75))
 
-        if role != 'super_admin':
-            ub = _user_branch_id(user)
-            if ub:
-                branch_id = str(ub)
-
         qs = AttendanceRecord.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(branch__organization=request.user.organization)
+
+        if role != 'super_admin':
+            branch_ids = get_user_branch_ids(user)
+            if branch_id:
+                if not branch_ids or str(branch_id) not in [str(b) for b in branch_ids]:
+                    return Response({'success': False, 'message': 'Not your branch.'}, status=status.HTTP_403_FORBIDDEN)
+                qs = qs.filter(branch_id=branch_id)
+            elif branch_ids:
+                qs = qs.filter(branch_id__in=branch_ids)
+            else:
+                qs = qs.none()
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
 
@@ -1291,9 +1289,10 @@ class EmployeeAttendanceListCreateView(APIView):
             qs = EmployeeAttendanceRecord.objects.select_related('user', 'branch', 'marked_by').all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            bid = _user_branch_id(request.user)
-            if role != 'super_admin' and bid:
-                qs = qs.filter(branch_id=bid)
+            if role != 'super_admin':
+                bids = get_user_branch_ids(request.user)
+                if bids:
+                    qs = qs.filter(branch_id__in=bids)
         else:
             # Non-admin staff see only their own records
             qs = EmployeeAttendanceRecord.objects.filter(user=request.user).select_related('branch', 'marked_by')
@@ -1389,7 +1388,7 @@ class EmployeeAttendanceListCreateView(APIView):
                 continue
 
             defaults = {
-                'branch_id': d.get('branch_id') or _user_branch_id(request.user),
+                'branch_id': d.get('branch_id') or get_user_branch_id(request.user),
                 'status': rec_status,
                 'marked_by': request.user,
             }
@@ -1442,7 +1441,7 @@ class EmployeeCheckInOutView(APIView):
         today = now.date()
         timetable_slot_id = request.data.get('timetable_slot_id')  # supports explicit from EmployeeCheckInOutSerializer (for faculty)
 
-        bid = _user_branch_id(user)
+        bid = get_user_branch_id(user)
         if not bid:
             return Response(
                 {'success': False, 'message': 'No branch assigned to your account.'},
@@ -1694,9 +1693,9 @@ class EmployeeDropdownView(APIView):
 
         # Branch scoping
         if role != 'super_admin':
-            bid = _user_branch_id(request.user)
-            if bid:
-                qs = qs.filter(branch_id=bid)
+            branch_id = get_user_branch_id(request.user)
+            if branch_id:
+                qs = qs.filter(branch_id=branch_id)
 
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)

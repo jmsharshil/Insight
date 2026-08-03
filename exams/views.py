@@ -15,7 +15,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access
 
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
@@ -52,20 +52,6 @@ ANSWER_KEY_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
 
 def _user_role(user):
     return getattr(user, 'role', None)
-
-
-def _user_branch_id(user):
-    if hasattr(user, 'branch_id') and user.branch_id:
-        return user.branch_id
-    if hasattr(user, 'profile') and hasattr(user.profile, 'branch_id'):
-        return user.profile.branch_id
-    try:
-        from faculty.models import FacultyProfile
-        fp = FacultyProfile.objects.only('branch_id').get(user=user)
-        return fp.branch_id
-    except Exception:
-        pass
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -127,9 +113,9 @@ class ExamListCreateView(APIView):
                 # Fallback: just show what they created
                 qs = qs.filter(created_by=user)
         elif role == 'exam_supervisor':
-            bid = _user_branch_id(user)
-            if bid:
-                qs = qs.filter(branch_id=bid)
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                qs = qs.filter(branch_id__in=branch_ids)
         elif role == 'paper_checker':
             try:
                 qs = qs.filter(Q(marksheets__paper_checker=user) | Q(paper_checkers=user)).distinct()
@@ -143,9 +129,9 @@ class ExamListCreateView(APIView):
                 logger.error(f"Paper checker exam filter error for {getattr(user, 'email', user)}: {e}")
                 qs = qs.none()
         elif role != 'super_admin':
-            bid = _user_branch_id(user)
-            if bid:
-                qs = qs.filter(branch_id=bid)
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                qs = qs.filter(branch_id__in=branch_ids)
 
         qs = apply_filters(self, request, qs)
         return qs
@@ -165,7 +151,7 @@ class ExamListCreateView(APIView):
         if not serializer.is_valid():
             return Response({'success': False, 'message': 'Validation failed.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        branch_id = _user_branch_id(user)
+        branch_id = get_user_branch_id(user)
         if not branch_id:
             batch = serializer.validated_data.get('batch')
             if batch:
@@ -1505,7 +1491,47 @@ class ExamGraceMarksView(APIView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# OMR Upload — POST /api/v1/exams/exams/{exam_id}/sessions/{session_id}/omr-upload/
+def _find_student_from_sheet_metadata(sheet_metadata, exam):
+    from django.db.models import Q
+    from students.models import Student
+
+    admission_number = sheet_metadata.get('admission_number')
+    roll_number = sheet_metadata.get('roll_number')
+    student_name = sheet_metadata.get('student_name')
+
+    qs = Student.objects.all()
+    if exam.batch_id:
+        qs = qs.filter(batch_id=exam.batch_id)
+    if exam.branch_id:
+        qs = qs.filter(branch_id=exam.branch_id)
+
+    if admission_number:
+        try:
+            return qs.get(admission_number__iexact=admission_number)
+        except Student.DoesNotExist:
+            return None
+        except Student.MultipleObjectsReturned:
+            return None
+
+    if roll_number:
+        roll_qs = qs.filter(roll_number__iexact=roll_number)
+        if roll_qs.count() == 1:
+            return roll_qs.first()
+        return None
+
+    if student_name:
+        name_parts = student_name.split()
+        if len(name_parts) >= 2:
+            first_name = name_parts[0]
+            surname = name_parts[-1]
+            exact = qs.filter(first_name__iexact=first_name, surname__iexact=surname)
+            if exact.count() == 1:
+                return exact.first()
+
+    return None
+
+
+# OMR Upload — POST /api/v1/exams/exams/{exam_id}/students/{student_id}/omr-upload/
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class OMRUploadView(APIView):
@@ -1534,7 +1560,7 @@ class OMRUploadView(APIView):
     """
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def post(self, request, exam_id, session_id):
+    def post(self, request, exam_id, student_id):
         from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr
         from results.models import MarkSheet
         import tempfile, os
@@ -1550,7 +1576,13 @@ class OMRUploadView(APIView):
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # ── 2. Validate exam type ──────────────────────────────────────────
+        # ── 2. Resolve student and validate offline exam upload ──────────────
+        try:
+            from students.models import Student
+            student = Student.objects.get(id=student_id)
+        except Student.DoesNotExist:
+            return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+
         if exam.exam_mode != 'offline' or exam.exam_type != 'mcq':
             return Response({
                 'success': False,
@@ -1563,19 +1595,40 @@ class OMRUploadView(APIView):
                 'message': 'No answer key uploaded for this exam. Please ask your admin to upload one.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── 3. Fetch ExamSession ───────────────────────────────────────────
-        try:
-            session = ExamSession.objects.select_related('student__user').get(
-                id=session_id, exam=exam
-            )
-        except ExamSession.DoesNotExist:
-            return Response({'success': False, 'message': 'Session not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if getattr(exam, 'branch_id', None) and getattr(student, 'branch_id', None) and exam.branch_id != student.branch_id:
+            return Response({'success': False, 'message': 'Student does not belong to the exam branch.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Only the student themselves (or admin) may upload
-        is_own_session = (role == 'student' and session.student.user == request.user)
+        if exam.batch_id and student.batch_id != exam.batch_id:
+            try:
+                from batches.models import BatchStudent
+                if not BatchStudent.objects.filter(student=student, batch_id=exam.batch_id).exists():
+                    return Response({'success': False, 'message': 'Student is not enrolled in this exam batch.'}, status=status.HTTP_403_FORBIDDEN)
+            except Exception:
+                return Response({'success': False, 'message': 'Student is not enrolled in this exam batch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        is_own_session = (role == 'student' and student.user == request.user)
         is_admin = role in ADMIN_ROLES
-        if not (is_own_session or is_admin):
+        is_faculty = False
+        if role == 'faculty':
+            from faculty.models import FacultyProfile
+            try:
+                fp = FacultyProfile.objects.get(user=request.user)
+                if exam.faculty_id == fp.id or exam.batch_id in list(fp.batch_assignments.values_list('batch_id', flat=True)):
+                    is_faculty = True
+                else:
+                    return Response({'success': False, 'message': 'You are not assigned to this exam or batch.'}, status=status.HTTP_403_FORBIDDEN)
+            except FacultyProfile.DoesNotExist:
+                return Response({'success': False, 'message': 'Faculty profile not found.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if is_admin and not has_user_branch_access(request.user, exam.branch_id):
+            return Response({'success': False, 'message': 'You do not have access to this exam branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if not (is_own_session or is_admin or is_faculty):
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        session, _ = ExamSession.objects.get_or_create(exam=exam, student=student)
+        if session.is_submitted:
+            return Response({'success': False, 'message': 'OMR has already been submitted for this student.'}, status=status.HTTP_409_CONFLICT)
 
         # ── 4. Get uploaded answer sheet ───────────────────────────────────
         answer_sheet = request.FILES.get('answer_sheet')
@@ -1641,9 +1694,40 @@ class OMRUploadView(APIView):
             # Also save it to the session's uploaded_answer_sheet field
             session.uploaded_answer_sheet.save(answer_sheet.name, answer_sheet, save=False)
 
+            # Parse student identity from the uploaded OMR sheet itself.
+            from .omr import parse_student_identity_from_sheet
+            sheet_metadata = parse_student_identity_from_sheet(sheet_tmp)
+
+            if not sheet_metadata:
+                return Response({
+                    'success': False,
+                    'message': 'Could not extract student identity from the OMR sheet. Please ensure name, roll number, or admission number is visible on the sheet.',
+                }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+            sheet_name = sheet_metadata.get('student_name')
+            sheet_roll = sheet_metadata.get('roll_number')
+            sheet_admission = sheet_metadata.get('admission_number')
+
+            if sheet_name and sheet_name.lower() != student.full_name.lower():
+                return Response({'success': False, 'message': 'Student name on sheet does not match the selected student.'}, status=status.HTTP_403_FORBIDDEN)
+
+            if sheet_roll:
+                if not student.roll_number:
+                    return Response({'success': False, 'message': 'Selected student does not have a roll number on record.'}, status=status.HTTP_400_BAD_REQUEST)
+                if sheet_roll.lower() != student.roll_number.lower():
+                    return Response({'success': False, 'message': 'Roll number on sheet does not match the selected student.'}, status=status.HTTP_403_FORBIDDEN)
+
+            if sheet_admission and sheet_admission != student.admission_number:
+                return Response({'success': False, 'message': 'Admission number on sheet does not match the selected student.'}, status=status.HTTP_403_FORBIDDEN)
+
             student_answers_dict = detect_student_answers(sheet_tmp, n_questions=n_questions, n_options=n_options)
+        except ImportError as exc:
+            return Response({
+                'success': False,
+                'message': str(exc),
+            }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
-            logger.error("OMR student sheet detection failed for session %s: %s", session_id, exc)
+            logger.error("OMR student sheet detection failed for student %s, exam %s: %s", student_id, exam_id, exc)
             return Response({
                 'success': False,
                 'message': f'Could not process your answer sheet: {exc}',
@@ -1696,4 +1780,190 @@ class OMRUploadView(APIView):
             'unanswered': sum(1 for b in breakdown if b['result'] == 'unanswered'),
             'breakdown': breakdown,
             'marksheet_id': str(ms.id),
+        }, status=status.HTTP_200_OK)
+
+
+class OMRBulkUploadView(APIView):
+    """Bulk upload OMR sheets for offline MCQ exams.
+
+    Accepts multipart/form-data with multiple files in `answer_sheets`.
+    Each file is parsed for student identity from the sheet itself and graded
+    against the exam answer key.
+    """
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, exam_id):
+        from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr, parse_student_identity_from_sheet
+        from results.models import MarkSheet
+        import tempfile, os
+
+        role = _user_role(request.user)
+
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if exam.exam_mode != 'offline' or exam.exam_type != 'mcq':
+            return Response({
+                'success': False,
+                'message': 'OMR grading is only available for offline MCQ exams.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not exam.answer_key:
+            return Response({
+                'success': False,
+                'message': 'No answer key uploaded for this exam. Please ask your admin to upload one.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if role not in ADMIN_ROLES and role != 'faculty':
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if role == 'admin' and not has_user_branch_access(request.user, exam.branch_id):
+            return Response({'success': False, 'message': 'You do not have access to this exam branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            n_questions = int(request.data.get('n_questions', 0)) or exam.total_marks or 100
+        except (TypeError, ValueError):
+            n_questions = exam.total_marks or 100
+
+        try:
+            marks_per_q = float(request.data.get('marks_per_question', 1.0))
+        except (TypeError, ValueError):
+            marks_per_q = 1.0
+
+        try:
+            negative_per_q = float(request.data.get('negative_marks', 0.0))
+        except (TypeError, ValueError):
+            negative_per_q = 0.0
+
+        n_options = 4
+
+        answer_sheets = request.FILES.getlist('answer_sheets') or request.FILES.getlist('answer_sheet')
+        if not answer_sheets:
+            return Response({'success': False, 'message': 'Please upload at least one answer sheet in answer_sheets.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        key_suffix = os.path.splitext(exam.answer_key.name)[1] or '.jpg'
+        try:
+            with tempfile.NamedTemporaryFile(suffix=key_suffix, delete=False) as kf:
+                for chunk in exam.answer_key.chunks():
+                    kf.write(chunk)
+                key_tmp = kf.name
+
+            answer_key_dict = extract_answer_key_from_file(key_tmp, n_questions=n_questions, n_options=n_options)
+        except Exception as exc:
+            logger.error("OMR answer key extraction failed for exam %s: %s", exam_id, exc)
+            return Response({
+                'success': False,
+                'message': 'Could not parse the answer key file. Ensure it is a clear OMR image or a text/PDF listing answers.',
+                'detail': str(exc),
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        finally:
+            try:
+                os.unlink(key_tmp)
+            except Exception:
+                pass
+
+        results = []
+        for answer_sheet in answer_sheets:
+            sheet_result = {'file_name': answer_sheet.name, 'status': 'error'}
+            sheet_suffix = os.path.splitext(answer_sheet.name)[1] or '.jpg'
+            try:
+                with tempfile.NamedTemporaryFile(suffix=sheet_suffix, delete=False) as sf:
+                    for chunk in answer_sheet.chunks():
+                        sf.write(chunk)
+                    sheet_tmp = sf.name
+
+                sheet_metadata = parse_student_identity_from_sheet(sheet_tmp)
+                if not sheet_metadata:
+                    sheet_result['message'] = 'Could not extract student identity from sheet.'
+                    results.append(sheet_result)
+                    continue
+
+                student = _find_student_from_sheet_metadata(sheet_metadata, exam)
+                if not student:
+                    sheet_result['message'] = 'Could not resolve a student from sheet metadata.'
+                    results.append(sheet_result)
+                    continue
+
+                if exam.batch_id and student.batch_id != exam.batch_id:
+                    sheet_result['message'] = 'Parsed student is not enrolled in this exam batch.'
+                    results.append(sheet_result)
+                    continue
+
+                if exam.branch_id and student.branch_id != exam.branch_id:
+                    sheet_result['message'] = 'Parsed student does not belong to this exam branch.'
+                    results.append(sheet_result)
+                    continue
+
+                session, _ = ExamSession.objects.get_or_create(exam=exam, student=student)
+                if session.is_submitted:
+                    sheet_result['message'] = 'OMR already submitted for this student.'
+                    results.append(sheet_result)
+                    continue
+
+                session.uploaded_answer_sheet.save(answer_sheet.name, answer_sheet, save=False)
+                student_answers_dict = detect_student_answers(sheet_tmp, n_questions=n_questions, n_options=n_options)
+
+                score, breakdown = grade_omr(
+                    student_answers=student_answers_dict,
+                    answer_key=answer_key_dict,
+                    marks_per_question=marks_per_q,
+                    negative_per_question=negative_per_q,
+                )
+
+                total_possible = len(answer_key_dict) * marks_per_q
+                is_pass = score >= (exam.pass_marks or 0)
+
+                ms, _ = MarkSheet.objects.get_or_create(
+                    exam=exam,
+                    student=student,
+                    defaults={'remarks': 'OMR auto-graded'},
+                )
+                ms.marks_obtained = score
+                ms.is_pass = is_pass
+                ms.checked_at = timezone.now()
+                ms.is_submitted = True
+                ms.remarks = f'OMR auto-graded — {int(score)}/{int(total_possible)}'
+                ms.question_marks = breakdown
+                ms.save(update_fields=['marks_obtained', 'is_pass', 'checked_at', 'is_submitted', 'remarks', 'question_marks'])
+
+                session.is_submitted = True
+                session.submitted_at = timezone.now()
+                session.save(update_fields=['uploaded_answer_sheet', 'is_submitted', 'submitted_at'])
+
+                sheet_result.update({
+                    'status': 'success',
+                    'student_id': str(student.id),
+                    'student_name': student.full_name,
+                    'score': score,
+                    'total': total_possible,
+                    'is_pass': is_pass,
+                    'correct': sum(1 for b in breakdown if b['result'] == 'correct'),
+                    'wrong': sum(1 for b in breakdown if b['result'] == 'wrong'),
+                    'unanswered': sum(1 for b in breakdown if b['result'] == 'unanswered'),
+                    'marksheet_id': str(ms.id),
+                })
+            except ImportError as exc:
+                sheet_result['message'] = str(exc)
+            except Exception as exc:
+                logger.error("Bulk OMR upload failed for exam %s file %s: %s", exam_id, answer_sheet.name, exc)
+                sheet_result['message'] = str(exc)
+            finally:
+                try:
+                    os.unlink(sheet_tmp)
+                except Exception:
+                    pass
+
+            results.append(sheet_result)
+
+        return Response({
+            'success': True,
+            'processed': len(results),
+            'succeeded': sum(1 for r in results if r['status'] == 'success'),
+            'failed': sum(1 for r in results if r['status'] != 'success'),
+            'results': results,
         }, status=status.HTTP_200_OK)

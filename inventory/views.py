@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from core.utils import get_user_branch_ids, get_user_branch_id
 
 from .models import ItemCategory, Item, StockTransaction, ItemAllocation
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -40,8 +41,10 @@ class ItemCategoryViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
-        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
-            qs = qs.filter(branch_id=user.branch_id)
+        if user.role != 'super_admin':
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                qs = qs.filter(branch_id__in=branch_ids)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -58,7 +61,7 @@ class ItemCategoryViewSet(viewsets.ModelViewSet):
                 )
         else:
             # For branch managers and other non-super_admin roles, inject branch automatically
-            branch_id = getattr(user, 'branch_id', None)
+            branch_id = get_user_branch_id(user)
             if branch_id and not data.get('branch'):
                 data['branch'] = str(branch_id)
 
@@ -82,8 +85,10 @@ class ItemViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
-        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
-            qs = qs.filter(category__branch_id=user.branch_id)
+        if user.role != 'super_admin':
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                qs = qs.filter(category__branch_id__in=branch_ids)
         return qs
 
 
@@ -97,8 +102,10 @@ class StockTransactionViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
-        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
-            qs = qs.filter(item__category__branch_id=user.branch_id)
+        if user.role != 'super_admin':
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                qs = qs.filter(item__category__branch_id__in=branch_ids)
         return qs
 
     def perform_create(self, serializer):
@@ -115,8 +122,10 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
-        if user.role != 'super_admin' and getattr(user, 'branch_id', None):
-            qs = qs.filter(item__category__branch_id=user.branch_id)
+        if user.role != 'super_admin':
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                qs = qs.filter(item__category__branch_id__in=branch_ids)
         return qs
 
     def create(self, request, *args, **kwargs):
