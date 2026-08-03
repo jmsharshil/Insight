@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import User, Organization
+from branch.models import Branch
 from django.conf import settings
 
 
@@ -11,6 +12,19 @@ EMPLOYEE_FIELDS = [
 ]
 
 class EmployeeFieldsMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request') if hasattr(self, 'context') and self.context else None
+        user = getattr(request, 'user', None) if request else None
+        if user and hasattr(user, 'organization') and user.organization and not getattr(user, 'is_superuser', False):
+            org = user.organization
+            qs = Branch.objects.filter(organization=org, is_deleted=False)
+        else:
+            qs = Branch.objects.filter(is_deleted=False)
+        for field_name in ('branch', 'branches'):
+            if field_name in self.fields:
+                self.fields[field_name].queryset = qs
+
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         role = getattr(instance, 'role', None)
@@ -228,14 +242,19 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     organization = serializers.PrimaryKeyRelatedField(
         queryset=Organization.objects.all(), required=False, allow_null=True
     )
+    branch = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.filter(is_deleted=False),
+        required=False,
+        allow_null=True
+    )
+    branches = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.filter(is_deleted=False),
+        many=True,
+        required=False,
+        allow_null=True
+    )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
-    branches = serializers.ListField(
-        required=False, 
-        allow_null=True, 
-        child=serializers.UUIDField(), 
-        allow_empty=True
-    )
 
     class Meta:
         model = User
@@ -388,15 +407,20 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     organization = serializers.PrimaryKeyRelatedField(
         queryset=Organization.objects.all(), required=False, allow_null=True
     )
+    branch = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.filter(is_deleted=False),
+        required=False,
+        allow_null=True
+    )
+    branches = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.filter(is_deleted=False),
+        many=True,
+        required=False,
+        allow_null=True
+    )
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
-    branches = serializers.ListField(
-        required=False, 
-        allow_null=True, 
-        child=serializers.UUIDField(), 
-        allow_empty=True
-    )
 
     class Meta:
         model = User

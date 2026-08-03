@@ -624,19 +624,17 @@ class UpdateUserAPIView(APIView):
         return Response(serializer.errors, status=400)
     
 class DeleteUserAPIView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, user_id):
         user = get_object_or_404(User, id=user_id, organization=request.user.organization)
 
-        # user.is_active = False
-        # user.save(update_fields=['is_active'])
-
-        user.delete()
+        user.is_active = False
+        user.save(update_fields=['is_active'])
 
         return Response({
             "success": True,
-            "message": "User deleted successfully"
+            "message": "User deactivated successfully"
         })
 
 class UserListAPIView(APIView):
@@ -648,7 +646,6 @@ class UserListAPIView(APIView):
     pagination_class = None
 
     def get(self, request):
-        from django.db.models import Q
         if request.user.is_superuser:
             users = User.objects.select_related('branch').prefetch_related('branches').all().order_by('-created_at')
         elif request.user.role == 'super_admin':
