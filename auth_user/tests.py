@@ -3,6 +3,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from django.core import mail
 
+from branch.models import Branch
 from .models import User, Organization, PasswordSetToken
 
 
@@ -71,6 +72,34 @@ class AuthUserAPITestCase(TestCase):
         self.assertTrue(user.is_active)
         self.assertTrue(user.check_password('NewPass123'))
         self.assertTrue(token.is_used)
+
+    def test_add_user_serializer_accepts_single_branch_string(self):
+        org = Organization.objects.create(name='Single Branch Org')
+        branch = Branch.objects.create(
+            organization=org,
+            name='Main Branch',
+            address='123 Main St',
+            city='Delhi',
+            state='Delhi',
+            pincode='110001',
+            phone='9999999999',
+            email='branch@example.com',
+        )
+
+        serializer = AddUserSerializer(data={
+            'username': 'singlebranchuser',
+            'email': 'singlebranchuser@test.org',
+            'phone': '6666666666',
+            'name': 'Single Branch User',
+            'role': 'admin_executive',
+            'organization': str(org.id),
+            'branch': str(branch.id),
+            'branches': str(branch.id),
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        user = serializer.save()
+        self.assertEqual(list(user.branches.values_list('id', flat=True)), [branch.id])
 
     def test_super_admin_can_add_user_to_organization(self):
         org = Organization.objects.create(name='Super Org')

@@ -220,10 +220,25 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    branches = serializers.ListField(required=False, allow_null=True, child=serializers.CharField(allow_blank=False), allow_empty=True)
 
     class Meta:
         model = User
         fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
+
+    def to_internal_value(self, data):
+        if hasattr(data, 'getlist'):
+            mutable_data = {}
+            for key in data.keys():
+                values = data.getlist(key)
+                mutable_data[key] = values if len(values) > 1 else values[0]
+        else:
+            mutable_data = dict(data)
+
+        if 'branches' in mutable_data and isinstance(mutable_data['branches'], (str, bytes)):
+            mutable_data['branches'] = [mutable_data['branches']]
+
+        return super().to_internal_value(mutable_data)
 
     def validate_role(self, value):
         if value in ['student', 'parents', 'super_admin']:
@@ -242,7 +257,11 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
         # ── Sync branch ↔ branches ────────────────────────────────────────
         # Build the final set of branches from both sources
-        branch_set = list(extra_branches) if extra_branches else []
+        if extra_branches is None:
+            branch_set = []
+        else:
+            branch_set = list(extra_branches) if isinstance(extra_branches, (list, tuple, set)) else [extra_branches]
+
         if user.branch and user.branch not in branch_set:
             branch_set.insert(0, user.branch)   # primary branch first
 

@@ -18,7 +18,7 @@
         "sideBarSectionHeader.background": "#0D0F1A",
         "statusBar.background": "#3d696e",
         "statusBar.foreground": "#D9E0FF",
-        "statusBar.debuggingBackground": "#f7cc08",
+        "statusBar.debuggingBackground": "#FFD400",
         "titleBar.activeBackground": "#11131c",
         "titleBar.activeForeground": "#D9E0FF",
         "tab.activeBackground": "#0D0F1A",
@@ -35,7 +35,7 @@
         "focusBorder": "#00E5FF",
         "gitDecoration.modifiedResourceForeground": "#d7ce11",
         "gitDecoration.addedResourceForeground": "#00FFA0",
-        "gitDecoration.deletedResourceForeground": "#fd345a",
+        "gitDecoration.deletedResourceForeground": "#FF2E5D",
         "badge.background": "#00E5FF",
         "progressBar.background": "#00E5FF",
         "editorError.foreground": "#f6524a",
@@ -101,14 +101,6 @@
                 ],
                 "settings": {
                     "foreground": "#FFD400"
-                }
-            },
-            {
-                "scope": [
-                    "invalid"
-                ],
-                "settings": {
-                    "foreground": "#f6524a"
                 }
             }
         ]
