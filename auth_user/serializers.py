@@ -399,17 +399,32 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             else:
                 ParentLink.objects.filter(parent=instance).delete()
 
-        # Sync employee fields to FacultyProfile if it exists
+        # Sync all employee fields to FacultyProfile if it exists
         if instance.role == 'faculty':
             try:
                 from faculty.models import FacultyProfile
                 fp = FacultyProfile.objects.get(user=instance)
+                fp.qualification = instance.qualification
+                fp.specialization = instance.specialization
+                fp.subject_expertise = instance.subject_expertise
+                fp.level = instance.level
                 fp.employment_type = instance.employment_type
+                fp.joining_date = instance.joining_date
                 fp.hourly_rate = instance.hourly_rate
                 fp.session_hours = instance.session_hours
                 fp.salary = instance.salary
                 fp.salary_retention_percentage = instance.salary_retention_percentage
-                fp.save(update_fields=['employment_type', 'hourly_rate', 'session_hours', 'salary', 'salary_retention_percentage'])
+                fp.bank_account = instance.bank_account
+                fp.ifsc_code = instance.ifsc_code
+                fp.pan_number = instance.pan_number
+                fp.work_start_time = instance.work_start_time
+                fp.work_end_time = instance.work_end_time
+                fp.save(update_fields=[
+                    'qualification', 'specialization', 'subject_expertise', 'level',
+                    'employment_type', 'joining_date', 'hourly_rate', 'session_hours',
+                    'salary', 'salary_retention_percentage', 'bank_account',
+                    'ifsc_code', 'pan_number', 'work_start_time', 'work_end_time',
+                ])
             except:
                 pass
                 
