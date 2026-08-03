@@ -5,6 +5,7 @@ from django.core import mail
 
 from branch.models import Branch
 from .models import User, Organization, PasswordSetToken
+from .serializers import AddUserSerializer
 
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')

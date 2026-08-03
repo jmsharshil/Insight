@@ -66,7 +66,17 @@ class EmployeeFieldsMixin:
                 mutable_data[k] = lst if len(lst) > 1 else lst[0]
         else:
             mutable_data = dict(data)
-            
+
+        # Normalize 'branches' to list (user wants explicit list ['id1', 'id2'])
+        # Single string is wrapped; comma-separated strings will fail validation (enforces proper array from frontend)
+        if 'branches' in mutable_data:
+            branches_val = mutable_data.get('branches')
+            if isinstance(branches_val, (str, bytes)) and branches_val.strip():
+                mutable_data['branches'] = [branches_val.strip()]
+            elif isinstance(branches_val, (list, tuple)):
+                mutable_data['branches'] = [b.strip() if isinstance(b, (str, bytes)) else b for b in branches_val if b]
+            elif branches_val not in (None, '', [], ['']):
+                mutable_data['branches'] = [branches_val]
 
         choice_fields_defaults = {
             'level': 'executive',
@@ -220,25 +230,20 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
-    branches = serializers.ListField(required=False, allow_null=True, child=serializers.CharField(allow_blank=False), allow_empty=True)
+    branches = serializers.ListField(
+        required=False, 
+        allow_null=True, 
+        child=serializers.UUIDField(), 
+        allow_empty=True
+    )
 
     class Meta:
         model = User
         fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
 
     def to_internal_value(self, data):
-        if hasattr(data, 'getlist'):
-            mutable_data = {}
-            for key in data.keys():
-                values = data.getlist(key)
-                mutable_data[key] = values if len(values) > 1 else values[0]
-        else:
-            mutable_data = dict(data)
-
-        if 'branches' in mutable_data and isinstance(mutable_data['branches'], (str, bytes)):
-            mutable_data['branches'] = [mutable_data['branches']]
-
-        return super().to_internal_value(mutable_data)
+        # Delegate to EmployeeFieldsMixin.to_internal_value (normalizes branches to list)
+        return super().to_internal_value(data)
 
     def validate_role(self, value):
         if value in ['student', 'parents', 'super_admin']:
@@ -386,6 +391,12 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    branches = serializers.ListField(
+        required=False, 
+        allow_null=True, 
+        child=serializers.UUIDField(), 
+        allow_empty=True
+    )
 
     class Meta:
         model = User
