@@ -466,14 +466,24 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.name', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
+    branch_details = serializers.SerializerMethodField()
+    branches_details = serializers.SerializerMethodField()
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     linked_student_names = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'branches', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names'] + EMPLOYEE_FIELDS
-        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'branches', 'linked_students', 'organization', 'organization_name', 'linked_student_names'] # These fields cannot be updated via this serializer
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'branch_details', 'branches', 'branches_details', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names'] + EMPLOYEE_FIELDS
+        read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'branch_details', 'branches', 'branches_details', 'linked_students', 'organization', 'organization_name', 'linked_student_names']
+
+    def get_branch_details(self, obj):
+        if obj.branch:
+            return {'id': str(obj.branch.id), 'name': obj.branch.name}
+        return None
+
+    def get_branches_details(self, obj):
+        return [{'id': str(branch.id), 'name': branch.name} for branch in obj.branches.all()]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

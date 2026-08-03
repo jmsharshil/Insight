@@ -3,33 +3,41 @@ exams/omr.py
 ============
 OMR (Optical Mark Recognition) engine for offline MCQ exams.
 
-Two responsibilities:
-  1. extract_answer_key_from_file(path)  → dict[int, str]
-     Reads the admin-uploaded answer key (image or PDF) and extracts
-     correct answers.  Supports two formats:
-       a) A filled OMR sheet (bubbles) — OpenCV bubble detection
-       b) A plain text / printed list  — pytesseract OCR + regex
+Core functions:
+  - extract_answer_key_from_file(path, n_questions=0, n_options=4) → {1: 'A', 2: 'B', ...}
+    Supports: (1) filled OMR bubble sheet (OpenCV contour detection + circularity),
+              (2) printed/text answer key via pytesseract OCR + robust regex.
 
-  2. detect_student_answers(image_bytes, n_questions, n_options) → dict[int, str]
-     Reads a student-uploaded OMR sheet image and returns the filled
-     option for each question row.
+  - parse_student_identity_from_sheet(source) → {'student_name': , 'roll_number': , 'admission_number': }
+    Uses OCR on header area to auto-resolve student in bulk uploads.
 
-  3. grade_omr(student, key, marks_per_q, negative_per_q) → (score, breakdown)
-     Compares detected answers against the answer key and returns the
-     final score + per-question result list.
+  - detect_student_answers(source, n_questions, n_options=4) → {1: 'A', 2: None, ...}
+    Returns detected option or None for blank rows.
 
-Dependencies (add to requirements.txt if not present):
-  opencv-python-headless
-  numpy
-  pytesseract   (required for OCR metadata extraction and text fallback)
-  Pillow
+  - grade_omr(student_answers, answer_key, marks_per_question=1.0, negative_per_question=0.0)
+    → (total_score, per_question_breakdown_list)
+
+**Improved in this update:**
+  - Better adaptive thresholding + morphology in bubble detection.
+  - Dynamic row tolerance using median spacing.
+  - Grayscale + PSM=6 config for OCR (much higher accuracy on printed OMRs).
+  - Robust error messages, logging, and fallback for missing questions.
+  - Uses math.pi for accurate circularity.
+
+Dependencies (add to requirements.txt / environment):
+  - opencv-python-headless
+  - numpy
+  - pytesseract + Tesseract binary (apt install tesseract-ocr or Windows installer)
+  - pdf2image + Poppler (for PDF support)
+  - Pillow
 """
 
 import re
 import logging
 import os
+import math
 from io import BytesIO
-from typing import Optional
+from typing import Optional, Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -118,48 +126,85 @@ def _pdf_page_to_image_bytes(pdf_path: str, page: int = 0) -> Optional[bytes]:
 OPTION_LABELS = ['A', 'B', 'C', 'D', 'E']
 
 
-def _parse_text_answer_key(text: str) -> dict:
+def _parse_text_answer_key(text: str) -> Dict[int, str]:
     """
-    Parse a text like:
-        1. A   2. B   3-C   4) D   ...
-        1 A
-        Q1: A
-    Returns {1: 'A', 2: 'B', ...}
+    Robust regex parser for printed answer keys in many formats:
+        1. A   2. B   3-C   4) D
+        Q1: A, 2 B
+        1)A 2)B
+        Answer 5 : C
+    Returns dict like {1: 'A', 2: 'B', ...}. Ignores duplicates (keeps first).
     """
-    pattern = re.compile(
-        r'(?:Q\.?\s*)?(\d{1,3})'        # question number
-        r'[\s.\-:)]+\s*'                 # separator
-        r'([A-Ea-e])\b',                 # single letter option
-        re.IGNORECASE,
-    )
-    key = {}
-    for m in pattern.finditer(text):
-        qnum = int(m.group(1))
-        opt = m.group(2).upper()
-        key[qnum] = opt
+    if not text or not text.strip():
+        return {}
+
+    # Multiple patterns for different common formats
+    patterns = [
+        # Standard: 1. A | Q1: B | 3 - C | 4) D
+        re.compile(r'(?:Q|Question|Ans|Answer)?[\s\.]?(\d{1,3})[\s.\-:\)]+\s*([A-Ea-e])\b', re.IGNORECASE),
+        # Number followed by option with optional parentheses: (1) A or 5.B
+        re.compile(r'\(?(\d{1,3})\)?[\s.\-:]+\s*([A-Ea-e])\b', re.IGNORECASE),
+        # Colon separated at start of line
+        re.compile(r'^[\s]*(\d{1,3})[\s:]+([A-Ea-e])\b', re.IGNORECASE | re.MULTILINE),
+    ]
+
+    key: Dict[int, str] = {}
+    for pattern in patterns:
+        for m in pattern.finditer(text):
+            qnum = int(m.group(1))
+            opt = m.group(2).upper()
+            if qnum not in key:  # keep first match
+                key[qnum] = opt
+
+    if not key:
+        logger.warning("No answers parsed from text. Sample text: %s...", text.strip()[:100])
+    else:
+        logger.debug("Parsed answer key: %s", dict(sorted(key.items())))
+
     return key
 
 
-def _detect_bubbles_from_image(img_arr, n_questions: int, n_options: int) -> dict:
+def _detect_bubbles_from_image(img_arr, n_questions: int, n_options: int = 4) -> Dict[int, Optional[str]]:
     """
-    Detect filled bubbles from a preprocessed OMR image.
-    Assumes a standard vertical OMR layout: rows = questions, cols = options.
-    Returns {1: 'A', 2: 'B', ...}  (1-indexed)
+    Detect filled bubbles from a preprocessed OMR image using OpenCV contours.
+    Improved preprocessing, adaptive thresholds, and robust row grouping.
+    Assumes standard vertical OMR layout (questions top to bottom, options left to right).
+    Returns {1: 'A', 2: 'B', ...} or {qnum: None} for unanswered. Raises descriptive errors.
     """
     import cv2
     import numpy as np
 
-    gray = cv2.cvtColor(img_arr, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    if n_questions < 1:
+        n_questions = 50  # safe default
+    if n_options < 2:
+        n_options = 4
 
-    # Find contours of bubble candidates
+    # Enhanced preprocessing for scanned/printed OMR sheets
+    if len(img_arr.shape) == 3:
+        gray = cv2.cvtColor(img_arr, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img_arr
+
+    # Noise reduction + contrast enhancement
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Adaptive thresholding works better for varying lighting/scans than global Otsu
+    thresh = cv2.adaptiveThreshold(
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV, 11, 2
+    )
+
+    # Light morphology to connect broken bubble edges
+    kernel = np.ones((2, 2), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+    # Find contours
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Filter circular-ish contours of reasonable size
-    h, w = thresh.shape
-    min_area = (h * w) / (n_questions * n_options * 20)
-    max_area = (h * w) / (n_questions * n_options * 2)
+    # Calculate expected bubble area (robust against zero-division)
+    h, w = thresh.shape[:2]
+    expected_area = (h * w) / (n_questions * n_options * 25)  # slightly more conservative
+    min_area = max(5, int(expected_area * 0.4))
+    max_area = int(expected_area * 3.0)
 
     bubbles = []
     for c in contours:
@@ -169,76 +214,102 @@ def _detect_bubbles_from_image(img_arr, n_questions: int, n_options: int) -> dic
         perimeter = cv2.arcLength(c, True)
         if perimeter == 0:
             continue
-        circularity = 4 * 3.14159 * area / (perimeter * perimeter)
-        if circularity < 0.55:  # loose threshold for printed/scanned sheets
+        # Improved circularity using math.pi
+        circularity = 4 * math.pi * area / (perimeter * perimeter)
+        if circularity < 0.6:  # tightened slightly for better filter
             continue
         x, y, bw, bh = cv2.boundingRect(c)
         cx = x + bw // 2
         cy = y + bh // 2
-        bubbles.append((cy, cx, c))  # sort by (row, col)
+        bubbles.append((cy, cx, c, area))  # include area for potential tie-breaking
 
     if not bubbles:
-        raise ValueError("No bubble contours detected — check image quality / orientation.")
+        # Provide more diagnostic info
+        logger.warning(
+            "No bubble contours detected. Image shape=%s, contours_found=%s, "
+            "min_area=%s, max_area=%s. Check scan quality, contrast, or orientation.",
+            img_arr.shape, len(contours), min_area, max_area
+        )
+        raise ValueError(
+            "No bubble contours detected — ensure the image is a clear, well-lit, "
+            "non-rotated OMR sheet with filled bubbles. Try re-scanning at 200+ DPI."
+        )
 
-    # Sort bubbles by row then column
+    # Sort by vertical position (row) then horizontal (column)
     bubbles.sort(key=lambda b: (b[0], b[1]))
 
-    # Group into rows (questions)
-    row_tolerance = h / (n_questions * 2.5)
-    rows = []
+    # Improved row grouping using dynamic tolerance based on median spacing
+    ys = [b[0] for b in bubbles]
+    if len(ys) > 1:
+        y_diffs = [ys[i+1] - ys[i] for i in range(len(ys)-1)]
+        median_spacing = sorted(y_diffs)[len(y_diffs)//2] if y_diffs else h / n_questions
+        row_tolerance = max(median_spacing * 1.5, h / (n_questions * 3))
+    else:
+        row_tolerance = h / (n_questions * 2.5)
+
+    rows: List[List] = []
     current_row = [bubbles[0]]
     for b in bubbles[1:]:
         if abs(b[0] - current_row[0][0]) <= row_tolerance:
             current_row.append(b)
         else:
-            rows.append(sorted(current_row, key=lambda x: x[1]))  # sort cols left→right
+            rows.append(sorted(current_row, key=lambda x: x[1]))
             current_row = [b]
     rows.append(sorted(current_row, key=lambda x: x[1]))
 
-    # Keep only the first n_questions rows with at least 1 bubble
-    rows = [r for r in rows if len(r) >= 1][:n_questions]
+    # Filter valid rows (must have at least one bubble) and limit to n_questions
+    valid_rows = [r for r in rows if len(r) >= 1]
+    rows = valid_rows[:n_questions]
 
-    results = {}
+    if len(rows) < n_questions // 2:
+        logger.warning("Only detected %d question rows out of %d expected", len(rows), n_questions)
+
+    results: Dict[int, Optional[str]] = {}
     for row_idx, row_bubbles in enumerate(rows):
         qnum = row_idx + 1
         best_filled = None
         best_count = -1
+        best_ratio = 0.0
 
-        # Take up to n_options bubbles in this row
+        # Limit to expected options per question
         row_bubbles = row_bubbles[:n_options]
 
-        for col_idx, (cy, cx, contour) in enumerate(row_bubbles):
-            # Create a mask for this bubble and count non-zero pixels in thresh
+        for col_idx, bubble_data in enumerate(row_bubbles):
+            cy, cx, contour, _ = bubble_data
+            # Mask and measure fill
             mask = np.zeros(thresh.shape, dtype=np.uint8)
             cv2.drawContours(mask, [contour], -1, 255, -1)
             filled_pixels = cv2.countNonZero(cv2.bitwise_and(thresh, thresh, mask=mask))
             total_pixels = cv2.countNonZero(mask)
-            fill_ratio = filled_pixels / total_pixels if total_pixels else 0
+            fill_ratio = filled_pixels / total_pixels if total_pixels > 0 else 0.0
 
-            if fill_ratio > 0.45 and filled_pixels > best_count:
+            # Improved decision: use both ratio and absolute filled pixels
+            if fill_ratio > 0.42 and filled_pixels > best_count:
                 best_count = filled_pixels
                 best_filled = col_idx
+                best_ratio = fill_ratio
 
         if best_filled is not None and best_filled < len(OPTION_LABELS):
             results[qnum] = OPTION_LABELS[best_filled]
+            logger.debug("Q%d: %s (fill_ratio=%.2f)", qnum, OPTION_LABELS[best_filled], best_ratio)
         else:
-            results[qnum] = None  # blank / unanswered
+            results[qnum] = None  # unanswered/blank
+
+    # Fill in any missing questions as unanswered
+    for q in range(1, n_questions + 1):
+        if q not in results:
+            results[q] = None
 
     return results
 
 
-def extract_answer_key_from_file(file_path: str, n_questions: int = 0, n_options: int = 4) -> dict:
+def extract_answer_key_from_file(file_path: str, n_questions: int = 0, n_options: int = 4) -> Dict[int, str]:
     """
-    Parse the admin-uploaded answer key file (image or PDF).
-    Strategy:
-      1. If image → try bubble detection (OMR sheet)
-      2. If PDF  → convert first page to image and try bubble detection;
-                   if that yields < 50 % of expected answers, fall back to OCR text parse
-      3. If text file (txt/csv) → direct text parse
-
-    Returns {1: 'A', 2: 'B', ...} (1-indexed, uppercase options).
+    Main entry point for parsing admin answer key (image/PDF/txt).
+    Prioritizes bubble detection on OMR sheets; falls back to OCR+regex for printed keys.
     """
     ext = os.path.splitext(file_path)[1].lower()
+    logger.info("Extracting answer key from %s (n_questions=%s, n_options=%s)", ext, n_questions, n_options)
 
     # ── Text / CSV path ────────────────────────────────────────────────────
     if ext in ('.txt', '.csv'):
@@ -246,39 +317,47 @@ def extract_answer_key_from_file(file_path: str, n_questions: int = 0, n_options
             text = f.read()
         key = _parse_text_answer_key(text)
         if key:
+            logger.info("Parsed %d answers from text file via regex.", len(key))
             return key
-        raise ValueError("Could not parse any answers from text file.")
+        raise ValueError("Could not parse any answers from text file. Check format (e.g. '1. A  2. B').")
 
     # ── PDF path ───────────────────────────────────────────────────────────
     if ext == '.pdf':
         img_bytes = _pdf_page_to_image_bytes(file_path)
-        if img_bytes and n_questions > 0:
+        if not img_bytes:
+            raise ValueError("Failed to render PDF to image (check Poppler installation).")
+
+        if n_questions > 0:
             try:
                 img = _load_image_as_array(img_bytes)
                 key = _detect_bubbles_from_image(img, n_questions, n_options)
-                if len([v for v in key.values() if v]) >= max(1, n_questions // 2):
+                filled_count = len([v for v in key.values() if v is not None])
+                if filled_count >= max(3, n_questions // 2):
+                    logger.info("Successfully extracted %d answers via bubble detection on PDF.", filled_count)
                     return key
+                logger.info("Bubble detection only found %d/%d answers; falling back to OCR.", filled_count, n_questions)
             except Exception as exc:
-                logger.warning("Bubble detection on PDF failed, trying OCR: %s", exc)
+                logger.warning("Bubble detection on PDF failed (will try OCR): %s", exc)
 
-        # OCR fallback
+        # OCR fallback for PDF (printed answer key)
         try:
             import pytesseract
             from PIL import Image as PILImage
-            if img_bytes:
-                pil_img = PILImage.open(BytesIO(img_bytes))
-            else:
-                pil_img = PILImage.open(file_path)
-            text = pytesseract.image_to_string(pil_img)
+            pil_img = PILImage.open(BytesIO(img_bytes))
+            text = pytesseract.image_to_string(pil_img, config=r'--oem 3 --psm 6')
             key = _parse_text_answer_key(text)
             if key:
+                logger.info("Parsed %d answers from PDF via OCR+regex.", len(key))
                 return key
         except ImportError:
             logger.warning("pytesseract not installed — cannot OCR PDF answer key.")
         except Exception as exc:
-            logger.error("OCR fallback failed: %s", exc)
+            logger.error("OCR fallback on PDF failed: %s", exc)
 
-        raise ValueError("Could not extract answer key from PDF — ensure it is a readable OMR sheet or text-based PDF.")
+        raise ValueError(
+            "Could not extract answer key from PDF. The file should either be a scannable OMR sheet "
+            "or contain clearly printed answers like '1 A, 2 B, 3 C'. Install Tesseract + Poppler."
+        )
 
     # ── Image path (JPEG, PNG, BMP, TIFF) ─────────────────────────────────
     img_arr = _load_image_as_array(file_path)
@@ -286,53 +365,78 @@ def extract_answer_key_from_file(file_path: str, n_questions: int = 0, n_options
     if n_questions > 0:
         try:
             key = _detect_bubbles_from_image(img_arr, n_questions, n_options)
-            if len([v for v in key.values() if v]) >= max(1, n_questions // 2):
+            filled_count = len([v for v in key.values() if v is not None])
+            if filled_count >= max(3, n_questions // 2):
+                logger.info("Extracted %d answers via bubble detection on image.", filled_count)
                 return key
+            logger.info("Bubble detection yielded only %d answers; trying OCR fallback.", filled_count)
         except Exception as exc:
-            logger.warning("Bubble detection on image failed, trying OCR: %s", exc)
+            logger.warning("Bubble detection failed on image, falling back to OCR: %s", exc)
 
-    # OCR fallback for image
+    # OCR fallback for image-based answer keys
     try:
         import pytesseract
         from PIL import Image as PILImage
         import cv2
         gray = cv2.cvtColor(img_arr, cv2.COLOR_BGR2GRAY)
         pil_img = PILImage.fromarray(gray)
-        text = pytesseract.image_to_string(pil_img)
+        text = pytesseract.image_to_string(pil_img, config=r'--oem 3 --psm 6')
         key = _parse_text_answer_key(text)
         if key:
+            logger.info("Parsed %d answers from image via OCR fallback.", len(key))
             return key
     except ImportError:
-        pass
+        logger.warning("pytesseract unavailable for OCR fallback.")
     except Exception as exc:
         logger.error("OCR on image failed: %s", exc)
 
-    raise ValueError("Could not extract answer key from image.")
+    raise ValueError(
+        "Could not extract answer key from image. Try a clearer scan or a text-based answer key. "
+        "Supported: bubble-filled OMR or text like 'Q1: A, 2 B, 3: C'."
+    )
 
 
 def _extract_text_from_image(img_arr):
+    """Improved OCR with grayscale conversion and PSM config optimized for OMR sheets."""
     try:
         import pytesseract
         from PIL import Image as PILImage
+        import cv2
+        import numpy as np
     except ImportError:
         raise ImportError("pytesseract is required to extract student metadata from the OMR sheet.")
 
     _configure_tesseract_cmd()
 
+    # Ensure we have a numpy array and convert BGR/color to grayscale for better OCR
     if getattr(img_arr, 'ndim', None) is not None:
-        from PIL import Image as PILImage
-        pil_img = PILImage.fromarray(img_arr)
+        if len(img_arr.shape) == 3:  # color image (BGR from OpenCV)
+            gray = cv2.cvtColor(img_arr, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img_arr
+        # Optional: enhance contrast for OCR
+        gray = cv2.convertScaleAbs(gray, alpha=1.5, beta=0)
+        pil_img = PILImage.fromarray(gray)
     else:
-        raise ValueError("Unsupported image type for OCR metadata extraction.")
+        pil_img = PILImage.open(img_arr) if isinstance(img_arr, (str, BytesIO)) else img_arr
 
     try:
-        return pytesseract.image_to_string(pil_img)
+        # Use PSM 6 (uniform text block) or 3 (fully automatic) for OMR metadata/printed text
+        custom_config = r'--oem 3 --psm 6'
+        text = pytesseract.image_to_string(pil_img, config=custom_config)
+        logger.debug("OCR extracted text (first 200 chars): %s...", text[:200])
+        return text
     except pytesseract.pytesseract.TesseractNotFoundError as exc:
         raise RuntimeError(
             "Tesseract OCR binary not found. Install Tesseract and ensure it is on PATH "
             "or set pytesseract.pytesseract.tesseract_cmd to the executable path. "
-            "On Windows, install it at C:\\Program Files\\Tesseract-OCR\\tesseract.exe."
+            "On Windows, install it at C:\\Program Files\\Tesseract-OCR\\tesseract.exe. "
+            "On Linux: apt-get install tesseract-ocr"
         ) from exc
+    except Exception as exc:
+        logger.error("Tesseract OCR failed: %s", exc)
+        # Fallback to default config
+        return pytesseract.image_to_string(pil_img)
 
 
 def _normalize_text_for_match(value: str) -> str:

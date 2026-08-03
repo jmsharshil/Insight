@@ -341,11 +341,127 @@ When an exam is created/scheduled and either `answer_key` or `question_paper` is
 
 ---
 
-## 6. Subject Papers (Reusable Paper Library)
+## 6. OMR (Optical Mark Recognition) APIs
+
+**For offline MCQ exams only.** Powered by `exams/omr.py`:
+- Bubble detection via OpenCV (`_detect_bubbles_from_image`).
+- OCR fallback via pytesseract (`_parse_text_answer_key`, `_extract_text_from_image`).
+- Student metadata extraction (`parse_student_identity_from_sheet` — name, roll_number, admission_number from header text).
+- Grading with negative marking support (`grade_omr`).
+
+Results are stored in `results.models.MarkSheet` (`marks_obtained`, `question_marks` JSON breakdown, `is_pass`, `remarks`). Also updates linked `ExamSession.uploaded_answer_sheet` and `is_submitted`.
+
+**Prerequisites:**
+- Exam must have `exam_mode='offline'`, `exam_type='mcq'`.
+- `answer_key` FileField must be populated (via `/upload-materials/`).
+- Dependencies (server-side): `opencv-python-headless`, `pytesseract` + Tesseract binary, `pdf2image` (+ Poppler), numpy, Pillow.
+- High-quality scans recommended for reliable bubble detection.
+
+### 6.1 Single Student OMR Upload
+**Endpoint:** `POST /api/v1/exams/{exam_id}/students/{student_id}/omr-upload/`
+
+**Permissions:** `super_admin`, `branch_manager`, `admin_senior_executive`, assigned `faculty`, or the student themselves.
+
+**Content-Type:** `multipart/form-data`
+
+**Request Fields:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `answer_sheet` | file | Yes | - | Scanned OMR sheet (JPG/PNG/PDF) |
+| `n_questions` | int | No | `exam.total_marks` or 100 | Number of questions on sheet |
+| `marks_per_question` | float | No | 1.0 | Marks per correct answer |
+| `negative_marks` | float | No | 0.0 | Penalty per incorrect answer |
+
+The endpoint:
+1. Validates permissions, exam type/mode, and answer key.
+2. Extracts correct answers from `Exam.answer_key` (bubble detection or OCR).
+3. Parses student identity from the uploaded sheet (to prevent mismatches).
+4. Detects student's bubbled answers.
+5. Grades and creates/updates `MarkSheet` + `ExamSession`.
+
+**Success Response:**
+```json
+{
+    "success": true,
+    "score": 42.0,
+    "total": 50.0,
+    "is_pass": true,
+    "correct": 42,
+    "wrong": 5,
+    "unanswered": 3,
+    "breakdown": [
+        {
+            "question": 1,
+            "correct_answer": "A",
+            "student_answer": "A",
+            "result": "correct",
+            "marks": 1.0
+        }
+        // ... full per-question array
+    ],
+    "marksheet_id": "uuid-of-marksheet"
+}
+```
+
+**Error Responses:**
+- `400`: Wrong exam mode/type, missing `answer_sheet` or `answer_key`.
+- `403`: Permission denied, branch mismatch, or OCR-parsed identity does not match target `student_id`.
+- `409`: Sheet already submitted for this student.
+- `422`: OMR parsing failed (bad image quality, no bubbles detected, etc.).
+
+### 6.2 Bulk OMR Upload
+**Endpoint:** `POST /api/v1/exams/{exam_id}/omr-upload/bulk/`
+
+**Permissions:** Admin roles or assigned faculty only.
+
+**Content-Type:** `multipart/form-data`
+
+**Request Fields:** 
+- `answer_sheets` (or `answer_sheet`): Multiple files (list).
+- Same optional params as single upload (`n_questions`, `marks_per_question`, `negative_marks`).
+
+**Auto-matching:** Each sheet is independently OCR'd for student identity (`parse_student_identity_from_sheet` + `_find_student_from_sheet_metadata` which prefers admission_number → roll_number → name patterns). Grading is isolated per file.
+
+**Success Response:**
+```json
+{
+    "success": true,
+    "processed": 25,
+    "succeeded": 23,
+    "failed": 2,
+    "results": [
+        {
+            "file_name": "omr_student42.pdf",
+            "status": "success",
+            "student_id": "uuid",
+            "student_name": "Alice Smith",
+            "score": 47.0,
+            "total": 50.0,
+            "is_pass": true,
+            "marksheet_id": "uuid"
+        },
+        {
+            "file_name": "bad_scan.pdf",
+            "status": "error",
+            "message": "Could not resolve student from sheet metadata."
+        }
+    ]
+}
+```
+
+**Notes:**
+- Failures do not block successful sheets (per-file resilience).
+- All successful entries update corresponding `MarkSheet.question_marks` (for detailed review in results module).
+- See `views.py:OMRBulkUploadView` and `omr.py` for full implementation details (temp files, contour detection thresholds, regex patterns, etc.).
+
+---
+
+## 7. Subject Papers (Reusable Paper Library)
 
 Papers are managed at the **Subject** level, making them reusable across multiple exams. An exam admin links one or more subject papers to an exam via `selected_papers`. When a student starts the exam, a paper is automatically assigned using a **round-robin** strategy.
 
-### 6.1 Upload / List Subject Papers
+### 7.1 Upload / List Subject Papers
 
 **Endpoint:** `POST /api/v1/subjects/{subject_id}/papers/`
 **Endpoint:** `GET  /api/v1/subjects/{subject_id}/papers/`
@@ -378,14 +494,14 @@ Papers are managed at the **Subject** level, making them reusable across multipl
 }
 ```
 
-### 6.2 Retrieve / Update / Delete a Subject Paper
+### 7.2 Retrieve / Update / Delete a Subject Paper
 
 **Endpoint:** `/api/v1/subjects/{subject_id}/papers/{paper_id}/`
 **Methods:** `GET`, `PATCH`, `DELETE`
 
 `PATCH` accepts any subset of `set_name`, `file`, `answer_key`.
 
-### 6.3 Link Papers to an Exam (`selected_papers`)
+### 7.3 Link Papers to an Exam (`selected_papers`)
 
 When creating or updating an exam, pass `selected_papers` as a list of `SubjectPaper` UUIDs.
 
@@ -396,11 +512,11 @@ When creating or updating an exam, pass `selected_papers` as a list of `SubjectP
 }
 ```
 
-### 6.4 Round-Robin Paper Assignment at Exam Start
+### 7.4 Round-Robin Paper Assignment at Exam Start
 
 When a student hits `POST /api/v1/exams/{exam_id}/start/`, the system assigns the paper with the **lowest assignment count** to ensure even distribution.
 
-### 6.5 Workflow Summary
+### 7.5 Workflow Summary
 
 ```
 1. Upload papers to a subject:
@@ -418,9 +534,11 @@ When a student hits `POST /api/v1/exams/{exam_id}/start/`, the system assigns th
 
 ---
 
-## 7. Exam Model Fields Reference
+## 8. Exam Model Fields Reference
 
-The `Exam` model supports full proctoring, geo-fencing, screen monitoring, configurable result release, reusable subject papers, M2M paper_checkers, and grace marks.
+The `Exam` model supports full proctoring, geo-fencing, screen monitoring, configurable result release, reusable subject papers, M2M `paper_checkers`/`supervisors`, **OMR grading for offline MCQ**, and grace marks.
+
+**OMR-specific usage:** `answer_key` FileField is the source of truth for correct answers in offline mode (parsed via `extract_answer_key_from_file()`). `MarkSheet` (in `results` app) receives the auto-graded `marks_obtained` + `question_marks` breakdown.
 
 ### Key Model Fields & Computed Serializer Fields (from `exams/models.py` + `serializers.py`)
 
@@ -437,7 +555,7 @@ The `Exam` model supports full proctoring, geo-fencing, screen monitoring, confi
 | `selected_papers` | M2M | Links to `SubjectPaper` objects (round-robin assignment on `/start/`) |
 | `paper_checkers` | M2M | Users with `role='paper_checker'` (synced from timetable slot) |
 | `supervisors` | M2M | Users with `role='exam_supervisor'` (synced from `examiners` in timetable) |
-| `answer_key` | FileField | Exam-level answer key upload |
+| `answer_key` | FileField | Exam-level answer key upload. **Critical for OMR**: used by `extract_answer_key_from_file()` for offline MCQ grading (bubble detection or OCR). |
 | `grace_marks` | decimal | Grace marks added to all student results |
 | `grace_marks_note` | text | Reason for awarding grace marks |
 | `classroom` / `classroom_name` | (computed) | Pulled from linked `TimetableSlot.classroom` (via `hasattr` check in serializer) |
@@ -449,12 +567,13 @@ The `Exam` model supports full proctoring, geo-fencing, screen monitoring, confi
 - `ensure_paper_checkers_for_exam()`: Early population of `paper_checkers` M2M from timetable slot (called in views).
 - `_student_can_see_answer_key(request, exam)`: Controls `answer_key` visibility (admins always see; students only within 24h of `PublishedResult.published_at`).
 
-**Proctoring Flow:**
-- `/start/` validates geo if configured, creates `ExamSession`, assigns paper round-robin.
+**Proctoring & OMR Flow:**
+- Online: `/start/` validates geo, creates `ExamSession`, assigns paper round-robin.
 - Periodic `/geo-check/` and `/screen-event/` log violations (ScreenEventSerializer), trigger actions per thresholds.
+- Offline MCQ: Use the dedicated **OMR endpoints** (section 6) with scanned sheets. `OMRUploadView` / `OMRBulkUploadView` call `exams.omr.*` functions and auto-populate `MarkSheet`.
 - `ExamListSerializer.get_can_start_exam()` includes student caching, batch match, time window (or `ongoing` status), and no prior submission check.
-- On submit, if `result_release_mode=instant` and MCQ-only, auto-grade and publish.
+- On submit (online) or OMR upload, if `result_release_mode=instant` and MCQ-only, auto-grade and publish.
 
-See `timetable_procedure_guide.md` (updated for `session_type` + nested `exam_data`, clash 409 responses, confirm/export/publish endpoints) for full integration examples. Also see `results_module_api_documentation.md` for marking/publishing/recheck.
+See `timetable_procedure_guide.md` (updated for `session_type` + nested `exam_data`, clash 409 responses, confirm/export/publish endpoints) for full integration examples. Also see `results_module_api_documentation.md` for `MarkSheet` review, recheck, and rank calculation.
 
-**Migration Note:** After pulling latest code, run `python manage.py migrate exams` (new fields: `grace_marks`, `grace_marks_note`, timetable OneToOne link, proctoring config). All changes synced with `ExamListSerializer`, `ExamCreateSerializer`, and `SubjectPaperSerializer`.
+**Migration Note:** After pulling latest code, run `python manage.py migrate exams` (new fields: `grace_marks`, `grace_marks_note`, timetable OneToOne link, proctoring config). OMR support uses existing `answer_key` + `MarkSheet.question_marks` (no additional migration). All changes synced with `ExamListSerializer`, `ExamCreateSerializer`, `SubjectPaperSerializer`, and the new OMR views. See `exams/omr.py` + `views.py:OMR*View` for implementation.
