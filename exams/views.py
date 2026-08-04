@@ -62,7 +62,7 @@ class ExamListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['exam_mode', 'exam_type', 'status', 'batch_id', 'scheduled_date','branch_id','subject_id']
-    search_fields = ['title', 'description']
+    search_fields = ['title']
     ordering_fields = '__all__'
 
     def _get_queryset(self, request):
