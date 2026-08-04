@@ -1994,6 +1994,7 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'email': employee.email,
                     'role': getattr(employee, 'role', 'Employee'),
                     'branch_name': branch_name,
+                    "employee_id": employee.employee_id or "",
                 },
                 'attendance_percentage': pct,
                 'summary': {

@@ -69,7 +69,7 @@ class LeaveListCreateView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'leave_type', 'applied_by']
     search_fields = ['applied_by__name', 'reason']
-    ordering_fields = '__all__'
+    ordering_fields = ['created_at', 'from_date', 'to_date', 'status', 'leave_type', 'total_days']
 
     def get(self, request):
         role = _user_role(request.user)
@@ -1044,7 +1044,7 @@ class StudentLeaveListCreateView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'leave_type', 'student']
     search_fields = ['student__first_name', 'student__surname', 'reason']
-    ordering_fields = '__all__'
+    ordering_fields = ['created_at', 'from_date', 'to_date', 'status', 'leave_type', 'reviewed_at']
 
     def get(self, request):
         role = _user_role(request.user)
