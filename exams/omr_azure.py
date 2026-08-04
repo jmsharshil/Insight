@@ -1,7 +1,7 @@
 """
 exams/omr_azure.py
 ===================
-Azure OpenAI (GPT-4o-vision) based OMR reader using the official `openai` SDK.
+Azure OpenAI (GPT-4o-vision) based OMR reader using the official `openai` SDK (v1.65+).
 
 Provides drop-in replacements for the local OpenCV/pytesseract functions in omr.py:
 
@@ -9,9 +9,10 @@ Provides drop-in replacements for the local OpenCV/pytesseract functions in omr.
   - detect_student_answers_azure(...) → {1: 'A', 2: None, ...}
   - parse_student_identity_from_sheet_azure(...) → {'student_name': ..., 'roll_number': ...}
 
-Advantages: No local CV/OCR deps (except optional pdf2image for PDF paths), works on poor scans,
-handles printed keys, handwritten bubbles, and varied layouts better in many cases.
-Uses official SDK, structured JSON mode (temperature=0) for reliability.
+Advantages: No local CV/OCR deps (pdf2image+Poppler optional for PDF support), robust to poor scans,
+handles printed keys, handwritten bubbles, varied layouts. Uses official SDK with JSON mode (temp=0)
+for reliable structured output. Enhanced _encode_image_to_data_url with magic-byte MIME detection
+and full BytesIO/PDF support. _extract_json has graceful fallback + stricter validation in callers.
 
 Required Django settings (add to your settings.py):
   AZURE_OPENAI_ENDPOINT     e.g. "https://your-resource.openai.azure.com/"
@@ -19,8 +20,10 @@ Required Django settings (add to your settings.py):
   AZURE_OPENAI_DEPLOYMENT   model deployment name (must support vision, e.g. "gpt-4o")
   AZURE_OPENAI_API_VERSION  optional (defaults to "2024-08-06")
 
-Note: Images are base64-encoded and sent in the prompt. For production, consider cost
-(~$0.01–0.05 per call) and latency (1–4s). PDF support reuses omr._pdf_page_to_image_bytes.
+PDF support (for .pdf paths/bytes/BytesIO): requires `pdf2image==1.16.0` (in requirements.txt)
+**and** Poppler (apt install poppler-utils). See omr.py for shared helper. Clear errors on missing deps.
+
+Note: Base64 data URLs sent to vision model. Monitor cost (~$0.01–0.05 per call) and latency (1–4s).
 """
 
 import base64
@@ -30,21 +33,23 @@ import logging
 import os
 import re
 from typing import Any, Dict, Optional
+
 from django.conf import settings
 from openai import AzureOpenAI
 
 logger = logging.getLogger(__name__)
 
-# Lazy-initialized Azure OpenAI client (official SDK instead of raw requests)
+# Lazy-initialized Azure OpenAI client + deployment name (official SDK instead of raw requests)
 _client = None
+_deployment = None
 
 
-def _get_azure_client():
-    """Return a cached AzureOpenAI client. Fetches settings dynamically (in case
-    module imported before Django settings are fully configured). Raises RuntimeError
-    if required settings missing.
+def _get_azure_config():
+    """Return cached (AzureOpenAI client, deployment_name). Fetches settings dynamically
+    (in case module imported before Django settings ready). Raises RuntimeError if
+    required settings missing.
     """
-    global _client
+    global _client, _deployment
     if _client is None:
         endpoint = getattr(settings, "AZURE_OPENAI_ENDPOINT", None)
         key = getattr(settings, "AZURE_OPENAI_KEY", None)
@@ -61,17 +66,35 @@ def _get_azure_client():
             api_key=key,
             api_version=api_version or "2024-08-06",
         )
-    return _client
+        _deployment = deployment
+    return _client, _deployment
+
+
+def _get_mime_type(data: bytes, fallback: str = "jpeg") -> str:
+    """Detect MIME type from magic bytes for robust image/PDF handling."""
+    if data.startswith(b"%PDF"):
+        return "pdf"
+    if data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"\x89PNG"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if data.startswith(b"RIFF") and b"WEBP" in data[:12]:
+        return "webp"
+    return fallback
 
 
 def _encode_image_to_data_url(source) -> str:
-    """Convert image source (path, bytes, BytesIO, or PDF) to data URL for vision API.
-    - PDF (path or bytes starting with %PDF) renders first page as PNG via pdf2image.
-    - Reuses helper from omr.py for consistency.
-    - MIME defaults to jpeg; PNG for rendered PDFs.
+    """Convert image source (path str, bytes, BytesIO, or PDF) to data URL.
+    Now with full magic-byte detection for JPEG/PNG/GIF/WEBP/PDF.
+    - PDF path/bytes → rendered to PNG via pdf2image or omr helper (requires Poppler).
+    - BytesIO now fully supports PDF magic too.
+    - Raises clear Poppler-missing errors. MIME defaults to jpeg for unknown images.
     """
-    data: bytes
-    mime: str = "jpeg"
+    if isinstance(source, io.BytesIO):
+        source.seek(0)
+        source = source.read()  # convert to bytes for unified handling
 
     if isinstance(source, str):
         ext = os.path.splitext(source)[1].lower()
@@ -86,16 +109,20 @@ def _encode_image_to_data_url(source) -> str:
             except Exception as e:
                 logger.error("PDF support in azure OMR failed: %s", e)
                 raise ValueError(
-                    "PDF processing requires pdf2image+Poppler (see omr.py)"
+                    "PDF processing requires pdf2image (pip install pdf2image) "
+                    "AND the Poppler runtime library (system dep). "
+                    "Ubuntu/Debian: sudo apt-get install poppler-utils. "
+                    "See https://pdf2image.readthedocs.io/en/latest/installation.html "
+                    "(also check omr.py _pdf_page_to_image_bytes)."
                 ) from e
         else:
             with open(source, "rb") as f:
                 data = f.read()
-            mime = "jpeg" if ext in (".jpg", ".jpeg") else ext.lstrip(".")
+            mime = _get_mime_type(data, "jpeg" if ext in (".jpg", ".jpeg") else ext.lstrip("."))
     elif isinstance(source, (bytes, bytearray)):
-        data = bytes(source)  # ensure bytes
-        # Check for PDF magic bytes
-        if data.startswith(b"%PDF"):
+        data = bytes(source)
+        mime = _get_mime_type(data)
+        if mime == "pdf":
             try:
                 from pdf2image import convert_from_bytes
                 pages = convert_from_bytes(data, dpi=200, first_page=1, last_page=1)
@@ -107,13 +134,11 @@ def _encode_image_to_data_url(source) -> str:
                 mime = "png"
             except Exception as e:
                 logger.error("PDF bytes rendering failed: %s", e)
-                raise ValueError("PDF bytes processing failed (pdf2image required)") from e
-        # else keep as jpeg default
-    elif isinstance(source, io.BytesIO):
-        source.seek(0)
-        data = source.read()
-        # could check for PDF magic here too but omitted for simplicity
-        mime = "jpeg"
+                raise ValueError(
+                    "PDF bytes processing failed. Requires pdf2image + Poppler runtime. "
+                    "See detailed install instructions in the PDF path error or "
+                    "https://pdf2image.readthedocs.io/en/latest/installation.html"
+                ) from e
     else:
         raise ValueError(f"Unsupported source type for image: {type(source)}")
 
@@ -122,14 +147,14 @@ def _encode_image_to_data_url(source) -> str:
 
 
 def _call_azure_vision(image_data_url: str, system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> str:
-    """Call Azure OpenAI vision model using the official SDK (no requests library).
-    Includes basic error handling for API issues.
+    """Call Azure OpenAI vision model (GPT-4o) using the official SDK.
+    Uses structured JSON mode (temperature=0) for reliable parsing.
     """
-    client = _get_azure_client()
+    client, deployment = _get_azure_config()
 
     try:
         response = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
+            model=deployment,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {
@@ -157,10 +182,11 @@ def _extract_json(text: str) -> Dict[str, Any]:
     - Strips ```json markdown fences
     - Extracts first embedded JSON object if extra text present
     - Fixes common trailing commas
-    - Graceful fallback to {} on parse failure (with logging)
+    - Graceful fallback to {} on parse failure (with detailed logging)
     """
     if not text or not text.strip():
-        raise ValueError("Empty response from Azure OpenAI")
+        logger.warning("Empty response from Azure OpenAI")
+        return {}
 
     cleaned = text.strip()
 
@@ -168,7 +194,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
     cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
     cleaned = re.sub(r'\s*```$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
 
-    # Extract the first JSON-like object if there is surrounding text
+    # Extract the first JSON-like object if there is surrounding text (non-greedy but sufficient for LLM output)
     json_match = re.search(r'(\{[\s\S]*?\})', cleaned)
     if json_match:
         cleaned = json_match.group(1)
@@ -184,17 +210,18 @@ def _extract_json(text: str) -> Dict[str, Any]:
             return json.loads(cleaned)
         except json.JSONDecodeError as exc:
             logger.error("JSON parse failed even after cleanup. Raw response snippet: %s", text[:300])
-            raise ValueError(f"Could not parse JSON from Azure OpenAI response: {exc}") from exc
+            return {}
 
 
 # ---------------------------------------------------------------------------
 # Drop-in replacements matching omr.py's public interface
 # ---------------------------------------------------------------------------
 
+
 def extract_answer_key_from_file_azure(source, n_questions: int = 0, n_options: int = 4) -> Dict[int, str]:
     """Drop-in alternative to omr.extract_answer_key_from_file using Azure Vision (GPT-4o).
     Accepts: str (path to image/PDF), bytes, BytesIO. For PDF uses first page.
-    Returns {1: 'A', 2: 'B', ...}. Raises on API or parse errors.
+    Returns {1: 'A', 2: 'B', ...} with stricter int/ABCDE validation. Returns {} on failure.
     """
     image_url = _encode_image_to_data_url(source)
     labels = ", ".join(chr(65 + i) for i in range(n_options))
@@ -204,28 +231,32 @@ def extract_answer_key_from_file_azure(source, n_questions: int = 0, n_options: 
     )
     user_prompt = (
         f"Image shows answer key for ~{n_questions or 'unknown'} questions with options {labels}. "
-        f'Output JSON: {{"1": "A", "2": "B", ...}}. Use null or omit for unclear/missing. '
-        "No explanations, no markdown — pure JSON only."
+        f'Output JSON object with integer keys and option letters (A-{labels[-1] if labels else "D"}): '
+        f'{{"1": "A", "2": "B", ...}}. Use null for unclear. No extra text or markdown.'
     )
     raw = _call_azure_vision(image_url, system_prompt, user_prompt, max_tokens=1500)
-    try:
-        parsed = _extract_json(raw)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        logger.error("Failed to parse answer key from Azure. Raw response: %s", raw[:250])
-        raise ValueError(f"Could not parse answer key JSON from Azure OpenAI: {exc}") from exc
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, dict) or not parsed:
+        logger.warning("No valid answer key parsed from Azure response. Raw snippet: %s", str(raw)[:200])
+        return {}
 
-    # Convert keys to int, values to uppercase letters, skip None/empty
-    return {
-        int(k): str(v).upper().strip()
-        for k, v in parsed.items()
-        if v and str(v).strip() in "ABCDE"
-    }
+    # Convert keys to int, values to uppercase letters; stricter validation for ABCDE
+    result = {}
+    for k, v in parsed.items():
+        try:
+            q = int(k)
+            ans = str(v).upper().strip()
+            if ans in "ABCDE":
+                result[q] = ans
+        except (ValueError, TypeError):
+            continue  # skip invalid keys
+    return result
 
 
 def detect_student_answers_azure(source, n_questions: int, n_options: int = 4) -> Dict[int, Optional[str]]:
     """Drop-in alternative to omr.detect_student_answers using Azure Vision (GPT-4o).
     Accepts: str (path to image/PDF), bytes, BytesIO. For PDF uses first page.
-    Returns {1: 'A', 2: None, ...} where None = blank or ambiguous.
+    Returns {1: 'A', 2: None, ...} where None = blank or ambiguous. Always returns all questions.
     """
     if n_questions < 1:
         raise ValueError("n_questions must be > 0 for student answer detection")
@@ -234,25 +265,25 @@ def detect_student_answers_azure(source, n_questions: int, n_options: int = 4) -
     labels = ", ".join(chr(65 + i) for i in range(n_options))
     system_prompt = (
         "You are an expert OMR bubble-sheet reader. Examine each question row and "
-        "identify the selected/filled option. Return ONLY a JSON dict."
+        "identify the selected/filled option (A-E). Return ONLY a JSON dict with "
+        "question numbers as keys."
     )
     user_prompt = (
-        f"Student OMR sheet with {n_questions} questions, options {labels}. For each q, "
-        f'return letter or null if blank/unclear/multiple. JSON example: {{"1": "B", "2": null, "3": "A"}}. '
-        "Strictly JSON, no other text."
+        f"Analyze this student OMR sheet ({n_questions} questions, options {labels}). "
+        f'For each question output the chosen letter or null if blank/ambiguous/multiple. '
+        f'Example: {{"1": "B", "2": null, "3": "A", "4": "C"}}. Strictly valid JSON only.'
     )
     raw = _call_azure_vision(image_url, system_prompt, user_prompt, max_tokens=2000)
-    try:
-        parsed = _extract_json(raw)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        logger.error("Failed to parse student answers from Azure. Raw: %s", raw[:250])
-        raise ValueError(f"Could not parse student answers JSON from Azure OpenAI: {exc}") from exc
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, dict):
+        logger.warning("Invalid parsed type from Azure for student answers: %s", type(parsed))
+        parsed = {}
 
     result: Dict[int, Optional[str]] = {}
     for q in range(1, n_questions + 1):
         val = parsed.get(str(q)) or parsed.get(q)
-        if val and str(val).strip().upper() in "ABCDE":
-            result[q] = str(val).upper().strip()
+        if isinstance(val, str) and val.strip().upper() in "ABCDE":
+            result[q] = val.strip().upper()
         else:
             result[q] = None
     return result
@@ -263,22 +294,28 @@ def parse_student_identity_from_sheet_azure(source) -> Dict[str, Any]:
     More robust for poor scans/handwriting than local OCR. Returns {} on failure.
     Accepts str path (img/PDF), bytes, BytesIO.
     """
-    image_url = _encode_image_to_data_url(source)
-    system_prompt = (
-        "You are an expert at extracting student information from exam answer sheet headers. "
-        "Look for name, roll number, admission/enrollment ID. Return ONLY JSON."
-    )
-    user_prompt = (
-        'From the image header, extract: {"student_name": "...", "roll_number": "...", '
-        '"admission_number": "..."}. Use empty string for missing fields. JSON only.'
-    )
-    raw = _call_azure_vision(image_url, system_prompt, user_prompt, max_tokens=800)
     try:
+        image_url = _encode_image_to_data_url(source)
+        system_prompt = (
+            "You are an expert at extracting student information from exam answer sheet headers. "
+            "Look for name, roll number, admission/enrollment ID. Return ONLY valid JSON."
+        )
+        user_prompt = (
+            'From the image header, extract: {"student_name": "...", "roll_number": "...", '
+            '"admission_number": "..."}. Use empty string for missing fields. JSON only.'
+        )
+        raw = _call_azure_vision(image_url, system_prompt, user_prompt, max_tokens=800)
         parsed = _extract_json(raw)
         if not isinstance(parsed, dict):
             logger.warning("Parsed identity is not a dict: %s", type(parsed))
             return {}
-        return {k: str(v).strip() for k, v in parsed.items() if v and str(v).strip()}
-    except (json.JSONDecodeError, ValueError, TypeError, RuntimeError) as exc:
-        logger.warning("Azure identity extraction failed: %s. Raw snippet: %s", exc, raw[:150] if 'raw' in locals() else 'N/A')
+        # Stricter filtering
+        return {
+            k: str(v).strip()
+            for k, v in parsed.items()
+            if v and str(v).strip() and str(v).strip().lower() not in ("null", "none", "n/a")
+        }
+    except Exception as exc:  # RuntimeError from API, ValueError from encoding, etc.
+        raw_snippet = str(locals().get("raw", ""))[:150] if "raw" in locals() else "N/A"
+        logger.warning("Azure identity extraction failed: %s. Raw snippet: %s", exc, raw_snippet)
         return {}

@@ -5,7 +5,7 @@ autobahn==25.12.2
 Automat==25.4.16
 azure-core==1.41.0
 azure-storage-blob==12.29.0
-openai==1.61.1
+openai==1.65.0  # Azure OMR vision (GPT-4o); pinned for SDK stability with response_format=json_object + AzureOpenAI client
 billiard==4.2.4
 cbor2==6.1.2
 celery==5.6.3
