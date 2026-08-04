@@ -2,7 +2,10 @@ from django.db import models
 from django.db.models import Sum
 from django.conf import settings
 import uuid
+import logging
 from leads.models import COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
+
+logger = logging.getLogger(__name__)
 
 
 # ── Day-of-week choices ───────────────────────────────────────────────────────
@@ -205,6 +208,50 @@ class Batch(models.Model):
                 seq = 1
             self.batch_code = f"{prefix}{seq:04d}"
         # Ensure name is auto-generated in format {course_type}_{batch_attempt}_{year}_{sequence}
+        # NEW: Apply batch attempt year calculation from services.py (per "fixes and updates" commit)
+        if not self.attempt_year and self.start_date and self.batch_attempt:
+            try:
+                from .services import get_exam_attempt_year
+                course_type_for_year = getattr(self.course, 'course_type', None) or 'cseet'
+                self.attempt_year = get_exam_attempt_year(
+                    course=course_type_for_year,
+                    batch_attempt=self.batch_attempt,
+                    group_module=self.group_module or '',
+                    form_date=self.start_date,  # use start_date as reference point
+                )
+            except Exception as e:
+                logger.warning(f"Could not auto-calculate attempt_year from start_date: {e}")
+
+        # Auto-set start_date/end_date using new ICSI-aligned logic if missing
+        if (not self.start_date or not self.end_date) and self.batch_attempt and self.course:
+            try:
+                from .services import get_batch_dates, get_exam_attempt_year
+                course_type = getattr(self.course, 'course_type', None) or 'cseet'
+                year = self.attempt_year or timezone.now().year
+                if not self.attempt_year:
+                    # Calculate year based on today if start_date not yet known
+                    from django.utils import timezone
+                    form_date = timezone.now().date()
+                    self.attempt_year = get_exam_attempt_year(
+                        course=course_type,
+                        batch_attempt=self.batch_attempt,
+                        group_module=self.group_module or '',
+                        form_date=form_date,
+                    )
+                    year = self.attempt_year
+                batch_start, batch_end = get_batch_dates(
+                    course=course_type,
+                    batch_attempt=self.batch_attempt,
+                    group_module=self.group_module or '',
+                    attempt_year=year,
+                )
+                if not self.start_date:
+                    self.start_date = batch_start
+                if not self.end_date:
+                    self.end_date = batch_end
+            except Exception as e:
+                logger.warning(f"Could not auto-set batch dates: {e}")
+
         if not self.name:
             from django.utils import timezone
             year = self.attempt_year or (self.start_date.year if self.start_date else timezone.now().year)
