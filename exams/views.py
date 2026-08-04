@@ -1562,7 +1562,7 @@ class OMRUploadView(APIView):
 
     def post(self, request, exam_id, student_id):
         # from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr
-        if django_settings.get('OMR_ENGINE') == 'azure' and django_settings.get("AZURE_OPENAI_KEY"):
+        if getattr(django_settings,'OMR_ENGINE') == 'azure' and getattr(django_settings,"AZURE_OPENAI_KEY"):
             from .omr_azure import (
                 extract_answer_key_from_file_azure as extract_answer_key_from_file,
                 detect_student_answers_azure as detect_student_answers,
@@ -1802,7 +1802,7 @@ class OMRBulkUploadView(APIView):
 
     def post(self, request, exam_id):
         # from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr, parse_student_identity_from_sheet
-        if django_settings.get('OMR_ENGINE') == 'azure':
+        if getattr(django_settings,'OMR_ENGINE') == 'azure' and getattr(django_settings,'AZURE_OPENAI_KEY'):
             from .omr_azure import (
                 extract_answer_key_from_file_azure as extract_answer_key_from_file,
                 detect_student_answers_azure as detect_student_answers,

@@ -22,10 +22,10 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-AZURE_OPENAI_ENDPOINT = settings.get("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_KEY = settings.get("AZURE_OPENAI_KEY")
-AZURE_OPENAI_DEPLOYMENT = settings.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-AZURE_OPENAI_API_VERSION = settings.get("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+AZURE_OPENAI_ENDPOINT = getattr(settings,"AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_KEY = getattr(settings,"AZURE_OPENAI_KEY")
+AZURE_OPENAI_DEPLOYMENT = getattr(settings,"AZURE_OPENAI_DEPLOYMENT")
+AZURE_OPENAI_API_VERSION = getattr(settings,"AZURE_OPENAI_API_VERSION")
 
 
 def _encode_image_to_data_url(path: str) -> str:
