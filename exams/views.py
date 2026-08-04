@@ -34,6 +34,7 @@ from .utils import (
     auto_submit_session, check_geo_boundary, assign_papers_to_checker,
     calculate_ranks, build_absolute_url,
 )
+from .omr import grade_omr
 from .emails import send_answer_key_email
 
 logger = logging.getLogger(__name__)
@@ -1703,7 +1704,7 @@ class OMRUploadView(APIView):
             session.uploaded_answer_sheet.save(answer_sheet.name, answer_sheet, save=False)
 
             # Parse student identity from the uploaded OMR sheet itself.
-            from .omr import parse_student_identity_from_sheet
+            #from .omr import parse_student_identity_from_sheet
             sheet_metadata = parse_student_identity_from_sheet(sheet_tmp)
 
             if not sheet_metadata:
