@@ -1561,7 +1561,15 @@ class OMRUploadView(APIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request, exam_id, student_id):
-        from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr
+        # from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr
+        if django_settings.get('OMR_ENGINE') == 'azure' and django_settings.get("AZURE_OPENAI_KEY"):
+            from .omr_azure import (
+                extract_answer_key_from_file_azure as extract_answer_key_from_file,
+                detect_student_answers_azure as detect_student_answers,
+                parse_student_identity_from_sheet_azure as parse_student_identity_from_sheet,
+            )
+        else:
+            from .omr import extract_answer_key_from_file, detect_student_answers, parse_student_identity_from_sheet
         from results.models import MarkSheet
         import tempfile, os
 
@@ -1793,7 +1801,15 @@ class OMRBulkUploadView(APIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request, exam_id):
-        from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr, parse_student_identity_from_sheet
+        # from .omr import extract_answer_key_from_file, detect_student_answers, grade_omr, parse_student_identity_from_sheet
+        if django_settings.get('OMR_ENGINE') == 'azure':
+            from .omr_azure import (
+                extract_answer_key_from_file_azure as extract_answer_key_from_file,
+                detect_student_answers_azure as detect_student_answers,
+                parse_student_identity_from_sheet_azure as parse_student_identity_from_sheet,
+            )
+        else:
+            from .omr import extract_answer_key_from_file, detect_student_answers, parse_student_identity_from_sheet
         from results.models import MarkSheet
         import tempfile, os
 
