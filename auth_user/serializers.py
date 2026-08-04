@@ -442,21 +442,26 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
 
         # ── Sync branch ↔ branches ────────────────────────────────────────
+        # Respect exact list sent in PATCH/PUT (fixes bug where sending 1 branch
+        # when user had 2 did not remove the extra branch from M2M)
         if extra_branches is not None:
-            branch_set = list(extra_branches)
-            # Always keep the primary branch in the M2M set
-            if instance.branch and instance.branch not in branch_set:
-                branch_set.insert(0, instance.branch)
+            branch_set = list(extra_branches) if extra_branches else []
             instance.branches.set(branch_set)
 
-            # If primary branch was cleared but branches remain, promote first
-            if not instance.branch and branch_set:
-                instance.branch = branch_set[0]
+            # If primary branch FK is no longer in the new branches list,
+            # promote the first one from the list (or clear it)
+            if branch_set:
+                if not instance.branch or instance.branch not in branch_set:
+                    instance.branch = branch_set[0]
+                    instance.save(update_fields=['branch'])
+            elif instance.branch:
+                # No branches left — clear primary FK too
+                instance.branch = None
                 instance.save(update_fields=['branch'])
-        elif extra_branches is None and instance.branch:
-            # branches not supplied in this request — ensure FK is still in M2M
-            if not instance.branches.filter(id=instance.branch_id).exists():
-                instance.branches.add(instance.branch)
+        elif 'branch' in validated_data and validated_data.get('branch'):
+            # Only primary branch was updated — ensure it's in the M2M relation
+            if not instance.branches.filter(id=validated_data['branch'].id).exists():
+                instance.branches.add(validated_data['branch'])
         # ─────────────────────────────────────────────────────────────────
         if linked_students is not None:
             # linked_students may be list of User instances or pks (UUIDs)
