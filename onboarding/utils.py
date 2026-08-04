@@ -161,6 +161,7 @@ class AdmissionService:
             organization=admission.branch.organization if admission.branch else None,
             branch=admission.branch,
         )
+        student_user.branches.set(admission.branch)  # Assign student to the admission branch
 
         try:
             if student_password:
@@ -186,6 +187,7 @@ class AdmissionService:
                     organization=admission.branch.organization if admission.branch else None,
                     branch=admission.branch,
                 )
+                parent_user.branches.set(admission.branch)
 
                 try:
                     if parent_password:
