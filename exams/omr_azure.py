@@ -88,9 +88,9 @@ def _get_mime_type(data: bytes, fallback: str = "jpeg") -> str:
 def _encode_image_to_data_url(source) -> str:
     """Convert image source (path str, bytes, BytesIO, or PDF) to data URL.
     Now with full magic-byte detection for JPEG/PNG/GIF/WEBP/PDF.
-    - PDF path/bytes → rendered to PNG via pdf2image or omr helper (requires Poppler).
+    - PDF path/bytes → rendered to PNG via pymupdf.
     - BytesIO now fully supports PDF magic too.
-    - Raises clear Poppler-missing errors. MIME defaults to jpeg for unknown images.
+    - MIME defaults to jpeg for unknown images.
     """
     if isinstance(source, io.BytesIO):
         source.seek(0)
@@ -109,11 +109,8 @@ def _encode_image_to_data_url(source) -> str:
             except Exception as e:
                 logger.error("PDF support in azure OMR failed: %s", e)
                 raise ValueError(
-                    "PDF processing requires pdf2image (pip install pdf2image) "
-                    "AND the Poppler runtime library (system dep). "
-                    "Ubuntu/Debian: sudo apt-get install poppler-utils. "
-                    "See https://pdf2image.readthedocs.io/en/latest/installation.html "
-                    "(also check omr.py _pdf_page_to_image_bytes)."
+                    "PDF processing requires pymupdf (pip install pymupdf). "
+                    "See https://pymupdf.readthedocs.io/en/latest/installation.html"
                 ) from e
         else:
             with open(source, "rb") as f:
@@ -124,20 +121,19 @@ def _encode_image_to_data_url(source) -> str:
         mime = _get_mime_type(data)
         if mime == "pdf":
             try:
-                from pdf2image import convert_from_bytes
-                pages = convert_from_bytes(data, dpi=200, first_page=1, last_page=1)
-                if not pages:
+                import fitz
+                doc = fitz.open("pdf", data)
+                if len(doc) == 0:
                     raise ValueError("No pages in PDF bytes")
-                buf = io.BytesIO()
-                pages[0].save(buf, format="PNG")
-                data = buf.getvalue()
+                pdf_page = doc.load_page(0)
+                pix = pdf_page.get_pixmap(dpi=200)
+                data = pix.tobytes("png")
                 mime = "png"
             except Exception as e:
                 logger.error("PDF bytes rendering failed: %s", e)
                 raise ValueError(
-                    "PDF bytes processing failed. Requires pdf2image + Poppler runtime. "
-                    "See detailed install instructions in the PDF path error or "
-                    "https://pdf2image.readthedocs.io/en/latest/installation.html"
+                    "PDF bytes processing failed. Requires pymupdf. "
+                    "See https://pymupdf.readthedocs.io/en/latest/installation.html"
                 ) from e
     else:
         raise ValueError(f"Unsupported source type for image: {type(source)}")

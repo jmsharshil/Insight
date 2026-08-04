@@ -100,20 +100,17 @@ def _load_image_as_array(source):
 
 
 def _pdf_page_to_image_bytes(pdf_path: str, page: int = 0) -> Optional[bytes]:
-    """Convert one PDF page to PNG bytes using pdf2image (poppler) if available."""
+    """Convert one PDF page to PNG bytes using pymupdf (fitz)."""
     try:
-        from pdf2image import convert_from_path
-        pages = convert_from_path(pdf_path, dpi=200, first_page=page + 1, last_page=page + 1)
-        if not pages:
+        import fitz
+        doc = fitz.open(pdf_path)
+        if page >= len(doc):
             return None
-        buf = BytesIO()
-        pages[0].save(buf, format='PNG')
-        return buf.getvalue()
+        pdf_page = doc.load_page(page)
+        pix = pdf_page.get_pixmap(dpi=200)
+        return pix.tobytes("png")
     except ImportError:
-        raise ImportError(
-            "pdf2image is required to render PDF OMR sheets. Install pdf2image into your Python environment "
-            "and install the Poppler runtime on the server."
-        )
+        raise ImportError("pymupdf is required to render PDF OMR sheets. Install pymupdf into your Python environment.")
     except Exception as exc:
         logger.error("PDF→image conversion failed: %s", exc)
         return None
