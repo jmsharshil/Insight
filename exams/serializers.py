@@ -84,19 +84,23 @@ def _student_can_see_answer_key(request, exam):
     if getattr(request.user, 'role', None) != 'student':
         return True
 
-    if not exam or exam.status != 'results_published':
+    if not exam:
         return False
 
-    from results.models import PublishedResult
-    pr = PublishedResult.objects.filter(exam=exam, student__user=request.user).first()
-    if not pr or not pr.published_at:
-        return False
+    import datetime
+    from django.utils import timezone
 
-    published_at = pr.published_at
-    if timezone.is_naive(published_at):
-        published_at = timezone.make_aware(published_at, timezone.get_default_timezone())
+    if exam.scheduled_date and exam.end_time:
+        dt_end_naive = datetime.datetime.combine(exam.scheduled_date, exam.end_time)
+        dt_end = timezone.make_aware(dt_end_naive) if timezone.is_naive(dt_end_naive) else dt_end_naive
+        
+        now = timezone.now()
+        
+        # Show answer key only within 24 hours after the exam's scheduled end time
+        if dt_end <= now <= dt_end + datetime.timedelta(hours=24):
+            return True
 
-    return timezone.now() <= published_at + datetime.timedelta(hours=24)
+    return False
 
 
 class SubjectPaperSerializer(serializers.ModelSerializer):
