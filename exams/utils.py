@@ -108,8 +108,8 @@ def auto_grade_mcq(session_id):
             defaults={'marks_obtained': marks, 'total_marks': exam.total_marks, 'percentage': pct, 'is_pass': passed},
         )
         if created:
-            from results.utils import notify_parents_of_exam_result
-            notify_parents_of_exam_result([pr])
+            from results.utils import notify_students_and_parents_of_exam_result
+            notify_students_and_parents_of_exam_result([pr])
 
     return marks, pct, passed
 

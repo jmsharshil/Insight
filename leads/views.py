@@ -892,6 +892,19 @@ class LeadTransferRequestReviewView(APIView):
                 )
                 
                 transfer_request.assigned_to = new_assignee
+                
+                from chat.notifications import send_system_notification
+                try:
+                    send_system_notification(
+                        user_id=str(new_assignee.id),
+                        title='Lead Transferred',
+                        body=f"A lead transfer has been approved. You are now assigned to: {lead.first_name} {lead.surname or ''}.",
+                        metadata={'type': 'lead_transferred', 'lead_id': str(lead.id)},
+                    )
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to notify new assignee on transfer for lead {lead.id}: {e}")
             
             transfer_request.save()
             return Response(LeadTransferRequestSerializer(transfer_request).data)

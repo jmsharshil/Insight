@@ -54,6 +54,28 @@ def auto_assign_lead(sender, instance, **kwargs):
                     instance.assigned_to = users_list[0]
 
 
+@receiver(post_save, sender='leads.Lead')
+def notify_new_lead_assignment(sender, instance, created, **kwargs):
+    """
+    Notify the assignee when a new lead is created and assigned to them (e.g. via auto-assignment or public form).
+    """
+    if created and instance.assigned_to:
+        from chat.notifications import send_system_notification
+        title = "New Lead Assigned"
+        body = f"You have been assigned a new lead: {instance.first_name} {instance.surname}".strip()
+        try:
+            send_system_notification(
+                user_id=str(instance.assigned_to.id),
+                title=title,
+                body=body,
+                metadata={
+                    "type": "lead_assigned",
+                    "lead_id": str(instance.id)
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {instance.assigned_to.id} for new lead {instance.id}: {e}")
+
 # @receiver(post_save, sender='leads.Lead')
 # def lead_status_changed(sender, instance, created, **kwargs):
 #     """
