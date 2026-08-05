@@ -1527,6 +1527,11 @@ def _find_student_from_sheet_metadata(sheet_metadata, exam):
             exact = qs.filter(first_name__iexact=first_name, surname__iexact=surname)
             if exact.count() == 1:
                 return exact.first()
+        elif len(name_parts) == 1:
+            first_name = name_parts[0]
+            exact = qs.filter(first_name__iexact=first_name)
+            if exact.count() == 1:
+                return exact.first()
 
     return None
 
