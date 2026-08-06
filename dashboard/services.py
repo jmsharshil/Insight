@@ -12,7 +12,7 @@ from students.models import Student, ParentLink
 from attendance.models import AttendanceRecord
 from fees.models import StudentFee, Payment
 from exams.models import Exam
-from results.models import MarkSheet, PublishedResult
+from results.models import MarkSheet, PublishedResult, CheckerQuery
 from leads.models import Lead
 from onboarding.models import Admission
 from batches.models import Batch, TimetableSlot
