@@ -87,6 +87,7 @@ class SchedulerConfig(AppConfig):
         from auth_user.tasks import cleanup_old_notifications
         from attendance.tasks import (
             detect_missing_scans_all_branches,
+            auto_mark_student_absentees,
         )
         TaskScheduler.register(
             "accrue_monthly_leaves",
@@ -99,6 +100,7 @@ class SchedulerConfig(AppConfig):
         TaskScheduler.register("cleanup_old_audit_logs", cleanup_old_audit_logs)
         TaskScheduler.register("cleanup_old_notifications", cleanup_old_notifications)
         TaskScheduler.register("detect_missing_scans_all_branches", detect_missing_scans_all_branches)
+        TaskScheduler.register("auto_mark_student_absentees", auto_mark_student_absentees)
         print("[SCHEDULER APP] All task types registered.")
 
     def _ensure_recurring_tasks(self):
@@ -155,6 +157,12 @@ class SchedulerConfig(AppConfig):
                 "task_type": "send_exam_material_upload_reminders",
                 "interval_seconds": 86400,       # daily
                 "delay_seconds": 600,            # 10 min after startup
+                "max_retries": 3,
+            },
+            {
+                "task_type": "auto_mark_student_absentees",
+                "interval_seconds": 600,         # every 10 minutes
+                "delay_seconds": 120,            # 2 min after startup (let DB settle first)
                 "max_retries": 3,
             },
         ]
