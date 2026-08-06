@@ -957,19 +957,40 @@ def _get_fee_trend(user=None, days=30):
     weekly = defaultdict(float)
     start_date = (timezone.now() - timedelta(days=days)).date()
     q = Q(payment_date__gte=start_date, status='verified')
+    
     if user and getattr(user, 'role', None) != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
             q &= Q(student__branch_id=bid)
         elif hasattr(user, 'organization') and user.organization:
             q &= Q(student__branch__organization=user.organization)
+            
     payments = Payment.objects.filter(q)
+    
+    curr_y, curr_w, _ = timezone.now().isocalendar()
+    
     for p in payments.iterator():  # memory efficient
-        week_key = p.payment_date.isocalendar()[1]
-        weekly[week_key] += float(p.amount or 0)
+        y, w, _ = p.payment_date.isocalendar()
+        weekly[(y, w)] += float(p.amount or 0)
+        
     sorted_weeks = sorted(weekly.keys())[-4:]
-    labels = [f'W{w}' for w in sorted_weeks] or ['W1', 'W2', 'W3', 'W4']
-    values = [weekly[w] for w in sorted_weeks] or [0.0] * 4
+    
+    labels = []
+    for (y, w) in sorted_weeks:
+        if y == curr_y and w == curr_w:
+            labels.append("Current Week")
+        elif (y == curr_y and w == curr_w - 1) or (y == curr_y - 1 and curr_w == 1 and w >= 52):
+            labels.append("Last Week")
+        else:
+            diff = curr_w - w if y == curr_y else (52 - w + curr_w)
+            labels.append(f"{diff} Weeks Ago")
+            
+    if not labels:
+        labels = ["3 Weeks Ago", "2 Weeks Ago", "Last Week", "Current Week"]
+        values = [0.0] * 4
+    else:
+        values = [weekly[k] for k in sorted_weeks]
+        
     return {'labels': labels, 'values': values}
 
 
