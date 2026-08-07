@@ -410,11 +410,6 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
             return None
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        if instance.session_type == 'regular':
-            data.pop('session_date', None)
-        return data
 
 
 class ExamDataSerializer(serializers.Serializer):
@@ -706,11 +701,6 @@ class FacultyTimetableSerializer(serializers.ModelSerializer):
             return None
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        if instance.session_type == 'regular':
-            data.pop('session_date', None)
-        return data
 
 
 class StudentTimetableSerializer(serializers.ModelSerializer):
@@ -740,8 +730,3 @@ class StudentTimetableSerializer(serializers.ModelSerializer):
             return None
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        if instance.session_type == 'regular':
-            data.pop('session_date', None)
-        return data
