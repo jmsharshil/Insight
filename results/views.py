@@ -460,8 +460,8 @@ class PublishResultView(APIView):
                 ))
         if pubs:
             created_pubs = PublishedResult.objects.bulk_create(pubs)
-            from results.utils import notify_parents_of_exam_result
-            notify_parents_of_exam_result(created_pubs)
+            from results.utils import notify_students_and_parents_of_exam_result
+            notify_students_and_parents_of_exam_result(created_pubs)
 
         calculate_ranks(exam_id)
 
