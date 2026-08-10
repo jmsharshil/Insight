@@ -4,9 +4,9 @@ from students.models import ParentLink
 
 logger = logging.getLogger(__name__)
 
-def notify_parents_of_exam_result(published_results):
+def notify_students_and_parents_of_exam_result(published_results):
     """
-    Send push notifications to the parents of students whose exam results have been published.
+    Send push notifications to the students and parents of students whose exam results have been published.
     """
     for pr in published_results:
         try:
@@ -35,5 +35,27 @@ def notify_parents_of_exam_result(published_results):
                             "result_id": str(pr.id)
                         }
                     )
+            
+            # Notify the student
+            try:
+                if pr.student and hasattr(pr.student, 'user') and pr.student.user:
+                    title = "Exam Result Published"
+                    exam_title = pr.exam.title if pr.exam else "Unknown Exam"
+                    body = f"Your result for '{exam_title}' has been published. Marks: {pr.marks_obtained}/{pr.total_marks} ({pr.percentage}%)."
+                    
+                    send_system_notification(
+                        user_id=str(pr.student.user.id),
+                        title=title,
+                        body=body,
+                        metadata={
+                            "type": "exam_result",
+                            "exam_id": str(pr.exam.id) if pr.exam else "",
+                            "student_id": str(pr.student.id),
+                            "result_id": str(pr.id)
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Failed to notify student for published result {pr.id}: {e}")
+
         except Exception as e:
             logger.error(f"Failed to notify parents for published result {pr.id}: {e}")

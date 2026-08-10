@@ -629,70 +629,76 @@ class QRScanView(APIView):
 
 
         if scan_type == 'check_in':
-            record = AttendanceRecord.objects.create(
-                student=student, timetable_slot=timetable_slot_obj, date=now.date(),
-                batch_id=batch.id, branch_id=student_branch_id, status='checkout_pending', marked_by=user, checked_in_at=now
+            from attendance.utils import evaluate_daily_slots_attendance
+            updated_records = evaluate_daily_slots_attendance(
+                student=student, 
+                date_obj=now.date(), 
+                check_in_time=now, 
+                check_out_time=None, 
+                marked_by=user, 
+                branch_id=student_branch_id
             )
             created = True
-
-            entry_status = get_attendance_entry_status(
-                timetable_slot_obj,
-                now,
-                is_first_class_of_day=not has_prior_same_day_checkin,
-            )
-            if entry_status == 'late_entry':
-                record.status = 'late'
-                ViolationRecord.objects.create(
-                    student=student,
-                    violation_type='late_entry',
-                    date=now.date(),
-                    description=f'Check-in was later than the allowed buffer for the class slot.',
-                    created_by=user,
-                )
-                # Notify student + parent about violation
-                try:
-                    from .notifications import notify_student_violation
-                    notify_student_violation(student, 'late_entry', now.date(), 'Check-in was later than allowed.')
-                except Exception as ne:
-                    logger.error(f"Violation notification failed: {ne}")
             
-            record.save(update_fields=['status'])
+            if not updated_records:
+                # No scheduled slots, just create a generic record
+                record = AttendanceRecord.objects.create(
+                    student=student, date=now.date(), batch_id=batch.id if batch else None,
+                    branch_id=student_branch_id, status='checkout_pending', marked_by=user, checked_in_at=now
+                )
+            else:
+                record = next((r for r in updated_records if r.timetable_slot_id == getattr(timetable_slot_obj, 'id', None)), None)
+                if not record:
+                    record = updated_records[0]
 
             attendance_status = record.status
-            checked_in_at = record.checked_in_at
-            checked_out_at = record.checked_out_at
+            checked_in_at = now
+            checked_out_at = None
 
             # Notify parent about check-in
             try:
                 from .notifications import notify_student_qr_scan
-                notify_student_qr_scan(student, 'check_in', now, attendance_status=record.status)
+                notify_student_qr_scan(student, 'check_in', now, attendance_status=attendance_status)
             except Exception as ne:
                 logger.error(f"QR check-in notification failed: {ne}")
 
         elif scan_type == 'check_out':
             if existing_record:
-                record = existing_record
-                record.checked_out_at = now
-                record.status = 'present'
-                record.save(update_fields=['checked_out_at', 'status'])
-                attendance_status = record.status
-                checked_in_at = record.checked_in_at
-                checked_out_at = record.checked_out_at
-
+                check_in_time = existing_record.checked_in_at
+                
+                from attendance.utils import evaluate_daily_slots_attendance
+                updated_records = evaluate_daily_slots_attendance(
+                    student=student, 
+                    date_obj=now.date(), 
+                    check_in_time=check_in_time, 
+                    check_out_time=now, 
+                    marked_by=user, 
+                    branch_id=student_branch_id
+                )
+                
+                if not updated_records:
+                    # Generic update
+                    existing_record.checked_out_at = now
+                    existing_record.status = 'present'
+                    existing_record.save(update_fields=['checked_out_at', 'status'])
+                
                 # Check minimum session duration — log violation if too short
-                if record.checked_in_at:
-                    duration = (now - record.checked_in_at).total_seconds() / 60
-                    if duration < 30:  # Less than 30 minutes
-                        ViolationRecord.objects.create(
-                            student=student, violation_type='missing_checkout', date=now.date(),
-                            description=f'Session duration only {int(duration)} minutes (minimum 30).',
+                duration = (now - check_in_time).total_seconds() / 60
+                if duration < 30:  # Less than 30 minutes
+                    ViolationRecord.objects.create(
+                        student=student, violation_type='missing_checkout', date=now.date(),
+                        description=f'Session duration only {int(duration)} minutes (minimum 30).',
+                    )
+                    # Check if violations threshold reached
+                    if should_block_qr(student.id):
+                        AlertLog.objects.create(
+                            student=student, alert_type='violation',
+                            message=f'{get_active_violations_count(student.id)} active violations. QR blocked.',
                         )
-                        # Check if violations threshold reached
-                        if should_block_qr(student.id):
-                            AlertLog.objects.create(
-                                student=student, alert_type='violation',
-                                message=f'{get_active_violations_count(student.id)} active violations. QR blocked.',
-                            )
+
+                attendance_status = 'present'
+                checked_in_at = check_in_time
+                checked_out_at = now
 
                 # Notify parent about check-out
                 try:
@@ -702,6 +708,8 @@ class QRScanView(APIView):
                     logger.error(f"QR check-out notification failed: {ne}")
             else:
                 attendance_status = 'no_checkin_found'
+                checked_in_at = None
+                checked_out_at = None
 
         # exam_entry — just the scan log, no attendance change
 

@@ -637,3 +637,94 @@ def get_active_timetable_slot_for_scan(student, slot_id=None):
             batch = Batch.objects.filter(id=enrolled_batch_ids[0]).first()
 
     return active_slot, batch
+
+
+def evaluate_daily_slots_attendance(student, date_obj, check_in_time, check_out_time, marked_by=None, branch_id=None):
+    """
+    Evaluates attendance for all scheduled TimetableSlots for the student on `date_obj`.
+    Creates or updates AttendanceRecords for each slot based on daily check-in and check-out times.
+    
+    A slot is marked 'present' if:
+    1. check_in_time <= slot.start_time + 30 minutes
+    2. check_out_time >= slot.end_time - 30 minutes
+    Otherwise, it is marked 'absent'.
+    """
+    from batches.models import TimetableSlot, BatchStudent, Batch
+    from .models import AttendanceRecord
+    from django.utils import timezone
+    import datetime
+
+    # Get student's enrolled batches
+    enrolled_batch_ids = list(
+        BatchStudent.objects.filter(
+            student=student,
+            batch__is_active=True
+        ).values_list('batch_id', flat=True)
+    )
+    primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
+    if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
+        enrolled_batch_ids.append(primary_batch_id)
+
+    # Monday is 0, Sunday is 6
+    day_of_week = date_obj.weekday()
+
+    # Get all scheduled slots for the day
+    daily_slots = TimetableSlot.objects.filter(
+        batch_id__in=enrolled_batch_ids,
+        day_of_week=day_of_week
+    ).order_by('start_time')
+
+    created_or_updated = []
+
+    for slot in daily_slots:
+        # Construct datetime objects for slot boundaries on this date (using the local timezone)
+        current_tz = timezone.get_current_timezone()
+        slot_start_dt = timezone.make_aware(datetime.datetime.combine(date_obj, slot.start_time), current_tz)
+        slot_end_dt = timezone.make_aware(datetime.datetime.combine(date_obj, slot.end_time), current_tz)
+        
+        # Calculate allowed check-in and check-out boundaries (30 mins tolerance)
+        allowed_check_in_limit = slot_start_dt + datetime.timedelta(minutes=30)
+        allowed_check_out_limit = slot_end_dt - datetime.timedelta(minutes=30)
+        
+        # Determine status
+        if check_in_time and check_in_time <= allowed_check_in_limit:
+            if check_out_time:
+                if check_out_time >= allowed_check_out_limit:
+                    status = 'present'
+                else:
+                    status = 'absent'
+            else:
+                status = 'checkout_pending'
+        else:
+            status = 'absent'
+            
+        # Determine appropriate batch_id
+        b_id = slot.batch_id if slot.batch_id else primary_batch_id
+        
+        # Find or create AttendanceRecord
+        record, created = AttendanceRecord.objects.get_or_create(
+            student=student,
+            date=date_obj,
+            timetable_slot=slot,
+            defaults={
+                'batch_id': b_id,
+                'branch_id': branch_id or getattr(student, 'branch_id', None),
+                'status': status,
+                'checked_in_at': check_in_time,
+                'checked_out_at': check_out_time,
+                'marked_by': marked_by
+            }
+        )
+        
+        # Update existing record if needed (e.g., it was pending or just newly checked out)
+        if not created:
+            record.status = status
+            record.checked_in_at = check_in_time
+            record.checked_out_at = check_out_time
+            if marked_by:
+                record.marked_by = marked_by
+            record.save(update_fields=['status', 'checked_in_at', 'checked_out_at', 'marked_by'])
+            
+        created_or_updated.append(record)
+        
+    return created_or_updated

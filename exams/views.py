@@ -1506,20 +1506,21 @@ def _find_student_from_sheet_metadata(sheet_metadata, exam):
     if exam.branch_id:
         qs = qs.filter(branch_id=exam.branch_id)
 
+    # 1. Try admission number
     if admission_number:
         try:
             return qs.get(admission_number__iexact=admission_number)
-        except Student.DoesNotExist:
-            return None
-        except Student.MultipleObjectsReturned:
-            return None
+        except (Student.DoesNotExist, Student.MultipleObjectsReturned):
+            pass  # Fallback to roll number
 
+    # 2. Try roll number
     if roll_number:
         roll_qs = qs.filter(roll_number__iexact=roll_number)
         if roll_qs.count() == 1:
             return roll_qs.first()
-        return None
+        # Fallback to student name
 
+    # 3. Try student name
     if student_name:
         name_parts = student_name.split()
         if len(name_parts) >= 2:
@@ -1528,6 +1529,22 @@ def _find_student_from_sheet_metadata(sheet_metadata, exam):
             exact = qs.filter(first_name__iexact=first_name, surname__iexact=surname)
             if exact.count() == 1:
                 return exact.first()
+        elif len(name_parts) == 1:
+            single_name = name_parts[0]
+            # Exact match on first name
+            exact = qs.filter(first_name__iexact=single_name)
+            if exact.count() == 1:
+                return exact.first()
+            
+            # Fallback: partial match on first name
+            contains_first = qs.filter(first_name__icontains=single_name)
+            if contains_first.count() == 1:
+                return contains_first.first()
+
+            # Fallback: exact match on surname
+            exact_surname = qs.filter(surname__iexact=single_name)
+            if exact_surname.count() == 1:
+                return exact_surname.first()
 
     return None
 

@@ -503,3 +503,159 @@ def send_low_attendance_alerts(branch_id, threshold=75.0):
 
     logger.info(f"Low attendance alerts: {alerts} for branch {branch_id}")
     return f"{alerts} alerts created"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7. auto_mark_student_absentees  (every 10 minutes)
+#    For every TimetableSlot that started 30+ minutes ago today,
+#    auto-creates an AttendanceRecord(status='absent') for any enrolled
+#    student who has NO record yet for that slot.
+#    This fills the gap where a student never scans at all.
+#    Records created here are updated (not overwritten) by evaluate_daily_slots_attendance()
+#    if the student scans later (via get_or_create in that function).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def auto_mark_student_absentees():
+    """
+    Periodic task (every 10 minutes).
+    For each TimetableSlot that started 30+ minutes ago today,
+    auto-fills 'absent' AttendanceRecords for any enrolled student
+    who hasn't checked in yet.
+
+    Rules:
+    - Only processes slots whose start_time was 30+ minutes ago.
+    - Skips students who already have ANY AttendanceRecord for that slot today.
+    - Skips students on approved leave today.
+    - Does NOT modify any existing records.
+    """
+    import datetime
+    from django.utils import timezone
+    from .models import AttendanceRecord
+
+    now = timezone.localtime(timezone.now())
+    today = now.date()
+    day_of_week = today.weekday()  # Monday=0, Sunday=6
+
+    # Cutoff: only slots that started 30+ minutes ago
+    cutoff_dt = now - datetime.timedelta(minutes=30)
+    cutoff_time = cutoff_dt.time()
+
+    logger.info(f"[auto_mark_absentees] Running for {today}, DOW={day_of_week}, cutoff={cutoff_time}")
+
+    try:
+        from batches.models import TimetableSlot, BatchStudent
+        from students.models import Student
+        from leave.models import StudentLeaveApplication
+
+        # Get ALL past slots for today from ALL active batches (no branch filter).
+        # Branch is derived from each slot's batch to avoid skipping batches with branch=NULL.
+        past_slots = TimetableSlot.objects.filter(
+            batch__is_active=True,
+            day_of_week=day_of_week,
+            start_time__lte=cutoff_time,
+            start_time__isnull=False,
+        ).select_related('batch', 'batch__branch', 'subject')
+
+        total_slots = past_slots.count()
+        logger.info(f"[auto_mark_absentees] Found {total_slots} past slots to process.")
+
+        if not past_slots.exists():
+            return f"auto_mark_student_absentees: no past slots for {today}"
+
+        # Build set of students on approved leave today (global — branch-independent)
+        leave_student_ids = set(
+            StudentLeaveApplication.objects.filter(
+                start_date__lte=today,
+                end_date__gte=today,
+                status='approved',
+            ).values_list('student_id', flat=True)
+        )
+
+        total_marked = 0
+
+        for slot in past_slots:
+            batch = slot.batch
+            if not batch:
+                continue
+
+            # Collect enrolled student IDs for this batch
+            enrolled_student_ids = set(
+                BatchStudent.objects.filter(
+                    batch=batch
+                ).values_list('student_id', flat=True)
+            )
+
+            # Also include students whose primary batch FK matches
+            primary_batch_students = set(
+                Student.objects.filter(
+                    batch=batch,
+                    is_active=True,
+                ).values_list('id', flat=True)
+            )
+            enrolled_student_ids |= primary_batch_students
+
+            if not enrolled_student_ids:
+                continue
+
+            # Find students who already have a record for this slot today
+            already_recorded_ids = set(
+                AttendanceRecord.objects.filter(
+                    date=today,
+                    timetable_slot=slot,
+                    student_id__in=enrolled_student_ids,
+                ).values_list('student_id', flat=True)
+            )
+
+            # Students to mark absent = enrolled - already recorded - on leave
+            to_mark_absent = enrolled_student_ids - already_recorded_ids - leave_student_ids
+
+            if not to_mark_absent:
+                continue
+
+            # Resolve branch — prefer batch.branch, else student's branch
+            batch_branch = getattr(batch, 'branch', None)
+            batch_branch_id = batch_branch.id if batch_branch else None
+
+            # Batch-create absent records
+            records_to_create = []
+            for student_id in to_mark_absent:
+                # Try to get branch from student if batch has no branch
+                branch_id = batch_branch_id
+                if not branch_id:
+                    try:
+                        branch_id = Student.objects.filter(id=student_id).values_list('branch_id', flat=True).first()
+                    except Exception:
+                        pass
+
+                records_to_create.append(
+                    AttendanceRecord(
+                        student_id=student_id,
+                        date=today,
+                        timetable_slot=slot,
+                        batch=batch,
+                        branch_id=branch_id,
+                        status='absent',
+                        checked_in_at=None,
+                        checked_out_at=None,
+                        marked_by=None,
+                    )
+                )
+
+            if records_to_create:
+                created = AttendanceRecord.objects.bulk_create(
+                    records_to_create, ignore_conflicts=True
+                )
+                total_marked += len(records_to_create)
+                logger.info(
+                    f"[auto_mark_absentees] Slot {slot.id} "
+                    f"({slot.start_time} batch={batch.batch_code}): "
+                    f"auto-marked {len(records_to_create)} absent."
+                )
+
+        logger.info(f"[auto_mark_absentees] Done. Total auto-absent records created: {total_marked}")
+        return f"auto_mark_student_absentees: {total_marked} absent records created for {today}"
+
+    except Exception as exc:
+        logger.error(f"[auto_mark_absentees] Error: {exc}", exc_info=True)
+        return f"Error: {exc}"
+

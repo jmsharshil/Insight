@@ -158,10 +158,17 @@ class UserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     organization_name = serializers.CharField(source='organization.name', read_only=True)
     profile_pic = serializers.SerializerMethodField()
+    branches = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'branches', 'organization', 'organization_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+
+    def get_branches(self, obj):
+        b_ids = [str(b.id) for b in obj.branches.all()]
+        if obj.branch_id and str(obj.branch_id) not in b_ids:
+            b_ids.append(str(obj.branch_id))
+        return b_ids
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:
@@ -186,10 +193,17 @@ class UserListSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     profile_pic = serializers.SerializerMethodField()
+    branches = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'branches', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+
+    def get_branches(self, obj):
+        b_ids = [str(b.id) for b in obj.branches.all()]
+        if obj.branch_id and str(obj.branch_id) not in b_ids:
+            b_ids.append(str(obj.branch_id))
+        return b_ids
 
     def get_profile_pic(self, obj):
         if obj.profile_pic:

@@ -12,7 +12,7 @@ from students.models import Student, ParentLink
 from attendance.models import AttendanceRecord
 from fees.models import StudentFee, Payment
 from exams.models import Exam
-from results.models import MarkSheet, PublishedResult
+from results.models import MarkSheet, PublishedResult, CheckerQuery
 from leads.models import Lead
 from onboarding.models import Admission
 from batches.models import Batch, TimetableSlot
@@ -71,9 +71,15 @@ def get_role_dashboard(user):
         ),
     }
 
-    if role in ('super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'accountant'):
+    if role in ('super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive'):
         data = _get_management_dashboard(user, now, today, month_start, thirty_days_ago)
-    elif role in ('faculty', 'exam_supervisor', 'paper_checker'):
+    elif role == 'accountant':
+        data = _get_accountant_dashboard(user, now, today, month_start, thirty_days_ago)
+    elif role == 'paper_checker':
+        data = _get_paper_checker_dashboard(user, now, today, month_start)
+    elif role == 'exam_supervisor':
+        data = _get_exam_supervisor_dashboard(user, now, today, month_start)
+    elif role == 'faculty':
         data = _get_faculty_dashboard(user, now, today, month_start)
     elif role in ('student', 'parents'):
         data = _get_student_dashboard(user, now, today, month_start)
@@ -197,6 +203,93 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
     }
 
 
+def _get_accountant_dashboard(user, now, today, month_start, thirty_days_ago):
+    """Accountant specific dashboard - focused on fees, payments, refunds, and installments."""
+    from fees.models import StudentFee, Payment, Refund, InstallmentPlan
+
+    bq = _branch_filter(user)
+
+    # Fee collection stats
+    fee_bq = Q()
+    bid = getattr(user, 'branch_id', None)
+    if bid:
+        fee_bq &= Q(student__branch_id=bid)
+
+    fee_agg = StudentFee.objects.filter(fee_bq).aggregate(
+        total_collected=Sum('amount_paid'),
+        total_due=Sum(
+            F('total_amount') - F('discount') - F('amount_paid'),
+            filter=Q(status__in=['approval_pending', 'partial', 'overdue']),
+            output_field=FloatField()
+        ),
+        total_billed=Sum('total_amount'),
+        total_discount=Sum('discount'),
+        overdue_count=Count('id', filter=Q(status='overdue')),
+    )
+
+    total_billed = float(fee_agg.get('total_billed') or 0)
+    total_discount = float(fee_agg.get('total_discount') or 0)
+    net_billed = total_billed - total_discount
+    
+    total_collected = float(fee_agg.get('total_collected') or 0)
+    total_due = float(fee_agg.get('total_due') or 0)
+    
+    collected_pct = round((total_collected / net_billed) * 100, 2) if net_billed > 0 else 0
+    due_pct = round((total_due / net_billed) * 100, 2) if net_billed > 0 else 0
+
+    # Actions pending approval
+    pending_payments_qs = Payment.objects.filter(
+        status='approval_pending'
+    )
+    if bid:
+        pending_payments_qs = pending_payments_qs.filter(student__branch_id=bid)
+    pending_payments_count = pending_payments_qs.count()
+
+    pending_refunds_qs = Refund.objects.filter(
+        status='approval_pending'
+    )
+    if bid:
+        pending_refunds_qs = pending_refunds_qs.filter(payment__student__branch_id=bid)
+    pending_refunds_count = pending_refunds_qs.count()
+
+    pending_installments_qs = InstallmentPlan.objects.filter(
+        status='pending_approval'
+    )
+    if bid:
+        pending_installments_qs = pending_installments_qs.filter(student_fee__student__branch_id=bid)
+    pending_installments_count = pending_installments_qs.count()
+
+    # Recent Transactions
+    recent_payments = list(
+        Payment.objects.filter(status='verified').order_by('-payment_date', '-created_at')[:10]
+        .select_related('student')
+        .values('id', 'receipt_number', 'amount', 'payment_mode', 'payment_date', 'student__first_name', 'student__surname')
+    )
+    recent_payments_formatted = [
+        {
+            'id': str(p['id']),
+            'receipt_number': p.get('receipt_number', ''),
+            'amount': float(p['amount']) if p['amount'] is not None else 0.0,
+            'mode': p.get('payment_mode', ''),
+            'date': p.get('payment_date', '').isoformat() if p.get('payment_date') else None,
+            'student_name': f"{p.get('student__first_name', '')} {p.get('student__surname', '')}".strip()
+        } for p in recent_payments
+    ]
+
+    return {
+        'kpis': {
+            'fee_collected': f"{total_collected} ({collected_pct}%)",
+            'pending_fees': f"{total_due} ({due_pct}%)",
+            'overdue_fees': fee_agg['overdue_count'] or 0,
+            'pending_payments': pending_payments_count,
+            'pending_refunds': pending_refunds_count,
+            'pending_installments': pending_installments_count,
+        },
+        'fee_collection_trend': _get_fee_trend(user, 30),
+        'recent_payments': recent_payments_formatted,
+    }
+
+
 def _get_faculty_dashboard(user, now, today, month_start):
     """Faculty specific dashboard - my classes, sessions, earnings."""
     try:
@@ -228,22 +321,8 @@ def _get_faculty_dashboard(user, now, today, month_start):
         )
         my_att_rate = round(((scan_agg['ontime'] or 0) / (scan_agg['total'] or 1)) * 100, 2) if scan_agg['total'] else 100.0
 
-    # Pending papers or exams if applicable
+    # Pending tasks (faculty might not have pending papers, but leaving placeholder if needed)
     pending_tasks = []
-    if user.role in ('paper_checker', 'exam_supervisor'):
-        raw_tasks = list(MarkSheet.objects.filter(
-            paper_checker=user, is_submitted=False, exam__is_deleted=False
-        ).select_related('student', 'exam')[:5].values(
-            'id', 'student__first_name', 'student__surname', 'exam__title'
-        ))
-        pending_tasks = [
-            {
-                'id': t['id'],
-                'student_name': f"{t.get('student__first_name', '')} {t.get('student__surname', '')}".strip(),
-                'exam_title': t.get('exam__title', '')
-            }
-            for t in raw_tasks
-        ]
 
     # Payroll summary - real from PaySlip (no static/demo)
     payroll_summary = {'this_month': 0.0, 'pending': 0.0}
@@ -299,6 +378,209 @@ def _get_faculty_dashboard(user, now, today, month_start):
         'charts': {
             'my_attendance_trend': _get_simple_trend(7, bq),
         }
+    }
+
+
+def _get_paper_checker_dashboard(user, now, today, month_start):
+    """Paper checker specific dashboard — assigned & checked paper KPIs.
+
+    Time windows used:
+      - today          : exam.scheduled_date == today  (assigned) / checked_at date == today (checked)
+      - this_month     : exam.scheduled_date in current month (assigned) / checked_at in current month (checked)
+      - last_month     : previous calendar month
+
+    NOTE: MarkSheet has no explicit assigned_at; exam.scheduled_date is the
+    canonical proxy for when papers become available for checking.
+    """
+    # ── time window boundaries ──────────────────────────────────────────────
+    # Last-month boundaries
+    first_day_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month_end = first_day_this_month - timedelta(seconds=1)
+    last_month_start = last_month_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # ── base queryset: all marksheets assigned to this checker ─────────────
+    base_qs = MarkSheet.objects.filter(
+        paper_checker=user,
+        exam__is_deleted=False,
+    ).select_related('exam', 'student')
+
+    # ── ASSIGNED PAPERS (proxy: exam.scheduled_date) ───────────────────────
+    assigned_today = base_qs.filter(
+        exam__scheduled_date=today
+    ).count()
+
+    assigned_this_month = base_qs.filter(
+        exam__scheduled_date__gte=month_start.date(),
+        exam__scheduled_date__lte=today,
+    ).count()
+
+    assigned_last_month = base_qs.filter(
+        exam__scheduled_date__gte=last_month_start.date(),
+        exam__scheduled_date__lte=last_month_end.date(),
+    ).count()
+
+    # ── CHECKED PAPERS (is_submitted=True, use checked_at timestamp) ────────
+    checked_today = base_qs.filter(
+        is_submitted=True,
+        checked_at__date=today,
+    ).count()
+
+    checked_this_month = base_qs.filter(
+        is_submitted=True,
+        checked_at__gte=month_start,
+        checked_at__lte=now,
+    ).count()
+
+    checked_last_month = base_qs.filter(
+        is_submitted=True,
+        checked_at__gte=last_month_start,
+        checked_at__lte=last_month_end,
+    ).count()
+
+    # ── PENDING (assigned but not yet submitted) ────────────────────────────
+    total_assigned = base_qs.count()
+    total_checked  = base_qs.filter(is_submitted=True).count()
+    total_pending  = total_assigned - total_checked
+
+    # ── OPEN QUERIES (blocks payroll — show as alert) ───────────────────────
+    open_queries = CheckerQuery.objects.filter(
+        raised_by=user, status='open'
+    ).count()
+
+    # ── RECENT PENDING PAPERS (up to 10) ────────────────────────────────────
+    pending_papers = list(
+        base_qs.filter(is_submitted=False)
+        .order_by('exam__scheduled_date')
+        [:10]
+        .values(
+            'id', 'student__first_name', 'student__surname',
+            'exam__title', 'exam__scheduled_date', 'exam__subject__name',
+            'exam__batch__name',
+        )
+    )
+    pending_papers_formatted = [
+        {
+            'id': str(p['id']),
+            'student_name': f"{p.get('student__first_name', '')} {p.get('student__surname', '')}".strip(),
+            'exam_title': p.get('exam__title', ''),
+            'exam_date': p.get('exam__scheduled_date', '').isoformat() if p.get('exam__scheduled_date') else None,
+            'subject': p.get('exam__subject__name', ''),
+            'batch': p.get('exam__batch__name', ''),
+        }
+        for p in pending_papers
+    ]
+
+    # ── RECENT CHECKED PAPERS (up to 10) ────────────────────────────────────
+    recent_checked = list(
+        base_qs.filter(is_submitted=True)
+        .order_by('-checked_at')
+        [:10]
+        .values(
+            'id', 'student__first_name', 'student__surname',
+            'exam__title', 'exam__scheduled_date', 'exam__subject__name',
+            'marks_obtained', 'checked_at',
+        )
+    )
+    recent_checked_formatted = [
+        {
+            'id': str(c['id']),
+            'student_name': f"{c.get('student__first_name', '')} {c.get('student__surname', '')}".strip(),
+            'exam_title': c.get('exam__title', ''),
+            'exam_date': c.get('exam__scheduled_date', '').isoformat() if c.get('exam__scheduled_date') else None,
+            'subject': c.get('exam__subject__name', ''),
+            'marks_obtained': float(c['marks_obtained']) if c['marks_obtained'] is not None else None,
+            'checked_at': c['checked_at'].isoformat() if c['checked_at'] else None,
+        }
+        for c in recent_checked
+    ]
+
+    return {
+        'kpis': {
+            # Assigned papers
+            'assigned_papers_today': assigned_today,
+            'assigned_papers_this_month': assigned_this_month,
+            'assigned_papers_last_month': assigned_last_month,
+            # Checked papers
+            'checked_papers_today': checked_today,
+            'checked_papers_this_month': checked_this_month,
+            'checked_papers_last_month': checked_last_month,
+            # Totals
+            'total_assigned': total_assigned,
+            'total_checked': total_checked,
+            'total_pending': total_pending,
+            # Alerts
+            'open_queries': open_queries,
+        },
+        'pending_papers': pending_papers_formatted,
+        'recent_checked_papers': recent_checked_formatted,
+    }
+
+
+def _get_exam_supervisor_dashboard(user, now, today, month_start):
+    """Exam Supervisor specific dashboard.
+    
+    Includes:
+      - Upcoming exams supervised by this user
+      - Payroll summary
+      - Today's exam sessions
+      - Monthly exam sessions count
+      - Today's schedule (exams happening today)
+    Note: Attendance is explicitly excluded for this role.
+    """
+    from exams.models import Exam
+    from payroll.models import PaySlip
+
+    # Base queryset for exams supervised by this user
+    supervised_exams_qs = Exam.objects.filter(
+        supervisors=user,
+        is_deleted=False
+    )
+
+    # Today's sessions (Exams happening today)
+    today_sessions = list(
+        supervised_exams_qs.filter(
+            scheduled_date=today
+        ).select_related('batch', 'subject').values(
+            'id', 'title', 'batch__name', 'subject__name', 'start_time', 'end_time', 'status'
+        ).order_by('start_time')
+    )
+
+    # Upcoming exams (Exams scheduled in the future)
+    upcoming_exams = list(
+        supervised_exams_qs.filter(
+            scheduled_date__gt=today
+        ).select_related('batch', 'subject').values(
+            'id', 'title', 'scheduled_date', 'batch__name', 'subject__name', 'start_time', 'end_time', 'status'
+        ).order_by('scheduled_date', 'start_time')[:10]
+    )
+
+    # Monthly supervision count
+    monthly_sessions_count = supervised_exams_qs.filter(
+        scheduled_date__gte=month_start.date(),
+        scheduled_date__lte=today
+    ).count()
+
+    # Payroll summary (PaySlip linked directly to user if not faculty)
+    payroll_summary = {'this_month': 0.0, 'pending': 0.0}
+    latest_payslip = PaySlip.objects.filter(user=user).order_by(
+        '-payroll_run__year', '-payroll_run__month'
+    ).first()
+    
+    if latest_payslip:
+        payroll_summary = {
+            'this_month': float(latest_payslip.net_salary or 0),
+            'pending': float(getattr(latest_payslip, 'late_penalty', 0) or 0),
+        }
+
+    return {
+        'kpis': {
+            'today_sessions': len(today_sessions),
+            'monthly_sessions': monthly_sessions_count,
+            'upcoming_exams': len(upcoming_exams),
+        },
+        'today_schedule': today_sessions,
+        'upcoming_exams': upcoming_exams,
+        'payroll_summary': payroll_summary,
     }
 
 
@@ -438,10 +720,23 @@ def _get_sales_dashboard(user, now, today, month_start):
     lead_qs = Lead.objects.filter(bq)
 
     # Junior sales roles only see leads assigned to them.
-    # Senior roles (sales_senior_executive) see all branch leads.
-    individual_roles = ('sales_executive', 'tele_caller', 'counsellor', 'front_desk')
+    # Senior roles (sales_senior_executive, front_desk) see all branch leads.
+    individual_roles = ('sales_executive', 'tele_caller', 'counsellor')
     if user.role in individual_roles:
         lead_qs = lead_qs.filter(assigned_to=user)
+
+    # Attendance rate for staff/sales roles
+    my_att_rate = 100.0
+    scan_agg = {}
+    from attendance.models import EmployeeAttendanceRecord
+    scan_agg = EmployeeAttendanceRecord.objects.filter(
+        user=user, date__gte=month_start.date()
+    ).aggregate(
+        total=Count('id'),
+        present=Count('id', filter=Q(status__in=['present', 'late', 'half_day'])),
+    )
+    if scan_agg['total']:
+        my_att_rate = round(((scan_agg['present'] or 0) / (scan_agg['total'] or 1)) * 100, 2)
 
     lead_agg = lead_qs.aggregate(
         total_leads=Count('id'),
@@ -468,6 +763,7 @@ def _get_sales_dashboard(user, now, today, month_start):
             'new_leads_this_month': lead_agg['new_leads'] or 0,
             'conversion_rate': f"{lead_agg.get('converted') or 0}/{lead_agg.get('total_leads') or 0} ({round((lead_agg.get('converted') or 0) / (lead_agg.get('total_leads') or 1) * 100, 2)}%)",
             'active_leads': lead_qs.exclude(current_stage__in=['converted', 'lost']).count(),
+            'attendance_rate': f"{scan_agg.get('present') or 0}/{scan_agg.get('total') or 0} ({my_att_rate}%)",
         },
         'pipeline': pipeline,
         'recent_leads': recent_leads,
@@ -661,19 +957,40 @@ def _get_fee_trend(user=None, days=30):
     weekly = defaultdict(float)
     start_date = (timezone.now() - timedelta(days=days)).date()
     q = Q(payment_date__gte=start_date, status='verified')
+    
     if user and getattr(user, 'role', None) != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
             q &= Q(student__branch_id=bid)
         elif hasattr(user, 'organization') and user.organization:
             q &= Q(student__branch__organization=user.organization)
+            
     payments = Payment.objects.filter(q)
+    
+    curr_y, curr_w, _ = timezone.now().isocalendar()
+    
     for p in payments.iterator():  # memory efficient
-        week_key = p.payment_date.isocalendar()[1]
-        weekly[week_key] += float(p.amount or 0)
+        y, w, _ = p.payment_date.isocalendar()
+        weekly[(y, w)] += float(p.amount or 0)
+        
     sorted_weeks = sorted(weekly.keys())[-4:]
-    labels = [f'W{w}' for w in sorted_weeks] or ['W1', 'W2', 'W3', 'W4']
-    values = [weekly[w] for w in sorted_weeks] or [0.0] * 4
+    
+    labels = []
+    for (y, w) in sorted_weeks:
+        if y == curr_y and w == curr_w:
+            labels.append("Current Week")
+        elif (y == curr_y and w == curr_w - 1) or (y == curr_y - 1 and curr_w == 1 and w >= 52):
+            labels.append("Last Week")
+        else:
+            diff = curr_w - w if y == curr_y else (52 - w + curr_w)
+            labels.append(f"{diff} Weeks Ago")
+            
+    if not labels:
+        labels = ["3 Weeks Ago", "2 Weeks Ago", "Last Week", "Current Week"]
+        values = [0.0] * 4
+    else:
+        values = [weekly[k] for k in sorted_weeks]
+        
     return {'labels': labels, 'values': values}
 
 
