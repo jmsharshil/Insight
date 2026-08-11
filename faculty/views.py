@@ -649,18 +649,28 @@ class FacultyQRCheckinView(APIView):
                             chapters_qs = Chapter.objects.filter(id__in=chapter_ids)
                             chapters_str = ", ".join([c.name for c in chapters_qs])
                         
-                        # Get actual check-in time for today, fallback to slot or now
-                        # Use local time to match timetable slot times stored in IST
-                        checkin_log = FacultyQRScanLog.objects.filter(
-                            faculty=fp, scan_type='check_in', scanned_at__date=now.date()
-                        ).order_by('scanned_at').first()
+                        # Get start/end time from the timetable slot for this batch/subject/day
+                        from batches.models import TimetableSlot as TTSlot
+                        from django.db.models import Q as SlotQ
+                        session_dow = now.weekday()
+                        session_slot = TTSlot.objects.filter(
+                            SlotQ(day_of_week=session_dow) | SlotQ(session_date=now.date()),
+                            batch=batch, subject=subject
+                        ).first()
                         
-                        if checkin_log:
-                            start_time = timezone.localtime(checkin_log.scanned_at).time()
+                        if session_slot and session_slot.start_time and session_slot.end_time:
+                            start_time = session_slot.start_time
+                            end_time = session_slot.end_time
                         else:
-                            start_time = now.time()
-                            
-                        end_time = now.time()
+                            # Fallback: use QR check-in time if no timetable slot found
+                            checkin_log = FacultyQRScanLog.objects.filter(
+                                faculty=fp, scan_type='check_in', scanned_at__date=now.date()
+                            ).order_by('scanned_at').first()
+                            if checkin_log:
+                                start_time = timezone.localtime(checkin_log.scanned_at).time()
+                            else:
+                                start_time = now.time()
+                            end_time = now.time()
                             
                         if batch and subject:
                             sr = SessionReport.objects.create(

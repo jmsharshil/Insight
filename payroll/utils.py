@@ -457,16 +457,26 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     late_half_days += (days_late_15_mins // 3)
 
     # 6. Leave deductions
-    approved_leaves = LeaveApplication.objects.filter(
+    # Fetch ALL approved leaves (any type) to exclude from absence calculation
+    all_approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
         status='approved',
-        from_date__year=year,
         from_date__month=month,
-        leave_type='unpaid',
+        from_date__year=year,
     )
-    leave_days = sum(l.total_days for l in approved_leaves)
+    # Collect all leave dates (any type) for absence exclusion
+    all_leave_dates_set = set()
+    for l in all_approved_leaves:
+        d = l.from_date
+        while d <= l.to_date:
+            all_leave_dates_set.add(d)
+            d += timedelta(days=1)
+    
+    # Only unpaid leaves get salary deducted
+    unpaid_leaves = [l for l in all_approved_leaves if l.leave_type == 'unpaid']
+    leave_days = sum(l.total_days for l in unpaid_leaves)
     leave_dates = []
-    for l in approved_leaves:
+    for l in unpaid_leaves:
         leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
     # Daily rate should be derived from monthly salary regardless of hourly rate
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
@@ -492,13 +502,21 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     else:
         working_days_passed = 0
         last_day = 0
-        
-    absent_days = Decimal(max(0, working_days_passed - days_with_attendance))
+    
+    # Count leave days (any type) that fall in the payroll month as "covered" (not absent)
+    leave_covered_working_days = 0
+    for d in range(1, last_day + 1):
+        if calendar.weekday(year, month, d) < 5:
+            curr_date = date(year, month, d)
+            if curr_date in all_leave_dates_set and curr_date not in attended_dates:
+                leave_covered_working_days += 1
+
+    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - leave_covered_working_days))
     
     for d in range(1, last_day + 1):
         if calendar.weekday(year, month, d) < 5:
             curr_date = date(year, month, d)
-            if curr_date not in attended_dates:
+            if curr_date not in attended_dates and curr_date not in all_leave_dates_set:
                 absent_dates.append(curr_date.strftime('%Y-%m-%d'))
 
     
@@ -809,16 +827,26 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     late_penalty = Decimal(0)
     policy = LateEntryPolicy.objects.filter(branch=faculty_profile.branch, is_active=True).first()
 
-    approved_leaves = LeaveApplication.objects.filter(
+    # Fetch ALL approved leaves (any type) to exclude from absence calculation
+    all_approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
         status='approved',
-        from_date__year=year,
         from_date__month=month,
-        leave_type='unpaid',
+        from_date__year=year,
     )
-    leave_days = sum(l.total_days for l in approved_leaves)
+    # Collect all leave dates (any type) for absence exclusion
+    all_leave_dates_set = set()
+    for l in all_approved_leaves:
+        d = l.from_date
+        while d <= l.to_date:
+            all_leave_dates_set.add(d)
+            d += timedelta(days=1)
+    
+    # Only unpaid leaves get salary deducted
+    unpaid_leaves = [l for l in all_approved_leaves if l.leave_type == 'unpaid']
+    leave_days = sum(l.total_days for l in unpaid_leaves)
     leave_dates = []
-    for l in approved_leaves:
+    for l in unpaid_leaves:
         leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
     # Daily rate should be derived from monthly salary regardless of hourly rate
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
@@ -958,18 +986,29 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     late_half_days += (days_late_15_mins // 3)
 
     days_with_attendance = len(session_dates | set(qr_by_date.keys()))
+    attended_dates = session_dates | set(qr_by_date.keys())
     
     from datetime import date
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
         working_days_passed = working_days
+        last_day = calendar.monthrange(year, month)[1]
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
         working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
         working_days_passed = 0
+        last_day = 0
+    
+    # Count leave days (any type) that fall in the payroll month as "covered" (not absent)
+    leave_covered_working_days = 0
+    for d in range(1, last_day + 1):
+        if calendar.weekday(year, month, d) < 5:
+            curr_date = date(year, month, d)
+            if curr_date in all_leave_dates_set and curr_date not in attended_dates:
+                leave_covered_working_days += 1
         
-    absent_days = Decimal(max(0, working_days_passed - days_with_attendance))
+    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - leave_covered_working_days))
     absent_days += Decimal(late_half_days) * Decimal('0.5')
 
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
@@ -1198,17 +1237,27 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                 total_hours += max(diff_hours, Decimal(0))
         hour_based_amount = total_hours * user.hourly_rate
 
-    # 4. Leave deductions (unpaid only)
-    approved_leaves = LeaveApplication.objects.filter(
+    # 4. Leave deductions
+    # Fetch ALL approved leaves (any type) to exclude from absence calculation
+    all_approved_leaves = LeaveApplication.objects.filter(
         applied_by=user,
         status='approved',
-        from_date__year=year,
         from_date__month=month,
-        leave_type='unpaid',
+        from_date__year=year,
     )
-    leave_days = sum(l.total_days for l in approved_leaves)
+    # Collect all leave dates (any type) for absence exclusion
+    all_leave_dates_set = set()
+    for l in all_approved_leaves:
+        d = l.from_date
+        while d <= l.to_date:
+            all_leave_dates_set.add(d)
+            d += timedelta(days=1)
+    
+    # Only unpaid leaves get salary deducted
+    unpaid_leaves = [l for l in all_approved_leaves if l.leave_type == 'unpaid']
+    leave_days = sum(l.total_days for l in unpaid_leaves)
     leave_dates = []
-    for l in approved_leaves:
+    for l in unpaid_leaves:
         leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
     leave_deductions = Decimal(leave_days) * daily_rate if user.employment_type == 'full_time' else Decimal(0)
 
@@ -1300,13 +1349,18 @@ def compute_payslip_for_user(user, month, year, payroll_run):
 
     attended_dates = set(attendance_records.values_list('date', flat=True))
     absent_dates = []
+    
+    # Count leave days (any type) that fall in the payroll month as "covered" (not absent)
+    leave_covered_working_days = 0
     for d in range(1, last_day + 1):
         if calendar.weekday(year, month, d) < 5:
             curr_date = date(year, month, d)
-            if curr_date not in attended_dates:
+            if curr_date in all_leave_dates_set and curr_date not in attended_dates:
+                leave_covered_working_days += 1
+            elif curr_date not in attended_dates and curr_date not in all_leave_dates_set:
                 absent_dates.append(curr_date.strftime('%Y-%m-%d'))
 
-    absent_days = Decimal(max(0, working_days_passed - days_attended))
+    absent_days = Decimal(max(0, working_days_passed - days_attended - leave_covered_working_days))
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
     absence_deductions = absent_days * absence_deduction_rate
     absence_deductions += sunday_deduction  # include Sunday shortfall deduction for HK/security
