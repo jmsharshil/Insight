@@ -271,8 +271,13 @@ def detect_missing_scans(branch_id, date_str=None):
 
         processed = 0
         from batches.models import TimetableSlot
-        current_time = timezone.localtime(timezone.now()).time()
-        current_dow = timezone.localtime(timezone.now()).weekday()
+        now_local = timezone.localtime(timezone.now())
+        # Use the actual date being processed for DOW — allows correct backfilling of past dates.
+        processing_dow = date_obj.weekday()
+        # For time gating: if we're processing today, only consider slots that have already started.
+        # For past dates, all slots on that day are "past" by definition.
+        is_today = (date_obj == now_local.date())
+        current_time = now_local.time()
 
         for student in students:
             # Get all attendance records for the day (supports multiple sessions)
@@ -283,19 +288,24 @@ def detect_missing_scans(branch_id, date_str=None):
 
             has_any_checkin = any(r.checked_in_at for r in day_records)
             open_sessions = [r for r in day_records if r.checked_in_at and not r.checked_out_at]
-            
-            # Check if student has a scheduled class today that has started
+
+            # Check if student has a scheduled class on the processed date that has started
             enrolled_batch_ids = list(student.batch_enrollments.values_list('batch_id', flat=True))
             primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
             if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
                 enrolled_batch_ids.append(primary_batch_id)
-                
-            today_slots = TimetableSlot.objects.filter(
+
+            day_slots = TimetableSlot.objects.filter(
                 batch_id__in=enrolled_batch_ids,
-                day_of_week=current_dow,
-            )
-            
-            past_slots = [s for s in today_slots if s.start_time and s.start_time <= current_time]
+                day_of_week=processing_dow,
+            ).select_related('batch', 'batch__branch')
+
+            # For today: only slots whose start_time has already passed.
+            # For past dates: all scheduled slots count as past.
+            if is_today:
+                past_slots = [s for s in day_slots if s.start_time and s.start_time <= current_time]
+            else:
+                past_slots = [s for s in day_slots if s.start_time]
 
             if not has_any_checkin:
                 # CASE 2: Missing check-in scan (no_show)
@@ -303,6 +313,46 @@ def detect_missing_scans(branch_id, date_str=None):
                     # Student had no scheduled classes that have started yet today, so skip
                     continue
 
+                # ── STEP 1: Always backfill absent AttendanceRecords for missed slots.
+                # This MUST happen before the AlertLog deduplication guard so that
+                # absent records are created even when the violation was already logged
+                # in a previous run (e.g. on live before a code update was deployed).
+                batch_branch = getattr(student, 'branch', None)
+                batch_branch_id = batch_branch.id if batch_branch else None
+                absent_records = []
+                for slot in past_slots:
+                    slot_batch = slot.batch
+                    slot_branch_id = (
+                        slot_batch.branch_id if slot_batch and slot_batch.branch_id
+                        else batch_branch_id
+                    )
+                    already_exists = AttendanceRecord.objects.filter(
+                        student=student,
+                        date=date_obj,
+                        timetable_slot=slot,
+                    ).exists()
+                    if not already_exists:
+                        absent_records.append(
+                            AttendanceRecord(
+                                student=student,
+                                date=date_obj,
+                                timetable_slot=slot,
+                                batch=slot_batch,
+                                branch_id=slot_branch_id,
+                                status='absent',
+                                checked_in_at=None,
+                                checked_out_at=None,
+                                marked_by=None,
+                            )
+                        )
+                if absent_records:
+                    AttendanceRecord.objects.bulk_create(absent_records, ignore_conflicts=True)
+                    logger.info(
+                        f"[detect_missing_scans] Created {len(absent_records)} absent record(s) "
+                        f"for student {student.id} on {date_str}."
+                    )
+
+                # ── STEP 2: Skip alert + violation if already logged for this date.
                 if AlertLog.objects.filter(
                     student=student,
                     alert_type='missing_checkin_scan',

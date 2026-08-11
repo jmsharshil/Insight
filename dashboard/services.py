@@ -21,7 +21,7 @@ from payroll.models import PaySlip
 from leave.models import LeaveApplication, LeaveBalance, StudentLeaveApplication
 
 
-def _get_cache_key(user):
+def _get_cache_key(user): 
     """Generate cache key specific to user/role/branch for cache isolation."""
     branch_id = str(user.branch_id or 'global')
     org_id = str(getattr(user.organization, 'id', 'global'))
