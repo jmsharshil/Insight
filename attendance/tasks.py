@@ -313,30 +313,10 @@ def detect_missing_scans(branch_id, date_str=None):
                     # Student had no scheduled classes that have started yet today, so skip
                     continue
 
-                if AlertLog.objects.filter(
-                    student=student,
-                    alert_type='missing_checkin_scan',
-                    sent_at__date=date_obj,
-                ).exists():
-                    continue
-
-                AlertLog.objects.create(
-                    student=student,
-                    alert_type='missing_checkin_scan',
-                    message=f'Missing check-in scan / no-show on {date_str}.',
-                    notified_parent=True,
-                    notified_admin=False,
-                )
-                ViolationRecord.objects.create(
-                    student=student,
-                    violation_type='no_show',
-                    date=date_str,
-                    description='No check-in recorded for scheduled class.',
-                    logged_by_admin=False,
-                )
-
-                # Also create absent AttendanceRecords for each missed slot so they
-                # appear in day_wise_attendance (mirrors auto_mark_student_absentees logic).
+                # ── STEP 1: Always backfill absent AttendanceRecords for missed slots.
+                # This MUST happen before the AlertLog deduplication guard so that
+                # absent records are created even when the violation was already logged
+                # in a previous run (e.g. on live before a code update was deployed).
                 batch_branch = getattr(student, 'branch', None)
                 batch_branch_id = batch_branch.id if batch_branch else None
                 absent_records = []
@@ -372,6 +352,28 @@ def detect_missing_scans(branch_id, date_str=None):
                         f"for student {student.id} on {date_str}."
                     )
 
+                # ── STEP 2: Skip alert + violation if already logged for this date.
+                if AlertLog.objects.filter(
+                    student=student,
+                    alert_type='missing_checkin_scan',
+                    sent_at__date=date_obj,
+                ).exists():
+                    continue
+
+                AlertLog.objects.create(
+                    student=student,
+                    alert_type='missing_checkin_scan',
+                    message=f'Missing check-in scan / no-show on {date_str}.',
+                    notified_parent=True,
+                    notified_admin=False,
+                )
+                ViolationRecord.objects.create(
+                    student=student,
+                    violation_type='no_show',
+                    date=date_str,
+                    description='No check-in recorded for scheduled class.',
+                    logged_by_admin=False,
+                )
                 try:
                     notify_student_missing_scan(student, 'no_checkin', date_obj)
                 except Exception as ne:
