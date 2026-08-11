@@ -420,6 +420,28 @@ class SessionReportCreateSerializer(serializers.Serializer):
         if not data.get('session_date'):
             data['session_date'] = timezone.now().date()
             
+        if data['session_date'] > timezone.now().date():
+            data['session_date'] = timezone.now().date()
+
+        # Look up timetable slot for start/end time if not explicitly provided
+        if not data.get('start_time') or not data.get('end_time'):
+            from batches.models import TimetableSlot
+            from django.db.models import Q
+            session_date = data['session_date']
+            dow = session_date.weekday()
+            slot = TimetableSlot.objects.filter(
+                Q(day_of_week=dow) | Q(session_date=session_date),
+                batch_id=data.get('batch_id'),
+                subject_id=data.get('subject_id'),
+            ).first()
+            
+            if slot:
+                if not data.get('start_time') and slot.start_time:
+                    data['start_time'] = slot.start_time
+                if not data.get('end_time') and slot.end_time:
+                    data['end_time'] = slot.end_time
+        
+        # Final fallback to current time if still not set
         if not data.get('start_time'):
             data['start_time'] = timezone.now().time()
             
@@ -428,9 +450,6 @@ class SessionReportCreateSerializer(serializers.Serializer):
             
         if data['end_time'] <= data['start_time']:
             data['end_time'] = (timezone.now() + timezone.timedelta(hours=1)).time()
-            
-        if data['session_date'] > timezone.now().date():
-            data['session_date'] = timezone.now().date()
             
         if not data.get('chapter_covered'):
             data['chapter_covered'] = "General"

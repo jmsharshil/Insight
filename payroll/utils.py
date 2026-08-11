@@ -217,16 +217,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     qr_slot_deviation = defaultdict(lambda: {'late_in': Decimal(0), 'early_out': Decimal(0)})
 
     for log_date, logs in qr_by_date.items():
-        if log_date in session_dates:
-            continue  # SessionReport hours already counted for this date
         check_ins = [l for l in logs if l.scan_type == 'check_in']
         check_outs = [l for l in logs if l.scan_type == 'check_out']
+        diff_minutes = Decimal(0)
         if check_ins and check_outs:
             # Use local times for all calculations
             first_in_local = dj_timezone.localtime(min(l.scanned_at for l in check_ins))
             last_out_local = dj_timezone.localtime(max(l.scanned_at for l in check_outs))
-            actual_in_time = first_in_local.time()
-            actual_out_time = last_out_local.time()
+            actual_in_dt = first_in_local.replace(tzinfo=None)
+            actual_out_dt = last_out_local.replace(tzinfo=None)
             diff_minutes = Decimal((last_out_local - first_in_local).total_seconds()) / Decimal(60)
 
             # Find scheduled slots for this date to cap hours and compute buffer deviation
@@ -238,6 +237,9 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 faculty=faculty_profile,
             )
             scheduled_minutes = Decimal(0)
+            earliest_s_dt = None
+            latest_e_dt = None
+            
             for slot in slots:
                 if slot.start_time and slot.end_time:
                     s_dt = datetime.combine(log_date, slot.start_time)
@@ -246,14 +248,17 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                         e_dt += timedelta(days=1)
                     scheduled_minutes += Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
 
-                    # Compute late check-in and early check-out deviation per slot
-                    actual_in_dt = datetime.combine(log_date, actual_in_time)
-                    actual_out_dt = datetime.combine(log_date, actual_out_time)
-                    late_in = max(Decimal(0), Decimal((actual_in_dt - s_dt).total_seconds()) / Decimal(60))
-                    early_out = max(Decimal(0), Decimal((e_dt - actual_out_dt).total_seconds()) / Decimal(60))
-                    d_str = log_date.strftime('%Y-%m-%d')
-                    qr_slot_deviation[d_str]['late_in'] += late_in
-                    qr_slot_deviation[d_str]['early_out'] += early_out
+                    if not earliest_s_dt or s_dt < earliest_s_dt:
+                        earliest_s_dt = s_dt
+                    if not latest_e_dt or e_dt > latest_e_dt:
+                        latest_e_dt = e_dt
+
+            if earliest_s_dt and latest_e_dt:
+                late_in = max(Decimal(0), Decimal((actual_in_dt - earliest_s_dt).total_seconds()) / Decimal(60))
+                early_out = max(Decimal(0), Decimal((latest_e_dt - actual_out_dt).total_seconds()) / Decimal(60))
+                d_str = log_date.strftime('%Y-%m-%d')
+                qr_slot_deviation[d_str]['late_in'] += late_in
+                qr_slot_deviation[d_str]['early_out'] += early_out
 
             # If they had a scheduled slot, their base pay for this period is the full scheduled duration.
             # The late/early penalty will correctly deduct from this base if they exceed the buffer.
@@ -261,12 +266,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             if scheduled_minutes > 0:
                 diff_minutes = scheduled_minutes
 
-            qr_extra_minutes += max(diff_minutes, Decimal(0))
+        if log_date in session_dates:
+            continue  # SessionReport hours already counted for this date
 
-            if diff_minutes > 0:
-                d_str = log_date.strftime('%Y-%m-%d')
-                daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
-                daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
+        qr_extra_minutes += max(diff_minutes, Decimal(0))
+
+        if diff_minutes > 0:
+            d_str = log_date.strftime('%Y-%m-%d')
+            daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
+            daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
 
     # total_hours: only actual hours worked (no guaranteed base session_hours inflation)
     total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
@@ -345,12 +353,25 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         if slot and slot.end_time:
             scheduled_end_time = slot.end_time
 
+        # Use QR check-in time as actual arrival time (not session report time which is now the slot time)
+        actual_start = s.start_time
+        actual_end = s.end_time
+        d_str = s.session_date.strftime('%Y-%m-%d')
+        if s.session_date in qr_by_date:
+            day_logs = qr_by_date[s.session_date]
+            day_check_ins = [l for l in day_logs if l.scan_type == 'check_in']
+            day_check_outs = [l for l in day_logs if l.scan_type == 'check_out']
+            if day_check_ins:
+                actual_start = dj_timezone.localtime(min(l.scanned_at for l in day_check_ins)).time()
+            if day_check_outs:
+                actual_end = dj_timezone.localtime(max(l.scanned_at for l in day_check_outs)).time()
+
         sched_dt = datetime.combine(s.session_date, scheduled_time)
-        actual_dt = datetime.combine(s.session_date, s.start_time)
+        actual_dt = datetime.combine(s.session_date, actual_start)
         diff = (actual_dt - sched_dt).total_seconds() / 60
 
         sched_end_dt = datetime.combine(s.session_date, scheduled_end_time)
-        actual_end_dt = datetime.combine(s.session_date, s.end_time)
+        actual_end_dt = datetime.combine(s.session_date, actual_end)
         if sched_end_dt < sched_dt:
             sched_end_dt += timedelta(days=1)
         if actual_end_dt < actual_dt:
@@ -366,7 +387,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             session_late_details.append({
                 'session': s,
                 'scheduled_time': scheduled_time,
-                'actual_start': s.start_time,
+                'actual_start': actual_start,
                 'late_minutes': total_session_diff,
                 'grace_applied': (total_session_diff <= grace)
             })
@@ -381,8 +402,28 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     if faculty_profile.employment_type in ('visiting', 'part_time'):
         # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
-        # Session-based deviation
+        processed_dates = set()
+
+        # QR-based deviation (prioritize actual check-ins/outs)
+        for d_str, deviation in qr_slot_deviation.items():
+            total_dev = deviation['late_in'] + deviation['early_out']
+            d_date = datetime.strptime(d_str, '%Y-%m-%d').date()
+            processed_dates.add(d_date)
+            daily_stats[d_str]['late_minutes'] = int(total_dev)
+            if total_dev > Decimal(grace):
+                penalty_min = int(total_dev - Decimal(grace))
+                day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                late_penalty += day_penalty
+                total_late_penalty_minutes += penalty_min
+                if d_str not in late_dates:
+                    late_dates.append(d_str)
+                daily_stats[d_str]['penalty_minutes'] = penalty_min
+                daily_stats[d_str]['deduction'] += day_penalty
+
+        # Session-based deviation (fallback if no QR scan)
         for d_date, d_delay in daily_delays.items():
+            if d_date in processed_dates:
+                continue
             d_str = d_date.strftime('%Y-%m-%d')
             daily_stats[d_str]['late_minutes'] = d_delay
             # Apply 5-minute buffer: only penalize minutes BEYOND 5
@@ -392,21 +433,6 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
                 late_dates.append(d_str)
-                daily_stats[d_str]['penalty_minutes'] = penalty_min
-                daily_stats[d_str]['deduction'] += day_penalty
-
-        # QR-based deviation (dates without session reports)
-        for d_str, deviation in qr_slot_deviation.items():
-            total_dev = deviation['late_in'] + deviation['early_out']
-            d_date = datetime.strptime(d_str, '%Y-%m-%d').date()
-            daily_stats[d_str]['late_minutes'] = int(total_dev)
-            if total_dev > Decimal(grace):
-                penalty_min = int(total_dev - Decimal(grace))
-                day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                late_penalty += day_penalty
-                total_late_penalty_minutes += penalty_min
-                if d_str not in late_dates:
-                    late_dates.append(d_str)
                 daily_stats[d_str]['penalty_minutes'] = penalty_min
                 daily_stats[d_str]['deduction'] += day_penalty
     else:
@@ -457,69 +483,69 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     late_half_days += (days_late_15_mins // 3)
 
     # 6. Leave deductions
-    # Fetch ALL approved leaves (any type) to exclude from absence calculation
-    all_approved_leaves = LeaveApplication.objects.filter(
+    from datetime import date
+    month_start = date(year, month, 1)
+    last_day_of_month = calendar.monthrange(year, month)[1]
+    month_end = date(year, month, last_day_of_month)
+
+    approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
         status='approved',
-        from_date__month=month,
-        from_date__year=year,
+        from_date__lte=month_end,
+        to_date__gte=month_start,
     )
-    # Collect all leave dates (any type) for absence exclusion
-    all_leave_dates_set = set()
-    for l in all_approved_leaves:
-        d = l.from_date
-        while d <= l.to_date:
-            all_leave_dates_set.add(d)
-            d += timedelta(days=1)
     
-    # Only unpaid leaves get salary deducted
-    unpaid_leaves = [l for l in all_approved_leaves if l.leave_type == 'unpaid']
-    leave_days = sum(l.total_days for l in unpaid_leaves)
+    leave_dates_in_month = set()
+    unpaid_leave_days = Decimal(0)
     leave_dates = []
-    for l in unpaid_leaves:
-        leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
+    
+    for l in approved_leaves:
+        overlap_start = max(l.from_date, month_start)
+        overlap_end = min(l.to_date, month_end)
+        curr = overlap_start
+        while curr <= overlap_end:
+            if curr.weekday() < 5:  # Only count weekdays for leaves
+                leave_dates_in_month.add(curr)
+                if l.leave_type == 'unpaid':
+                    unpaid_leave_days += Decimal(1)
+            curr += timedelta(days=1)
+        leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
+        
+    leave_days = len(leave_dates_in_month)
     # Daily rate should be derived from monthly salary regardless of hourly rate
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
-    leave_deductions = Decimal(leave_days) * daily_rate
+    leave_deductions = unpaid_leave_days * daily_rate
 
     # 7. Working days
-    working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+    working_days = sum(1 for d in range(1, last_day_of_month + 1)
                        if calendar.weekday(year, month, d) < 5)
 
     # 8. Absence deductions
-    # Sundays that have any QR/session attendance count as full day present
-    days_with_attendance = len(session_dates | set(qr_by_date.keys()))
     attended_dates = session_dates | set(qr_by_date.keys())
+    attended_weekdays = {d for d in attended_dates if d.weekday() < 5}
+    days_with_attendance = len(attended_weekdays)
+    
     absent_dates = []
-    from datetime import date
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
         working_days_passed = working_days
-        last_day = calendar.monthrange(year, month)[1]
+        last_day = last_day_of_month
     elif year == today.year and month == today.month:
-        last_day = min(today.day, calendar.monthrange(year, month)[1])
+        last_day = min(today.day, last_day_of_month)
         working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
         working_days_passed = 0
         last_day = 0
-    
-    # Count leave days (any type) that fall in the payroll month as "covered" (not absent)
-    leave_covered_working_days = 0
-    for d in range(1, last_day + 1):
-        if calendar.weekday(year, month, d) < 5:
-            curr_date = date(year, month, d)
-            if curr_date in all_leave_dates_set and curr_date not in attended_dates:
-                leave_covered_working_days += 1
-
-    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - leave_covered_working_days))
+        
+    # Subtract attended weekdays AND approved leave weekdays from working days passed
+    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
     
     for d in range(1, last_day + 1):
         if calendar.weekday(year, month, d) < 5:
             curr_date = date(year, month, d)
-            if curr_date not in attended_dates and curr_date not in all_leave_dates_set:
+            if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
                 absent_dates.append(curr_date.strftime('%Y-%m-%d'))
 
-    
     # Add late half days
     absent_days += Decimal(late_half_days) * Decimal('0.5')
     
@@ -560,7 +586,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     # Retention is calculated AFTER all other deductions
     retention_deduction = Decimal(0)
-    if faculty_profile.salary_retention_percentage > 0:
+    if faculty_profile.salary_retention_percentage > 0 and net_before_retention > 0:
         retention_deduction = net_before_retention * (faculty_profile.salary_retention_percentage / Decimal(100))
 
     net = net_before_retention - retention_deduction
@@ -759,15 +785,14 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     qr_slot_deviation = defaultdict(lambda: {'late_in': Decimal(0), 'early_out': Decimal(0)})
 
     for log_date, logs in qr_by_date.items():
-        if log_date in session_dates:
-            continue
         check_ins = [l for l in logs if l.scan_type == 'check_in']
         check_outs = [l for l in logs if l.scan_type == 'check_out']
+        diff_minutes = Decimal(0)
         if check_ins and check_outs:
             first_in_local = dj_timezone.localtime(min(l.scanned_at for l in check_ins))
             last_out_local = dj_timezone.localtime(max(l.scanned_at for l in check_outs))
-            actual_in_time = first_in_local.time()
-            actual_out_time = last_out_local.time()
+            actual_in_dt = first_in_local.replace(tzinfo=None)
+            actual_out_dt = last_out_local.replace(tzinfo=None)
             diff_minutes = Decimal((last_out_local - first_in_local).total_seconds()) / Decimal(60)
 
             from batches.models import TimetableSlot
@@ -778,6 +803,9 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 faculty=faculty_profile,
             )
             scheduled_minutes = Decimal(0)
+            earliest_s_dt = None
+            latest_e_dt = None
+            
             for slot in slots:
                 if slot.start_time and slot.end_time:
                     s_dt = datetime.combine(log_date, slot.start_time)
@@ -786,23 +814,30 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                         e_dt += timedelta(days=1)
                     scheduled_minutes += Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
 
-                    actual_in_dt = datetime.combine(log_date, actual_in_time)
-                    actual_out_dt = datetime.combine(log_date, actual_out_time)
-                    late_in = max(Decimal(0), Decimal((actual_in_dt - s_dt).total_seconds()) / Decimal(60))
-                    early_out = max(Decimal(0), Decimal((e_dt - actual_out_dt).total_seconds()) / Decimal(60))
-                    d_str = log_date.strftime('%Y-%m-%d')
-                    qr_slot_deviation[d_str]['late_in'] += late_in
-                    qr_slot_deviation[d_str]['early_out'] += early_out
+                    if not earliest_s_dt or s_dt < earliest_s_dt:
+                        earliest_s_dt = s_dt
+                    if not latest_e_dt or e_dt > latest_e_dt:
+                        latest_e_dt = e_dt
+
+            if earliest_s_dt and latest_e_dt:
+                late_in = max(Decimal(0), Decimal((actual_in_dt - earliest_s_dt).total_seconds()) / Decimal(60))
+                early_out = max(Decimal(0), Decimal((latest_e_dt - actual_out_dt).total_seconds()) / Decimal(60))
+                d_str = log_date.strftime('%Y-%m-%d')
+                qr_slot_deviation[d_str]['late_in'] += late_in
+                qr_slot_deviation[d_str]['early_out'] += early_out
 
             if scheduled_minutes > 0:
                 diff_minutes = scheduled_minutes
 
-            qr_extra_minutes += max(diff_minutes, Decimal(0))
+        if log_date in session_dates:
+            continue
 
-            if diff_minutes > 0:
-                d_str = log_date.strftime('%Y-%m-%d')
-                daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
-                daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
+        qr_extra_minutes += max(diff_minutes, Decimal(0))
+
+        if diff_minutes > 0:
+            d_str = log_date.strftime('%Y-%m-%d')
+            daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
+            daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
 
     # total_hours: only actual hours worked (no guaranteed base session_hours inflation)
     total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
@@ -827,32 +862,40 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     late_penalty = Decimal(0)
     policy = LateEntryPolicy.objects.filter(branch=faculty_profile.branch, is_active=True).first()
 
-    # Fetch ALL approved leaves (any type) to exclude from absence calculation
-    all_approved_leaves = LeaveApplication.objects.filter(
+    from datetime import date
+    month_start = date(year, month, 1)
+    last_day_of_month = calendar.monthrange(year, month)[1]
+    month_end = date(year, month, last_day_of_month)
+
+    approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
         status='approved',
-        from_date__month=month,
-        from_date__year=year,
+        from_date__lte=month_end,
+        to_date__gte=month_start,
     )
-    # Collect all leave dates (any type) for absence exclusion
-    all_leave_dates_set = set()
-    for l in all_approved_leaves:
-        d = l.from_date
-        while d <= l.to_date:
-            all_leave_dates_set.add(d)
-            d += timedelta(days=1)
     
-    # Only unpaid leaves get salary deducted
-    unpaid_leaves = [l for l in all_approved_leaves if l.leave_type == 'unpaid']
-    leave_days = sum(l.total_days for l in unpaid_leaves)
+    leave_dates_in_month = set()
+    unpaid_leave_days = Decimal(0)
     leave_dates = []
-    for l in unpaid_leaves:
-        leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
+    
+    for l in approved_leaves:
+        overlap_start = max(l.from_date, month_start)
+        overlap_end = min(l.to_date, month_end)
+        curr = overlap_start
+        while curr <= overlap_end:
+            if curr.weekday() < 5:  # Only count weekdays for leaves
+                leave_dates_in_month.add(curr)
+                if l.leave_type == 'unpaid':
+                    unpaid_leave_days += Decimal(1)
+            curr += timedelta(days=1)
+        leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
+        
+    leave_days = len(leave_dates_in_month)
     # Daily rate should be derived from monthly salary regardless of hourly rate
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
-    leave_deductions = Decimal(leave_days) * daily_rate
+    leave_deductions = unpaid_leave_days * daily_rate
 
-    working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+    working_days = sum(1 for d in range(1, last_day_of_month + 1)
                        if calendar.weekday(year, month, d) < 5)
 
     # 5. Compute deduction rates and late penalty
@@ -897,12 +940,25 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         if slot and slot.end_time:
             scheduled_end_time = slot.end_time
 
+        # Use QR check-in time as actual arrival time (not session report time which is now the slot time)
+        actual_start = s.start_time
+        actual_end = s.end_time
+        d_str = s.session_date.strftime('%Y-%m-%d')
+        if s.session_date in qr_by_date:
+            day_logs = qr_by_date[s.session_date]
+            day_check_ins = [l for l in day_logs if l.scan_type == 'check_in']
+            day_check_outs = [l for l in day_logs if l.scan_type == 'check_out']
+            if day_check_ins:
+                actual_start = dj_timezone.localtime(min(l.scanned_at for l in day_check_ins)).time()
+            if day_check_outs:
+                actual_end = dj_timezone.localtime(max(l.scanned_at for l in day_check_outs)).time()
+
         sched_dt = datetime.combine(s.session_date, scheduled_time)
-        actual_dt = datetime.combine(s.session_date, s.start_time)
+        actual_dt = datetime.combine(s.session_date, actual_start)
         diff = (actual_dt - sched_dt).total_seconds() / 60
 
         sched_end_dt = datetime.combine(s.session_date, scheduled_end_time)
-        actual_end_dt = datetime.combine(s.session_date, s.end_time)
+        actual_end_dt = datetime.combine(s.session_date, actual_end)
         if sched_end_dt < sched_dt:
             sched_end_dt += timedelta(days=1)
         if actual_end_dt < actual_dt:
@@ -918,23 +974,30 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 
     if faculty_profile.employment_type in ('visiting', 'part_time'):
         # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
-        for d_date, d_delay in daily_delays.items():
-            d_str = d_date.strftime('%Y-%m-%d')
-            daily_stats[d_str]['late_minutes'] = d_delay
-            if d_delay > grace:
-                penalty_min = d_delay - grace
+        processed_dates = set()
+
+        # QR-based deviation (prioritize actual check-ins/outs)
+        for d_str, deviation in qr_slot_deviation.items():
+            total_dev = deviation['late_in'] + deviation['early_out']
+            d_date = datetime.strptime(d_str, '%Y-%m-%d').date()
+            processed_dates.add(d_date)
+            daily_stats[d_str]['late_minutes'] = int(total_dev)
+            if total_dev > Decimal(grace):
+                penalty_min = int(total_dev - Decimal(grace))
                 day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
                 daily_stats[d_str]['penalty_minutes'] = penalty_min
                 daily_stats[d_str]['deduction'] += day_penalty
 
-        # QR-based deviation (dates without session reports)
-        for d_str, deviation in qr_slot_deviation.items():
-            total_dev = deviation['late_in'] + deviation['early_out']
-            daily_stats[d_str]['late_minutes'] = int(total_dev)
-            if total_dev > Decimal(grace):
-                penalty_min = int(total_dev - Decimal(grace))
+        # Session-based deviation (fallback if no QR scan)
+        for d_date, d_delay in daily_delays.items():
+            if d_date in processed_dates:
+                continue
+            d_str = d_date.strftime('%Y-%m-%d')
+            daily_stats[d_str]['late_minutes'] = d_delay
+            if d_delay > grace:
+                penalty_min = d_delay - grace
                 day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
@@ -985,30 +1048,21 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 
     late_half_days += (days_late_15_mins // 3)
 
-    days_with_attendance = len(session_dates | set(qr_by_date.keys()))
     attended_dates = session_dates | set(qr_by_date.keys())
+    attended_weekdays = {d for d in attended_dates if d.weekday() < 5}
+    days_with_attendance = len(attended_weekdays)
     
     from datetime import date
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
         working_days_passed = working_days
-        last_day = calendar.monthrange(year, month)[1]
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
         working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
         working_days_passed = 0
-        last_day = 0
-    
-    # Count leave days (any type) that fall in the payroll month as "covered" (not absent)
-    leave_covered_working_days = 0
-    for d in range(1, last_day + 1):
-        if calendar.weekday(year, month, d) < 5:
-            curr_date = date(year, month, d)
-            if curr_date in all_leave_dates_set and curr_date not in attended_dates:
-                leave_covered_working_days += 1
         
-    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - leave_covered_working_days))
+    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
     absent_days += Decimal(late_half_days) * Decimal('0.5')
 
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
@@ -1044,7 +1098,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 
     # Retention is calculated AFTER all other deductions
     retention_deduction = Decimal(0)
-    if faculty_profile.salary_retention_percentage > 0:
+    if faculty_profile.salary_retention_percentage > 0 and net_before_retention > 0:
         retention_deduction = net_before_retention * (faculty_profile.salary_retention_percentage / Decimal(100))
 
     net = net_before_retention - retention_deduction
@@ -1152,9 +1206,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         working_days = 0
         sessions_conducted = papers_checked
         leaves_taken = 0
-        if getattr(user, 'salary_retention_percentage', 0) > 0:
-            retention_deduction = paper_amount * (Decimal(user.salary_retention_percentage) / Decimal(100))
-        net = paper_amount - late_penalty - retention_deduction
+        net_before_retention = paper_amount - late_penalty
+        if getattr(user, 'salary_retention_percentage', 0) > 0 and net_before_retention > 0:
+            retention_deduction = net_before_retention * (Decimal(user.salary_retention_percentage) / Decimal(100))
+        net = net_before_retention - retention_deduction
         net = max(net, Decimal(0))
         # Delete existing for regeneration
         PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
@@ -1237,29 +1292,37 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                 total_hours += max(diff_hours, Decimal(0))
         hour_based_amount = total_hours * user.hourly_rate
 
-    # 4. Leave deductions
-    # Fetch ALL approved leaves (any type) to exclude from absence calculation
-    all_approved_leaves = LeaveApplication.objects.filter(
+    # 4. Leave deductions (unpaid only)
+    from datetime import date
+    month_start = date(year, month, 1)
+    last_day_of_month = calendar.monthrange(year, month)[1]
+    month_end = date(year, month, last_day_of_month)
+
+    approved_leaves = LeaveApplication.objects.filter(
         applied_by=user,
         status='approved',
-        from_date__month=month,
-        from_date__year=year,
+        from_date__lte=month_end,
+        to_date__gte=month_start,
     )
-    # Collect all leave dates (any type) for absence exclusion
-    all_leave_dates_set = set()
-    for l in all_approved_leaves:
-        d = l.from_date
-        while d <= l.to_date:
-            all_leave_dates_set.add(d)
-            d += timedelta(days=1)
     
-    # Only unpaid leaves get salary deducted
-    unpaid_leaves = [l for l in all_approved_leaves if l.leave_type == 'unpaid']
-    leave_days = sum(l.total_days for l in unpaid_leaves)
+    leave_dates_in_month = set()
+    unpaid_leave_days = Decimal(0)
     leave_dates = []
-    for l in unpaid_leaves:
-        leave_dates.append(f"{l.from_date.strftime('%Y-%m-%d')} to {l.to_date.strftime('%Y-%m-%d')}")
-    leave_deductions = Decimal(leave_days) * daily_rate if user.employment_type == 'full_time' else Decimal(0)
+    
+    for l in approved_leaves:
+        overlap_start = max(l.from_date, month_start)
+        overlap_end = min(l.to_date, month_end)
+        curr = overlap_start
+        while curr <= overlap_end:
+            if curr.weekday() < 5:  # Only count weekdays for leaves
+                leave_dates_in_month.add(curr)
+                if l.leave_type == 'unpaid':
+                    unpaid_leave_days += Decimal(1)
+            curr += timedelta(days=1)
+        leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
+        
+    leave_days = len(leave_dates_in_month)
+    leave_deductions = unpaid_leave_days * daily_rate if user.employment_type == 'full_time' else Decimal(0)
 
     # 5. Late penalty 
     from leave.models import LateEntryRecord
@@ -1301,6 +1364,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         daily_delays[entry.date] += entry.late_minutes
         
     for rec in attendance_records:
+        day_diff = 0
         if rec.checked_in_at and user.work_start_time:
             s_time = user.work_start_time
             from django.utils import timezone
@@ -1308,7 +1372,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             s_dt = datetime.combine(rec.date, s_time)
             if local_checkin.replace(tzinfo=None) > s_dt:
                 diff = (local_checkin.replace(tzinfo=None) - s_dt).total_seconds() / 60
-                daily_delays[rec.date] += int(diff)
+                day_diff += int(diff)
                 
         if rec.checked_out_at and user.work_end_time:
             e_time = user.work_end_time
@@ -1320,7 +1384,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                 
             if local_checkout.replace(tzinfo=None) < e_dt:
                 diff = (e_dt - local_checkout.replace(tzinfo=None)).total_seconds() / 60
-                daily_delays[rec.date] += int(diff)
+                day_diff += int(diff)
+                
+        if day_diff > daily_delays[rec.date]:
+            daily_delays[rec.date] = day_diff
 
     late_dates = []
     for d_date, d_delay in daily_delays.items():
@@ -1348,19 +1415,17 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         last_day = 0
 
     attended_dates = set(attendance_records.values_list('date', flat=True))
-    absent_dates = []
+    attended_weekdays = {d for d in attended_dates if d.weekday() < 5}
+    days_attended_weekdays = len(attended_weekdays)
     
-    # Count leave days (any type) that fall in the payroll month as "covered" (not absent)
-    leave_covered_working_days = 0
+    absent_dates = []
     for d in range(1, last_day + 1):
         if calendar.weekday(year, month, d) < 5:
             curr_date = date(year, month, d)
-            if curr_date in all_leave_dates_set and curr_date not in attended_dates:
-                leave_covered_working_days += 1
-            elif curr_date not in attended_dates and curr_date not in all_leave_dates_set:
+            if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
                 absent_dates.append(curr_date.strftime('%Y-%m-%d'))
 
-    absent_days = Decimal(max(0, working_days_passed - days_attended - leave_covered_working_days))
+    absent_days = Decimal(max(0, working_days_passed - days_attended_weekdays - len(leave_dates_in_month)))
     absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
     absence_deductions = absent_days * absence_deduction_rate
     absence_deductions += sunday_deduction  # include Sunday shortfall deduction for HK/security
@@ -1374,12 +1439,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     attendance_bonus += sunday_bonus  # extra day bonus if 3+ Sundays attended
 
     # 8. Retention deduction
-    retention_deduction = Decimal(0)
-    if user.salary_retention_percentage and user.salary_retention_percentage > 0:
-        gross_salary = basic_salary + hour_based_amount
-        retention_deduction = gross_salary * (user.salary_retention_percentage / Decimal(100))
-
-    # 9. Leave encashment (March)
+    # 8. Leave encashment (March)
     leave_encashment = Decimal(0)
     if month == 3:
         from leave.models import LeaveBalance
@@ -1390,14 +1450,20 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                 bal.used_days += bal.remaining_days
                 bal.save(update_fields=['used_days'])
 
-    # 10. Net salary
+    # 9. Net salary before retention
     if user.employment_type == 'full_time':
-        net = (basic_salary + hour_based_amount + attendance_bonus + leave_encashment
-               - late_penalty - absence_deductions - leave_deductions - retention_deduction)
+        net_before_retention = (basic_salary + hour_based_amount + attendance_bonus + leave_encashment
+                               - late_penalty - absence_deductions - leave_deductions)
     else:
-        net = (hour_based_amount + attendance_bonus + leave_encashment
-               - late_penalty - absence_deductions - retention_deduction)
+        net_before_retention = (hour_based_amount + attendance_bonus + leave_encashment
+                               - late_penalty - absence_deductions)
 
+    # 10. Retention deduction
+    retention_deduction = Decimal(0)
+    if getattr(user, 'salary_retention_percentage', 0) > 0 and net_before_retention > 0:
+        retention_deduction = net_before_retention * (Decimal(user.salary_retention_percentage) / Decimal(100))
+
+    net = net_before_retention - retention_deduction
     net = max(net, Decimal(0))
 
     # 11. Create PaySlip
