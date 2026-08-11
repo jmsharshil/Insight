@@ -411,6 +411,7 @@ class TimetableSlotListSerializer(serializers.ModelSerializer):
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
 
 
+
 class ExamDataSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=200, required=False)
     exam_type = serializers.CharField(max_length=20, default='subjective')
@@ -701,6 +702,7 @@ class FacultyTimetableSerializer(serializers.ModelSerializer):
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
 
 
+
 class StudentTimetableSerializer(serializers.ModelSerializer):
     subject_name = serializers.CharField(source='subject.name', read_only=True, default=None)
     faculty_name = serializers.CharField(source='faculty.user.name', read_only=True, default=None)
@@ -727,3 +729,4 @@ class StudentTimetableSerializer(serializers.ModelSerializer):
         if obj.day_of_week is None:
             return None
         return dict(DAY_CHOICES).get(obj.day_of_week, '')
+

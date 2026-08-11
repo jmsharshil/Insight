@@ -31,7 +31,7 @@ from exams.emails import send_checker_assignment_email, send_recheck_request_not
 logger = logging.getLogger(__name__)
 
 # ── Role constants ────────────────────────────────────────────────────────────
-PAPER_VIEW_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
+PAPER_VIEW_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive', 'branch_manager']
 PAPER_MARK_ROLES = ['super_admin', 'paper_checker']
 RECHECK_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 CHECKER_STATUS_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']

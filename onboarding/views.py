@@ -260,6 +260,9 @@ class AdmissionListView(APIView):
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(branch__organization=request.user.organization)
 
+        if getattr(request.user, 'role', None) == 'counsellor':
+            queryset = queryset.filter(assigned_counsellor=request.user)
+
         # Optional filters
         adm_status = request.GET.get('status')
         course     = request.GET.get('course')
