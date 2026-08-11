@@ -353,12 +353,25 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         if slot and slot.end_time:
             scheduled_end_time = slot.end_time
 
+        # Use QR check-in time as actual arrival time (not session report time which is now the slot time)
+        actual_start = s.start_time
+        actual_end = s.end_time
+        d_str = s.session_date.strftime('%Y-%m-%d')
+        if s.session_date in qr_by_date:
+            day_logs = qr_by_date[s.session_date]
+            day_check_ins = [l for l in day_logs if l.scan_type == 'check_in']
+            day_check_outs = [l for l in day_logs if l.scan_type == 'check_out']
+            if day_check_ins:
+                actual_start = dj_timezone.localtime(min(l.scanned_at for l in day_check_ins)).time()
+            if day_check_outs:
+                actual_end = dj_timezone.localtime(max(l.scanned_at for l in day_check_outs)).time()
+
         sched_dt = datetime.combine(s.session_date, scheduled_time)
-        actual_dt = datetime.combine(s.session_date, s.start_time)
+        actual_dt = datetime.combine(s.session_date, actual_start)
         diff = (actual_dt - sched_dt).total_seconds() / 60
 
         sched_end_dt = datetime.combine(s.session_date, scheduled_end_time)
-        actual_end_dt = datetime.combine(s.session_date, s.end_time)
+        actual_end_dt = datetime.combine(s.session_date, actual_end)
         if sched_end_dt < sched_dt:
             sched_end_dt += timedelta(days=1)
         if actual_end_dt < actual_dt:
@@ -374,7 +387,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             session_late_details.append({
                 'session': s,
                 'scheduled_time': scheduled_time,
-                'actual_start': s.start_time,
+                'actual_start': actual_start,
                 'late_minutes': total_session_diff,
                 'grace_applied': (total_session_diff <= grace)
             })
@@ -927,12 +940,25 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         if slot and slot.end_time:
             scheduled_end_time = slot.end_time
 
+        # Use QR check-in time as actual arrival time (not session report time which is now the slot time)
+        actual_start = s.start_time
+        actual_end = s.end_time
+        d_str = s.session_date.strftime('%Y-%m-%d')
+        if s.session_date in qr_by_date:
+            day_logs = qr_by_date[s.session_date]
+            day_check_ins = [l for l in day_logs if l.scan_type == 'check_in']
+            day_check_outs = [l for l in day_logs if l.scan_type == 'check_out']
+            if day_check_ins:
+                actual_start = dj_timezone.localtime(min(l.scanned_at for l in day_check_ins)).time()
+            if day_check_outs:
+                actual_end = dj_timezone.localtime(max(l.scanned_at for l in day_check_outs)).time()
+
         sched_dt = datetime.combine(s.session_date, scheduled_time)
-        actual_dt = datetime.combine(s.session_date, s.start_time)
+        actual_dt = datetime.combine(s.session_date, actual_start)
         diff = (actual_dt - sched_dt).total_seconds() / 60
 
         sched_end_dt = datetime.combine(s.session_date, scheduled_end_time)
-        actual_end_dt = datetime.combine(s.session_date, s.end_time)
+        actual_end_dt = datetime.combine(s.session_date, actual_end)
         if sched_end_dt < sched_dt:
             sched_end_dt += timedelta(days=1)
         if actual_end_dt < actual_dt:
