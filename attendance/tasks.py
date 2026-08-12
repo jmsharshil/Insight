@@ -615,8 +615,8 @@ def auto_mark_student_absentees():
         # Build set of students on approved leave today (global — branch-independent)
         leave_student_ids = set(
             StudentLeaveApplication.objects.filter(
-                start_date__lte=today,
-                end_date__gte=today,
+                from_date__lte=today,
+                to_date__gte=today,
                 status='approved',
             ).values_list('student_id', flat=True)
         )
