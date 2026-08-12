@@ -538,19 +538,23 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         last_day = 0
         
     # Subtract attended weekdays AND approved leave weekdays from working days passed
-    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
-    
-    for d in range(1, last_day + 1):
-        if calendar.weekday(year, month, d) < 5:
-            curr_date = date(year, month, d)
-            if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
-                absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+    if faculty_profile.employment_type == 'full_time':
+        absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
+        
+        for d in range(1, last_day + 1):
+            if calendar.weekday(year, month, d) < 5:
+                curr_date = date(year, month, d)
+                if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
+                    absent_dates.append(curr_date.strftime('%Y-%m-%d'))
 
-    # Add late half days
-    absent_days += Decimal(late_half_days) * Decimal('0.5')
-    
-    absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
-    absence_deductions = absent_days * absence_deduction_rate
+        # Add late half days
+        absent_days += Decimal(late_half_days) * Decimal('0.5')
+        
+        absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+        absence_deductions = absent_days * absence_deduction_rate
+    else:
+        absent_days = Decimal(0)
+        absence_deductions = Decimal(0)
 
     # 8.5 Attendance Bonus & Salary Retention
     attendance_bonus = Decimal(0)
@@ -1062,11 +1066,15 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     else:
         working_days_passed = 0
         
-    absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
-    absent_days += Decimal(late_half_days) * Decimal('0.5')
-
-    absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
-    absence_deductions = absent_days * absence_deduction_rate
+    if faculty_profile.employment_type == 'full_time':
+        absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
+        absent_days += Decimal(late_half_days) * Decimal('0.5')
+    
+        absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+        absence_deductions = absent_days * absence_deduction_rate
+    else:
+        absent_days = Decimal(0)
+        absence_deductions = Decimal(0)
 
     attendance_bonus = Decimal(0)
     if working_days > 0:
@@ -1425,9 +1433,14 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
                 absent_dates.append(curr_date.strftime('%Y-%m-%d'))
 
-    absent_days = Decimal(max(0, working_days_passed - days_attended_weekdays - len(leave_dates_in_month)))
-    absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
-    absence_deductions = absent_days * absence_deduction_rate
+    if user.employment_type == 'full_time':
+        absent_days = Decimal(max(0, working_days_passed - days_attended_weekdays - len(leave_dates_in_month)))
+        absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+        absence_deductions = absent_days * absence_deduction_rate
+    else:
+        absent_days = Decimal(0)
+        absence_deductions = Decimal(0)
+        
     absence_deductions += sunday_deduction  # include Sunday shortfall deduction for HK/security
 
     # 7. Attendance bonus
