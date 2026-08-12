@@ -248,6 +248,14 @@ class RegisterSerializer(serializers.ModelSerializer):
             request_org = getattr(request.user, 'organization', None)
             if getattr(request.user, 'is_authenticated', False) and request_org:
                 validated_data['organization'] = request_org
+        
+        # Auto-generate username for self-registered users (usually students/parents from portal)
+        role = validated_data.get('role', 'student')
+        if 'username' not in validated_data or not validated_data['username']:
+            from auth_user.utils import generate_username
+            username, _ = generate_username(role=role, branch=None)
+            validated_data['username'] = username
+            
         user = User.objects.create_user(password=password, is_active=False, **validated_data)
         return user
 
@@ -273,6 +281,9 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
+        extra_kwargs = {
+            'username': {'required': False, 'allow_null': True, 'allow_blank': True}
+        }
 
     def to_internal_value(self, data):
         # Delegate to EmployeeFieldsMixin.to_internal_value (normalizes branches to list)
@@ -291,6 +302,15 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             request_org = getattr(request.user, 'organization', None)
             if request_org:
                 validated_data['organization'] = request_org
+
+        role = validated_data.get('role')
+        branch = validated_data.get('branch')
+        
+        # Auto-generate username for employees
+        from auth_user.utils import generate_username
+        username, _ = generate_username(role=role, branch=branch)
+        validated_data['username'] = username
+
         user = User.objects.create_user(password=None, is_active=True, **validated_data)
 
         # ── Sync branch ↔ branches ────────────────────────────────────────
@@ -333,7 +353,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
 class OrganizationCreateSerializer(serializers.Serializer):
     organization_name = serializers.CharField(max_length=255)
-    username = serializers.CharField(max_length=100)
+    username = serializers.CharField(max_length=100, required=False, allow_blank=True)
     email = serializers.EmailField()
     phone = serializers.CharField(max_length=15)
     name = serializers.CharField(max_length=255)
@@ -344,14 +364,18 @@ class OrganizationCreateSerializer(serializers.Serializer):
         return value
 
     def validate_username(self, value):
-        if User.objects.filter(username=value).exists():
+        if value and User.objects.filter(username=value).exists():
             raise serializers.ValidationError("This username is already taken.")
         return value
 
     def create(self, validated_data):
         organization = Organization.objects.create(name=validated_data['organization_name'])
+        
+        from auth_user.utils import generate_username
+        username, _ = generate_username(role='super_admin')
+        
         user = User.objects.create_user(
-            username=validated_data['username'],
+            username=username,
             email=validated_data['email'],
             password=None,
             role='super_admin',

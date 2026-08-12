@@ -256,3 +256,61 @@ Best Regards,
         send_whatsapp_text(to=user.phone, body=text_content, user_id=str(user.id))
     except Exception as e:
         print(e)
+
+
+def generate_username(role, branch=None, course=None, batch_attempt=None, attempt_year=None):
+    from django.utils import timezone
+    from auth_user.models import User
+    
+    institute = "IIPS"
+    
+    ROLE_ABBR = {
+        'super_admin': 'SA',
+        'branch_manager': 'BM',
+        'admin_senior_executive': 'ASE',
+        'admin_executive': 'AE',
+        'front_desk': 'FD',
+        'counsellor': 'CO',
+        'sales_senior_executive': 'SSE',
+        'sales_executive': 'SE',
+        'tele_caller': 'TC',
+        'exam_supervisor': 'ES',
+        'paper_checker': 'PC',
+        'accountant': 'AC',
+        'faculty': 'FA',
+        'house_keeping': 'HK',
+        'security': 'SC',
+        'student': 'S',
+        'parents': 'P',
+        'parent': 'P'
+    }
+    role_str = ROLE_ABBR.get(role, role[:2].upper())
+    
+    if role == 'super_admin':
+        prefix = f"{institute}_{role_str}_"
+    else:
+        branch_str = "XX"
+        if branch and getattr(branch, 'name', None):
+            branch_str = branch.name[:2].upper()
+            
+        if role in ['student', 'parents', 'parent']:
+            course_str = (course or 'UNKNOWN').upper()
+            
+            attempt_char = (batch_attempt[0].upper() if batch_attempt else 'X')
+            year_str = str(attempt_year)[-2:] if attempt_year else str(timezone.now().year)[-2:]
+            attempt_str = f"{attempt_char}{year_str}"
+            
+            prefix = f"{institute}_{branch_str}_{role_str}_{course_str}_{attempt_str}_"
+        else:
+            prefix = f"{institute}_{branch_str}_{role_str}_"
+            
+    last_user = User.objects.filter(username__startswith=prefix).order_by('-username').first()
+    if last_user and last_user.username:
+        try:
+            seq = int(last_user.username.split('_')[-1]) + 1
+        except ValueError:
+            seq = 1
+    else:
+        seq = 1
+            
+    return f"{prefix}{seq:04d}", seq

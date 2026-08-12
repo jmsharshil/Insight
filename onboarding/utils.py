@@ -152,6 +152,15 @@ class AdmissionService:
     def _create_user_accounts(admission: Admission):
         student_name = f"{admission.first_name} {admission.surname}".strip()
 
+        from auth_user.utils import generate_username
+        student_username, _ = generate_username(
+            role='student',
+            branch=admission.branch,
+            course=admission.course,
+            batch_attempt=admission.batch_attempt,
+            attempt_year=admission.attempt_year
+        )
+
         student_user, student_password = AdmissionService._create_or_update_user(
             email=admission.email,
             phone=re.sub(r'\D', '', admission.phone_student or ''),
@@ -160,8 +169,9 @@ class AdmissionService:
             linked_student=None,
             organization=admission.branch.organization if admission.branch else None,
             branch=admission.branch,
+            username=student_username,
         )
-        student_user.branches.set(admission.branch)  # Assign student to the admission branch
+        student_user.branches.set([admission.branch]) if admission.branch else None
 
         try:
             if student_password:
@@ -178,6 +188,8 @@ class AdmissionService:
             else:
                 parent_name  = admission.father_name.strip() or f"Parent of {student_name}"
 
+                parent_username = student_username.replace('_S_', '_P_', 1)
+
                 parent_user, parent_password = AdmissionService._create_or_update_user(
                     email=admission.email_parent,
                     phone=parent_phone,
@@ -186,8 +198,9 @@ class AdmissionService:
                     linked_student=student_user,
                     organization=admission.branch.organization if admission.branch else None,
                     branch=admission.branch,
+                    username=parent_username,
                 )
-                parent_user.branches.set(admission.branch)
+                parent_user.branches.set([admission.branch]) if admission.branch else None
 
                 try:
                     if parent_password:
@@ -213,7 +226,7 @@ class AdmissionService:
         return username
 
     @staticmethod
-    def _create_or_update_user(*, email, phone, name, role, linked_student=None, organization=None, branch=None):
+    def _create_or_update_user(*, email, phone, name, role, linked_student=None, organization=None, branch=None, username=None):
         if not email:
             raise ValueError("Email is required to create login credentials.")
         if not phone:
@@ -223,7 +236,7 @@ class AdmissionService:
 
         if user:
             if not user.username:
-                user.username = AdmissionService._build_unique_username(email)
+                user.username = username or AdmissionService._build_unique_username(email)
             user.phone          = phone
             user.name           = name or user.name
             user.role           = role
@@ -239,7 +252,7 @@ class AdmissionService:
         else:
             password = generate_temporary_password()
             user = User.objects.create_user(
-                username=AdmissionService._build_unique_username(email),
+                username=username or AdmissionService._build_unique_username(email),
                 email=email,
                 password=password,
                 role=role,
