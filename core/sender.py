@@ -16,7 +16,7 @@ def send_email(to, subject, cc=None, text="", template=None, attachments=None, t
     if cc is None:
         cc = []
     if from_email is None:
-        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'iips.insightinstitute@gmail.com')
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'support@insightinstitute.co')
     
     # Ensure to/cc are always lists and deduplicate while preserving order
     if isinstance(to, str):
