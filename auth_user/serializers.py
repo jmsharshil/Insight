@@ -306,13 +306,6 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         role = validated_data.get('role')
         branch = validated_data.get('branch')
         
-        # Auto-generate username for employees
-        from auth_user.utils import generate_username
-        username, _ = generate_username(role=role, branch=branch)
-        validated_data['username'] = username
-
-        user = User.objects.create_user(password=None, is_active=True, **validated_data)
-
         # ── Sync branch ↔ branches ────────────────────────────────────────
         # Build the final set of branches from both sources
         if extra_branches is None:
@@ -320,8 +313,15 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         else:
             branch_set = list(extra_branches) if isinstance(extra_branches, (list, tuple, set)) else [extra_branches]
 
-        if user.branch and user.branch not in branch_set:
-            branch_set.insert(0, user.branch)   # primary branch first
+        if branch and branch not in branch_set:
+            branch_set.insert(0, branch)   # primary branch first
+
+        # Auto-generate username for employees
+        from auth_user.utils import generate_username
+        username, _ = generate_username(role=role, branches=branch_set)
+        validated_data['username'] = username
+
+        user = User.objects.create_user(password=None, is_active=True, **validated_data)
 
         if branch_set:
             user.branches.set(branch_set)

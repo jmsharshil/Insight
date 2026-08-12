@@ -258,7 +258,7 @@ Best Regards,
         print(e)
 
 
-def generate_username(role, branch=None, course=None, batch_attempt=None, attempt_year=None):
+def generate_username(role, branch=None, branches=None, course=None, batch_attempt=None, attempt_year=None):
     from django.utils import timezone
     from auth_user.models import User
     
@@ -289,9 +289,18 @@ def generate_username(role, branch=None, course=None, batch_attempt=None, attemp
     if role == 'super_admin':
         prefix = f"{institute}_{role_str}_"
     else:
-        branch_str = "XX"
+        branch_set = []
         if branch and getattr(branch, 'name', None):
-            branch_str = branch.name[:2].upper()
+            branch_set.append(branch)
+        if branches:
+            for b in branches:
+                if getattr(b, 'name', None) and b not in branch_set:
+                    branch_set.append(b)
+                    
+        branch_str = "XX"
+        if branch_set:
+            branch_names = [b.name[:2].upper() for b in branch_set]
+            branch_str = "_".join(branch_names)
             
         if role in ['student', 'parents', 'parent']:
             course_str = (course or 'UNKNOWN').upper()
