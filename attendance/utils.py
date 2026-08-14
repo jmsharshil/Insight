@@ -517,9 +517,8 @@ def get_next_session_details(student, current_slot=None):
 
     # Look for next slot today (after current slot/time)
     next_slots_qs = TimetableSlot.objects.filter(
+        Q(day_of_week=dow) | Q(session_date=now.date()),
         batch_id__in=batch_ids,
-        day_of_week=dow,
-        is_recurring=True,
     )
     if current_slot and hasattr(current_slot, 'end_time') and current_slot.end_time:
         next_slots_qs = next_slots_qs.filter(start_time__gt=current_slot.end_time)
@@ -543,10 +542,10 @@ def get_next_session_details(student, current_slot=None):
 
     # Tomorrow's first slot
     tomorrow_dow = (dow % 7) + 1
+    tomorrow = now.date() + timedelta(days=1)
     tomorrow_slot = TimetableSlot.objects.filter(
+        Q(day_of_week=tomorrow_dow) | Q(session_date=tomorrow),
         batch_id__in=batch_ids,
-        day_of_week=tomorrow_dow,
-        is_recurring=True,
     ).order_by('start_time').first()
     if tomorrow_slot:
         subject_name = getattr(tomorrow_slot.subject, 'name', 'Class') if tomorrow_slot.subject else 'Class'
@@ -606,8 +605,8 @@ def get_active_timetable_slot_for_scan(student, slot_id=None):
     buffered_time = (now + timedelta(minutes=15)).time()
 
     matching_slots = TimetableSlot.objects.filter(
+        Q(day_of_week=current_dow) | Q(session_date=now.date()),
         batch_id__in=enrolled_batch_ids,
-        day_of_week=current_dow,
         start_time__lte=buffered_time,
         end_time__gte=current_time
     ).select_related('batch', 'subject').order_by('start_time')
@@ -670,8 +669,8 @@ def evaluate_daily_slots_attendance(student, date_obj, check_in_time, check_out_
 
     # Get all scheduled slots for the day
     daily_slots = TimetableSlot.objects.filter(
-        batch_id__in=enrolled_batch_ids,
-        day_of_week=day_of_week
+        Q(day_of_week=day_of_week) | Q(session_date=date_obj),
+        batch_id__in=enrolled_batch_ids
     ).order_by('start_time')
 
     created_or_updated = []

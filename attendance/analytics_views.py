@@ -523,13 +523,9 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
             for r in records.exclude(status='on_leave'):
                 day_slots = []
                 for slot in slots:
-                    if slot.is_recurring:
-                        if slot.day_of_week == r.date.weekday():
-                            if (not slot.effective_from or slot.effective_from <= r.date) and \
-                               (not slot.effective_to or slot.effective_to >= r.date):
-                                day_slots.append(slot)
-                    else:
-                        if slot.session_date == r.date:
+                    if slot.day_of_week == r.date.weekday() or slot.session_date == r.date:
+                        if (not slot.effective_from or slot.effective_from <= r.date) and \
+                           (not slot.effective_to or slot.effective_to >= r.date):
                             day_slots.append(slot)
                             
                 is_present = r.status in ['present', 'late', 'half_day']
@@ -726,13 +722,9 @@ class AttendanceHistoryAPIView(SafeAPIView):
                 if r.batch:
                     slots = TimetableSlot.objects.filter(batch=r.batch).select_related('subject')
                     for slot in slots:
-                        if slot.is_recurring:
-                            if slot.day_of_week == r.date.weekday():
-                                if (not slot.effective_from or slot.effective_from <= r.date) and \
-                                   (not slot.effective_to or slot.effective_to >= r.date):
-                                    day_slots.append(slot)
-                        else:
-                            if slot.session_date == r.date:
+                        if slot.day_of_week == r.date.weekday() or slot.session_date == r.date:
+                            if (not slot.effective_from or slot.effective_from <= r.date) and \
+                               (not slot.effective_to or slot.effective_to >= r.date):
                                 day_slots.append(slot)
 
                 if day_slots:

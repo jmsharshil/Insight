@@ -217,54 +217,84 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     qr_slot_deviation = defaultdict(lambda: {'late_in': Decimal(0), 'early_out': Decimal(0)})
 
     for log_date, logs in qr_by_date.items():
-        check_ins = [l for l in logs if l.scan_type == 'check_in']
-        check_outs = [l for l in logs if l.scan_type == 'check_out']
+        d_str = log_date.strftime('%Y-%m-%d')
         diff_minutes = Decimal(0)
-        if check_ins and check_outs:
-            # Use local times for all calculations
-            first_in_local = dj_timezone.localtime(min(l.scanned_at for l in check_ins))
-            last_out_local = dj_timezone.localtime(max(l.scanned_at for l in check_outs))
-            actual_in_dt = first_in_local.replace(tzinfo=None)
-            actual_out_dt = last_out_local.replace(tzinfo=None)
-            diff_minutes = Decimal((last_out_local - first_in_local).total_seconds()) / Decimal(60)
-
-            # Find scheduled slots for this date to cap hours and compute buffer deviation
-            from batches.models import TimetableSlot
-            from django.db.models import Q
-            dow = log_date.weekday()
-            slots = TimetableSlot.objects.filter(
-                Q(day_of_week=dow) | Q(session_date=log_date),
-                faculty=faculty_profile,
-            )
+        
+        from attendance.models import EmployeeAttendanceRecord
+        att_records = EmployeeAttendanceRecord.objects.filter(
+            user=faculty_profile.user,
+            date=log_date,
+            timetable_slot__isnull=False
+        ).select_related('timetable_slot')
+        
+        if att_records.exists():
+            # V3 logic: precise slot-based check-in/out
             scheduled_minutes = Decimal(0)
-            earliest_s_dt = None
-            latest_e_dt = None
-            
-            for slot in slots:
+            for att in att_records:
+                slot = att.timetable_slot
                 if slot.start_time and slot.end_time:
                     s_dt = datetime.combine(log_date, slot.start_time)
                     e_dt = datetime.combine(log_date, slot.end_time)
                     if e_dt < s_dt:
                         e_dt += timedelta(days=1)
-                    scheduled_minutes += Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
-
-                    if not earliest_s_dt or s_dt < earliest_s_dt:
-                        earliest_s_dt = s_dt
-                    if not latest_e_dt or e_dt > latest_e_dt:
-                        latest_e_dt = e_dt
-
-            if earliest_s_dt and latest_e_dt:
-                late_in = max(Decimal(0), Decimal((actual_in_dt - earliest_s_dt).total_seconds()) / Decimal(60))
-                early_out = max(Decimal(0), Decimal((latest_e_dt - actual_out_dt).total_seconds()) / Decimal(60))
-                d_str = log_date.strftime('%Y-%m-%d')
-                qr_slot_deviation[d_str]['late_in'] += late_in
-                qr_slot_deviation[d_str]['early_out'] += early_out
-
-            # If they had a scheduled slot, their base pay for this period is the full scheduled duration.
-            # The late/early penalty will correctly deduct from this base if they exceed the buffer.
-            # If we don't do this, they get penalized twice (once for missing minutes in diff_minutes, and again via penalty).
+                    slot_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+                    scheduled_minutes += slot_mins
+                    
+                    if att.checked_in_at:
+                        actual_in_dt = dj_timezone.localtime(att.checked_in_at).replace(tzinfo=None)
+                        late_in = max(Decimal(0), Decimal((actual_in_dt - s_dt).total_seconds()) / Decimal(60))
+                        qr_slot_deviation[d_str]['late_in'] += late_in
+                        
+                    if att.checked_out_at:
+                        actual_out_dt = dj_timezone.localtime(att.checked_out_at).replace(tzinfo=None)
+                        early_out = max(Decimal(0), Decimal((e_dt - actual_out_dt).total_seconds()) / Decimal(60))
+                        qr_slot_deviation[d_str]['early_out'] += early_out
+            
             if scheduled_minutes > 0:
                 diff_minutes = scheduled_minutes
+        else:
+            # Fallback for old records before V3
+            check_ins = [l for l in logs if l.scan_type == 'check_in']
+            check_outs = [l for l in logs if l.scan_type == 'check_out']
+            if check_ins and check_outs:
+                first_in_local = dj_timezone.localtime(min(l.scanned_at for l in check_ins))
+                last_out_local = dj_timezone.localtime(max(l.scanned_at for l in check_outs))
+                actual_in_dt = first_in_local.replace(tzinfo=None)
+                actual_out_dt = last_out_local.replace(tzinfo=None)
+                diff_minutes = Decimal((last_out_local - first_in_local).total_seconds()) / Decimal(60)
+
+                from batches.models import TimetableSlot
+                from django.db.models import Q
+                dow = log_date.weekday()
+                slots = TimetableSlot.objects.filter(
+                    Q(day_of_week=dow) | Q(session_date=log_date),
+                    faculty=faculty_profile,
+                )
+                scheduled_minutes = Decimal(0)
+                earliest_s_dt = None
+                latest_e_dt = None
+                
+                for slot in slots:
+                    if slot.start_time and slot.end_time:
+                        s_dt = datetime.combine(log_date, slot.start_time)
+                        e_dt = datetime.combine(log_date, slot.end_time)
+                        if e_dt < s_dt:
+                            e_dt += timedelta(days=1)
+                        scheduled_minutes += Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+
+                        if not earliest_s_dt or s_dt < earliest_s_dt:
+                            earliest_s_dt = s_dt
+                        if not latest_e_dt or e_dt > latest_e_dt:
+                            latest_e_dt = e_dt
+
+                if earliest_s_dt and latest_e_dt:
+                    late_in = max(Decimal(0), Decimal((actual_in_dt - earliest_s_dt).total_seconds()) / Decimal(60))
+                    early_out = max(Decimal(0), Decimal((latest_e_dt - actual_out_dt).total_seconds()) / Decimal(60))
+                    qr_slot_deviation[d_str]['late_in'] += late_in
+                    qr_slot_deviation[d_str]['early_out'] += early_out
+
+                if scheduled_minutes > 0:
+                    diff_minutes = scheduled_minutes
 
         if log_date in session_dates:
             continue  # SessionReport hours already counted for this date
@@ -353,11 +383,26 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         if slot and slot.end_time:
             scheduled_end_time = slot.end_time
 
-        # Use QR check-in time as actual arrival time (not session report time which is now the slot time)
+        # Use EmployeeAttendanceRecord for precise slot-based check-in/out time
         actual_start = s.start_time
         actual_end = s.end_time
         d_str = s.session_date.strftime('%Y-%m-%d')
-        if s.session_date in qr_by_date:
+        
+        from attendance.models import EmployeeAttendanceRecord
+        att_record = EmployeeAttendanceRecord.objects.filter(
+            user=faculty_profile.user,
+            date=s.session_date,
+            timetable_slot__batch_id=s.batch_id,
+            timetable_slot__subject_id=s.subject_id
+        ).first()
+        
+        if att_record:
+            if att_record.checked_in_at:
+                actual_start = dj_timezone.localtime(att_record.checked_in_at).time()
+            if att_record.checked_out_at:
+                actual_end = dj_timezone.localtime(att_record.checked_out_at).time()
+        elif s.session_date in qr_by_date:
+            # Fallback for old records before EmployeeAttendanceRecord logic was fully enforced
             day_logs = qr_by_date[s.session_date]
             day_check_ins = [l for l in day_logs if l.scan_type == 'check_in']
             day_check_outs = [l for l in day_logs if l.scan_type == 'check_out']
@@ -436,11 +481,9 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 daily_stats[d_str]['penalty_minutes'] = penalty_min
                 daily_stats[d_str]['deduction'] += day_penalty
     else:
-        # ── Full-time: legacy approach — aggregate daily delays ─────────────────────
-        for log_date, logs in qr_by_date.items():
-            for log in logs:
-                daily_delays[log_date] += log.late_minutes
-                daily_delays[log_date] += log.early_minutes
+        # ── Full-time: aggregate daily delays from session differences ─────────────────────
+        # Note: We NO LONGER sum log.late_minutes and log.early_minutes from FacultyQRScanLog
+        # to avoid double-counting, because daily_delays ALREADY includes total_session_diff.
 
         for d_date, d_delay in daily_delays.items():
             if d_date.weekday() == 6:
@@ -456,15 +499,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 if d_delay >= 15:
                     days_late_15_mins += 1
 
-                # Full-time faculty do not get per-minute deduction
-                # if d_delay > grace:
-                #     penalty_min = d_delay - grace
-                #     day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                #     late_penalty += day_penalty
-                #     total_late_penalty_minutes += penalty_min
-                #     late_dates.append(d_str)
-                #     daily_stats[d_str]['penalty_minutes'] = penalty_min
-                #     daily_stats[d_str]['deduction'] += day_penalty
+                # Apply per-minute deduction for full_time (uncommented to fix deduction calculation)
+                if d_delay > grace:
+                    penalty_min = d_delay - grace
+                    day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                    late_penalty += day_penalty
+                    total_late_penalty_minutes += penalty_min
+                    late_dates.append(d_str)
+                    daily_stats[d_str]['penalty_minutes'] = penalty_min
+                    daily_stats[d_str]['deduction'] += day_penalty
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):

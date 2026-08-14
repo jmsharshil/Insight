@@ -296,8 +296,8 @@ def detect_missing_scans(branch_id, date_str=None):
                 enrolled_batch_ids.append(primary_batch_id)
 
             day_slots = TimetableSlot.objects.filter(
+                Q(day_of_week=processing_dow) | Q(session_date=date_obj),
                 batch_id__in=enrolled_batch_ids,
-                day_of_week=processing_dow,
             ).select_related('batch', 'batch__branch')
 
             # For today: only slots whose start_time has already passed.
@@ -452,10 +452,64 @@ def detect_missing_scans_all_branches():
             result = detect_missing_scans(str(branch.id), date_str)
             results.append(f"Branch {branch.name}: {result}")
         logger.info(f"Nightly missing scan detection done for {len(results)} branches.")
+        
+        # Also run EOD staff absentees check
+        auto_mark_staff_absentees_eod()
+        
         return "\n".join(results)
     except Exception as exc:
         logger.error(f"detect_missing_scans_all_branches error: {exc}")
         return f"Error: {exc}"
+
+def auto_mark_staff_absentees_eod():
+    """
+    Nightly task: Auto-marks non-faculty staff as absent if they have no check-in for the day.
+    """
+    try:
+        from django.contrib.auth import get_user_model
+        from .models import EmployeeAttendanceRecord
+        from leave.models import LeaveApplication
+        User = get_user_model()
+        
+        today = timezone.localtime(timezone.now()).date()
+        
+        staff_users = User.objects.filter(
+            is_active=True
+        ).exclude(role__in=['student', 'parents', 'faculty', 'super_admin'])
+        
+        leave_user_ids = set(
+            LeaveApplication.objects.filter(
+                from_date__lte=today,
+                to_date__gte=today,
+                status='approved'
+            ).values_list('user_id', flat=True)
+        )
+        
+        recorded_user_ids = set(
+            EmployeeAttendanceRecord.objects.filter(
+                date=today
+            ).values_list('user_id', flat=True)
+        )
+        
+        to_mark_absent = staff_users.exclude(id__in=leave_user_ids).exclude(id__in=recorded_user_ids)
+        
+        records = []
+        for user in to_mark_absent:
+            records.append(
+                EmployeeAttendanceRecord(
+                    user=user,
+                    branch=getattr(user, 'branch', None),
+                    date=today,
+                    status='absent'
+                )
+            )
+            
+        if records:
+            EmployeeAttendanceRecord.objects.bulk_create(records, ignore_conflicts=True)
+            logger.info(f"Auto-marked {len(records)} staff members absent for {today}.")
+            
+    except Exception as exc:
+        logger.error(f"auto_mark_staff_absentees_eod error: {exc}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -600,8 +654,8 @@ def auto_mark_student_absentees():
         # Get ALL past slots for today from ALL active batches (no branch filter).
         # Branch is derived from each slot's batch to avoid skipping batches with branch=NULL.
         past_slots = TimetableSlot.objects.filter(
+            Q(day_of_week=day_of_week) | Q(session_date=today),
             batch__is_active=True,
-            day_of_week=day_of_week,
             start_time__lte=cutoff_time,
             start_time__isnull=False,
         ).select_related('batch', 'batch__branch', 'subject')
@@ -701,6 +755,35 @@ def auto_mark_student_absentees():
                     f"({slot.start_time} batch={batch.batch_code}): "
                     f"auto-marked {len(records_to_create)} absent."
                 )
+
+            # ----- FACULTY AUTO-ABSENT LOGIC -----
+            faculty_profile = getattr(slot, 'faculty', None)
+            if faculty_profile and faculty_profile.user:
+                faculty_user = faculty_profile.user
+                
+                from leave.models import LeaveApplication
+                on_leave = LeaveApplication.objects.filter(
+                    user=faculty_user,
+                    from_date__lte=today,
+                    to_date__gte=today,
+                    status='approved'
+                ).exists()
+                
+                if not on_leave:
+                    from .models import EmployeeAttendanceRecord
+                    faculty_recorded = EmployeeAttendanceRecord.objects.filter(
+                        user=faculty_user, date=today, timetable_slot=slot
+                    ).exists()
+                    
+                    if not faculty_recorded:
+                        EmployeeAttendanceRecord.objects.create(
+                            user=faculty_user,
+                            branch=faculty_profile.branch,
+                            timetable_slot=slot,
+                            date=today,
+                            status='absent'
+                        )
+                        logger.info(f"[auto_mark_absentees] Faculty {faculty_user.id} auto-marked absent for slot {slot.id}")
 
         logger.info(f"[auto_mark_absentees] Done. Total auto-absent records created: {total_marked}")
         return f"auto_mark_student_absentees: {total_marked} absent records created for {today}"

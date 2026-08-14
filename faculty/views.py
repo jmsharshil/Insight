@@ -579,16 +579,11 @@ class FacultyQRCheckinView(APIView):
 
         # Determine late status for check_in
         if scan_type == 'check_in':
-            dow = now.weekday()
-            slots = TimetableSlot.objects.filter(
-                Q(day_of_week=dow) | Q(session_date=now.date()),
-                faculty=fp, batch__branch=fp.branch, batch__is_active=True,
-                start_time__isnull=False
-            )
             expected_start = None
-            for slot in slots:
-                if expected_start is None or slot.start_time < expected_start:
-                    expected_start = slot.start_time
+            if active_slot and active_slot.start_time:
+                expected_start = active_slot.start_time
+            elif future_slot and future_slot.start_time:
+                expected_start = future_slot.start_time
 
             if expected_start:
                 from datetime import datetime
@@ -600,16 +595,20 @@ class FacultyQRCheckinView(APIView):
                     late_minutes = int(diff)
         
         elif scan_type == 'check_out':
-            dow = now.weekday()
-            slots = TimetableSlot.objects.filter(
-                Q(day_of_week=dow) | Q(session_date=now.date()),
-                faculty=fp, batch__branch=fp.branch, batch__is_active=True,
-                end_time__isnull=False
-            )
             expected_end = None
-            for slot in slots:
-                if expected_end is None or slot.end_time > expected_end:
-                    expected_end = slot.end_time
+            if open_record and open_record.timetable_slot and open_record.timetable_slot.end_time:
+                expected_end = open_record.timetable_slot.end_time
+            else:
+                # Fallback to the latest slot of the day if no open record matched
+                dow = now.weekday()
+                slots = TimetableSlot.objects.filter(
+                    Q(day_of_week=dow) | Q(session_date=now.date()),
+                    faculty=fp, batch__branch=fp.branch, batch__is_active=True,
+                    end_time__isnull=False
+                )
+                for slot in slots:
+                    if expected_end is None or slot.end_time > expected_end:
+                        expected_end = slot.end_time
             
             if expected_end:
                 from datetime import datetime

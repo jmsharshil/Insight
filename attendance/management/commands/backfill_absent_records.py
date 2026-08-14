@@ -72,8 +72,8 @@ class Command(BaseCommand):
                     continue
 
                 slots = TimetableSlot.objects.filter(
+                    Q(day_of_week=processing_dow) | Q(session_date=date_obj),
                     batch_id__in=enrolled_batch_ids,
-                    day_of_week=processing_dow,
                     start_time__isnull=False,
                 ).select_related("batch", "batch__branch")
 
