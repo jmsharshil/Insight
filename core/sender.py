@@ -5,6 +5,47 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import imaplib
+import time
+
+def save_to_sent_folder(msg):
+    email_user = getattr(settings,"EMAIL_HOST_USER")
+    email_password = getattr(settings,"EMAIL_HOST_PASSWORD")
+
+    try:
+        mail = imaplib.IMAP4_SSL("imap.hostinger.com", 993)
+
+        # Login
+        mail.login(email_user, email_password)
+
+        # Convert Django email to raw MIME message
+        raw_message = msg.message().as_bytes()
+
+        # Save directly to Hostinger Sent folder
+        result = mail.append(
+            "INBOX.Sent",
+            None,
+            imaplib.Time2Internaldate(time.time()),
+            raw_message
+        )
+        print("result:",result)
+
+        logger.info("IMAP APPEND result: %s", result)
+
+        mail.logout()
+
+        if result[0] == "OK":
+            logger.info("Email successfully saved to Sent folder.")
+            return True
+
+        logger.error("Failed to save email to Sent: %s", result)
+        return False
+
+    except Exception as e:
+        logger.exception("IMAP Sent error: %s", e)
+        print("error........................",e)
+        return False
+
 def send_email(to, subject, cc=None, text="", template=None, attachments=None, template_context=None, organization=None, from_email=None):
     """
     Send email supporting plain-text + HTML fallback.
@@ -75,6 +116,7 @@ def send_email(to, subject, cc=None, text="", template=None, attachments=None, t
     try:
         msg.send()
         logger.info("Email sent successfully to %s with subject: %s", to_list, subject)
+        # save_to_sent_folder(msg)
         return True
     except Exception as e:
         logger.error("Failed to send email to %s: %s", to_list, str(e))
