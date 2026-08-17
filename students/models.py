@@ -98,7 +98,7 @@ class Student(models.Model):
 
     # ── Identity ──────────────────────────────────────────────────────────────
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    admission_number = models.CharField(max_length=20, unique=True, editable=False, db_index=True)
+    admission_number = models.CharField(max_length=100, unique=True, editable=False, db_index=True)
 
     # ── Links ─────────────────────────────────────────────────────────────────
     admission = models.OneToOneField(Admission,on_delete=models.PROTECT,related_name='student_profile',help_text="The admission record this student was created from.",)
@@ -187,8 +187,11 @@ class Student(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        if not self.admission_number:
-            self.admission_number = generate_admission_number()
+        if not self.admission_number or self.admission_number.startswith("ADM-") or (self.user and self.admission_number != self.user.username):
+            if hasattr(self, 'user') and self.user and self.user.username:
+                self.admission_number = self.user.username
+            elif not self.admission_number:
+                self.admission_number = generate_admission_number()
         super().save(*args, **kwargs)
 
     @property

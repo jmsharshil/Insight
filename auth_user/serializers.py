@@ -52,6 +52,10 @@ class EmployeeFieldsMixin:
         if role not in all_employee_roles:
             for f in EMPLOYEE_FIELDS:
                 ret.pop(f, None)
+            if role == 'student':
+                ret['student_id'] = getattr(instance, 'username', None)
+            elif role in ['parent', 'parents']:
+                ret['parent_id'] = getattr(instance, 'username', None)
             return ret
             
         if role != 'faculty':
