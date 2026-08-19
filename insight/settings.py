@@ -338,46 +338,45 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Logging Configuration (Production)
+# Logging Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if not DEBUG:
-    LOGGING = {
-        'version': 1,
-        'disable_existing_loggers': False,
-        'formatters': {
-            'verbose': {
-                'format': '{levelname} {asctime} {module} {message}',
-                'style': '{',
-            },
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
         },
-        'handlers': {
-            # stdout → Azure Log Stream / App Service Diagnostics / local console
-            'console': {
-                'class': 'logging.StreamHandler',
-                'formatter': 'verbose',
-                'level': 'ERROR',
-            },
-            'file': {
-                'level': 'ERROR',
-                'class': 'logging.FileHandler',
-                'filename': os.getenv('DJANGO_LOG_FILE', os.path.join(BASE_DIR, 'django_errors.log')),
-                'formatter': 'verbose',
-            },
+    },
+    'handlers': {
+        # stdout → Azure Log Stream / App Service Diagnostics / local console
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+            'level': 'ERROR',
         },
-        'loggers': {
-            '': {
-                'handlers': ['console', 'file'],
-                'level': 'ERROR',
-                'propagate': True,
-            },
-            'django': {
-                'handlers': ['console', 'file'],
-                'level': 'ERROR',
-                'propagate': False,
-            },
+        'file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': os.getenv('DJANGO_LOG_FILE', os.path.join(BASE_DIR, 'django_errors.log')),
+            'formatter': 'verbose',
         },
-    }
+    },
+    'loggers': {
+        '': {
+            'handlers': ['console', 'file'],
+            'level': 'ERROR',
+            'propagate': True,
+        },
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
