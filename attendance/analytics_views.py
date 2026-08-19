@@ -2082,10 +2082,15 @@ class EmployeeViolationsAPIView(SafeAPIView):
 
         from django.db.models import Q
 
+        from django.utils import timezone
+        today = timezone.localtime(timezone.now()).date()
+
         # Base queryset for violation-like records
+        # Only consider missing checkouts (or checkout_pending) as violations if the date is in the past.
         qs = EmployeeAttendanceRecord.objects.filter(
-            Q(status__in=['late', 'absent', 'checkout_pending']) |
-            Q(checked_out_at__isnull=True, checked_in_at__isnull=False)  # missing checkout
+            Q(status__in=['late', 'absent']) |
+            (Q(status='checkout_pending') & Q(date__lt=today)) |
+            (Q(checked_out_at__isnull=True, checked_in_at__isnull=False) & Q(date__lt=today))
         ).select_related('user', 'branch', 'timetable_slot', 'marked_by').order_by('-date', '-checked_in_at')
 
         # Scoping
