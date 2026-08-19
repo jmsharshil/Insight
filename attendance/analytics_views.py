@@ -1375,6 +1375,7 @@ class ViolationsAPIView(SafeAPIView):
         resolved = request.GET.get('resolved')
         date_from = request.GET.get('date_from')
         date_to = request.GET.get('date_to')
+        search = request.GET.get('search')
 
         if student_id and role not in ['student', 'parents']:
             violation_qs = violation_qs.filter(student_id=student_id)
@@ -1390,6 +1391,18 @@ class ViolationsAPIView(SafeAPIView):
             violation_qs = violation_qs.filter(date__gte=date_from)
         if date_to:
             violation_qs = violation_qs.filter(date__lte=date_to)
+            
+        if search:
+            from django.db.models import Q
+            violation_qs = violation_qs.filter(
+                Q(student__first_name__icontains=search) |
+                Q(student__surname__icontains=search) |
+                Q(student__roll_number__icontains=search) |
+                Q(student__admission_number__icontains=search) |
+                Q(student__user__name__icontains=search) |
+                Q(student__user__username__icontains=search) |
+                Q(student__user__email__icontains=search)
+            )
 
         violation_qs = violation_qs.order_by('-date')
 
@@ -2091,10 +2104,18 @@ class EmployeeViolationsAPIView(SafeAPIView):
                 qs = qs.filter(branch_id=branch_id)
             date_from = request.GET.get('date_from')
             date_to = request.GET.get('date_to')
+            search = request.GET.get('search')
             if date_from:
                 qs = qs.filter(date__gte=date_from)
             if date_to:
                 qs = qs.filter(date__lte=date_to)
+            if search:
+                qs = qs.filter(
+                    Q(user__name__icontains=search) |
+                    Q(user__username__icontains=search) |
+                    Q(user__email__icontains=search) |
+                    Q(user__employee_id__icontains=search)
+                )
 
         # Convert to violation-style response (consistent with student violations)
         violation_list = []
