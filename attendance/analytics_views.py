@@ -1449,11 +1449,36 @@ class ViolationDetailAPIView(SafeAPIView):
         VIOLATION_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
         if role not in VIOLATION_ROLES:
             return None, Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        entity_type = request.data.get('entity_type', request.GET.get('entity_type'))
+        
+        if entity_type == 'employee':
+            try:
+                v = EmployeeAttendanceRecord.objects.get(id=violation_id)
+                v.is_employee_violation = True
+                return v, None
+            except EmployeeAttendanceRecord.DoesNotExist:
+                return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        elif entity_type == 'student':
+            try:
+                v = ViolationRecord.objects.get(id=violation_id)
+                v.is_employee_violation = False
+                return v, None
+            except ViolationRecord.DoesNotExist:
+                return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Fallback if no entity_type provided
         try:
             v = ViolationRecord.objects.get(id=violation_id)
+            v.is_employee_violation = False
+            return v, None
         except ViolationRecord.DoesNotExist:
-            return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return v, None
+            try:
+                v = EmployeeAttendanceRecord.objects.get(id=violation_id)
+                v.is_employee_violation = True
+                return v, None
+            except EmployeeAttendanceRecord.DoesNotExist:
+                return None, Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     def patch(self, request, violation_id):
         v, err = self._get_violation(request, violation_id)
@@ -1463,6 +1488,16 @@ class ViolationDetailAPIView(SafeAPIView):
         ser = ViolationResolveSerializer(data=request.data)
         if not ser.is_valid():
             return Response({'success': False, 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        if getattr(v, 'is_employee_violation', False):
+            if ser.validated_data['is_resolved']:
+                v.status = 'present'
+                v.shortfall_minutes = 0
+                v.is_corrected = True
+                v.corrected_by = request.user
+                v.correction_note = request.data.get('resolution_note', 'Violation resolved manually.')
+                v.save()
+            return Response({'success': True, 'message': 'Employee violation resolved.'})
 
         v.is_resolved = ser.validated_data['is_resolved']
         v.resolved_by = request.user
@@ -1483,6 +1518,16 @@ class ViolationDetailAPIView(SafeAPIView):
         v, err = self._get_violation(request, violation_id)
         if err:
             return err
+            
+        if getattr(v, 'is_employee_violation', False):
+            # Deleting an employee violation resets the penalty statuses without completely deleting the attendance record
+            v.status = 'present'
+            v.shortfall_minutes = 0
+            v.is_corrected = True
+            v.corrected_by = request.user
+            v.correction_note = 'Violation deleted/dismissed by admin.'
+            v.save()
+            return Response({'success': True, 'message': 'Employee violation dismissed.'}, status=status.HTTP_200_OK)
 
         student_id = v.student_id
         v.delete()
