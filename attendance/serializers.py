@@ -153,8 +153,8 @@ class QRScanInputSerializer(serializers.Serializer):
         required=True,
         help_text='ID of the QR reader device or "mobile_app" for in-app scan.',
     )
-    latitude = serializers.FloatField(required=False, allow_null=True)
-    longitude = serializers.FloatField(required=False, allow_null=True)
+    latitude = serializers.FloatField(required=True, help_text='Device GPS latitude. Required for attendance.')
+    longitude = serializers.FloatField(required=True, help_text='Device GPS longitude. Required for attendance.')
     timetable_slot = serializers.UUIDField(required=False, allow_null=True,
                                          help_text='Optional TimetableSlot UUID for timing validation.')
 
@@ -306,6 +306,7 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'checked_in_at', 'checked_out_at',
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'correction_note',
+            'shortfall_minutes', 'latitude', 'longitude', 'location_verified',
         ]
 
     def get_user_name(self, obj):
@@ -356,7 +357,7 @@ class EmployeeAttendanceCreateSerializer(serializers.Serializer):
 class EmployeeCheckInOutSerializer(serializers.Serializer):
     """POST /api/v1/attendance/employee/check-in/ or check-out/"""
     scan_type = serializers.ChoiceField(choices=[('check_in', 'Check In'), ('check_out', 'Check Out')])
-    latitude = serializers.FloatField(required=False, allow_null=True)
-    longitude = serializers.FloatField(required=False, allow_null=True)
+    latitude = serializers.FloatField(required=True, help_text='Device GPS latitude. Required for attendance.')
+    longitude = serializers.FloatField(required=True, help_text='Device GPS longitude. Required for attendance.')
     # device_id = serializers.CharField(required=True, max_length=100)
     timetable_slot_id = serializers.UUIDField(required=False, allow_null=True)

@@ -36,6 +36,7 @@ CORRECTION_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
 REPORT_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
 QR_ROLES = ['super_admin', 'student', 'exam_supervisor', 'admin_executive']
 VIOLATION_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
+NINE_HOUR_EXEMPT_ROLES = ['faculty', 'exam_supervisor', 'paper_checker', 'house_keeping', 'security']
 
 
 def _user_role(user):
@@ -260,6 +261,25 @@ class QRScanView(APIView):
             if not has_user_branch_access(user, branch.id):
                 return Response({'success': False, 'message': 'You are not assigned to this branch.'}, status=status.HTTP_403_FORBIDDEN)
             
+            # ── Geofencing: require location and validate against branch ──
+            emp_lat = ser.validated_data.get('latitude')
+            emp_lng = ser.validated_data.get('longitude')
+            if emp_lat is None or emp_lng is None:
+                return Response({'success': False, 'message': 'Location is required for attendance. Please enable GPS.'}, status=status.HTTP_400_BAD_REQUEST)
+            if branch.latitude is not None and branch.longitude is not None:
+                geo_distance = haversine_distance(float(emp_lat), float(emp_lng), float(branch.latitude), float(branch.longitude))
+                allowed_radius = branch.allowed_radius_meters or 100
+                if geo_distance > allowed_radius:
+                    return Response({
+                        'success': False,
+                        'message': f'You are outside the allowed area. Distance: {int(geo_distance)}m, Allowed: {allowed_radius}m'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                geo_verified = True
+            else:
+                geo_distance = None
+                geo_verified = False
+                logger.warning(f'Branch {branch.id} has no coordinates configured for geofencing.')
+
             # Record employee attendance
             from attendance.models import EmployeeAttendanceRecord
             from attendance.serializers import EmployeeAttendanceRecordSerializer
@@ -401,7 +421,8 @@ class QRScanView(APIView):
                 # Create a new session record
                 record = EmployeeAttendanceRecord.objects.create(
                     user=user, date=today, timetable_slot=timetable_slot_obj,
-                    branch_id=branch.id, status='checkout_pending', checked_in_at=now
+                    branch_id=branch.id, status='checkout_pending', checked_in_at=now,
+                    latitude=emp_lat, longitude=emp_lng, location_verified=geo_verified,
                 )
                 message = f'Employee Check In recorded successfully.'
             
@@ -422,6 +443,20 @@ class QRScanView(APIView):
                 record.status = 'present'
                 record.save(update_fields=['checked_out_at', 'status'])
                 message = f'Employee Check Out recorded successfully.'
+
+                # ── 9-hour shift violation for non-exempt roles ──
+                if role not in NINE_HOUR_EXEMPT_ROLES and record.checked_in_at:
+                    duration_minutes = int((now - record.checked_in_at).total_seconds() / 60)
+                    required_minutes = 9 * 60  # 540 minutes
+                    shortfall = max(0, required_minutes - duration_minutes)
+                    if shortfall > 0:
+                        record.shortfall_minutes = shortfall
+                        record.save(update_fields=['shortfall_minutes'])
+                        logger.warning(
+                            f'9-hour shift violation: {user.name or user.email} '
+                            f'worked {duration_minutes}min, shortfall {shortfall}min'
+                        )
+                        message += f' Warning: Shift shortfall of {shortfall} minutes detected.'
             
             return Response({
                 'success': True,
@@ -514,9 +549,21 @@ class QRScanView(APIView):
 
         student_branch_id = getattr(student, 'branch_id', None) or getattr(batch, 'branch_id', None) or get_user_branch_id(user)
 
-        # Geofencing check for students (if lat/long provided and branch has coords)
+        # ── Geofencing: require location for students ──
         student_lat = ser.validated_data.get('latitude')
         student_lon = ser.validated_data.get('longitude')
+        if student_lat is None or student_lon is None:
+            return Response({'success': False, 'message': 'Location is required for attendance. Please enable GPS.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate student location against branch
+        if branch.latitude is not None and branch.longitude is not None:
+            student_geo_distance = haversine_distance(float(student_lat), float(student_lon), float(branch.latitude), float(branch.longitude))
+            student_allowed_radius = branch.allowed_radius_meters or 100
+            if student_geo_distance > student_allowed_radius:
+                return Response({
+                    'success': False,
+                    'message': f'You are outside the allowed area. Distance: {int(student_geo_distance)}m, Allowed: {student_allowed_radius}m'
+                }, status=status.HTTP_403_FORBIDDEN)
 
         # Old manual slot override (COMMENTED - now handled earlier with get_active_timetable_slot_for_scan
         # to avoid duplicate queries; old code kept per instructions)
@@ -1456,6 +1503,29 @@ class EmployeeCheckInOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # ── Geofencing: require location and validate against branch ──
+        emp_lat = ser.validated_data.get('latitude')
+        emp_lng = ser.validated_data.get('longitude')
+        if emp_lat is None or emp_lng is None:
+            return Response({'success': False, 'message': 'Location is required for attendance. Please enable GPS.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from branch.models import Branch as BranchModel
+        branch_obj = BranchModel.objects.filter(id=bid).first()
+        geo_verified = False
+        if branch_obj and branch_obj.latitude is not None and branch_obj.longitude is not None:
+            geo_distance = haversine_distance(float(emp_lat), float(emp_lng), float(branch_obj.latitude), float(branch_obj.longitude))
+            allowed_radius = branch_obj.allowed_radius_meters or 100
+            if geo_distance > allowed_radius:
+                return Response({
+                    'success': False,
+                    'message': f'You are outside the allowed area. Distance: {int(geo_distance)}m, Allowed: {allowed_radius}m'
+                }, status=status.HTTP_403_FORBIDDEN)
+            geo_verified = True
+        elif branch_obj:
+            logger.warning(f'Branch {bid} has no coordinates configured for geofencing.')
+
+        role = getattr(user, 'role', '')
+
         # Resolve Timetable Slot for faculty (now supports explicit `timetable_slot_id`; works for faculty path)
         timetable_slot_obj = None
         if timetable_slot_id:
@@ -1551,7 +1621,8 @@ class EmployeeCheckInOutView(APIView):
             # Create a new session record
             record = EmployeeAttendanceRecord.objects.create(
                 user=user, date=today, timetable_slot=timetable_slot_obj,
-                branch_id=bid, status='checkout_pending', checked_in_at=now
+                branch_id=bid, status='checkout_pending', checked_in_at=now,
+                latitude=emp_lat, longitude=emp_lng, location_verified=geo_verified,
             )
             message = f'Check In recorded successfully.'
         
@@ -1567,6 +1638,20 @@ class EmployeeCheckInOutView(APIView):
             record.status = 'present'
             record.save(update_fields=['checked_out_at', 'status'])
             message = f'Check Out recorded successfully.'
+
+            # ── 9-hour shift violation for non-exempt roles ──
+            if role not in NINE_HOUR_EXEMPT_ROLES and record.checked_in_at:
+                duration_minutes = int((now - record.checked_in_at).total_seconds() / 60)
+                required_minutes = 9 * 60  # 540 minutes
+                shortfall = max(0, required_minutes - duration_minutes)
+                if shortfall > 0:
+                    record.shortfall_minutes = shortfall
+                    record.save(update_fields=['shortfall_minutes'])
+                    logger.warning(
+                        f'9-hour shift violation: {user.name or user.email} '
+                        f'worked {duration_minutes}min, shortfall {shortfall}min'
+                    )
+                    message += f' Warning: Shift shortfall of {shortfall} minutes detected.'
 
         # NEW: Faculty late/early deduction logging (fixes amount not being deducted in payroll)
         # Uses resolved timetable_slot_obj if available (per-slot accuracy vs profile work times); 

@@ -1070,14 +1070,13 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 if d_delay >= 15:
                     days_late_15_mins += 1
 
-                # Full-time faculty do not get per-minute deduction
-                # if d_delay > grace:
-                #     penalty_min = d_delay - grace
-                #     day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                #     late_penalty += day_penalty
-                #     total_late_penalty_minutes += penalty_min
-                #     daily_stats[d_str]['penalty_minutes'] = penalty_min
-                #     daily_stats[d_str]['deduction'] += day_penalty
+                if d_delay > grace:
+                    penalty_min = d_delay - grace
+                    day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                    late_penalty += day_penalty
+                    total_late_penalty_minutes += penalty_min
+                    daily_stats[d_str]['penalty_minutes'] = penalty_min
+                    daily_stats[d_str]['deduction'] += day_penalty
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
@@ -1410,48 +1409,71 @@ def compute_payslip_for_user(user, month, year, payroll_run):
 
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
 
+    # ── 9-hour shortfall deduction for non-exempt roles ──
+    # Roles exempt from 9-hour rule (same as in attendance/views.py)
+    NINE_HOUR_EXEMPT_ROLES = ['faculty', 'exam_supervisor', 'paper_checker', 'house_keeping', 'security']
+    REQUIRED_SHIFT_MINUTES = 9 * 60  # 540 minutes
+    SHORTFALL_BUFFER_MINUTES = 5  # Combined 5-minute grace
+
     daily_delays = defaultdict(int)
     for entry in late_entries:
         daily_delays[entry.date] += entry.late_minutes
-        
-    for rec in attendance_records:
-        day_diff = 0
-        if rec.checked_in_at and user.work_start_time:
-            s_time = user.work_start_time
-            from django.utils import timezone
-            local_checkin = timezone.localtime(rec.checked_in_at)
-            s_dt = datetime.combine(rec.date, s_time)
-            if local_checkin.replace(tzinfo=None) > s_dt:
-                diff = (local_checkin.replace(tzinfo=None) - s_dt).total_seconds() / 60
-                day_diff += int(diff)
-                
-        if rec.checked_out_at and user.work_end_time:
-            e_time = user.work_end_time
-            from django.utils import timezone
-            local_checkout = timezone.localtime(rec.checked_out_at)
-            e_dt = datetime.combine(rec.date, e_time)
-            if user.work_start_time and user.work_end_time < user.work_start_time:
-                e_dt += timedelta(days=1)
-                
-            if local_checkout.replace(tzinfo=None) < e_dt:
-                diff = (e_dt - local_checkout.replace(tzinfo=None)).total_seconds() / 60
-                day_diff += int(diff)
-                
-        if day_diff > daily_delays[rec.date]:
-            daily_delays[rec.date] = day_diff
+
+    # Calculate per-day shortfall from 9-hour requirement
+    if role not in NINE_HOUR_EXEMPT_ROLES:
+        for rec in attendance_records:
+            if rec.checked_in_at and rec.checked_out_at:
+                from django.utils import timezone
+                local_checkin = timezone.localtime(rec.checked_in_at)
+                local_checkout = timezone.localtime(rec.checked_out_at)
+                actual_minutes = int((local_checkout - local_checkin).total_seconds() / 60)
+                day_shortfall = max(0, REQUIRED_SHIFT_MINUTES - actual_minutes)
+                if day_shortfall > daily_delays.get(rec.date, 0):
+                    daily_delays[rec.date] = day_shortfall
+    else:
+        # For exempt roles, keep the existing late-in / early-out logic
+        for rec in attendance_records:
+            day_diff = 0
+            if rec.checked_in_at and user.work_start_time:
+                s_time = user.work_start_time
+                from django.utils import timezone
+                local_checkin = timezone.localtime(rec.checked_in_at)
+                s_dt = datetime.combine(rec.date, s_time)
+                if local_checkin.replace(tzinfo=None) > s_dt:
+                    diff = (local_checkin.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                    day_diff += int(diff)
+
+            if rec.checked_out_at and user.work_end_time:
+                e_time = user.work_end_time
+                from django.utils import timezone
+                local_checkout = timezone.localtime(rec.checked_out_at)
+                e_dt = datetime.combine(rec.date, e_time)
+                if user.work_start_time and user.work_end_time < user.work_start_time:
+                    e_dt += timedelta(days=1)
+
+                if local_checkout.replace(tzinfo=None) < e_dt:
+                    diff = (e_dt - local_checkout.replace(tzinfo=None)).total_seconds() / 60
+                    day_diff += int(diff)
+
+            if day_diff > daily_delays[rec.date]:
+                daily_delays[rec.date] = day_diff
 
     late_dates = []
+    total_shortfall_penalty_minutes = 0
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
             continue
-        if d_delay > grace:
-            penalty_min = d_delay - grace
+        # Apply combined 5-minute buffer per day
+        if d_delay > SHORTFALL_BUFFER_MINUTES:
+            penalty_min = d_delay - SHORTFALL_BUFFER_MINUTES
             late_penalty += min(Decimal(penalty_min) * deduction_per_minute, max_deduction)
             late_dates.append(d_date.strftime('%Y-%m-%d'))
-            
+            total_shortfall_penalty_minutes += penalty_min
+
     if role in ['house_keeping', 'security']:
         late_penalty = Decimal(0)
         late_dates = []
+        total_shortfall_penalty_minutes = 0
 
     from datetime import date
     today = date.today()
@@ -1526,12 +1548,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     # Delete existing payslip for this user in this payroll run (for regeneration)
     PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
 
-    late_penalty_minutes = 0
-    for d_date, d_delay in daily_delays.items():
-        if d_date.weekday() == 6:
-            continue
-        if d_delay > grace:
-            late_penalty_minutes += d_delay - grace
+    late_penalty_minutes = total_shortfall_penalty_minutes
 
     deduction_note_str = build_deduction_note(
         late_penalty=late_penalty,
