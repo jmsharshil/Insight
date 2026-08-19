@@ -11,6 +11,7 @@ Changes from v2:
 
 import logging
 from django.utils import timezone
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
