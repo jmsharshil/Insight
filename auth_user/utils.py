@@ -188,7 +188,7 @@ Best Regards,
     )
     
     try:
-        send_whatsapp_text(to=parent_user.phone,body=text_content,parent_id=str(parent_user.id))
+        send_whatsapp_text(to=parent_user.phone, body=text_content, user_id=str(parent_user.id))
     except Exception as e:
         print(e)
 
