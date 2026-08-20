@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 from django.conf import settings
@@ -876,7 +877,6 @@ import hashlib
 import json
 
 class RazorpayWebhookView(APIView):
-    from rest_framework.permissions import AllowAny
     
     def get_permissions(self):
         return [AllowAny()]
