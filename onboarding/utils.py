@@ -265,3 +265,84 @@ class AdmissionService:
             if linked_student:
                 user.linked_students.add(linked_student)
             return user, password
+
+import requests
+from requests.auth import HTTPBasicAuth
+from django.conf import settings
+
+def create_razorpay_payment_link(amount, reference_id, customer_name, customer_email, customer_contact, description="Fee Payment"):
+    url = "https://api.razorpay.com/v1/payment_links"
+    payload = {
+        "amount": int(amount * 100), # amount in paise
+        "currency": "INR",
+        "accept_partial": False,
+        "reference_id": str(reference_id),
+        "description": description,
+        "customer": {
+            "name": customer_name,
+            "email": customer_email,
+            "contact": customer_contact
+        },
+        "notify": {
+            "sms": False,
+            "email": False 
+        },
+        "reminder_enable": True,
+    }
+    
+    # # Route payment to specific bank account via Razorpay Route (linked accounts)
+    # if razorpay_account_id:
+    #     payload["transfers"] = [
+    #         {
+    #             "account": razorpay_account_id,
+    #             "amount": int(amount * 100),
+    #             "currency": "INR",
+    #             "on_hold": 0,
+    #         }
+    #     ]
+    
+    if hasattr(settings, 'RAZORPAY_KEY_ID') and settings.RAZORPAY_KEY_ID:
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                auth=HTTPBasicAuth(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Razorpay Payment Link error: {response.text}")
+                return None
+        except Exception as e:
+            logger.error(f"Razorpay request exception: {e}")
+            return None
+    return None
+
+def create_razorpay_refund(payment_id, amount, reason=""):
+    url = f"https://api.razorpay.com/v1/payments/{payment_id}/refund"
+    payload = {
+        "amount": int(amount * 100),
+        "notes": {
+            "reason": reason
+        }
+    }
+    if hasattr(settings, 'RAZORPAY_KEY_ID') and settings.RAZORPAY_KEY_ID:
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                auth=HTTPBasicAuth(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Razorpay Refund error: {response.text}")
+                return None
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Razorpay refund request exception: {e}")
+            return None
+    return None

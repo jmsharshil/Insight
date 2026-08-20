@@ -992,3 +992,257 @@ class MyFeesAPIView(APIView):
                 'refunds': refund_serializer.data
             }
         })
+
+import json
+from django.conf import settings
+from rest_framework.permissions import AllowAny
+from .razorpay_service import (
+    create_payment_link,
+    build_upi_link,
+    fetch_payment_link,
+    cancel_payment_link,
+    fetch_payment,
+    create_refund,
+    process_payment_link_paid_event,
+    process_payment_link_cancelled_event,
+    process_refund_processed_event,
+    is_razorpay_enabled,
+    verify_webhook_signature,
+)
+
+
+class RazorpayGeneratePaymentLinkView(APIView):
+    """
+    POST /api/v1/fees/razorpay/generate-link/
+    Body: {
+        "student_fee_id": "<uuid>",
+        "payment_type":   "token_full" | "token_finance",
+        "amount":         5000           # optional override
+    }
+    payment_type='token_full'    → charges the full outstanding amount
+    payment_type='token_finance' → charges only the token/registration amount
+    """
+
+    def post(self, request):
+        student_fee_id  = request.data.get('student_fee_id')
+        payment_type    = request.data.get('payment_type', 'token_full')
+        override_amount = request.data.get('amount')
+
+        if not student_fee_id:
+            return Response({'success': False, 'message': 'student_fee_id is required.'}, status=400)
+
+        try:
+            sf = StudentFee.objects.select_related('student', 'fee_structure').get(pk=student_fee_id)
+        except StudentFee.DoesNotExist:
+            return Response({'success': False, 'message': 'Student fee not found.'}, status=404)
+
+        student, fee_structure = sf.student, sf.fee_structure
+
+        # Resolve amount
+        if override_amount:
+            amount = float(override_amount)
+        elif payment_type == 'token_full':
+            amount = float(sf.amount_due)
+        else:
+            amount = float(fee_structure.token_amount) if (fee_structure and fee_structure.token_amount) else float(sf.amount_due)
+
+        if amount <= 0:
+            return Response({'success': False, 'message': 'Amount must be greater than zero.'}, status=400)
+
+        # Resolve bank account details for direct routing
+        bank_account_data = None
+        admission = None
+        try:
+            from onboarding.models import Admission
+            admission = Admission.objects.filter(email=student.email).order_by('-submitted_at').first()
+            if admission and admission.bank_account:
+                bank_account_data = {
+                    "account_number": admission.bank_account.account_number,
+                    "name": admission.bank_account.name,
+                    "ifsc": admission.bank_account.ifsc_code
+                }
+        except Exception:
+            pass
+
+        result = create_payment_link(
+            amount               = amount,
+            reference_id         = f"SF_{sf.id}_{payment_type}",
+            customer_name        = student.full_name,
+            customer_email       = student.email or '',
+            customer_contact     = student.phone or '',
+            description          = f"Fee Payment — {fee_structure.name if fee_structure else 'Insight Institute'}",
+            bank_account_data    = bank_account_data,
+        )
+
+        if not result['success']:
+            return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=502)
+
+        rp = result['data']
+
+        # Persist link back to admission record if available
+        try:
+            if admission:
+                admission.razorpay_payment_link    = rp.get('short_url', '')
+                admission.razorpay_payment_link_id = rp.get('id', '')
+                admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+        except Exception:
+            pass
+
+        return Response({
+            'success': True,
+            'message': 'Razorpay payment link created.',
+            'data': {
+                'payment_link_id': rp.get('id'),
+                'short_url':       rp.get('short_url'),
+                'amount':          amount,
+                'payment_type':    payment_type,
+                'status':          rp.get('status'),
+                'expire_by':       rp.get('expire_by'),
+            }
+        }, status=201)
+
+
+class RazorpayFetchPaymentLinkView(APIView):
+    """
+    GET /api/v1/fees/razorpay/payment-link/<link_id>/
+    Fetch live status of a Razorpay payment link.
+    """
+
+    def get(self, request, link_id):
+        result = fetch_payment_link(link_id)
+        if not result['success']:
+            return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=404)
+        return Response({'success': True, 'data': result['data']})
+
+
+class RazorpayCancelPaymentLinkView(APIView):
+    """
+    POST /api/v1/fees/razorpay/cancel-link/<link_id>/
+    Cancel/expire a Razorpay payment link.
+    """
+
+    def post(self, request, link_id):
+        result = cancel_payment_link(link_id)
+        if not result['success']:
+            return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=400)
+
+        # Clear from any linked admission
+        try:
+            from onboarding.models import Admission
+            Admission.objects.filter(razorpay_payment_link_id=link_id).update(
+                razorpay_payment_link=None,
+                razorpay_payment_link_id=None,
+            )
+        except Exception:
+            pass
+
+        return Response({'success': True, 'message': 'Payment link cancelled.', 'data': result['data']})
+
+
+class RazorpayFetchPaymentView(APIView):
+    """
+    GET /api/v1/fees/razorpay/payment/<razorpay_payment_id>/
+    Fetch full details of a Razorpay payment.
+    """
+
+    def get(self, request, razorpay_payment_id):
+        result = fetch_payment(razorpay_payment_id)
+        if not result['success']:
+            return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=404)
+        return Response({'success': True, 'data': result['data']})
+
+
+class RazorpayRefundView(APIView):
+    """
+    POST /api/v1/fees/razorpay/refund/
+    Body: {
+        "payment_id":       "pay_xxx",    # Razorpay payment ID
+        "amount":           1000,         # INR amount to refund
+        "reason":           "...",
+        "local_payment_id": "<uuid>"      # optional â€” local Payment record to create Refund against
+    }
+    """
+
+    def post(self, request):
+        razorpay_payment_id = request.data.get('payment_id')
+        amount              = request.data.get('amount')
+        reason              = request.data.get('reason', '')
+        local_payment_id    = request.data.get('local_payment_id')
+
+        if not razorpay_payment_id or not amount:
+            return Response({'success': False, 'message': 'payment_id and amount are required.'}, status=400)
+
+        result = create_refund(payment_id=razorpay_payment_id, amount=amount, reason=reason)
+        if not result['success']:
+            return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=502)
+
+        rp = result['data']
+
+        # Optionally create local Refund record
+        local_refund = None
+        if local_payment_id:
+            try:
+                local_payment = Payment.objects.get(pk=local_payment_id)
+                local_refund  = Refund.objects.create(
+                    payment      = local_payment,
+                    amount       = float(amount),
+                    reason       = reason,
+                    status       = 'completed',
+                    processed_by = request.user if request.user.is_authenticated else None,
+                )
+                update_student_fee_status(local_payment.student_fee_id)
+            except Payment.DoesNotExist:
+                logger.warning(f"Local payment {local_payment_id} not found â€” Razorpay refund still processed.")
+            except Exception as exc:
+                logger.error(f"Local refund record creation failed: {exc}")
+
+        return Response({
+            'success': True,
+            'message': 'Refund initiated on Razorpay.',
+            'data': {
+                'razorpay_refund_id':  rp.get('id'),
+                'razorpay_payment_id': razorpay_payment_id,
+                'amount':              float(amount),
+                'status':              rp.get('status'),
+                'local_refund_id':     str(local_refund.id) if local_refund else None,
+            }
+        }, status=201)
+
+
+class RazorpayWebhookView(APIView):
+    """
+    POST /api/v1/fees/razorpay/webhook/
+    Receives and processes Razorpay webhook events.
+    Register this URL in Razorpay Dashboard â†’ Webhooks.
+    Supported events: payment_link.paid, refund.processed
+    """
+
+    def get_permissions(self):
+        return [AllowAny()]
+
+    def post(self, request):
+        # Verify signature
+        signature = request.headers.get('X-Razorpay-Signature', '')
+        if not verify_webhook_signature(request.body, signature):
+            logger.warning("Razorpay webhook: invalid signature â€” rejected.")
+            return Response({'success': False, 'message': 'Invalid signature.'}, status=400)
+
+        try:
+            payload = json.loads(request.body)
+        except json.JSONDecodeError:
+            return Response({'success': False, 'message': 'Invalid JSON.'}, status=400)
+
+        event = payload.get('event', '')
+        logger.info(f"Razorpay webhook received: {event}")
+
+        if event in ('payment_link.paid', 'payment_link.partially_paid'):
+            process_payment_link_paid_event(payload)
+
+        elif event == 'refund.processed':
+            process_refund_processed_event(payload)
+            
+        elif event in ('payment_link.cancelled', 'payment_link.expired'):
+            process_payment_link_cancelled_event(payload)
+
+        # Always return 200 so Razorpay doesn't retry indefinitely
+        return Response({'success': True})
