@@ -374,10 +374,14 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     for s in sessions:
         from batches.models import TimetableSlot
+        from django.db.models import Q
         scheduled_time = s.start_time
         scheduled_end_time = s.end_time
         dow = s.session_date.weekday()
-        slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
+        slot = TimetableSlot.objects.filter(
+            Q(day_of_week=dow) | Q(session_date=s.session_date),
+            batch_id=s.batch_id, subject_id=s.subject_id
+        ).first()
         if slot and slot.start_time:
             scheduled_time = slot.start_time
         if slot and slot.end_time:
@@ -978,10 +982,14 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 
     for s in sessions:
         from batches.models import TimetableSlot
+        from django.db.models import Q
         scheduled_time = s.start_time
         scheduled_end_time = s.end_time
         dow = s.session_date.weekday()
-        slot = TimetableSlot.objects.filter(batch_id=s.batch_id, subject_id=s.subject_id, day_of_week=dow).first()
+        slot = TimetableSlot.objects.filter(
+            Q(day_of_week=dow) | Q(session_date=s.session_date),
+            batch_id=s.batch_id, subject_id=s.subject_id
+        ).first()
         if slot and slot.start_time:
             scheduled_time = slot.start_time
         if slot and slot.end_time:
