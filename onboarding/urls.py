@@ -1,8 +1,9 @@
 from django.urls import path
-from .views import AdmissionListView, AdmissionDetailView, AdmissionStatusUpdateView,AdmissionApproveView,AdmissionRejectView,AdmissionDocumentUploadView,AdmissionUpdateView,AdmissionPaymentSubmitView
+from .views import AdmissionListView, AdmissionDetailView, AdmissionStatusUpdateView,AdmissionApproveView,AdmissionRejectView,AdmissionDocumentUploadView,AdmissionUpdateView,AdmissionPaymentSubmitView, RazorpayWebhookView
 
 urlpatterns = [
     path('admissions/', AdmissionListView.as_view()),
+    path('admissions/razorpay-webhook/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),
     path('admissions/<int:admission_id>/', AdmissionDetailView.as_view()),
     path('admissions/<int:admission_id>/status/', AdmissionStatusUpdateView.as_view()),
     path('admissions/<int:admission_id>/approve/',AdmissionApproveView.as_view(),name='admission-approve'),

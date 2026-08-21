@@ -483,7 +483,7 @@ def auto_mark_staff_absentees_eod():
                 from_date__lte=today,
                 to_date__gte=today,
                 status='approved'
-            ).values_list('user_id', flat=True)
+            ).values_list('applied_by_id', flat=True)
         )
         
         recorded_user_ids = set(
@@ -764,7 +764,7 @@ def auto_mark_student_absentees():
                 
                 from leave.models import LeaveApplication
                 on_leave = LeaveApplication.objects.filter(
-                    user=faculty_user,
+                    applied_by=faculty_user,
                     from_date__lte=today,
                     to_date__gte=today,
                     status='approved'

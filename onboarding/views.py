@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 from django.conf import settings
@@ -103,6 +104,7 @@ def _setup_payment_bank_and_notify(admission):
     """
     from fees.utils import select_bank_accounts_for_payment
     from fees.models import BankAccount
+    from fees.razorpay_service import create_payment_link
 
     if getattr(admission, 'bank_account', None):
         return  # already assigned
@@ -124,6 +126,37 @@ def _setup_payment_bank_and_notify(admission):
         changed_by=None,
         note='Form submitted. Waiting for fee payment.',
     )
+    
+    amount_to_pay = payment_amount
+    if getattr(admission, 'fee_structure', None) and admission.fee_structure.token_amount > 0:
+        amount_to_pay = admission.fee_structure.token_amount
+
+    razorpay_link_url = ""
+    try:
+        response = create_payment_link(
+            amount=amount_to_pay,
+            reference_id=f"ADM_{admission.id}",
+            customer_name=f"{admission.first_name} {admission.surname}".strip(),
+            customer_email=admission.email,
+            customer_contact=admission.phone_student,
+            description="Insight Institute Fee Payment",
+            bank_account_data={
+                'account_number': assigned_bank.account_number,
+                'name': assigned_bank.name,
+                'ifsc': assigned_bank.ifsc_code,
+            } if assigned_bank else None,
+        )
+        if response.get('success') and response.get('data'):
+            rp_link = response['data']
+            if rp_link and 'short_url' in rp_link:
+                razorpay_link_url = rp_link['short_url']
+                admission.razorpay_payment_link = razorpay_link_url
+                admission.razorpay_payment_link_id = rp_link['id']
+                admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id'])
+        else:
+            logger.error(f"Failed to create Razorpay link: {response.get('error')} {response.get('detail')}")
+    except Exception as e:
+        logger.error(f"Failed to create Razorpay link: {e}")
 
     if admission.email and assigned_bank:
         try:
@@ -143,10 +176,15 @@ def _setup_payment_bank_and_notify(admission):
                 f"Thank you for submitting your admission form. "
                 f"Please complete your fee payment to proceed with your enrollment.\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"BANK DETAILS FOR FEE PAYMENT\n"
+                f"ONLINE PAYMENT LINK\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"You can instantly pay online using the secure Razorpay link below:\n"
+                f"{razorpay_link_url if razorpay_link_url else 'Not available. Please use offline bank transfer.'}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"OFFLINE BANK DETAILS FOR FEE PAYMENT\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"{bank_details}"
-                f"After making the payment, please click the link below to "
+                f"If you paid via offline bank transfer, please click the link below to "
                 f"upload your payment screenshot and transaction ID:\n\n"
                 f"{payment_link}\n\n"
                 f"If you have any questions, feel free to reach out to your counsellor.\n\n"
@@ -794,7 +832,7 @@ class AdmissionDocumentUploadView(APIView):
         admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
- 
+
         serializer = AdmissionDocumentUploadSerializer(
             data={
                 'field_name': request.data.get('field_name'),
@@ -831,3 +869,66 @@ class AdmissionDocumentUploadView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+# ── POST /api/admissions/razorpay-webhook/ ─────────────────────────────────────
+
+import hmac
+import hashlib
+import json
+
+class RazorpayWebhookView(APIView):
+    
+    def get_permissions(self):
+        return [AllowAny()]
+
+    def post(self, request):
+        webhook_secret = getattr(settings, 'RAZORPAY_WEBHOOK_SECRET', None)
+        if webhook_secret:
+            signature = request.headers.get('X-Razorpay-Signature', '')
+            payload_body = request.body.decode('utf-8')
+            expected_signature = hmac.new(
+                webhook_secret.encode('utf-8'),
+                payload_body.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(expected_signature, signature):
+                return Response({'success': False, 'message': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            payload = json.loads(request.body)
+            event = payload.get('event')
+            
+            if event == 'payment_link.paid':
+                payment_link = payload.get('payload', {}).get('payment_link', {}).get('entity', {})
+                reference_id = payment_link.get('reference_id', '')
+                if reference_id.startswith('ADM_'):
+                    admission_id = reference_id.split('_')[1]
+                    admission = Admission.objects.filter(id=admission_id).first()
+                    if admission and admission.status == 'payment_pending':
+                        from django.utils import timezone
+                        amount_paid = payment_link.get('amount_paid', 0) / 100
+                        payment_details = payload.get('payload', {}).get('payment', {}).get('entity', {})
+                        transaction_id = payment_details.get('id', '') or payment_link.get('id', '')
+                        
+                        admission.transaction_id = transaction_id
+                        admission.payment_note = f"Paid via Razorpay: {payment_link.get('id')}"
+                        admission.payment_submitted_at = timezone.now()
+                        admission.payment_amount = amount_paid
+                        admission.status = 'approval_pending'
+                        admission.save(update_fields=[
+                            'transaction_id', 'payment_note',
+                            'payment_submitted_at', 'status', 'payment_amount', 'updated_at'
+                        ])
+                        
+                        AdmissionStatusHistory.objects.create(
+                            admission=admission,
+                            status='approval_pending',
+                            changed_by=None,
+                            note=f"Payment received via Razorpay webhook. Transaction ID: {transaction_id}",
+                        )
+                        logger.info(f"Admission {admission.id} payment verified automatically via Razorpay webhook.")
+            
+            return Response({'success': True})
+        except Exception as e:
+            logger.error(f"Razorpay webhook processing error: {e}")
+            return Response({'success': False}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

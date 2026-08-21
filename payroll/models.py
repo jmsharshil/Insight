@@ -18,10 +18,10 @@ class LateEntryPolicy(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     branch = models.ForeignKey('branch.Branch', on_delete=models.CASCADE, related_name='late_policies')
     grace_period_minutes = models.IntegerField(default=5)
-    deduction_per_minute = models.DecimalField(max_digits=6, decimal_places=2, default=0)
-    max_deduction_per_session = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    deduction_per_minute = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    max_deduction_per_session = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     # 0 = no cap
-    absence_deduction_per_day = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    absence_deduction_per_day = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     # NEW (FRD §4.8.4): amount deducted per day of unexcused absence
 
     # NEW (FRD §4.9.3 — Late Entry Rules):
@@ -53,7 +53,7 @@ class PayrollRun(models.Model):
     generated_at = models.DateTimeField(auto_now_add=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     disbursed_at = models.DateTimeField(null=True, blank=True)
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -70,24 +70,24 @@ class PaySlip(models.Model):
     payroll_run = models.ForeignKey(PayrollRun, on_delete=models.CASCADE, related_name='payslips')
     faculty = models.ForeignKey('faculty.FacultyProfile', on_delete=models.CASCADE, related_name='payslips', null=True, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payslips', null=True, blank=True)
-    basic_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    basic_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_session_hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     # sum of SessionReport.duration_minutes / 60 + QR hours
-    hour_based_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    hour_based_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     # sum of (session_hours_per_subject * subject_hourly_rate)
-    late_penalty = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    late_penalty = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     late_penalty_minutes = models.IntegerField(default=0, help_text="Total penalised minutes (after grace) summed across the month")
     per_day_deduction_log = models.JSONField(default=list, blank=True, help_text="Per-day breakdown: date, late_minutes, penalty_minutes, penalty_amount")
-    absence_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    absence_deductions = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     # NEW (FRD §4.8.4): days absent * absence_deduction_per_day
-    leave_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    retention_deduction = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    other_deductions = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    leave_deductions = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    retention_deduction = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    other_deductions = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     deduction_note = models.CharField(max_length=300, blank=True)
-    bonus = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    attendance_bonus = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    leave_encashment = models.DecimalField(max_digits=8, decimal_places=2, default=0)
-    net_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    attendance_bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    leave_encashment = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    net_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     leaves_taken = models.IntegerField(default=0)
     working_days = models.IntegerField(default=0)
     sessions_conducted = models.IntegerField(default=0)
@@ -109,7 +109,7 @@ class SessionLatePenaltyLog(models.Model):
     scheduled_time = models.TimeField()
     actual_start = models.TimeField()
     late_minutes = models.IntegerField()
-    penalty_amount = models.DecimalField(max_digits=8, decimal_places=2)
+    penalty_amount = models.DecimalField(max_digits=12, decimal_places=2)
     grace_applied = models.BooleanField(default=False)
 
     class Meta:

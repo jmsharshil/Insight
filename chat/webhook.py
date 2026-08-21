@@ -324,7 +324,7 @@ class WhatsAppWebhookView(View):
     def _mark_as_read(self, message_id, phone_number_id):
         """Send a read receipt back to Meta for the incoming message."""
         try:
-            from core.utils import _get_sender
+            from core.utils import _get_sender  # singleton WhatsAppSender from core/utils.py
             sender = _get_sender()
             sender.mark_as_read(message_id)
         except Exception as e:
@@ -334,6 +334,8 @@ class WhatsAppWebhookView(View):
                                content, msg_id, extra_data=None):
         """
         Persist the incoming WhatsApp message for audit / display.
+        Uses get_or_create so that Meta webhook retries (which replay the same
+        wamid) are idempotent — no IntegrityError on the unique wa_message_id.
         Tries to match the sender phone number to a User in the system.
         """
         try:
@@ -355,16 +357,22 @@ class WhatsAppWebhookView(View):
             ).first()
 
             from chat.models import WhatsAppMessage
-            WhatsAppMessage.objects.create(
+            _, created = WhatsAppMessage.objects.get_or_create(
                 wa_message_id=msg_id,
-                sender_wa_id=sender_wa_id,
-                sender_name=sender_name,
-                user=user,
-                message_type=msg_type,
-                content=content[:2000] if content else '',
-                extra_data=extra_data or {},
-                direction='inbound',
+                defaults=dict(
+                    sender_wa_id=sender_wa_id,
+                    sender_name=sender_name,
+                    user=user,
+                    message_type=msg_type,
+                    content=content[:2000] if content else '',
+                    extra_data=extra_data or {},
+                    direction='inbound',
+                ),
             )
+            if not created:
+                logger.debug(
+                    "[WHATSAPP WEBHOOK] Duplicate wamid=%s (Meta retry) — skipped.", msg_id
+                )
         except ImportError:
             # WhatsAppMessage model not yet created — just log
             logger.info(

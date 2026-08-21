@@ -439,14 +439,14 @@ def send_system_notification(
                 except Exception as e:
                     logger.error("Failed to send system email to %s: %s", user.email, e)
 
-            # 3. Send WhatsApp Notification (independent of email)
+            # 3. Send WhatsApp Notification (only when explicitly configured)
             try:
                 if whatsapp_template and getattr(user, 'phone', None):
                     send_whatsapp_template(
                         to=user.phone,
                         template_name=whatsapp_template,
                         language_code=whatsapp_template_lang_code or 'en_US',
-                        components=[{"type": "body", "parameters": [{"type": "text", "text": str(whatsapp_context.get(k, ''))} for k in whatsapp_context]}] if whatsapp_context else [],
+                        components=([{"type": "body", "parameters": [{"type": "text", "text": str(whatsapp_context.get(k, ''))} for k in whatsapp_context]}] if whatsapp_context else []),
                         user_id=str(user.id),
                         delay_seconds=delay_seconds or 0
                     )
@@ -461,9 +461,9 @@ def send_system_notification(
                         user_id=str(user.id),
                         delay_seconds=delay_seconds or 0
                     )
-                elif getattr(user, 'phone', None):
-                    # Fallback: send plain text WhatsApp if no template is specified
-                    send_whatsapp_text(to=user.phone, body=body, user_id=str(user.id))
+                # elif getattr(user, 'phone', None):
+                #     # Fallback: send plain text WhatsApp if no template is specified
+                #     send_whatsapp_text(to=user.phone, body=body, user_id=str(user.id))
             except Exception as e:
                 logger.error("Failed to send WhatsApp notification to %s: %s", user.id, e)
 

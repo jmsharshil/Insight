@@ -309,6 +309,12 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
         role = validated_data.get('role')
         branch = validated_data.get('branch')
+
+        if validated_data.get("email"):
+            email = validated_data.get("email")
+            user = User.objects.filter(email=email)
+            if user.exists():
+                raise serializers.ValidationError("User with this email already exists")
         
         # ── Sync branch ↔ branches ────────────────────────────────────────
         # Build the final set of branches from both sources
@@ -325,7 +331,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         username, _ = generate_username(role=role, branches=branch_set)
         validated_data['username'] = username
 
-        user = User.objects.create_user(password=None, is_active=True, **validated_data)
+        user = User.objects.create_user(password=None, is_active=False, **validated_data)
 
         if branch_set:
             user.branches.set(branch_set)

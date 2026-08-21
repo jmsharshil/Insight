@@ -180,7 +180,12 @@ class Admission(models.Model):
     note         = models.TextField(blank=True, help_text="Latest note added during status update.")
     submitted_at = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
-
+    
+    #Razor Pay
+    razorpay_payment_link = models.URLField(blank=True, null=True)
+    razorpay_payment_link_id = models.CharField(max_length=100, blank=True, null=True)
+    razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
+    
     # ── Fee Payment Tracking ──────────────────────────────────────────────────
     bank_account = models.ForeignKey(
         'fees.BankAccount',

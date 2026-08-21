@@ -9,6 +9,13 @@ from .views import (
     FeeReportView,
     StudentFeeSummaryView,
     MyFeesAPIView,
+    # Razorpay
+    RazorpayGeneratePaymentLinkView,
+    RazorpayFetchPaymentLinkView,
+    RazorpayCancelPaymentLinkView,
+    RazorpayFetchPaymentView,
+    RazorpayRefundView,
+    RazorpayWebhookView,
 )
 
 urlpatterns = [
@@ -46,4 +53,12 @@ urlpatterns = [
     
     # ── Token-based My Fees API ────────────────────────────────────────────
     path('fees/my-fees/', MyFeesAPIView.as_view(), name='my-fees'),
+
+    # ── Razorpay ───────────────────────────────────────────────────────────
+    path('razorpay/webhook/',                            RazorpayWebhookView.as_view(),            name='razorpay-webhook'),
+    path('razorpay/generate-link/',                      RazorpayGeneratePaymentLinkView.as_view(), name='razorpay-generate-link'),
+    path('razorpay/payment-link/<str:link_id>/',         RazorpayFetchPaymentLinkView.as_view(),    name='razorpay-fetch-link'),
+    path('razorpay/cancel-link/<str:link_id>/',          RazorpayCancelPaymentLinkView.as_view(),   name='razorpay-cancel-link'),
+    path('razorpay/payment/<str:razorpay_payment_id>/',  RazorpayFetchPaymentView.as_view(),        name='razorpay-fetch-payment'),
+    path('razorpay/refund/',                             RazorpayRefundView.as_view(),              name='razorpay-refund'),
 ]

@@ -307,6 +307,7 @@ CORS_ALLOWED_ORIGINS = [
     'https://wonderful-pond-0982c5200.7.azurestaticapps.net',
     'https://victorious-rock-0352cde00.7.azurestaticapps.net',
     'https://insight.jmstech.co',
+    'https://crm.insightinstitute.co'
 ]
 CORS_ALLOW_CREDENTIALS = True
 
@@ -409,3 +410,8 @@ AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT","https://jivihire
 AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY")
 AZURE_OPENAI_DEPLOYMENT = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-05-01-preview")
+
+# Razorpay Configuration
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "1234")
