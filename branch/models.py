@@ -19,7 +19,7 @@ class Branch(models.Model):
     logo = models.ImageField(upload_to="branches/logos/",null=True,blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    allowed_radius_meters = models.PositiveIntegerField(default=100)
+    allowed_radius_meters = models.PositiveIntegerField(default=20)
     is_active = models.BooleanField(default=True)
     qr_image = models.ImageField(upload_to="branches/qrcodes/", null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -96,6 +96,11 @@ class AttendanceRecord(models.Model):
     checked_in_at = models.DateTimeField(null=True, blank=True)
     checked_out_at = models.DateTimeField(null=True, blank=True)
 
+    # ── Session-level location tracking ───────────────────────────────────────
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    location_verified = models.BooleanField(default=False)
+
     # ── Marked by ─────────────────────────────────────────────────────────────
     marked_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

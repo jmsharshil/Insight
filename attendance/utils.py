@@ -422,7 +422,7 @@ def validate_qr_scan(scan_lat, scan_lng, branch, timetable_slot, scan_time) -> d
                     float(scan_lat), float(scan_lng),
                     float(branch_lat), float(branch_lng),
                 )
-                radius = branch.allowed_radius_meters or 100
+                radius = branch.allowed_radius_meters or 20
                 if distance <= radius:
                     location_verified = True
                     reasons.append(f"Within {int(distance)}m of branch (radius={radius}m).")
@@ -638,69 +638,116 @@ def get_active_timetable_slot_for_scan(student, slot_id=None):
     return active_slot, batch
 
 
-def evaluate_daily_slots_attendance(student, date_obj, check_in_time, check_out_time, marked_by=None, branch_id=None):
+def evaluate_daily_slots_attendance(
+    student, date_obj, check_in_time, check_out_time,
+    marked_by=None, branch_id=None,
+    latitude=None, longitude=None, location_verified=False,
+):
     """
-    Evaluates attendance for all scheduled TimetableSlots for the student on `date_obj`.
-    Creates or updates AttendanceRecords for each slot based on daily check-in and check-out times.
-    
-    A slot is marked 'present' if:
-    1. check_in_time <= slot.start_time + 30 minutes
-    2. check_out_time >= slot.end_time - 30 minutes
-    Otherwise, it is marked 'absent'.
+    Session-wise attendance evaluator.
+
+    Creates or updates one AttendanceRecord per TimetableSlot scheduled for the
+    student on `date_obj`.  The student's check-in / check-out window determines
+    which sessions are present, absent, or pending checkout.
+
+    ── At CHECK-IN (check_out_time is None) ──────────────────────────────────
+    • Slots whose end_time <= check_in_time  →  absent   (already over)
+    • Slots whose start_time is within 30-min tolerance of check_in_time,
+      or start after check_in_time  →  checkout_pending  (student is here)
+    • Location is stored on every checkout_pending record.
+
+    ── At CHECK-OUT (check_out_time is provided) ─────────────────────────────
+    • Slots whose end_time <= check_in_time  →  absent   (ended before arrival)
+    • Slots whose start_time >= check_out_time  →  absent (start after departure)
+    • Slots overlapping [check_in, check_out] window  →  present
+    • Location is stored on every present record.
+
+    Unique key: student + date + timetable_slot  (via get_or_create).
     """
     from batches.models import TimetableSlot, BatchStudent, Batch
     from .models import AttendanceRecord
     from django.utils import timezone
-    import datetime
+    import datetime as dt_mod
 
-    # Get student's enrolled batches
+    # ── Enrolled batches ────────────────────────────────────────────────────
     enrolled_batch_ids = list(
         BatchStudent.objects.filter(
             student=student,
-            batch__is_active=True
+            batch__is_active=True,
         ).values_list('batch_id', flat=True)
     )
-    primary_batch_id = getattr(student, 'current_batch_id', None) or getattr(student, 'batch_id', None)
+    primary_batch_id = (
+        getattr(student, 'current_batch_id', None)
+        or getattr(student, 'batch_id', None)
+    )
     if primary_batch_id and primary_batch_id not in enrolled_batch_ids:
         enrolled_batch_ids.append(primary_batch_id)
 
-    # Monday is 0, Sunday is 6
-    day_of_week = date_obj.weekday()
+    day_of_week = date_obj.weekday()  # Monday=0 … Sunday=6
 
-    # Get all scheduled slots for the day
+    # ── All scheduled slots for the day ─────────────────────────────────────
     daily_slots = TimetableSlot.objects.filter(
         Q(day_of_week=day_of_week) | Q(session_date=date_obj),
-        batch_id__in=enrolled_batch_ids
+        batch_id__in=enrolled_batch_ids,
     ).order_by('start_time')
 
+    current_tz = timezone.get_current_timezone()
     created_or_updated = []
 
     for slot in daily_slots:
-        # Construct datetime objects for slot boundaries on this date (using the local timezone)
-        current_tz = timezone.get_current_timezone()
-        slot_start_dt = timezone.make_aware(datetime.datetime.combine(date_obj, slot.start_time), current_tz)
-        slot_end_dt = timezone.make_aware(datetime.datetime.combine(date_obj, slot.end_time), current_tz)
-        
-        # Calculate allowed check-in and check-out boundaries (30 mins tolerance)
-        allowed_check_in_limit = slot_start_dt + datetime.timedelta(minutes=30)
-        allowed_check_out_limit = slot_end_dt - datetime.timedelta(minutes=30)
-        
-        # Determine status
-        if check_in_time and check_in_time <= allowed_check_in_limit:
-            if check_out_time:
-                if check_out_time >= allowed_check_out_limit:
-                    status = 'present'
-                else:
-                    status = 'absent'
+        if not slot.start_time or not slot.end_time:
+            continue  # skip malformed slots
+
+        slot_start_dt = timezone.make_aware(
+            dt_mod.datetime.combine(date_obj, slot.start_time), current_tz,
+        )
+        slot_end_dt = timezone.make_aware(
+            dt_mod.datetime.combine(date_obj, slot.end_time), current_tz,
+        )
+
+        # 30-minute tolerance for late check-in / early check-out
+        allowed_checkin_limit = slot_start_dt + dt_mod.timedelta(minutes=30)
+
+        # ── Determine status ────────────────────────────────────────────────
+        if check_out_time:  # ← CHECK-OUT path (final evaluation)
+            if slot_end_dt <= check_in_time:
+                # Session ended before the student arrived
+                att_status = 'absent'
+            elif slot_start_dt >= check_out_time:
+                # Session starts after the student left
+                att_status = 'absent'
             else:
-                status = 'checkout_pending'
-        else:
-            status = 'absent'
-            
-        # Determine appropriate batch_id
-        b_id = slot.batch_id if slot.batch_id else primary_batch_id
-        
-        # Find or create AttendanceRecord
+                # Session overlaps the student's attendance window
+                # Apply 30-min late-entry tolerance
+                if check_in_time <= allowed_checkin_limit:
+                    att_status = 'present'
+                else:
+                    att_status = 'absent'
+        else:  # ← CHECK-IN path (no checkout yet)
+            if slot_end_dt <= check_in_time:
+                # Session already finished before check-in
+                att_status = 'absent'
+            else:
+                # Session is ongoing or upcoming — student is checked in
+                if check_in_time <= allowed_checkin_limit:
+                    att_status = 'checkout_pending'
+                else:
+                    # Late beyond tolerance for this specific slot
+                    if slot_start_dt >= check_in_time:
+                        # Slot hasn't started yet; student arrived in time
+                        att_status = 'checkout_pending'
+                    else:
+                        att_status = 'absent'
+
+        # ── Resolve batch_id ────────────────────────────────────────────────
+        b_id = slot.batch_id or primary_batch_id
+
+        # ── Location: store on present / checkout_pending records ───────────
+        rec_lat = latitude if att_status in ('present', 'checkout_pending') else None
+        rec_lng = longitude if att_status in ('present', 'checkout_pending') else None
+        rec_loc_verified = location_verified if att_status in ('present', 'checkout_pending') else False
+
+        # ── Upsert attendance record (student + date + slot = unique) ───────
         record, created = AttendanceRecord.objects.get_or_create(
             student=student,
             date=date_obj,
@@ -708,22 +755,30 @@ def evaluate_daily_slots_attendance(student, date_obj, check_in_time, check_out_
             defaults={
                 'batch_id': b_id,
                 'branch_id': branch_id or getattr(student, 'branch_id', None),
-                'status': status,
+                'status': att_status,
                 'checked_in_at': check_in_time,
                 'checked_out_at': check_out_time,
-                'marked_by': marked_by
-            }
+                'marked_by': marked_by,
+                'latitude': rec_lat,
+                'longitude': rec_lng,
+                'location_verified': rec_loc_verified,
+            },
         )
-        
-        # Update existing record if needed (e.g., it was pending or just newly checked out)
+
         if not created:
-            record.status = status
+            record.status = att_status
             record.checked_in_at = check_in_time
             record.checked_out_at = check_out_time
+            record.latitude = rec_lat
+            record.longitude = rec_lng
+            record.location_verified = rec_loc_verified
             if marked_by:
                 record.marked_by = marked_by
-            record.save(update_fields=['status', 'checked_in_at', 'checked_out_at', 'marked_by'])
-            
+            record.save(update_fields=[
+                'status', 'checked_in_at', 'checked_out_at',
+                'marked_by', 'latitude', 'longitude', 'location_verified',
+            ])
+
         created_or_updated.append(record)
-        
+
     return created_or_updated

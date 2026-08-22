@@ -268,7 +268,7 @@ class QRScanView(APIView):
                 return Response({'success': False, 'message': 'Location is required for attendance. Please enable GPS.'}, status=status.HTTP_400_BAD_REQUEST)
             if branch.latitude is not None and branch.longitude is not None:
                 geo_distance = haversine_distance(float(emp_lat), float(emp_lng), float(branch.latitude), float(branch.longitude))
-                allowed_radius = branch.allowed_radius_meters or 100
+                allowed_radius = branch.allowed_radius_meters or 20
                 if geo_distance > allowed_radius:
                     return Response({
                         'success': False,
@@ -558,7 +558,7 @@ class QRScanView(APIView):
         # Validate student location against branch
         if branch.latitude is not None and branch.longitude is not None:
             student_geo_distance = haversine_distance(float(student_lat), float(student_lon), float(branch.latitude), float(branch.longitude))
-            student_allowed_radius = branch.allowed_radius_meters or 100
+            student_allowed_radius = branch.allowed_radius_meters or 20
             if student_geo_distance > student_allowed_radius:
                 return Response({
                     'success': False,
@@ -683,7 +683,10 @@ class QRScanView(APIView):
                 check_in_time=now, 
                 check_out_time=None, 
                 marked_by=user, 
-                branch_id=student_branch_id
+                branch_id=student_branch_id,
+                latitude=student_lat,
+                longitude=student_lon,
+                location_verified=validation_result['location_verified'] or False,
             )
             created = True
             
@@ -691,7 +694,9 @@ class QRScanView(APIView):
                 # No scheduled slots, just create a generic record
                 record = AttendanceRecord.objects.create(
                     student=student, date=now.date(), batch_id=batch.id if batch else None,
-                    branch_id=student_branch_id, status='checkout_pending', marked_by=user, checked_in_at=now
+                    branch_id=student_branch_id, status='checkout_pending', marked_by=user, checked_in_at=now,
+                    latitude=student_lat, longitude=student_lon,
+                    location_verified=validation_result['location_verified'] or False,
                 )
             else:
                 record = next((r for r in updated_records if r.timetable_slot_id == getattr(timetable_slot_obj, 'id', None)), None)
@@ -720,7 +725,10 @@ class QRScanView(APIView):
                     check_in_time=check_in_time, 
                     check_out_time=now, 
                     marked_by=user, 
-                    branch_id=student_branch_id
+                    branch_id=student_branch_id,
+                    latitude=student_lat,
+                    longitude=student_lon,
+                    location_verified=validation_result['location_verified'] or False,
                 )
                 
                 if not updated_records:
@@ -1514,7 +1522,7 @@ class EmployeeCheckInOutView(APIView):
         geo_verified = False
         if branch_obj and branch_obj.latitude is not None and branch_obj.longitude is not None:
             geo_distance = haversine_distance(float(emp_lat), float(emp_lng), float(branch_obj.latitude), float(branch_obj.longitude))
-            allowed_radius = branch_obj.allowed_radius_meters or 100
+            allowed_radius = branch_obj.allowed_radius_meters or 20
             if geo_distance > allowed_radius:
                 return Response({
                     'success': False,
