@@ -6,8 +6,8 @@ from django.db import migrations
 def update_jms_test_coords(apps, schema_editor):
     Branch = apps.get_model('branch', 'Branch')
     Branch.objects.filter(name__icontains='jms test').update(
-        latitude=23.019461546358126,
-        longitude=72.55544718903472,
+        latitude=23.01804701952351,
+        longitude=72.55508714336585,
     )
 
 def reverse_coords(apps, schema_editor):
