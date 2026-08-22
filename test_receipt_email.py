@@ -40,7 +40,7 @@ student.email = None
 student.email_parent = None
 student.user = MagicMock()
 # CHANGE THIS to a real deliverable email address:
-student.user.email = "harshilk.dev@gmail.com"
+student.user.email = "zeelsh@jmstech.co"
 
 payment.student = student
 
