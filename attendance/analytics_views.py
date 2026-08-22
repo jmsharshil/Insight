@@ -416,6 +416,14 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         check_in_history = []
         check_out_history = []
         day_wise_attendance = []
+        
+        # Pre-fetch QR scan logs to avoid N+1 queries for location
+        student_scans = QRScanLog.objects.filter(
+            student=s, 
+            scan_type='check_in'
+        ).values('scanned_at__date', 'latitude', 'longitude', 'location_verified')
+        scan_map = {scan['scanned_at__date']: scan for scan in student_scans}
+
         for r in records.select_related('timetable_slot', 'timetable_slot__subject').order_by('-date', '-checked_in_at'):
             slot_info = None
             if r.timetable_slot:
@@ -426,6 +434,16 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                     'subject_name': r.timetable_slot.subject.name if r.timetable_slot.subject else None,
                     'slot_code': r.timetable_slot.slot_code,
                 }
+
+            scan = scan_map.get(r.date)
+            location_details = None
+            if scan and scan['latitude'] is not None and scan['longitude'] is not None:
+                location_details = {
+                    'latitude': float(scan['latitude']),
+                    'longitude': float(scan['longitude']),
+                    'location_verified': scan['location_verified']
+                }
+
             day_wise_attendance.append({
                 'id': str(r.id),
                 'date': r.date,
@@ -433,6 +451,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                 'checked_in_at': r.checked_in_at,
                 'checked_out_at': r.checked_out_at,
                 'timetable_slot': slot_info,
+                'location_details': location_details,
             })
             if r.checked_in_at:
                 check_in_history.append({
@@ -1951,6 +1970,15 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'subject_name': r.timetable_slot.subject.name if r.timetable_slot.subject else None,
                     'slot_code': r.timetable_slot.slot_code,
                 }
+
+            location_details = None
+            if r.latitude is not None and r.longitude is not None:
+                location_details = {
+                    'latitude': float(r.latitude),
+                    'longitude': float(r.longitude),
+                    'location_verified': r.location_verified
+                }
+
             day_wise_attendance.append({
                 'id': str(r.id),
                 'date': r.date,
@@ -1958,6 +1986,7 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                 'checked_in_at': r.checked_in_at,
                 'checked_out_at': r.checked_out_at,
                 'timetable_slot': slot_info,
+                'location_details': location_details,
             })
             if r.checked_in_at:
                 check_in_history.append({
