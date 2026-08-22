@@ -128,14 +128,18 @@ def _setup_payment_bank_and_notify(admission):
     )
     
     amount_to_pay = payment_amount
-    if getattr(admission, 'fee_structure', None) and admission.fee_structure.token_amount > 0:
+    if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'token_amount', 0) > 0:
         amount_to_pay = admission.fee_structure.token_amount
 
     razorpay_link_url = ""
     try:
+        # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
+        import time
+        unique_ref = f"ADM_{admission.id}_{int(time.time())}"
+        
         response = create_payment_link(
             amount=amount_to_pay,
-            reference_id=f"ADM_{admission.id}",
+            reference_id=unique_ref,
             customer_name=f"{admission.first_name} {admission.surname}".strip(),
             customer_email=admission.email,
             customer_contact=admission.phone_student,
@@ -151,12 +155,16 @@ def _setup_payment_bank_and_notify(admission):
             if rp_link and 'short_url' in rp_link:
                 razorpay_link_url = rp_link['short_url']
                 admission.razorpay_payment_link = razorpay_link_url
-                admission.razorpay_payment_link_id = rp_link['id']
-                admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id'])
+                admission.razorpay_payment_link_id = rp_link.get('id')
+                admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+                logger.info(f"Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
+            else:
+                logger.warning(f"Razorpay response missing short_url: {rp_link}")
         else:
-            logger.error(f"Failed to create Razorpay link: {response.get('error')} {response.get('detail')}")
+            error_detail = response.get('error') or response.get('detail', response)
+            logger.error(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
     except Exception as e:
-        logger.error(f"Failed to create Razorpay link: {e}")
+        logger.error(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
 
     if admission.email and assigned_bank:
         try:
