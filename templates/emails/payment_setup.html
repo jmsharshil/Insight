@@ -1,0 +1,54 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2 style="color: {{ primary_color }};">Complete Your Admission Fee Payment</h2>
+
+<p>Hello <strong>{{ student_name }}</strong>,</p>
+
+<p>Thank you for submitting your admission form. Please complete your fee payment to proceed with enrollment.</p>
+
+{% if razorpay_link %}
+<div class="info-box" style="text-align: center; padding: 25px; margin: 20px 0; background-color: #f0f8ff;">
+    <h3 style="color: {{ primary_color }}; margin: 0 0 15px 0;">💳 Instant Online Payment (Recommended)</h3>
+    <p>Use the secure Razorpay link below to pay instantly:</p>
+    <a href="{{ razorpay_link }}" 
+       class="button" 
+       style="background-color: {{ primary_color }}; color: white; padding: 14px 32px; font-size: 18px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 10px 0; box-shadow: 0 4px 12px rgba(237, 124, 49, 0.3);">
+        Pay ₹{{ amount }} Now
+    </a>
+    <p style="font-size: 13px; color: #28a745; margin: 10px 0 0 0; font-weight: bold;">🔒 Secure • Instant • No bank details needed</p>
+</div>
+{% else %}
+<p style="color: #d32f2f; font-weight: bold;">Razorpay link is currently unavailable. Please use the bank transfer option below.</p>
+{% endif %}
+
+<div class="info-box">
+    <h3 style="margin-top: 0; color: {{ primary_color }};">🏦 Bank Transfer Details (Offline Option)</h3>
+    <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+        <tr><td style="padding: 8px 0; font-weight: bold; width: 40%;">Bank Name:</td><td style="padding: 8px 0;">{{ bank_name }}</td></tr>
+        <tr><td style="padding: 8px 0; font-weight: bold;">Account Holder:</td><td style="padding: 8px 0;">{{ account_holder }}</td></tr>
+        <tr><td style="padding: 8px 0; font-weight: bold;">Account Number:</td><td style="padding: 8px 0; font-family: monospace; font-size: 15px;">{{ account_number }}</td></tr>
+        <tr><td style="padding: 8px 0; font-weight: bold;">IFSC Code:</td><td style="padding: 8px 0; font-family: monospace;">{{ ifsc_code }}</td></tr>
+        {% if branch %}<tr><td style="padding: 8px 0; font-weight: bold;">Branch:</td><td style="padding: 8px 0;">{{ branch }}</td></tr>{% endif %}
+    </table>
+    <p style="margin-top: 15px; color: #d32f2f; font-size: 14px;"><strong>After transfer, you MUST upload the screenshot using the button below.</strong></p>
+</div>
+
+<div style="text-align: center; margin: 30px 0;">
+    <p><strong>Upload Payment Proof:</strong></p>
+    <a href="{{ upload_link }}" 
+       class="button" 
+       style="background-color: #28a745; color: white; padding: 14px 32px; font-size: 16px; text-decoration: none; border-radius: 6px; display: inline-block;">
+        📤 Upload Screenshot & Transaction ID
+    </a>
+</div>
+
+<p>If you encounter any issues with the payment link or have questions, please contact your counsellor or reply to this email.</p>
+
+<p style="color: #28a745; font-weight: bold; margin-top: 20px;">We are excited to have you join Insight Institute of Professional Studies!</p>
+
+<p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 15px;">
+    This is an automated email from {{ org_name|default:"Insight Institute of Professional Studies" }}.<br>
+    Support: <a href="mailto:insightinstitute.ips@gmail.com" style="color: {{ primary_color }};">insightinstitute.ips@gmail.com</a> | Phone: 77780 50578
+</p>
+{% endblock %}

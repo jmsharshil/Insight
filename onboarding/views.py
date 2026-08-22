@@ -161,8 +161,24 @@ def _setup_payment_bank_and_notify(admission):
     if admission.email and assigned_bank:
         try:
             from core.sender import send_email
-            payment_link = f"{settings.FRONTEND_BASE_URL}/insight/student/payment-upload?id={admission.id}"
+            payment_link = f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://127.0.0.1:5173')}/insight/student/payment-upload?id={admission.id}"
+            
+            # Build rich HTML context (similar to payment_receipt.html and other system emails)
+            template_context = {
+                'student_name': f"{admission.first_name} {admission.surname}".strip(),
+                'razorpay_link': razorpay_link_url,
+                'amount': f"{float(amount_to_pay):,.0f}",
+                'bank_name': assigned_bank.bank_name,
+                'account_holder': assigned_bank.name,
+                'account_number': assigned_bank.account_number,
+                'ifsc_code': assigned_bank.ifsc_code,
+                'branch': getattr(assigned_bank, 'branch_name', ''),
+                'upload_link': payment_link,
+                'primary_color': '#ed7c31',
+                'org_name': 'Insight Institute of Professional Studies',
+            }
 
+            # Rich plain-text version (kept exactly as original for compatibility with all email clients)
             bank_details = (
                 f"Bank Name       : {assigned_bank.bank_name}\n"
                 f"Account Holder  : {assigned_bank.name}\n"
@@ -196,8 +212,8 @@ def _setup_payment_bank_and_notify(admission):
                 to=admission.email,
                 subject="Complete Your Fee Payment",
                 text=text_content,
-                template=None,
-                template_context={},
+                template="emails/payment_setup.html",
+                template_context=template_context,
                 organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
             )
             
