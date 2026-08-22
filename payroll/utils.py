@@ -354,7 +354,11 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         # Hourly rate is the effective take-home rate for part-time/visiting
         implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
-    deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
+    if faculty_profile.employment_type == 'full_time':
+        deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
+    else:
+        deduction_rate = implicit_deduction_per_minute
+        
     grace = policy.grace_period_minutes if policy else 5
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
     
@@ -462,6 +466,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             if total_dev > Decimal(grace):
                 penalty_min = int(total_dev - Decimal(grace))
                 day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                
+                if day_penalty > daily_stats[d_str]['gross_salary']:
+                    day_penalty = daily_stats[d_str]['gross_salary']
+                    
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
                 if d_str not in late_dates:
@@ -479,6 +487,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             if d_delay > grace:
                 penalty_min = d_delay - grace
                 day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
+                
+                if day_penalty > daily_stats[d_str]['gross_salary']:
+                    day_penalty = daily_stats[d_str]['gross_salary']
+                    
                 late_penalty += day_penalty
                 total_late_penalty_minutes += penalty_min
                 late_dates.append(d_str)

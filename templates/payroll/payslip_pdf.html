@@ -285,6 +285,32 @@
             </tbody>
         </table>
 
+        {% if per_day_deduction_log %}
+        <div style="margin-top: 15px; margin-bottom: 10px;">
+            <span class="label" style="font-size: 14px; color: #333; text-decoration: underline;">Daily Deduction Breakdown</span>
+        </div>
+        <table class="table" style="margin-top: 0; font-size: 12px;">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th class="amount">Late Mins</th>
+                    <th class="amount">Penalty Mins</th>
+                    <th class="amount">Deduction (Rs.)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in per_day_deduction_log %}
+                <tr>
+                    <td>{{ log.date }}</td>
+                    <td class="amount">{{ log.late_minutes }}</td>
+                    <td class="amount">{{ log.penalty_minutes }}</td>
+                    <td class="amount">{{ log.penalty_amount }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
         <div class="row" style="margin-top: 30px;">
             <span class="label" style="font-size: 18px; color: #ed7c31;">Net Salary Payable:</span>
             <span class="value" style="font-weight: bold; font-size: 18px;">{{ net_salary }}</span>

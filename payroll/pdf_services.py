@@ -118,6 +118,32 @@ def _reportlab_payslip_pdf(context):
     elements.append(t_table)
     elements.append(Spacer(1, 10 * mm))
 
+    if context.get('per_day_deduction_log'):
+        elements.append(Paragraph('<b>Daily Deduction Breakdown</b>', label_style))
+        elements.append(Spacer(1, 2 * mm))
+        
+        log_data = [[
+            Paragraph('<b>Date</b>', small_style),
+            Paragraph('<b>Late Mins</b>', small_style),
+            Paragraph('<b>Penalty Mins</b>', small_style),
+            Paragraph('<b>Deduction (Rs.)</b>', small_style)
+        ]]
+        for log in context['per_day_deduction_log']:
+            log_data.append([
+                Paragraph(str(log.get('date', '')), small_style),
+                Paragraph(str(log.get('late_minutes', '')), small_style),
+                Paragraph(str(log.get('penalty_minutes', '')), small_style),
+                Paragraph(str(log.get('penalty_amount', '')), small_style)
+            ])
+            
+        log_table = Table(log_data, colWidths=[doc.width * 0.25] * 4)
+        log_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, HexColor('#cccccc')),
+            ('BACKGROUND', (0,0), (-1,0), HexColor('#f9f9f9')),
+        ]))
+        elements.append(log_table)
+        elements.append(Spacer(1, 10 * mm))
+
     elements.append(Paragraph(f'<font color="#ed7c31"><b>Net Salary Payable:</b></font> <b>{context.get("net_salary", "")}</b>', ParagraphStyle('Net', parent=label_style, fontSize=14)))
     elements.append(Spacer(1, 2 * mm))
     elements.append(Paragraph(f'<b>Amount in words:</b> {context.get("amount_words", "")}', label_style))
@@ -252,6 +278,7 @@ def generate_payslip_pdf(payslip):
             'net_salary': f"\u20b9{payslip.net_salary:,.2f}",
             'amount_words': num2words(payslip.net_salary),
             'deduction_note': payslip.deduction_note,
+            'per_day_deduction_log': payslip.per_day_deduction_log,
             
             'logo_url': 'https://insightsinstitutes.blob.core.windows.net/media/insight.png',
             'signature_url': processed_sig_url,
