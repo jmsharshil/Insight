@@ -416,13 +416,6 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         check_in_history = []
         check_out_history = []
         day_wise_attendance = []
-        
-        # Pre-fetch QR scan logs to avoid N+1 queries for location
-        student_scans = QRScanLog.objects.filter(
-            student=s, 
-            scan_type='check_in'
-        ).values('scanned_at__date', 'latitude', 'longitude', 'location_verified')
-        scan_map = {scan['scanned_at__date']: scan for scan in student_scans}
 
         for r in records.select_related('timetable_slot', 'timetable_slot__subject').order_by('-date', '-checked_in_at'):
             slot_info = None
@@ -435,13 +428,13 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
                     'slot_code': r.timetable_slot.slot_code,
                 }
 
-            scan = scan_map.get(r.date)
+            # Location is now stored directly on each AttendanceRecord (per-session)
             location_details = None
-            if scan and scan['latitude'] is not None and scan['longitude'] is not None:
+            if r.latitude is not None and r.longitude is not None:
                 location_details = {
-                    'latitude': float(scan['latitude']),
-                    'longitude': float(scan['longitude']),
-                    'location_verified': scan['location_verified']
+                    'latitude': float(r.latitude),
+                    'longitude': float(r.longitude),
+                    'location_verified': r.location_verified,
                 }
 
             day_wise_attendance.append({
