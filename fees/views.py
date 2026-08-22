@@ -577,23 +577,14 @@ class PaymentVerifyView(APIView):
                     text_body += f"Reason: {payment.note}\n\n"
                 text_body += "Please contact the administration for more details.\n\nInsight Institute of Professional Studies"
 
-                html_body = f"""<html>
-<body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <div style="background: #dc3545; color: white; padding: 25px; text-align: center; border-radius: 8px 8px 0 0;">
-        <h2 style="margin: 0;">Payment Rejected</h2>
-    </div>
-    <div style="background: #f8f9fa; padding: 30px; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 8px 8px;">
-        <p>Dear <strong>{getattr(payment.student, 'first_name', 'Student')}</strong>,</p>
-        <p>Unfortunately, your payment of <strong>₹{payment.amount}</strong> has been rejected.</p>
-        {f'<p><strong>Reason:</strong> {payment.note}</p>' if getattr(payment, 'note', None) else ''}
-        <p>Please contact the administration immediately for resolution.</p>
-        <p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 20px;">
-            Insight Institute of Professional Studies<br>
-            <a href="mailto:insightinstitute.ips@gmail.com" style="color: #ed7c31;">insightinstitute.ips@gmail.com</a>
-        </p>
-    </div>
-</body>
-</html>"""
+                # Use dedicated template (text unchanged = used as alt/plaintext fallback)
+                template_context = {
+                    'student_name': getattr(payment.student, 'first_name', 'Student'),
+                    'amount': payment.amount,
+                    'reason': payment.note if getattr(payment, 'note', None) else '',
+                    'primary_color': '#ed7c31',
+                    'org_name': 'Insight Institute of Professional Studies',
+                }
 
                 for recipient in recipients:
                     try:
@@ -601,9 +592,10 @@ class PaymentVerifyView(APIView):
                             to=recipient,
                             subject=subject,
                             text=text_body,
-                            template=html_body,
+                            template="emails/payment_rejected.html",
+                            template_context=template_context,
                         )
-                        logger.info(f"Rejection email (with HTML) sent to {recipient}")
+                        logger.info(f"Rejection email (with HTML template) sent to {recipient}")
                     except Exception as e:
                         logger.error(f"Failed to send rejection email to {recipient}: {e}")
 

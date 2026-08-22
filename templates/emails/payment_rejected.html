@@ -1,0 +1,24 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<div style="background: #dc3545; color: white; padding: 25px; text-align: center; border-radius: 8px 8px 0 0; margin: -30px -30px 20px -30px;">
+    <h2 style="margin: 0; color: white;">Payment Rejected ❌</h2>
+</div>
+
+<p>Dear <strong>{{ student_name }}</strong>,</p>
+
+<p>Unfortunately, your payment of <strong>₹{{ amount }}</strong> has been rejected.</p>
+
+{% if reason %}
+<p><strong>Reason:</strong> {{ reason }}</p>
+{% endif %}
+
+<p>Please contact the administration immediately for resolution and next steps.</p>
+
+<p style="color: #28a745; font-weight: bold;">We are here to help — reach out to your counsellor if you have any questions.</p>
+
+<p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 15px;">
+    This is an automated email from {{ org_name|default:"Insight Institute of Professional Studies" }}.<br>
+    For support: <a href="mailto:insightinstitute.ips@gmail.com" style="color: {{ primary_color }};">insightinstitute.ips@gmail.com</a>
+</p>
+{% endblock %}
