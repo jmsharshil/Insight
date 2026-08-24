@@ -315,6 +315,79 @@ def send_payment_receipt(payment):
                     f"Email to {recipient} failed for payment {payment.id}: {mail_err}",
                     exc_info=True
                 )
+
+        # --- Send WhatsApp to student + parent phones (with PDF document) ---
+        try:
+            from chat.notifications import send_whatsapp_text, send_whatsapp_media
+
+            wa_phones = set()
+            if getattr(payment.student, 'phone_student', None):
+                wa_phones.add(payment.student.phone_student)
+            if getattr(payment.student, 'phone_father', None):
+                wa_phones.add(payment.student.phone_father)
+            try:
+                if (getattr(payment.student, 'user', None)
+                        and getattr(payment.student.user, 'phone', None)):
+                    wa_phones.add(payment.student.user.phone)
+            except Exception:
+                pass
+
+            wa_phones = list(filter(None, wa_phones))
+            if not wa_phones:
+                logger.info(f"No WhatsApp phones found for payment {payment.id} — skipping WA.")
+            else:
+                # Try to get a publicly accessible PDF URL from the saved payment_document
+                pdf_url = None
+                try:
+                    doc = payment.payment_document
+                    if doc and doc.name:
+                        pdf_url = doc.url  # Azure Blob / S3 / local URL
+                except Exception:
+                    pass
+
+                wa_caption = (
+                    f"✅ *Payment Receipt — Insight Institute*\n"
+                    f"Dear {student_name},\n\n"
+                    f"Your payment of ₹{payment.amount:,.2f} has been verified.\n"
+                    f"Receipt No    : {payment.receipt_number or 'N/A'}\n"
+                    f"Transaction ID: {payment.transaction_ref or 'N/A'}\n"
+                    f"Payment Mode  : {getattr(payment, 'payment_mode', 'N/A').title()}\n\n"
+                    f"Official receipt is attached. "
+                    f"Keep it safe for your records.\n"
+                    f"— Insight Institute of Professional Studies"
+                )
+
+                for phone in wa_phones:
+                    try:
+                        if pdf_url:
+                            send_whatsapp_media(
+                                to=phone,
+                                media_type='document',
+                                link=pdf_url,
+                                caption=wa_caption,
+                                filename=f"Receipt_{payment.receipt_number or payment.id}.pdf",
+                            )
+                            logger.info(
+                                f"WhatsApp receipt (PDF document) sent to {phone} "
+                                f"for payment {payment.id}"
+                            )
+                        else:
+                            # Fallback: text-only WhatsApp if no PDF URL
+                            send_whatsapp_text(to=phone, body=wa_caption)
+                            logger.info(
+                                f"WhatsApp receipt (text-only) sent to {phone} "
+                                f"for payment {payment.id} (no PDF URL)"
+                            )
+                    except Exception as wa_phone_err:
+                        logger.error(
+                            f"WhatsApp to {phone} failed for payment {payment.id}: {wa_phone_err}"
+                        )
+        except Exception as wa_err:
+            logger.error(
+                f"WhatsApp receipt notification failed for payment "
+                f"{getattr(payment, 'id', 'N/A')}: {wa_err}"
+            )
+
     except Exception as e:
         logger.error(
             f"Failed to process receipt for payment {getattr(payment, 'id', 'N/A')}: {e}",
