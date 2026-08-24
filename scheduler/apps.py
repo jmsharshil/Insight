@@ -150,7 +150,7 @@ class SchedulerConfig(AppConfig):
             {
                 "task_type": "detect_missing_scans_all_branches",
                 "interval_seconds": 86400,       # nightly (every 24h)
-                "delay_seconds": 82800,          # ~23:00 after midnight startup
+                "delay_seconds": 30600,          # 08:30 AM after midnight startup
                 "max_retries": 3,
             },
             {
