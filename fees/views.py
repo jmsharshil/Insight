@@ -1239,3 +1239,79 @@ class RazorpayWebhookView(APIView):
 
         # Always return 200 so Razorpay doesn't retry indefinitely
         return Response({'success': True})
+
+
+class RazorpayWebhookTestView(APIView):
+    """
+    POST /api/v1/fees/razorpay/webhook/test/
+    Safe test endpoint that simulates a 'payment_link.paid' webhook event
+    without requiring a live Razorpay callback. Runs the full pipeline:
+    - Payment record creation (SF_ flow) or Admission status update (ADM_ flow)
+    - Receipt PDF auto-generation
+    - Email dispatch (with PDF attachment)
+    - WhatsApp notification (PDF document or text fallback)
+
+    Request body:
+    {
+        "reference_id": "SF_<uuid>_token_full" | "ADM_<admission_id>",
+        "amount": 5000,
+        "rp_payment_id": "pay_TEST123"   (optional)
+    }
+    """
+
+    def post(self, request):
+        reference_id  = request.data.get('reference_id', '')
+        amount_inr    = request.data.get('amount', 100)
+        rp_payment_id = request.data.get('rp_payment_id') or f'pay_TEST_{reference_id[:8]}'
+
+        if not reference_id:
+            return Response(
+                {
+                    'success': False,
+                    'message': (
+                        'reference_id is required. '
+                        'Examples: "SF_<uuid>_token_full" or "ADM_<admission_id>"'
+                    ),
+                },
+                status=400,
+            )
+
+        amount_paise = int(float(amount_inr) * 100)
+        simulated_payload = {
+            'event': 'payment_link.paid',
+            'payload': {
+                'payment_link': {
+                    'entity': {
+                        'id': f'plink_TEST_{reference_id[:8]}',
+                        'reference_id': reference_id,
+                        'amount_paid': amount_paise,
+                        'status': 'paid',
+                    }
+                },
+                'payment': {
+                    'entity': {
+                        'id': rp_payment_id,
+                        'amount': amount_paise,
+                        'status': 'captured',
+                    }
+                },
+            },
+        }
+
+        logger.info(
+            '[RazorpayTest] Simulating payment_link.paid — '
+            f'reference_id={reference_id}, amount=Rs.{amount_inr}'
+        )
+
+        result = process_payment_link_paid_event(simulated_payload)
+
+        return Response({
+            'success': True,
+            'message': (
+                'Webhook simulation complete. '
+                'Check server logs and the recipient inbox / WhatsApp.'
+            ),
+            'simulated_payload': simulated_payload,
+            'result': result,
+        })
+

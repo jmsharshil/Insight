@@ -280,13 +280,173 @@ def verify_webhook_signature(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def send_admission_payment_notification(admission, amount_paid: float, rp_payment_id: str):
+    """
+    Send payment confirmation email + WhatsApp to the student (and parent if available)
+    when a Razorpay payment_link.paid event is received for an Admission (ADM_ flow).
+    This is called before the student is fully enrolled — no Payment model object exists yet.
+    Generates an auto-PDF receipt using _reportlab_receipt_pdf and attaches it to both
+    the email and the WhatsApp document message.
+    """
+    try:
+        from core.sender import send_email
+        from io import BytesIO
+        from django.utils import timezone as tz
+        from .pdf_services import _reportlab_receipt_pdf
+
+        student_name = f"{getattr(admission, 'first_name', '')} {getattr(admission, 'surname', '')}".strip()
+        receipt_number = f"ADM-RZP-{rp_payment_id[:10]}" if rp_payment_id else f"ADM-{admission.id}"
+        receipt_date = tz.localtime().strftime('%d %b, %Y')
+
+        subject = f"Payment Receipt – ₹{amount_paid:,.0f} | Insight Institute"
+        text_body = (
+            f"Dear {student_name},\n\n"
+            f"We have received your payment of ₹{amount_paid:,.2f} via Razorpay.\n\n"
+            f"Receipt No     : {receipt_number}\n"
+            f"Transaction ID : {rp_payment_id or 'N/A'}\n"
+            f"Amount         : ₹{amount_paid:,.2f}\n"
+            f"Date           : {receipt_date}\n"
+            f"Status         : Payment Received — Pending Enrollment Approval\n\n"
+            f"Your official receipt is attached to this email. "
+            f"Our team will complete your enrollment shortly. "
+            f"You will receive your login credentials once approved.\n\n"
+            f"Thank you,\nInsight Institute of Professional Studies"
+        )
+        template_context = {
+            'student_name': student_name,
+            'amount': f"{float(amount_paid):,.2f}",
+            'receipt_number': receipt_number,
+            'payment_mode': 'Razorpay (Online)',
+            'transaction_ref': rp_payment_id or 'N/A',
+            'payment_date': receipt_date,
+            'primary_color': '#ed7c31',
+            'org_name': 'Insight Institute of Professional Studies',
+        }
+
+        # ── Generate PDF receipt using reportlab (pure Python, no WeasyPrint needed) ──
+        pdf_attachment = None
+        pdf_bytes = None
+        try:
+            from core.number_utils import num2words
+            reportlab_context = {
+                'receipt_no': receipt_number,
+                'receipt_date': receipt_date,
+                'student_name': student_name,
+                'amount': f"₹{float(amount_paid):,.2f}",
+                'amount_words': num2words(amount_paid),
+                'batch_name': 'N/A',
+                'payment_type': 'token',
+                'payment_mode': 'online',
+                'transaction_ref': rp_payment_id or 'N/A',
+                'transaction_date': receipt_date,
+            }
+            pdf_buffer = _reportlab_receipt_pdf(reportlab_context)
+            if pdf_buffer and pdf_buffer.getvalue():
+                pdf_bytes = pdf_buffer.getvalue()
+                pdf_filename = f"Receipt_{receipt_number}.pdf"
+                pdf_attachment = (pdf_filename, pdf_bytes, 'application/pdf')
+                logger.info(f"[Razorpay] ADM receipt PDF generated ({len(pdf_bytes)} bytes)")
+            else:
+                logger.warning(f"[Razorpay] ADM receipt PDF empty for admission {admission.id}")
+        except Exception as pdf_err:
+            logger.error(f"[Razorpay] ADM receipt PDF generation failed: {pdf_err}", exc_info=True)
+
+        # ── Build recipient email list ──────────────────────────────────────────────
+        recipients = set()
+        if getattr(admission, 'email', None):
+            recipients.add(admission.email)
+        if getattr(admission, 'email_parent', None):
+            recipients.add(admission.email_parent)
+        recipients = list(filter(None, recipients))
+
+        attachments = [pdf_attachment] if pdf_attachment else []
+        for recipient in recipients:
+            try:
+                send_email(
+                    to=recipient,
+                    subject=subject,
+                    text=text_body,
+                    template="emails/payment_receipt.html",
+                    template_context=template_context,
+                    attachments=attachments,
+                    organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                )
+                logger.info(
+                    f"[Razorpay] ADM payment receipt email sent to {recipient}"
+                    + (" (with PDF)" if pdf_attachment else " (no PDF)")
+                )
+            except Exception as mail_err:
+                logger.error(f"[Razorpay] ADM payment email failed to {recipient}: {mail_err}")
+
+        # ── WhatsApp notification with PDF document ─────────────────────────────────
+        try:
+            from chat.notifications import send_whatsapp_text, send_whatsapp_media
+
+            phones = []
+            if getattr(admission, 'phone_student', None):
+                phones.append(admission.phone_student)
+            if getattr(admission, 'phone_father', None):
+                phones.append(admission.phone_father)
+            phones = list(set(filter(None, phones)))
+
+            if not phones:
+                logger.info(f"[Razorpay] No WhatsApp phones for ADM {admission.id} — skipping WA.")
+            else:
+                wa_caption = (
+                    f"✅ *Payment Receipt — Insight Institute*\n"
+                    f"Dear {student_name},\n\n"
+                    f"Your payment of ₹{amount_paid:,.0f} has been received via Razorpay.\n"
+                    f"Receipt No    : {receipt_number}\n"
+                    f"Transaction ID: {rp_payment_id or 'N/A'}\n"
+                    f"Date          : {receipt_date}\n\n"
+                    f"Your enrollment is pending approval. "
+                    f"You will receive login credentials once approved.\n"
+                    f"— Insight Institute of Professional Studies"
+                )
+
+                # Upload PDF to Azure Blob and share as WhatsApp document
+                pdf_public_url = None
+                if pdf_bytes:
+                    try:
+                        from django.core.files.base import ContentFile
+                        from django.core.files.storage import default_storage
+                        blob_path = f"receipts/admissions/{receipt_number}.pdf"
+                        blob_name = default_storage.save(blob_path, ContentFile(pdf_bytes))
+                        pdf_public_url = default_storage.url(blob_name)
+                        logger.info(f"[Razorpay] ADM receipt PDF uploaded to: {pdf_public_url}")
+                    except Exception as upload_err:
+                        logger.error(f"[Razorpay] ADM PDF upload for WhatsApp failed: {upload_err}")
+
+                for phone in phones:
+                    try:
+                        if pdf_public_url:
+                            send_whatsapp_media(
+                                to=phone,
+                                media_type='document',
+                                link=pdf_public_url,
+                                caption=wa_caption,
+                                filename=f"Receipt_{receipt_number}.pdf",
+                            )
+                            logger.info(f"[Razorpay] ADM WhatsApp receipt (PDF) sent to {phone}")
+                        else:
+                            send_whatsapp_text(to=phone, body=wa_caption)
+                            logger.info(f"[Razorpay] ADM WhatsApp receipt (text) sent to {phone}")
+                    except Exception as wa_err:
+                        logger.error(f"[Razorpay] ADM WhatsApp failed to {phone}: {wa_err}")
+        except Exception as wa_import_err:
+            logger.error(f"[Razorpay] WhatsApp import failed: {wa_import_err}")
+
+    except Exception as exc:
+        logger.error(f"[Razorpay] send_admission_payment_notification error: {exc}", exc_info=True)
+
+
 def process_payment_link_paid_event(payload: dict) -> dict:
     """
     Handle the 'payment_link.paid' Razorpay webhook event.
 
     Supports two reference_id conventions:
-        - "SF_<student_fee_uuid>_<payment_type>"  → updates StudentFee
-        - "ADM_<admission_id>"                    → updates Admission
+        - "SF_<student_fee_uuid>_<payment_type>"  → updates StudentFee + sends receipt
+        - "ADM_<admission_id>"                    → updates Admission + sends confirmation
 
     Returns:
         { "success": True, "processed": "SF"|"ADM"|"unknown" }
@@ -328,6 +488,15 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             )
             update_student_fee_status(sf.id)
             logger.info(f"[Razorpay] StudentFee {sf_id} verified. Payment: {payment.id}")
+
+            # ── Auto-send receipt (email + WhatsApp) ─────────────────────
+            try:
+                from .services import send_payment_receipt
+                send_payment_receipt(payment)
+                logger.info(f"[Razorpay] Receipt sent for Payment {payment.id}")
+            except Exception as receipt_err:
+                logger.error(f"[Razorpay] Failed to send receipt for Payment {payment.id}: {receipt_err}")
+
             return {"success": True, "processed": "SF", "payment_id": str(payment.id)}
 
         # ── Admission flow ────────────────────────────────────────────────
@@ -359,6 +528,13 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 note       = f"Payment auto-verified via Razorpay. Txn: {rp_payment_id}",
             )
             logger.info(f"[Razorpay] Admission {adm_id} moved to approval_pending.")
+
+            # ── Auto-send payment confirmation (email + WhatsApp) ─────────
+            try:
+                send_admission_payment_notification(admission, amount_paid, rp_payment_id)
+            except Exception as notify_err:
+                logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
+
             return {"success": True, "processed": "ADM"}
 
         return {"success": True, "processed": "unknown", "reference_id": reference_id}

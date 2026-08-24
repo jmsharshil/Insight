@@ -56,6 +56,7 @@ res = create_payment_link(
     bank_account_data    = bank_account_data,
 )
 data = res['data']
+
 razorpay_link_url = data.get("short_url")
 admission.razorpay_payment_link = razorpay_link_url
 admission.branch = MagicMock()
