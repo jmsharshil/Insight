@@ -298,6 +298,11 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             raise serializers.ValidationError(f"Users with role '{value}' cannot be created directly from the Add User interface. This role is managed automatically.")
         return value
 
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("User with this email already exists")
+        return value
+
     def create(self, validated_data):
         linked_students = validated_data.pop('linked_students', None)
         extra_branches = validated_data.pop('branches', None)
@@ -309,12 +314,6 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
         role = validated_data.get('role')
         branch = validated_data.get('branch')
-
-        if validated_data.get("email"):
-            email = validated_data.get("email")
-            user = User.objects.filter(email=email)
-            if user.exists():
-                raise serializers.ValidationError("User with this email already exists")
         
         # ── Sync branch ↔ branches ────────────────────────────────────────
         # Build the final set of branches from both sources
