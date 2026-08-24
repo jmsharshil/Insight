@@ -272,7 +272,7 @@ class QRScanView(APIView):
                 if geo_distance > allowed_radius:
                     return Response({
                         'success': False,
-                        'message': f'You are outside the allowed area. Distance: {int(geo_distance)}m, Allowed: {allowed_radius}m'
+                        'message': f'Check-in failed: You are {int(geo_distance)}m away from the institute. Please come within {allowed_radius}m and try again.'
                     }, status=status.HTTP_403_FORBIDDEN)
                 geo_verified = True
             else:
@@ -562,7 +562,7 @@ class QRScanView(APIView):
             if student_geo_distance > student_allowed_radius:
                 return Response({
                     'success': False,
-                    'message': f'You are outside the allowed area. Distance: {int(student_geo_distance)}m, Allowed: {student_allowed_radius}m'
+                    'message': f'Check-in failed: You are {int(student_geo_distance)}m away from the institute. Please come within {student_allowed_radius}m and try again.'
                 }, status=status.HTTP_403_FORBIDDEN)
 
         # Old manual slot override (COMMENTED - now handled earlier with get_active_timetable_slot_for_scan
@@ -1526,7 +1526,7 @@ class EmployeeCheckInOutView(APIView):
             if geo_distance > allowed_radius:
                 return Response({
                     'success': False,
-                    'message': f'You are outside the allowed area. Distance: {int(geo_distance)}m, Allowed: {allowed_radius}m'
+                    'message': f'Check-in failed: You are {int(geo_distance)}m away from the institute. Please come within {allowed_radius}m and try again.'
                 }, status=status.HTTP_403_FORBIDDEN)
             geo_verified = True
         elif branch_obj:
