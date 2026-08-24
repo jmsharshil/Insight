@@ -20,8 +20,8 @@ def set_branch_coords_and_radius(apps, schema_editor):
 
     # Set JMS TEST branch coordinates
     Branch.objects.filter(name__icontains='jms test').update(
-        latitude=23.02014263437688,
-        longitude=72.55650043611708,
+        latitude=23.019461546358126,
+        longitude=72.55544718903472,
     )
 
 
