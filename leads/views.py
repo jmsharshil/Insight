@@ -357,12 +357,19 @@ class LeadStatusUpdateView(APIView):
                             subject = "Complete Your Admission Process"
                             text_content = f"Hello {admission.first_name},\n\nWe are thrilled to welcome you! Your lead has been converted, and we are ready to proceed with your admission.\n\nPlease click the link below to complete your admission form and upload the necessary documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\nInsight Institute Team"
                             
+                            template_context = {
+                                'student_name': admission.first_name,
+                                'admission_link': admission_link,
+                                'primary_color': '#ed7c31',
+                                'org_name': getattr(admission.branch.organization, 'name', 'Insight Institute of Professional Studies') if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None) else 'Insight Institute of Professional Studies',
+                            }
+                            
                             send_email(
                                 to=admission.email,
                                 subject=subject,
                                 text=text_content,
-                                template=None,
-                                template_context={},
+                                template="emails/admission_process.html",
+                                template_context=template_context,
                                 organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                             )
                             
