@@ -1,0 +1,46 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2 style="color: {{ primary_color|default:'#ed7c31' }};">Refund Processed</h2>
+
+<p>Dear <strong>{{ student_name }}</strong>,</p>
+
+<p>We have successfully initiated a refund of <strong>₹{{ amount }}</strong> to your original payment source. Please find the details below:</p>
+
+<div class="info-box" style="margin: 24px 0; padding: 20px; border-radius: 8px; background-color: #f0fff4; border-left: 4px solid #28a745;">
+    <h3 style="margin: 0 0 16px 0; color: #28a745;">✅ Refund Details</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid #e0e0e0;">
+            <td style="padding: 10px 4px; font-weight: bold; width: 45%; color: #555;">Refund Amount</td>
+            <td style="padding: 10px 4px; font-size: 18px; font-weight: bold; color: #28a745;">₹{{ amount }}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #e0e0e0;">
+            <td style="padding: 10px 4px; font-weight: bold; color: #555;">Razorpay Refund ID</td>
+            <td style="padding: 10px 4px; font-family: monospace;">{{ razorpay_refund_id }}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #e0e0e0;">
+            <td style="padding: 10px 4px; font-weight: bold; color: #555;">Original Payment ID</td>
+            <td style="padding: 10px 4px; font-family: monospace;">{{ razorpay_payment_id }}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #e0e0e0;">
+            <td style="padding: 10px 4px; font-weight: bold; color: #555;">Refund Date</td>
+            <td style="padding: 10px 4px;">{{ refund_date }}</td>
+        </tr>
+        {% if reason %}
+        <tr>
+            <td style="padding: 10px 4px; font-weight: bold; color: #555;">Reason</td>
+            <td style="padding: 10px 4px;">{{ reason }}</td>
+        </tr>
+        {% endif %}
+    </table>
+</div>
+
+<p style="color: #555;">Refunds typically reflect in your bank account within <strong>5–7 business days</strong> depending on your bank. If you do not receive the refund within this period, please contact us.</p>
+
+<p>If you have any questions or concerns regarding this refund, please reply to this email or contact your counsellor directly.</p>
+
+<p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 15px;">
+    This is an automated email from {{ org_name|default:"Insight Institute of Professional Studies" }}.<br>
+    Support: <a href="mailto:insightinstitute.ips@gmail.com" style="color: {{ primary_color|default:'#ed7c31' }};">insightinstitute.ips@gmail.com</a> | Phone: 77780 50578
+</p>
+{% endblock %}

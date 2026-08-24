@@ -628,6 +628,133 @@ class RefundListView(APIView):
         return paginate_queryset(queryset, request, RefundListSerializer)
 
 
+def trigger_razorpay_refund(refund):
+    """
+    Auto-trigger Razorpay refund if payment was made online.
+    Returns a tuple (rp_refund_id, rp_error).
+    """
+    rp_refund_id = None
+    rp_error     = None
+    transaction_ref = refund.payment.transaction_ref or ''
+    if transaction_ref.startswith('pay_'):
+        try:
+            from .razorpay_service import create_refund as rp_create_refund
+            rp_result = rp_create_refund(
+                payment_id=transaction_ref,
+                amount=float(refund.amount),
+                reason=refund.reason or f'Refund for receipt {refund.payment.receipt_number}',
+            )
+            if rp_result.get('success'):
+                rp_refund_id = rp_result['data'].get('id', '')
+                logger.info(
+                    f"[Refund] Razorpay refund {rp_refund_id} initiated "
+                    f"for local Refund {refund.id} / Payment {refund.payment.id}"
+                )
+            else:
+                rp_error = rp_result.get('error', 'Unknown Razorpay error')
+                logger.error(f"[Refund] Razorpay refund failed for Payment {refund.payment.id}: {rp_error}")
+        except Exception as exc:
+            rp_error = str(exc)
+            logger.error(f"[Refund] Razorpay refund exception for Payment {refund.payment.id}: {exc}")
+    
+    return rp_refund_id, rp_error
+
+def send_refund_notifications(refund, rp_refund_id):
+    """Send refund confirmation via email + WhatsApp to the student (and parent)."""
+    from core.sender import send_email
+    from django.utils import timezone
+
+    payment      = refund.payment
+    student      = payment.student
+    refund_date  = timezone.localtime().strftime('%d %b, %Y')
+    student_name = getattr(student, 'full_name', '') or str(student)
+    student_user = getattr(student, 'user', None)
+    org          = getattr(student_user, 'organization', None) if student_user else None
+
+    amount_fmt = f"{float(refund.amount):,.2f}"
+    subject    = f"Refund Processed \u2013 \u20b9{float(refund.amount):,.0f} | Insight Institute"
+    text_body  = (
+        f"Dear {student_name},\n\n"
+        f"A refund of \u20b9{amount_fmt} has been successfully processed to your original payment source.\n\n"
+        f"Receipt No : {payment.receipt_number}\n"
+        f"Refund ID  : {rp_refund_id or 'N/A (offline)'}\n"
+        f"Amount     : \u20b9{amount_fmt}\n"
+        f"Date       : {refund_date}\n"
+        f"Reason     : {refund.reason or 'N/A'}\n\n"
+        f"Online refunds typically reflect within 5\u20137 business days depending on your bank.\n\n"
+        f"Thank you,\nInsight Institute of Professional Studies"
+    )
+    template_context = {
+        'student_name':        student_name,
+        'amount':              amount_fmt,
+        'razorpay_refund_id':  rp_refund_id or 'N/A (offline refund)',
+        'razorpay_payment_id': payment.transaction_ref or 'N/A',
+        'refund_date':         refund_date,
+        'reason':              refund.reason,
+        'primary_color':       '#ed7c31',
+        'org_name':            getattr(org, 'name', 'Insight Institute of Professional Studies'),
+    }
+
+    # Email: student + parent
+    emails = set()
+    if student_user and getattr(student_user, 'email', None):
+        emails.add(student_user.email)
+    try:
+        admission = student.admission
+        if getattr(admission, 'email_parent', None):
+            emails.add(admission.email_parent)
+    except Exception:
+        pass
+
+    for email_addr in filter(None, emails):
+        try:
+            send_email(
+                to=email_addr,
+                subject=subject,
+                text=text_body,
+                template='emails/refund_confirmation.html',
+                template_context=template_context,
+                organization=org,
+            )
+            logger.info(f"[Refund] Email sent to {email_addr}")
+        except Exception as e:
+            logger.error(f"[Refund] Email to {email_addr} failed: {e}")
+
+    # WhatsApp: student + parent phones
+    try:
+        from chat.notifications import send_whatsapp_text
+        wa_message = (
+            f"\u2705 *Refund Processed \u2014 Insight Institute*\n\n"
+            f"Dear {student_name},\n\n"
+            f"A refund of *\u20b9{float(refund.amount):,.0f}* has been processed.\n\n"
+            f"\ud83c\udd94 Refund ID: {rp_refund_id or 'N/A'}\n"
+            f"\ud83d\udcc5 Date: {refund_date}\n"
+            f"\ud83d\udcdd Reason: {refund.reason or 'N/A'}\n\n"
+            f"Online refunds reflect within *5\u20137 business days*.\n"
+            f"\u2014 Insight Institute of Professional Studies"
+        )
+        phones = set()
+        try:
+            admission = student.admission
+            if getattr(admission, 'phone_student', None):
+                phones.add(admission.phone_student)
+            if getattr(admission, 'phone_father', None):
+                phones.add(admission.phone_father)
+        except Exception:
+            pass
+        if student_user and getattr(student_user, 'phone', None):
+            phones.add(student_user.phone)
+
+        for phone in filter(None, phones):
+            try:
+                send_whatsapp_text(to=phone, body=wa_message)
+                logger.info(f"[Refund] WhatsApp sent to {phone}")
+            except Exception as e:
+                logger.error(f"[Refund] WhatsApp to {phone} failed: {e}")
+    except Exception as wa_err:
+        logger.error(f"[Refund] WhatsApp error: {wa_err}")
+
+        
 class RefundCreateView(APIView):
 
     def post(self, request):
@@ -642,13 +769,27 @@ class RefundCreateView(APIView):
             processed_by=request.user if request.user.is_authenticated else None,
         )
 
-        # If refund is completed, update student fee
+        rp_refund_id = None
+        rp_error = None
+        
+        # If refund is created as completed immediately, trigger Razorpay and notifications
         if refund.status == 'completed':
             update_student_fee_status(refund.payment.student_fee_id)
+            rp_refund_id, rp_error = trigger_razorpay_refund(refund)
+            
+            try:
+                send_refund_notifications(refund=refund, rp_refund_id=rp_refund_id)
+            except Exception as notif_err:
+                logger.error(f"[Refund] Notification failed for Refund {refund.id}: {notif_err}")
+
+        response_data = RefundListSerializer(refund).data
+        if rp_refund_id:
+            response_data['razorpay_refund_id'] = rp_refund_id
+        if rp_error:
+            response_data['razorpay_warning'] = f'Local refund recorded, but Razorpay refund failed: {rp_error}'
 
         return Response(
-            {'success': True, 'message': 'Refund created.',
-             'data': RefundListSerializer(refund).data},
+            {'success': True, 'message': 'Refund created.', 'data': response_data},
             status=status.HTTP_201_CREATED,
         )
 
@@ -672,15 +813,30 @@ class RefundUpdateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        old_status = refund.status
         refund.status = new_status
         refund.save()
 
-        if new_status == 'completed':
+        rp_refund_id = None
+        rp_error = None
+        
+        if new_status == 'completed' and old_status != 'completed':
             update_student_fee_status(refund.payment.student_fee_id)
+            rp_refund_id, rp_error = trigger_razorpay_refund(refund)
+            
+            try:
+                send_refund_notifications(refund=refund, rp_refund_id=rp_refund_id)
+            except Exception as notif_err:
+                logger.error(f"[Refund] Notification failed for Refund {refund.id}: {notif_err}")
+
+        response_data = RefundListSerializer(refund).data
+        if rp_refund_id:
+            response_data['razorpay_refund_id'] = rp_refund_id
+        if rp_error:
+            response_data['razorpay_warning'] = f'Local refund recorded, but Razorpay refund failed: {rp_error}'
 
         return Response(
-            {'success': True, 'message': f'Refund {new_status}.',
-             'data': RefundListSerializer(refund).data},
+            {'success': True, 'message': f'Refund {new_status}.', 'data': response_data},
         )
 
 
