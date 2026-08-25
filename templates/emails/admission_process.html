@@ -1,0 +1,28 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2 style="color: {{ primary_color|default:'#ed7c31' }};">Complete Your Admission Process</h2>
+
+<p>Hello <strong>{{ student_name }}</strong>,</p>
+
+<p>We are thrilled to welcome you! Your inquiry has been processed, and we are ready to proceed with your admission.</p>
+
+<div class="info-box" style="text-align: center; padding: 25px; margin: 20px 0; background-color: #f0f8ff; border-radius: 8px;">
+    <h3 style="color: {{ primary_color|default:'#ed7c31' }}; margin: 0 0 15px 0;">📝 Admission Form</h3>
+    <p style="margin-bottom: 20px;">Please click the button below to complete your admission form and upload the necessary documents:</p>
+    <a href="{{ admission_link }}" 
+       class="button" 
+       style="background-color: {{ primary_color|default:'#ed7c31' }}; color: white; padding: 14px 32px; font-size: 16px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; box-shadow: 0 4px 12px rgba(237, 124, 49, 0.3);">
+        Complete Admission Form
+    </a>
+</div>
+
+<p>If you have any questions or need assistance, feel free to reach out to your assigned counsellor or reply directly to this email.</p>
+
+<p style="color: #28a745; font-weight: bold; margin-top: 20px;">We look forward to having you join us!</p>
+
+<p style="margin-top: 30px; font-size: 13px; color: #666; border-top: 1px solid #eee; padding-top: 15px;">
+    This is an automated email from {{ org_name|default:"Insight Institute of Professional Studies" }}.<br>
+    Support: <a href="mailto:insightinstitute.ips@gmail.com" style="color: {{ primary_color|default:'#ed7c31' }};">insightinstitute.ips@gmail.com</a>
+</p>
+{% endblock %}

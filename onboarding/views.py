@@ -131,6 +131,7 @@ def _setup_payment_bank_and_notify(admission):
     if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'token_amount', 0) > 0:
         amount_to_pay = admission.fee_structure.token_amount
 
+    print("Amount to pay..........",amount_to_pay)
     razorpay_link_url = ""
     try:
         # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
@@ -150,21 +151,25 @@ def _setup_payment_bank_and_notify(admission):
                 'ifsc': assigned_bank.ifsc_code,
             } if assigned_bank else None,
         )
+        print("================================================")
+        print(response)
+        print("================================================")
         if response.get('success') and response.get('data'):
             rp_link = response['data']
+            print(rp_link)
             if rp_link and 'short_url' in rp_link:
                 razorpay_link_url = rp_link['short_url']
                 admission.razorpay_payment_link = razorpay_link_url
                 admission.razorpay_payment_link_id = rp_link.get('id')
                 admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
-                logger.info(f"Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
+                print("Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
             else:
-                logger.warning(f"Razorpay response missing short_url: {rp_link}")
+                print(f"Razorpay response missing short_url: {rp_link}")
         else:
             error_detail = response.get('error') or response.get('detail', response)
-            logger.error(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
+            print(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
     except Exception as e:
-        logger.error(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
+        print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
 
     if admission.email and assigned_bank:
         try:
