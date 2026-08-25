@@ -131,45 +131,57 @@ def _setup_payment_bank_and_notify(admission):
     if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'token_amount', 0) > 0:
         amount_to_pay = admission.fee_structure.token_amount
 
+    # Fallback to default amounts for testing if amount is zero
+    if amount_to_pay <= 0:
+        default_course_fees = {
+            'cseet': 1000,
+            'cs_executive': 2000,
+            'cs_professional': 5000,
+        }
+        amount_to_pay = default_course_fees.get(admission.course, 1)
+
     print("Amount to pay..........",amount_to_pay)
     razorpay_link_url = ""
-    try:
-        # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
-        import time
-        unique_ref = f"ADM_{admission.id}_{int(time.time())}"
-        
-        response = create_payment_link(
-            amount=amount_to_pay,
-            reference_id=unique_ref,
-            customer_name=f"{admission.first_name} {admission.surname}".strip(),
-            customer_email=admission.email,
-            customer_contact=admission.phone_student,
-            description="Insight Institute Fee Payment",
-            bank_account_data={
-                'account_number': assigned_bank.account_number,
-                'name': assigned_bank.name,
-                'ifsc': assigned_bank.ifsc_code,
-            } if assigned_bank else None,
-        )
-        print("================================================")
-        print(response)
-        print("================================================")
-        if response.get('success') and response.get('data'):
-            rp_link = response['data']
-            print(rp_link)
-            if rp_link and 'short_url' in rp_link:
-                razorpay_link_url = rp_link['short_url']
-                admission.razorpay_payment_link = razorpay_link_url
-                admission.razorpay_payment_link_id = rp_link.get('id')
-                admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
-                print("Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
+    if amount_to_pay > 0:
+        try:
+            # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
+            import time
+            unique_ref = f"ADM_{admission.id}_{int(time.time())}"
+            
+            response = create_payment_link(
+                amount=amount_to_pay,
+                reference_id=unique_ref,
+                customer_name=f"{admission.first_name} {admission.surname}".strip(),
+                customer_email=admission.email,
+                customer_contact=admission.phone_student,
+                description="Insight Institute Fee Payment",
+                bank_account_data={
+                    'account_number': assigned_bank.account_number,
+                    'name': assigned_bank.name,
+                    'ifsc': assigned_bank.ifsc_code,
+                } if assigned_bank else None,
+            )
+            print("================================================")
+            print(response)
+            print("================================================")
+            if response.get('success') and response.get('data'):
+                rp_link = response['data']
+                print(rp_link)
+                if rp_link and 'short_url' in rp_link:
+                    razorpay_link_url = rp_link['short_url']
+                    admission.razorpay_payment_link = razorpay_link_url
+                    admission.razorpay_payment_link_id = rp_link.get('id')
+                    admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+                    print(f"Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
+                else:
+                    print(f"Razorpay response missing short_url: {rp_link}")
             else:
-                print(f"Razorpay response missing short_url: {rp_link}")
-        else:
-            error_detail = response.get('error') or response.get('detail', response)
-            print(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
-    except Exception as e:
-        print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
+                error_detail = response.get('error') or response.get('detail', response)
+                print(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
+        except Exception as e:
+            print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
+    else:
+        print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
 
     if admission.email and assigned_bank:
         try:
