@@ -74,6 +74,12 @@ def create_payment_link(
     if not is_razorpay_enabled():
         return {"success": False, "error": "Razorpay is not configured on this server."}
 
+    try:
+        if float(amount) <= 0:
+            return {"success": False, "error": "Amount must be greater than zero to create a payment link."}
+    except (ValueError, TypeError):
+        return {"success": False, "error": "Invalid amount provided."}
+
     payload = {
         "amount": _to_paise(amount),
         "currency": "INR",
