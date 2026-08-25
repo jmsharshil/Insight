@@ -103,12 +103,49 @@ class SchedulerConfig(AppConfig):
         TaskScheduler.register("auto_mark_student_absentees", auto_mark_student_absentees)
         print("[SCHEDULER APP] All task types registered.")
 
+    @staticmethod
+    def _seconds_until_target_ist(hour, minute=0):
+        """
+        Calculate seconds from now until the next occurrence of
+        the given hour:minute in IST (Asia/Kolkata).
+
+        If the target time has already passed today, it returns the
+        delay until the same time tomorrow.
+        """
+        import datetime
+        import zoneinfo
+
+        ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+        now_ist = datetime.datetime.now(ist)
+
+        target_today = now_ist.replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+
+        if now_ist < target_today:
+            delay = (target_today - now_ist).total_seconds()
+        else:
+            # Target time already passed today → schedule for tomorrow
+            target_tomorrow = target_today + datetime.timedelta(days=1)
+            delay = (target_tomorrow - now_ist).total_seconds()
+
+        return int(delay)
+
     def _ensure_recurring_tasks(self):
         """
         Make sure each recurring system task has at least one pending row.
         If not (fresh deploy or all completed), create one.
         """
         from .services import TaskScheduler
+
+        # Calculate actual delay to 8:30 AM IST regardless of server
+        # start time (the old hardcoded 30600s assumed midnight startup).
+        detect_missing_scans_delay = self._seconds_until_target_ist(8, 30)
+        print(
+            f"[SCHEDULER APP] detect_missing_scans_all_branches "
+            f"scheduled in {detect_missing_scans_delay}s "
+            f"(next 08:30 AM IST)"
+        )
 
         RECURRING_TASKS = [
             {
@@ -149,8 +186,8 @@ class SchedulerConfig(AppConfig):
             },
             {
                 "task_type": "detect_missing_scans_all_branches",
-                "interval_seconds": 86400,       # nightly (every 24h)
-                "delay_seconds": 30600,          # 08:30 AM after midnight startup
+                "interval_seconds": 86400,       # daily (every 24h)
+                "delay_seconds": detect_missing_scans_delay,  # next 08:30 AM IST
                 "max_retries": 3,
             },
             {
