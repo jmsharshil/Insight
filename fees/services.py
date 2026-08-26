@@ -318,7 +318,7 @@ def send_payment_receipt(payment):
 
         # --- Send WhatsApp to student + parent phones (with PDF document) ---
         try:
-            from chat.notifications import send_whatsapp_text, send_whatsapp_media
+            from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
 
             wa_phones = set()
             if getattr(payment.student, 'phone_student', None):
@@ -372,10 +372,16 @@ def send_payment_receipt(payment):
                                 f"for payment {payment.id}"
                             )
                         else:
-                            # Fallback: text-only WhatsApp if no PDF URL
-                            send_whatsapp_text(to=phone, body=wa_caption)
+                            # Fallback: text-only WhatsApp if no PDF URL, but try template first
+                            send_whatsapp_with_fallback(
+                                to=phone,
+                                template_name="admission_process",
+                                language_code="en",
+                                components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+                                fallback_body=wa_caption,
+                            )
                             logger.info(
-                                f"WhatsApp receipt (text-only) sent to {phone} "
+                                f"WhatsApp receipt (template/text fallback) sent to {phone} "
                                 f"for payment {payment.id} (no PDF URL)"
                             )
                     except Exception as wa_phone_err:

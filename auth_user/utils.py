@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 import secrets
 import string
 from core.sender import send_email
-from chat.notifications import send_whatsapp_text
+from chat.notifications import send_whatsapp_with_fallback
 
 def generate_temporary_password(length=12):
     """Generate a secure temporary password"""
@@ -48,7 +48,17 @@ Thank you,
     )
 
     try:
-        send_whatsapp_text(to=user.phone,body=text_content,user_id=str(user.id))
+        send_whatsapp_with_fallback(
+            to=user.phone,
+            template_name="no_one_institute_in_gujarat_",
+            language_code="en",
+            components=[{
+                "type": "body",
+                "parameters": [{"type": "text", "text": user.name}],
+            }],
+            fallback_body=text_content,
+            user_id=str(user.id),
+        )
     except Exception as e:
         print(e)
 
@@ -87,7 +97,17 @@ Best Regards,
     )
 
     try:
-        send_whatsapp_text(to=user.phone,body=text_content,user_id=str(user.id))
+        send_whatsapp_with_fallback(
+            to=user.phone,
+            template_name="otp_verification",
+            language_code="en",
+            components=[{
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(otp)}],
+            }],
+            fallback_body=f"{otp} is your verification code. For your security, do not share this code.",
+            user_id=str(user.id),
+        )
     except Exception as e:
         print(e)
 
@@ -137,7 +157,17 @@ Best Regards,
     )
 
     try:
-        send_whatsapp_text(to=user.phone,body=text_content,user_id=str(user.id))
+        send_whatsapp_with_fallback(
+            to=user.phone,
+            template_name="admission_process",
+            language_code="en",
+            components=[{
+                "type": "body",
+                "parameters": [{"type": "text", "text": user.name}],
+            }],
+            fallback_body=text_content,
+            user_id=str(user.id),
+        )
     except Exception as e:
         print(e)
 
@@ -186,9 +216,19 @@ Best Regards,
         },
         organization=parent_user.organization,
     )
-    
+
     try:
-        send_whatsapp_text(to=parent_user.phone, body=text_content, user_id=str(parent_user.id))
+        send_whatsapp_with_fallback(
+            to=parent_user.phone,
+            template_name="admission_process",
+            language_code="en",
+            components=[{
+                "type": "body",
+                "parameters": [{"type": "text", "text": parent_user.name}],
+            }],
+            fallback_body=text_content,
+            user_id=str(parent_user.id),
+        )
     except Exception as e:
         print(e)
 
@@ -217,7 +257,17 @@ Best Regards,
     )
 
     try:
-        send_whatsapp_text(to=user.phone, body=text_content, user_id=str(user.id))
+        send_whatsapp_with_fallback(
+            to=user.phone,
+            template_name="login_otp",
+            language_code="en",
+            components=[{
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(otp)}],
+            }],
+            fallback_body=f"{otp} is your verification code. For your security, do not share this code.",
+            user_id=str(user.id),
+        )
     except Exception as e:
         print(e)
 
@@ -253,7 +303,17 @@ Best Regards,
     )
 
     try:
-        send_whatsapp_text(to=user.phone, body=text_content, user_id=str(user.id))
+        send_whatsapp_with_fallback(
+            to=user.phone,
+            template_name="resend_login_otp",
+            language_code="en",
+            components=[{
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(otp)}],
+            }],
+            fallback_body=f"{otp} is your verification code. For your security, do not share this code.",
+            user_id=str(user.id),
+        )
     except Exception as e:
         print(e)
 

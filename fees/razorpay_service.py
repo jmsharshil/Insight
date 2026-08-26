@@ -386,7 +386,7 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
 
         # ── WhatsApp notification with PDF document ─────────────────────────────────
         try:
-            from chat.notifications import send_whatsapp_text, send_whatsapp_media
+            from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
 
             phones = []
             if getattr(admission, 'phone_student', None):
@@ -435,8 +435,14 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
                             )
                             logger.info(f"[Razorpay] ADM WhatsApp receipt (PDF) sent to {phone}")
                         else:
-                            send_whatsapp_text(to=phone, body=wa_caption)
-                            logger.info(f"[Razorpay] ADM WhatsApp receipt (text) sent to {phone}")
+                            send_whatsapp_with_fallback(
+                                to=phone,
+                                template_name="admission_process",
+                                language_code="en",
+                                components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+                                fallback_body=wa_caption,
+                            )
+                            logger.info(f"[Razorpay] ADM WhatsApp receipt (template/text) sent to {phone}")
                     except Exception as wa_err:
                         logger.error(f"[Razorpay] ADM WhatsApp failed to {phone}: {wa_err}")
         except Exception as wa_import_err:

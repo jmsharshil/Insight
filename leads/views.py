@@ -23,7 +23,7 @@ from django.db.models import Q
 import re
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
-from chat.notifications import send_whatsapp_text
+from chat.notifications import send_whatsapp_with_fallback
 
 FORM_TYPE_DISPLAY = dict(FORM_TYPE_CHOICES)
 STAGE_DISPLAY = dict(STAGE_CHOICES)
@@ -374,7 +374,13 @@ class LeadStatusUpdateView(APIView):
                             )
                             
                             try:
-                                send_whatsapp_text(to=admission.phone_student,body=text_content)
+                                send_whatsapp_with_fallback(
+                                    to=admission.phone_student,
+                                    template_name="admission_process",
+                                    language_code="en",
+                                    components=[{"type": "body", "parameters": [{"type": "text", "text": admission.first_name}]}],
+                                    fallback_body=text_content,
+                                )
                             except Exception as e:
                                 print(e)
                             logger.info(f"Admission form email sent to {admission.email}")

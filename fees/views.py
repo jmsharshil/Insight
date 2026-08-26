@@ -722,7 +722,7 @@ def send_refund_notifications(refund, rp_refund_id):
 
     # WhatsApp: student + parent phones
     try:
-        from chat.notifications import send_whatsapp_text
+        from chat.notifications import send_whatsapp_with_fallback
         wa_message = (
             f"\u2705 *Refund Processed \u2014 Insight Institute*\n\n"
             f"Dear {student_name},\n\n"
@@ -747,7 +747,13 @@ def send_refund_notifications(refund, rp_refund_id):
 
         for phone in filter(None, phones):
             try:
-                send_whatsapp_text(to=phone, body=wa_message)
+                send_whatsapp_with_fallback(
+                    to=phone,
+                    template_name="admission_process",
+                    language_code="en",
+                    components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+                    fallback_body=wa_message,
+                )
                 logger.info(f"[Refund] WhatsApp sent to {phone}")
             except Exception as e:
                 logger.error(f"[Refund] WhatsApp to {phone} failed: {e}")
