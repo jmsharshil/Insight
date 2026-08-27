@@ -91,6 +91,10 @@ def create_payment_link(
             "email": customer_email or "",
             "contact": str(customer_contact or ""),
         },
+        "notify": {
+            "sms": True,
+            "email": True
+        },
         "reminder_enable": True,
     }
 
