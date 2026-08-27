@@ -135,8 +135,12 @@ def test_sender():
             print("✅ Sender ready. Sending template message to", TARGET_NUMBER, "...")
             response = wa.send_template(
                 to=TARGET_NUMBER,
-                template_name="no_one_institute_in_gujarat_",
-                language_code="en_US"
+                template_name="otp_verification",
+                language_code="en_US",
+                components=[{
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": "123456"}],
+                }],
             )
             print("✅ SUCCESS! API Response:", json.dumps(response, indent=2))
             print("Message sent successfully.")

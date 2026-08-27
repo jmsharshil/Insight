@@ -314,15 +314,18 @@ def send_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, user_id=No
  
 def send_whatsapp_template(*, to: str, template_name: str, language_code: str = "en_US",
                             components: list = None, delay_seconds: int = 0,
-                            user_id=None) -> Optional[str]:
+                            user_id=None, fallback_body: str = None) -> Optional[str]:
     """Schedule a template WhatsApp message (works outside the 24h session
-    window, unlike send_whatsapp_text)."""
+    window, unlike send_whatsapp_text).
+    Pass `fallback_body` to automatically queue a plain-text message if the
+    template send fails permanently in the scheduler."""
     if not to:
         return None
  
     task = queue_whatsapp_template(
         to=to, template_name=template_name, language_code=language_code,
         components=components, delay_seconds=delay_seconds,
+        fallback_body=fallback_body,
     )
     task_id = str(task.id) if task else None
  
@@ -383,6 +386,7 @@ def send_whatsapp_with_fallback(
                 components=components or [],
                 delay_seconds=delay_seconds,
                 user_id=user_id,
+                fallback_body=fallback_body,  # persisted in task_kwargs for scheduler-level fallback
             )
             logger.info(
                 "[WA] Template '%s' queued for %s (task=%s)",

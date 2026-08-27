@@ -231,6 +231,7 @@ from .sender import WhatsAppAPIError, WhatsAppConfig, WhatsAppSender
 # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes
 PERMANENT_ERROR_CODES = {
     100,     # invalid object ID / no permission / unsupported operation (e.g. wrong phone_number_id)
+    131008,  # required parameter missing (e.g. template component not supplied)
     131026,  # undeliverable / invalid number
     131047,  # outside 24h window, needs a template
     131051,  # unsupported message type
@@ -281,6 +282,8 @@ def _run_whatsapp_send(*, method: str, **send_kwargs):
         # surface it loudly.
         raise ValueError(f"WhatsAppSender has no method '{method}'")
 
+    fallback_body = send_kwargs.pop("fallback_body", None)
+    
     try:
         return fn(**send_kwargs)
     except WhatsAppAPIError as exc:
@@ -289,6 +292,17 @@ def _run_whatsapp_send(*, method: str, **send_kwargs):
                 "[WHATSAPP] Permanent failure (code=%s), not retrying: %s",
                 exc.error_code, exc,
             )
+            # queue it now so the recipient still gets the message.
+            to = send_kwargs.get("to")
+            if fallback_body and to and method == "send_template":
+                try:
+                    queue_whatsapp_text(to=to, body=fallback_body)
+                    logger.info(
+                        "[WHATSAPP] Fallback plain-text queued for %s after template failure (code=%s)",
+                        to, exc.error_code,
+                    )
+                except Exception as fallback_err:
+                    logger.error("[WHATSAPP] Failed to queue text fallback: %s", fallback_err)
             return  # swallow -> TaskScheduler marks the task 'completed'
         logger.warning("[WHATSAPP] Transient failure (code=%s): %s", exc.error_code, exc)
         raise  # let TaskScheduler's retry/backoff handle it
@@ -310,16 +324,26 @@ def queue_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, max_retri
 
 def queue_whatsapp_template(*, to: str, template_name: str, language_code: str = "en_US",
                              components: Optional[List[Dict[str, Any]]] = None,
-                             delay_seconds: int = 0, max_retries: int = 3):
+                             delay_seconds: int = 0, max_retries: int = 3,
+                             fallback_body: Optional[str] = None):
+    """
+    Queue a WhatsApp template message.
+    If `fallback_body` is provided and the template send fails with a permanent
+    API error (e.g. 131008 missing param, 132001 not approved), the scheduler
+    will automatically queue a plain-text message with that content instead.
+    """
+    task_kwargs = {
+        "method": "send_template",
+        "to": to,
+        "template_name": template_name,
+        "language_code": language_code,
+        "components": components or [],
+    }
+    if fallback_body:
+        task_kwargs["fallback_body"] = fallback_body
     return TaskScheduler.schedule(
         task_type="whatsapp_send",
-        task_kwargs={
-            "method": "send_template",
-            "to": to,
-            "template_name": template_name,
-            "language_code": language_code,
-            "components": components or [],
-        },
+        task_kwargs=task_kwargs,
         delay_seconds=delay_seconds,
         max_retries=max_retries,
     )

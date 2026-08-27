@@ -52,10 +52,18 @@ Thank you,
             to=user.phone,
             template_name="no_one_institute_in_gujarat_",
             language_code="en",
-            components=[{
-                "type": "body",
-                "parameters": [{"type": "text", "text": user.name}],
-            }],
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": user.name}],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": token}],
+                }
+            ],
             fallback_body=text_content,
             user_id=str(user.id),
         )
@@ -101,10 +109,18 @@ Best Regards,
             to=user.phone,
             template_name="otp_verification",
             language_code="en",
-            components=[{
-                "type": "body",
-                "parameters": [{"type": "text", "text": str(otp)}],
-            }],
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": str(otp)}],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": str(otp)}],
+                }
+            ],
             fallback_body=f"{otp} is your verification code. For your security, do not share this code.",
             user_id=str(user.id),
         )
@@ -161,10 +177,21 @@ Best Regards,
             to=user.phone,
             template_name="admission_process",
             language_code="en",
-            components=[{
-                "type": "body",
-                "parameters": [{"type": "text", "text": user.name}],
-            }],
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": user.name},
+                        {"type": "text", "text": user.organization.name if user.organization else 'Insight ERP'}
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": "login"}],
+                }
+            ],
             fallback_body=text_content,
             user_id=str(user.id),
         )
@@ -222,10 +249,21 @@ Best Regards,
             to=parent_user.phone,
             template_name="admission_process",
             language_code="en",
-            components=[{
-                "type": "body",
-                "parameters": [{"type": "text", "text": parent_user.name}],
-            }],
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": parent_user.name},
+                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'}
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": "login"}],
+                }
+            ],
             fallback_body=text_content,
             user_id=str(parent_user.id),
         )
@@ -261,10 +299,18 @@ Best Regards,
             to=user.phone,
             template_name="login_otp",
             language_code="en",
-            components=[{
-                "type": "body",
-                "parameters": [{"type": "text", "text": str(otp)}],
-            }],
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": str(otp)}],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": str(otp)}],
+                }
+            ],
             fallback_body=f"{otp} is your verification code. For your security, do not share this code.",
             user_id=str(user.id),
         )
@@ -307,10 +353,18 @@ Best Regards,
             to=user.phone,
             template_name="resend_login_otp",
             language_code="en",
-            components=[{
-                "type": "body",
-                "parameters": [{"type": "text", "text": str(otp)}],
-            }],
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": str(otp)}],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": str(otp)}],
+                }
+            ],
             fallback_body=f"{otp} is your verification code. For your security, do not share this code.",
             user_id=str(user.id),
         )
