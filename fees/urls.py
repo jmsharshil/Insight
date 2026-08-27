@@ -11,6 +11,7 @@ from .views import (
     MyFeesAPIView,
     # Razorpay
     RazorpayGeneratePaymentLinkView,
+    RazorpayDirectPaymentLinkView,
     RazorpayFetchPaymentLinkView,
     RazorpayCancelPaymentLinkView,
     RazorpayFetchPaymentView,
@@ -59,6 +60,7 @@ urlpatterns = [
     path('razorpay/webhook/',                            RazorpayWebhookView.as_view(),            name='razorpay-webhook'),
     path('razorpay/webhook/test/',                       RazorpayWebhookTestView.as_view(),        name='razorpay-webhook-test'),
     path('razorpay/generate-link/',                      RazorpayGeneratePaymentLinkView.as_view(), name='razorpay-generate-link'),
+    path('razorpay/generate-direct-link/',               RazorpayDirectPaymentLinkView.as_view(),   name='razorpay-generate-direct-link'),
     path('razorpay/payment-link/<str:link_id>/',         RazorpayFetchPaymentLinkView.as_view(),    name='razorpay-fetch-link'),
     path('razorpay/cancel-link/<str:link_id>/',          RazorpayCancelPaymentLinkView.as_view(),   name='razorpay-cancel-link'),
     path('razorpay/payment/<str:razorpay_payment_id>/',  RazorpayFetchPaymentView.as_view(),        name='razorpay-fetch-payment'),

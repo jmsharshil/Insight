@@ -1257,6 +1257,62 @@ class RazorpayGeneratePaymentLinkView(APIView):
         }, status=201)
 
 
+class RazorpayDirectPaymentLinkView(APIView):
+    """
+    POST /api/v1/fees/razorpay/generate-direct-link/
+    Generate a Razorpay payment link directly with the parameters passed in the body.
+    Body parameters:
+    - amount (required): Amount in INR
+    - reference_id (required): Unique string identifier
+    - customer_name (required): Payer name
+    - customer_email (optional): Payer email
+    - customer_contact (optional): Payer phone (10-digit)
+    - description (optional): Description for payment
+    - bank_account_data (optional): Dict with account_number, name, ifsc
+    - upi_id (optional): UPI ID
+    """
+    
+    def post(self, request):
+        amount = request.data.get('amount')
+        reference_id = request.data.get('reference_id')
+        customer_name = request.data.get('customer_name')
+        
+        if not amount or not reference_id or not customer_name:
+            return Response({
+                'success': False, 
+                'message': 'amount, reference_id, and customer_name are required.'
+            }, status=400)
+            
+        bank_account_data = request.data.get('bank_account_data')
+        if isinstance(bank_account_data, str):
+            try:
+                import json
+                bank_account_data = json.loads(bank_account_data)
+            except json.JSONDecodeError:
+                bank_account_data = None
+                
+        result = create_payment_link(
+            amount=amount,
+            reference_id=reference_id,
+            customer_name=customer_name,
+            customer_email=request.data.get('customer_email', ''),
+            customer_contact=request.data.get('customer_contact', ''),
+            description=request.data.get('description', 'Direct Payment'),
+            bank_account_data=bank_account_data,
+            upi_id=request.data.get('upi_id')
+        )
+        
+        if not result['success']:
+            return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=502)
+            
+        return Response({
+            'success': True,
+            'message': 'Razorpay payment link created.',
+            'data': result['data']
+        }, status=201)
+
+
+
 class RazorpayFetchPaymentLinkView(APIView):
     """
     GET /api/v1/fees/razorpay/payment-link/<link_id>/
