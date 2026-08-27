@@ -386,7 +386,7 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
 
         # ── WhatsApp notification with PDF document ─────────────────────────────────
         try:
-            from chat.notifications import send_whatsapp_text, send_whatsapp_media
+            from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
 
             phones = []
             if getattr(admission, 'phone_student', None):
@@ -435,8 +435,14 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
                             )
                             logger.info(f"[Razorpay] ADM WhatsApp receipt (PDF) sent to {phone}")
                         else:
-                            send_whatsapp_text(to=phone, body=wa_caption)
-                            logger.info(f"[Razorpay] ADM WhatsApp receipt (text) sent to {phone}")
+                            send_whatsapp_with_fallback(
+                                to=phone,
+                                template_name="admission_process",
+                                language_code="en",
+                                components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+                                fallback_body=wa_caption,
+                            )
+                            logger.info(f"[Razorpay] ADM WhatsApp receipt (template/text) sent to {phone}")
                     except Exception as wa_err:
                         logger.error(f"[Razorpay] ADM WhatsApp failed to {phone}: {wa_err}")
         except Exception as wa_import_err:
@@ -569,7 +575,28 @@ def process_refund_processed_event(payload: dict) -> dict:
 
         local_payment = Payment.objects.filter(transaction_ref=rp_payment_id).first()
         if not local_payment:
-            logger.warning(f"[Razorpay] refund.processed: no local payment for {rp_payment_id}")
+            # Check if this was an admission payment that was refunded before enrollment/approval
+            try:
+                from onboarding.models import Admission, AdmissionStatusHistory
+                admission = Admission.objects.filter(transaction_id=rp_payment_id).first()
+                if admission:
+                    admission.status = 'payment_pending'
+                    admission.transaction_id = ''
+                    admission.payment_note = f"Razorpay refund {rp_refund_id} processed."
+                    admission.save(update_fields=['status', 'transaction_id', 'payment_note', 'updated_at'])
+                    
+                    AdmissionStatusHistory.objects.create(
+                        admission=admission,
+                        status='payment_pending',
+                        changed_by=None,
+                        note=f"Payment refunded via Razorpay. Txn: {rp_payment_id}, Refund: {rp_refund_id}",
+                    )
+                    logger.info(f"[Razorpay] Refund {rp_refund_id} processed for admission {admission.id}. Status reset to payment_pending.")
+                    return {"success": True, "refund_id": "admission_refunded"}
+            except Exception as e:
+                logger.error(f"[Razorpay] Error processing admission refund: {e}")
+
+            logger.warning(f"[Razorpay] refund.processed: no local payment or admission for {rp_payment_id}")
             return {"success": True, "note": "No matching local payment found — skipped."}
 
         refund, created = Refund.objects.get_or_create(

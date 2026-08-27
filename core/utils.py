@@ -253,6 +253,7 @@ def _get_sender() -> WhatsAppSender:
         config = WhatsAppConfig(
             phone_number_id=settings.WHATSAPP_PHONE_NUMBER_ID,
             access_token=settings.WHATSAPP_ACCESS_TOKEN,
+            base_url=getattr(settings, 'WHATSAPP_API_BASE_URL', 'https://graph.facebook.com'),
         )
         _sender_instance = WhatsAppSender(config)
     return _sender_instance

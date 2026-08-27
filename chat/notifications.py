@@ -344,6 +344,66 @@ def send_whatsapp_media(*, to: str, media_type: str, link: str = None, media_id:
     return task_id
  
  
+def send_whatsapp_with_fallback(
+    *,
+    to: str,
+    fallback_body: str,
+    template_name: str = None,
+    language_code: str = "en_US",
+    components: list = None,
+    delay_seconds: int = 0,
+    user_id=None,
+) -> Optional[str]:
+    """
+    Send a WhatsApp message preferring a named template.
+    Falls back to plain-text (`fallback_body`) if:
+      - no template_name is provided, OR
+      - the template send raises any exception.
+
+    Returns the ScheduledTask id string, or None.
+
+    Usage:
+        send_whatsapp_with_fallback(
+            to=user.phone,
+            template_name="admission_process",
+            components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+            fallback_body=text_content,
+            user_id=str(user.id),
+        )
+    """
+    if not to:
+        return None
+
+    if template_name:
+        try:
+            task_id = send_whatsapp_template(
+                to=to,
+                template_name=template_name,
+                language_code=language_code,
+                components=components or [],
+                delay_seconds=delay_seconds,
+                user_id=user_id,
+            )
+            logger.info(
+                "[WA] Template '%s' queued for %s (task=%s)",
+                template_name, to, task_id,
+            )
+            return task_id
+        except Exception as exc:
+            logger.warning(
+                "[WA] Template '%s' failed for %s (%s) — falling back to plain text.",
+                template_name, to, exc,
+            )
+
+    # Fallback: plain text
+    return send_whatsapp_text(
+        to=to,
+        body=fallback_body,
+        delay_seconds=delay_seconds,
+        user_id=user_id,
+    )
+ 
+ 
 def notify_new_message_whatsapp(*, room_id: str, sender_name: str, content: str,
                                  recipient_phone: str, recipient_user_id=None):
     """

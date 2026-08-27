@@ -244,8 +244,14 @@ def _setup_payment_bank_and_notify(admission):
             )
             
             try:
-                from chat.notifications import send_whatsapp_text
-                send_whatsapp_text(to=admission.phone_student,body=text_content)
+                from chat.notifications import send_whatsapp_with_fallback
+                send_whatsapp_with_fallback(
+                    to=admission.phone_student,
+                    template_name="admission_process",
+                    language_code="en",
+                    components=[{"type": "body", "parameters": [{"type": "text", "text": admission.first_name}]}],
+                    fallback_body=text_content,
+                )
             except Exception as e:
                 print(e)
             logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank.bank_name}")
