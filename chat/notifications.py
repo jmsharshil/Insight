@@ -368,7 +368,7 @@ def send_whatsapp_with_fallback(
     Usage:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="admission_process",
+            template_name="admission_process_",
             components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
             fallback_body=text_content,
             user_id=str(user.id),

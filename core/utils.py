@@ -259,6 +259,28 @@ def _get_sender() -> WhatsAppSender:
         _sender_instance = WhatsAppSender(config)
     return _sender_instance
 
+import requests
+
+def log_template_to_crm(phone_number: str, template_text: str):
+    """
+    Sends a log of the outbound template to the CRM so it appears in the chat history.
+    """
+    # Our CRM Webhook URL 
+    crm_webhook_url = "https://whatsappcrmsaas-emdke9dnb4f8bne6.centralindia-01.azurewebsites.net/webhook/"
+    payload = {
+        "is_insight_log": True,
+        "phone": phone_number,
+        "content": template_text,
+        "bot_name": "Insights",
+        "phone_number_id": "1168578376348442"
+    }
+    try:
+        # Fire-and-forget request with a short timeout to prevent blocking your logic
+        requests.post(crm_webhook_url, json=payload, timeout=5)
+        logger.info(f"[CRM LOG] Forwarded outbound template for {phone_number} to CRM")
+    except Exception as e:
+        logger.error(f"[CRM LOG] Failed to forward outbound template to CRM: {e}")
+
 
 def _run_whatsapp_send(*, method: str, **send_kwargs):
     """
@@ -285,7 +307,16 @@ def _run_whatsapp_send(*, method: str, **send_kwargs):
     fallback_body = send_kwargs.pop("fallback_body", None)
     
     try:
-        return fn(**send_kwargs)
+        result = fn(**send_kwargs)
+        
+        # [NEW STEP] Call the logger function to notify the CRM
+        if method == "send_template" and send_kwargs.get("to"):
+            to = send_kwargs.get("to")
+            template_name = send_kwargs.get("template_name", "unknown")
+            template_text = fallback_body if fallback_body else f"Sent WhatsApp template: {template_name}"
+            log_template_to_crm(to, template_text)
+            
+        return result
     except WhatsAppAPIError as exc:
         if exc.error_code in PERMANENT_ERROR_CODES:
             logger.error(

@@ -135,7 +135,7 @@ def test_sender():
             print("✅ Sender ready. Sending template message to", TARGET_NUMBER, "...")
             response = wa.send_template(
                 to=TARGET_NUMBER,
-                template_name="otp_verification",
+                template_name="otp_verification_",
                 language_code="en_US",
                 components=[{
                     "type": "body",

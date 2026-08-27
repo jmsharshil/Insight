@@ -749,7 +749,7 @@ def send_refund_notifications(refund, rp_refund_id):
             try:
                 send_whatsapp_with_fallback(
                     to=phone,
-                    template_name="admission_process",
+                    template_name="admission_process_",
                     language_code="en",
                     components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
                     fallback_body=wa_message,

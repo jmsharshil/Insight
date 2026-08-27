@@ -107,7 +107,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="otp_verification",
+            template_name="otp_verification_",
             language_code="en",
             components=[
                 {
@@ -175,7 +175,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="admission_process",
+            template_name="admission_process_",
             language_code="en",
             components=[
                 {
@@ -247,7 +247,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=parent_user.phone,
-            template_name="admission_process",
+            template_name="admission_process_",
             language_code="en",
             components=[
                 {
@@ -297,7 +297,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="login_otp",
+            template_name="login_otp_",
             language_code="en",
             components=[
                 {
@@ -351,7 +351,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="resend_login_otp",
+            template_name="resend_login_otp_",
             language_code="en",
             components=[
                 {

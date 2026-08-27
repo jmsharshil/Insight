@@ -50,7 +50,7 @@ def send_checker_assignment_email(marksheet):
     try:
         send_whatsapp_with_fallback(
             to=checker.phone,
-            template_name="admission_process",
+            template_name="admission_process_",
             language_code="en",
             components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name}]}],
             fallback_body=text_content,
@@ -92,7 +92,7 @@ def send_answer_key_email(checker, exam, signed_url):
     try:
         send_whatsapp_with_fallback(
             to=checker.phone,
-            template_name="admission_process",
+            template_name="admission_process_",
             language_code="en",
             components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name}]}],
             fallback_body=text_content,
@@ -137,7 +137,7 @@ def send_submission_reminder_email(marksheet):
     try:
         send_whatsapp_with_fallback(
             to=checker.phone,
-            template_name="admission_process",
+            template_name="admission_process_",
             language_code="en",
             components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name}]}],
             fallback_body=text_content,
@@ -201,7 +201,7 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
         if getattr(faculty_user, 'phone', None):
             send_whatsapp_with_fallback(
                 to=faculty_user.phone,
-                template_name="admission_process",
+                template_name="admission_process_",
                 language_code="en",
                 components=[{"type": "body", "parameters": [{"type": "text", "text": faculty_user.name}]}],
                 fallback_body=text_content,
@@ -260,7 +260,7 @@ def send_recheck_request_notification(recheck_request):
         if admin_phone:
             send_whatsapp_with_fallback(
                 to=admin_phone,
-                template_name="admission_process",
+                template_name="admission_process_",
                 language_code="en",
                 components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
                 fallback_body=text_content,

@@ -376,7 +376,7 @@ class LeadStatusUpdateView(APIView):
                             try:
                                 send_whatsapp_with_fallback(
                                     to=admission.phone_student,
-                                    template_name="admission_process",
+                                    template_name="admission_process_",
                                     language_code="en",
                                     components=[{"type": "body", "parameters": [{"type": "text", "text": admission.first_name}]}],
                                     fallback_body=text_content,
