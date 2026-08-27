@@ -35,17 +35,17 @@ Thank you,
 {user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    send_email(
-        to=user.email,
-        subject=subject,
-        text=text_content,
-        template='emails/password_set.html',
-        template_context={
-            'user_name': user.name,
-            'password_set_link': password_set_link,
-        },
-        organization=user.organization,
-    )
+    # send_email(
+    #     to=user.email,
+    #     subject=subject,
+    #     text=text_content,
+    #     template='emails/password_set.html',
+    #     template_context={
+    #         'user_name': user.name,
+    #         'password_set_link': password_set_link,
+    #     },
+    #     organization=user.organization,
+    # )
 
     try:
         send_whatsapp_with_fallback(
@@ -92,17 +92,17 @@ Best Regards,
 {user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    send_email(
-        to=user.email,
-        subject=subject,
-        text=text_content,
-        template='emails/otp.html',
-        template_context={
-            'user_name': user.name,
-            'otp_code': otp,
-        },
-        organization=user.organization,
-    )
+    # send_email(
+    #     to=user.email,
+    #     subject=subject,
+    #     text=text_content,
+    #     template='emails/otp.html',
+    #     template_context={
+    #         'user_name': user.name,
+    #         'otp_code': otp,
+    #     },
+    #     organization=user.organization,
+    # )
 
     try:
         send_whatsapp_with_fallback(
@@ -285,14 +285,14 @@ Best Regards,
 {user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    send_email(
-        to=user.email,
-        subject=subject,
-        text=text_content,
-        template='emails/login_otp.html',
-        template_context={'user_name': user.name, 'otp_code': otp, 'organization_name':user.organization.name},
-        organization=user.organization,
-    )
+    # send_email(
+    #     to=user.email,
+    #     subject=subject,
+    #     text=text_content,
+    #     template='emails/login_otp.html',
+    #     template_context={'user_name': user.name, 'otp_code': otp, 'organization_name':user.organization.name},
+    #     organization=user.organization,
+    # )
 
     try:
         send_whatsapp_with_fallback(
@@ -334,19 +334,19 @@ Best Regards,
 {user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    send_email(
-        to=user.email,
-        subject=subject,
-        text=text_content,
-        template='emails/resend_login_otp.html',
-        template_context={
-            'user_name': user.name,
-            'otp_code': otp,
-            'organization': user.organization,
-            "organization_name": user.organization.name
-        },
-        organization=user.organization,
-    )
+    # send_email(
+    #     to=user.email,
+    #     subject=subject,
+    #     text=text_content,
+    #     template='emails/resend_login_otp.html',
+    #     template_context={
+    #         'user_name': user.name,
+    #         'otp_code': otp,
+    #         'organization': user.organization,
+    #         "organization_name": user.organization.name
+    #     },
+    #     organization=user.organization,
+    # )
 
     try:
         send_whatsapp_with_fallback(
