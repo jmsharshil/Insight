@@ -35,22 +35,22 @@ Thank you,
 {user.organization.name if user.organization else 'Insight ERP'} Team
 """
 
-    # send_email(
-    #     to=user.email,
-    #     subject=subject,
-    #     text=text_content,
-    #     template='emails/password_set.html',
-    #     template_context={
-    #         'user_name': user.name,
-    #         'password_set_link': password_set_link,
-    #     },
-    #     organization=user.organization,
-    # )
+    send_email(
+        to=user.email,
+        subject=subject,
+        text=text_content,
+        template='emails/password_set.html',
+        template_context={
+            'user_name': user.name,
+            'password_set_link': password_set_link,
+        },
+        organization=user.organization,
+    )
 
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="no_one_institute_in_gujarat_",
+            template_name="no_one_institute_in_gujarat",
             language_code="en",
             components=[
                 {
@@ -107,7 +107,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="otp_verification_",
+            template_name="otp_verification",
             language_code="en",
             components=[
                 {
@@ -175,7 +175,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="admission_process_",
+            template_name="admission_process",
             language_code="en",
             components=[
                 {
@@ -247,7 +247,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=parent_user.phone,
-            template_name="admission_process_",
+            template_name="admission_process",
             language_code="en",
             components=[
                 {
@@ -297,7 +297,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="login_otp_",
+            template_name="login_otp",
             language_code="en",
             components=[
                 {
@@ -351,7 +351,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="resend_login_otp_",
+            template_name="resend_login_otp",
             language_code="en",
             components=[
                 {
