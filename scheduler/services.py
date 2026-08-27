@@ -50,6 +50,25 @@ class TaskScheduler:
     # tasks that schedule() already armed.
     _armed_task_ids: set = set()
 
+    # ── Wall-clock helpers ───────────────────────────────────────
+
+    @staticmethod
+    def _seconds_until_target_ist(hour, minute=0):
+        """
+        Seconds from now until the next *hour:minute* in IST.
+        If the target time already passed today, returns the delay
+        until the same time tomorrow.
+        Uses django.utils.timezone (Python 3.8-compatible).
+        """
+        import datetime as _dt
+        from django.utils import timezone as _tz
+
+        now_ist = _tz.localtime(_tz.now())
+        target = now_ist.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now_ist >= target:
+            target += _dt.timedelta(days=1)
+        return int((target - now_ist).total_seconds())
+
     # ── Registration ─────────────────────────────────────────────
 
     @classmethod
@@ -231,14 +250,27 @@ class TaskScheduler:
 
         # ── Recurring: schedule the next iteration ───────────────
         if task.is_recurring and task.interval_seconds:
+            next_delay = task.interval_seconds
+
+            # For wall-clock-sensitive tasks, compute the actual delay
+            # to the target IST time instead of a blind +24h offset.
+            # This prevents drift if the task runs a few minutes late.
+            WALL_CLOCK_TASKS = {
+                # task_type → (target_hour, target_minute)
+                "detect_missing_scans_all_branches": (8, 30),
+            }
+            if task.task_type in WALL_CLOCK_TASKS:
+                target_h, target_m = WALL_CLOCK_TASKS[task.task_type]
+                next_delay = cls._seconds_until_target_ist(target_h, target_m)
+
             print(
                 f"[SCHEDULER] Recurring task '{task.task_type}' — "
-                f"scheduling next run in {task.interval_seconds}s"
+                f"scheduling next run in {next_delay}s"
             )
             cls.schedule(
                 task_type=task.task_type,
                 task_kwargs=task.task_kwargs if task.task_kwargs else None,
-                delay_seconds=task.interval_seconds,
+                delay_seconds=next_delay,
                 is_recurring=True,
                 interval_seconds=task.interval_seconds,
                 max_retries=task.max_retries,

@@ -111,12 +111,15 @@ class SchedulerConfig(AppConfig):
 
         If the target time has already passed today, it returns the
         delay until the same time tomorrow.
+
+        Compatible with Python 3.8+ (uses django.utils.timezone
+        instead of zoneinfo).
         """
         import datetime
-        import zoneinfo
+        from django.utils import timezone as tz
 
-        ist = zoneinfo.ZoneInfo("Asia/Kolkata")
-        now_ist = datetime.datetime.now(ist)
+        # timezone.localtime() uses settings.TIME_ZONE ('Asia/Kolkata')
+        now_ist = tz.localtime(tz.now())
 
         target_today = now_ist.replace(
             hour=hour, minute=minute, second=0, microsecond=0
@@ -135,11 +138,32 @@ class SchedulerConfig(AppConfig):
         """
         Make sure each recurring system task has at least one pending row.
         If not (fresh deploy or all completed), create one.
+
+        For wall-clock-sensitive tasks (like detect_missing_scans_all_branches),
+        any existing pending task is cancelled and re-created with the correct
+        delay to the target IST time, so that server restarts always self-correct.
         """
         from .services import TaskScheduler
+        from .models import ScheduledTask
+        from django.utils import timezone
 
-        # Calculate actual delay to 8:30 AM IST regardless of server
-        # start time (the old hardcoded 30600s assumed midnight startup).
+        # ── Fix detect_missing_scans_all_branches timing ─────────
+        # Cancel any existing pending task so we can re-create it
+        # with the correct delay to 8:30 AM IST.  Without this,
+        # the singleton guard would keep the OLD task (which was
+        # scheduled at the wrong time from a previous deploy).
+        stale = ScheduledTask.objects.filter(
+            task_type="detect_missing_scans_all_branches",
+            status="pending",
+        )
+        stale_count = stale.count()
+        if stale_count:
+            stale.update(status="cancelled", updated_at=timezone.now())
+            print(
+                f"[SCHEDULER APP] Cancelled {stale_count} stale "
+                f"detect_missing_scans_all_branches task(s) to re-schedule at correct time."
+            )
+
         detect_missing_scans_delay = self._seconds_until_target_ist(8, 30)
         print(
             f"[SCHEDULER APP] detect_missing_scans_all_branches "
