@@ -101,16 +101,16 @@ class WhatsAppWebhookView(View):
             return HttpResponse(status=404)
 
         # ── Forward Webhook to CRM (Option 1) ──
-        # forward_url = getattr(settings, 'WHATSAPP_CRM_WEBHOOK_URL', None)
-        # if forward_url:
-        #     try:
-        #         import requests
-        #         # Fire and forget request to forward the webhook
-        #         # Using a short timeout so we don't block responding to Meta
-        #         requests.post(forward_url, json=body, timeout=5)
-        #         logger.info(f"[WHATSAPP WEBHOOK] Forwarded payload to {forward_url}")
-        #     except Exception as e:
-        #         logger.error(f"[WHATSAPP WEBHOOK] Failed to forward to {forward_url}: {e}")
+        forward_url = getattr(settings, 'WHATSAPP_CRM_WEBHOOK_URL', None)
+        if forward_url:
+            try:
+                import requests
+                # Fire and forget request to forward the webhook
+                # Using a short timeout so we don't block responding to Meta
+                requests.post(forward_url, json=body, timeout=5)
+                logger.info(f"[WHATSAPP WEBHOOK] Forwarded payload to {forward_url}")
+            except Exception as e:
+                logger.error(f"[WHATSAPP WEBHOOK] Failed to forward to {forward_url}: {e}")
 
         for entry in body.get('entry', []):
             for change in entry.get('changes', []):

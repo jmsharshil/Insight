@@ -484,7 +484,7 @@ class BankAccountListSerializer(serializers.ModelSerializer):
     class Meta:
         model = BankAccount
         fields = ['id', 'name', 'bank_name', 'account_number',
-                  'ifsc_code', 'branch_name', 'm_id',
+                  'ifsc_code', 'branch_name', 'm_id', 'razorpay_account_id',
                   'is_active', 'max_payment_amount']
 
 
@@ -492,7 +492,7 @@ class BankAccountCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = BankAccount
         fields = ['name', 'bank_name', 'account_number',
-                  'ifsc_code', 'branch_name', 'm_id', 'is_active']
+                  'ifsc_code', 'branch_name', 'm_id', 'razorpay_account_id', 'is_active']
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

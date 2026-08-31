@@ -49,7 +49,6 @@ def create_payment_link(
     customer_email,
     customer_contact,
     description="Fee Payment",
-    bank_account_data=None,
     upi_id=None,
 ) -> dict:
     """
@@ -62,8 +61,6 @@ def create_payment_link(
         customer_email      – Customer email.
         customer_contact    – Customer phone (10-digit, no country code prefix needed).
         description         – Short description shown on the payment page.
-        bank_account_data   – Dictionary with {'account_number': ..., 'name': ..., 'ifsc': ...} 
-                              for direct Netbanking/UPI routing via options.order.bank_account.
         upi_id              – (Unused in API; UPI deep-link is built separately.)
 
     Returns:
@@ -97,17 +94,6 @@ def create_payment_link(
         },
         "reminder_enable": True,
     }
-
-    if bank_account_data and isinstance(bank_account_data, dict):
-        payload["options"] = {
-            "order": {
-                "bank_account": {
-                    "account_number": bank_account_data.get("account_number", ""),
-                    "name": bank_account_data.get("name", ""),
-                    "ifsc": bank_account_data.get("ifsc", "")
-                }
-            }
-        }
 
     try:
         resp = http_requests.post(
@@ -456,6 +442,37 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
         logger.error(f"[Razorpay] send_admission_payment_notification error: {exc}", exc_info=True)
 
 
+def transfer_payment_to_linked_account(payment_id: str, amount_in_inr: float, linked_account_id: str) -> bool:
+    """
+    Transfers funds from the primary Razorpay account to a specific Linked Account using Razorpay Route.
+    """
+    payload = {
+        "transfers": [
+            {
+                "account": linked_account_id,
+                "amount": int(amount_in_inr * 100),  # amount in paise
+                "currency": "INR"
+            }
+        ]
+    }
+    try:
+        resp = http_requests.post(
+            f"https://api.razorpay.com/v1/payments/{payment_id}/transfers",
+            json=payload,
+            auth=_auth(),
+            timeout=15,
+        )
+        if resp.status_code in (200, 201):
+            logger.info(f"[Razorpay Route] Successfully routed payment {payment_id} to {linked_account_id}")
+            return True
+        else:
+            logger.error(f"[Razorpay Route] Failed to route payment {payment_id}: {resp.text}")
+            return False
+    except Exception as e:
+        logger.error(f"[Razorpay Route] Exception routing payment {payment_id}: {e}")
+        return False
+
+
 def process_payment_link_paid_event(payload: dict) -> dict:
     """
     Handle the 'payment_link.paid' Razorpay webhook event.
@@ -513,6 +530,15 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             except Exception as receipt_err:
                 logger.error(f"[Razorpay] Failed to send receipt for Payment {payment.id}: {receipt_err}")
 
+            # ── Route Transfer ───────────────────────────────────────────────
+            try:
+                from onboarding.models import Admission
+                admission = Admission.objects.filter(email=sf.student.email).order_by('-submitted_at').first()
+                if admission and admission.bank_account and admission.bank_account.razorpay_account_id:
+                    transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
+            except Exception as e:
+                logger.error(f"[Razorpay Route] Transfer failed for SF {sf_id}: {e}")
+
             return {"success": True, "processed": "SF", "payment_id": str(payment.id)}
 
         # ── Admission flow ────────────────────────────────────────────────
@@ -550,6 +576,13 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 send_admission_payment_notification(admission, amount_paid, rp_payment_id)
             except Exception as notify_err:
                 logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
+
+            # ── Route Transfer ───────────────────────────────────────────────
+            try:
+                if admission.bank_account and admission.bank_account.razorpay_account_id:
+                    transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
+            except Exception as e:
+                logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {e}")
 
             return {"success": True, "processed": "ADM"}
 

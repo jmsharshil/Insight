@@ -53,7 +53,6 @@ res = create_payment_link(
     customer_email       = admission.email or '',
     customer_contact     = admission.phone_student or '',
     description          = f"Fee Payment — Insight Institute",
-    bank_account_data    = bank_account_data,
 )
 data = res['data']
 

@@ -355,6 +355,7 @@ class BankAccount(models.Model):
     ifsc_code   = models.CharField(max_length=15)
     branch_name = models.CharField(max_length=200, blank=True)
     m_id      = models.CharField(max_length=100, blank=True, null=True, help_text="UPI ID for generating UPI payment links")
+    razorpay_account_id = models.CharField(max_length=100, blank=True, null=True, help_text="Razorpay Linked Account ID (e.g. acc_...) for Route transfers")
     is_active   = models.BooleanField(default=True)
     max_payment_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)

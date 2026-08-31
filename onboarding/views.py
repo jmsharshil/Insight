@@ -155,12 +155,6 @@ def _setup_payment_bank_and_notify(admission):
                 customer_email=admission.email,
                 customer_contact=admission.phone_student,
                 description="Insight Institute Fee Payment",
-                bank_account_data=None
-                # bank_account_data={
-                #     'account_number': assigned_bank.account_number,
-                #     'name': assigned_bank.name,
-                #     'ifsc': assigned_bank.ifsc_code,
-                # } if assigned_bank else None,
             )
             print("================================================")
             print(response)

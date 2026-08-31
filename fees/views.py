@@ -1204,18 +1204,10 @@ class RazorpayGeneratePaymentLinkView(APIView):
         if amount <= 0:
             return Response({'success': False, 'message': 'Amount must be greater than zero.'}, status=400)
 
-        # Resolve bank account details for direct routing
-        bank_account_data = None
         admission = None
         try:
             from onboarding.models import Admission
             admission = Admission.objects.filter(email=student.email).order_by('-submitted_at').first()
-            if admission and admission.bank_account:
-                bank_account_data = {
-                    "account_number": admission.bank_account.account_number,
-                    "name": admission.bank_account.name,
-                    "ifsc": admission.bank_account.ifsc_code
-                }
         except Exception:
             pass
 
@@ -1226,7 +1218,6 @@ class RazorpayGeneratePaymentLinkView(APIView):
             customer_email       = student.email or '',
             customer_contact     = student.phone or '',
             description          = f"Fee Payment — {fee_structure.name if fee_structure else 'Insight Institute'}",
-            bank_account_data    = bank_account_data,
         )
 
         if not result['success']:
@@ -1268,7 +1259,6 @@ class RazorpayDirectPaymentLinkView(APIView):
     - customer_email (optional): Payer email
     - customer_contact (optional): Payer phone (10-digit)
     - description (optional): Description for payment
-    - bank_account_data (optional): Dict with account_number, name, ifsc
     - upi_id (optional): UPI ID
     """
     
@@ -1283,14 +1273,7 @@ class RazorpayDirectPaymentLinkView(APIView):
                 'message': 'amount, reference_id, and customer_name are required.'
             }, status=400)
             
-        bank_account_data = request.data.get('bank_account_data')
-        if isinstance(bank_account_data, str):
-            try:
-                import json
-                bank_account_data = json.loads(bank_account_data)
-            except json.JSONDecodeError:
-                bank_account_data = None
-                
+
         result = create_payment_link(
             amount=amount,
             reference_id=reference_id,
@@ -1298,7 +1281,6 @@ class RazorpayDirectPaymentLinkView(APIView):
             customer_email=request.data.get('customer_email', ''),
             customer_contact=request.data.get('customer_contact', ''),
             description=request.data.get('description', 'Direct Payment'),
-            bank_account_data=bank_account_data,
             upi_id=request.data.get('upi_id')
         )
         
