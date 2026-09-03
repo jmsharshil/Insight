@@ -749,9 +749,9 @@ def send_refund_notifications(refund, rp_refund_id):
             try:
                 send_whatsapp_with_fallback(
                     to=phone,
-                    template_name="admission_process_",
+                    template_name="refund_confirmation_",
                     language_code="en",
-                    components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+                    components=[{"type": "body", "parameters": [{"type": "text", "text": student_name},{"type": "text", "text": amount_fmt},{"type": "text", "text": rp_refund_id or 'N/A'},{"type": "text", "text": refund_date},{"type": "text", "text": refund.reason or 'N/A'}]}],
                     fallback_body=wa_message,
                 )
                 logger.info(f"[Refund] WhatsApp sent to {phone}")

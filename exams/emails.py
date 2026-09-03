@@ -50,9 +50,9 @@ def send_checker_assignment_email(marksheet):
     try:
         send_whatsapp_with_fallback(
             to=checker.phone,
-            template_name="admission_process_",
+            template_name="checker_assignment_",
             language_code="en",
-            components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name}]}],
+            components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name},{"type": "text", "text": marksheet.exam.title},{"type": "text", "text": deadline.strftime('%d %b %Y')},{"type": "text", "text": link}]}],
             fallback_body=text_content,
             user_id=str(checker.id),
         )
@@ -92,9 +92,9 @@ def send_answer_key_email(checker, exam, signed_url):
     try:
         send_whatsapp_with_fallback(
             to=checker.phone,
-            template_name="admission_process_",
+            template_name="answer_key_",
             language_code="en",
-            components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name}]}],
+            components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name},{"type": "text", "text": exam.title}]}],
             fallback_body=text_content,
             user_id=str(checker.id),
         )
@@ -137,9 +137,9 @@ def send_submission_reminder_email(marksheet):
     try:
         send_whatsapp_with_fallback(
             to=checker.phone,
-            template_name="admission_process_",
+            template_name="submission_reminder_",
             language_code="en",
-            components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name}]}],
+            components=[{"type": "body", "parameters": [{"type": "text", "text": checker.name},{"type": "text", "text": marksheet.exam.title}]}],
             fallback_body=text_content,
             user_id=str(checker.id),
         )
@@ -201,9 +201,9 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
         if getattr(faculty_user, 'phone', None):
             send_whatsapp_with_fallback(
                 to=faculty_user.phone,
-                template_name="admission_process_",
+                template_name="material_upload_reminder_",
                 language_code="en",
-                components=[{"type": "body", "parameters": [{"type": "text", "text": faculty_user.name}]}],
+                components=[{"type": "body", "parameters": [{"type": "text", "text": faculty_user.name},{"type": "text", "text": exam.title},{"type": "text", "text": exam.scheduled_date.strftime('%d %b %Y')},{"type": "text", "text": missing_items}]}],
                 fallback_body=text_content,
                 user_id=str(faculty_user.id),
             )
@@ -260,7 +260,7 @@ def send_recheck_request_notification(recheck_request):
         if admin_phone:
             send_whatsapp_with_fallback(
                 to=admin_phone,
-                template_name="admission_process_",
+                template_name="recheck_request_",
                 language_code="en",
                 components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
                 fallback_body=text_content,

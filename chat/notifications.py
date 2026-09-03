@@ -509,7 +509,7 @@ def send_system_notification(
                     send_whatsapp_template(
                         to=user.phone,
                         template_name=whatsapp_template,
-                        language_code=whatsapp_template_lang_code or 'en_US',
+                        language_code=whatsapp_template_lang_code or 'en',
                         components=([{"type": "body", "parameters": [{"type": "text", "text": str(whatsapp_context.get(k, ''))} for k in whatsapp_context]}] if whatsapp_context else []),
                         user_id=str(user.id),
                         delay_seconds=delay_seconds or 0
