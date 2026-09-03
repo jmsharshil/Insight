@@ -599,6 +599,53 @@ class PaymentVerifyView(APIView):
                     except Exception as e:
                         logger.error(f"Failed to send rejection email to {recipient}: {e}")
 
+                # WhatsApp: notify student + parent phones
+                try:
+                    from chat.notifications import send_whatsapp_with_fallback
+                    rejection_reason = payment.note if getattr(payment, 'note', None) else 'No reason provided'
+                    student_name = getattr(payment.student, 'first_name', 'Student')
+                    amount_str = f"{float(payment.amount):,.2f}"
+                    wa_fallback = (
+                        f"Dear {student_name},\n\n"
+                        f"Unfortunately your payment of \u20b9{amount_str} has been rejected.\n"
+                        f"Reason: {rejection_reason}\n\n"
+                        f"Please contact administration immediately for resolution."
+                    )
+                    wa_phones = set()
+                    try:
+                        admission = payment.student.admission
+                        if getattr(admission, 'phone_student', None):
+                            wa_phones.add(admission.phone_student)
+                        if getattr(admission, 'phone_father', None):
+                            wa_phones.add(admission.phone_father)
+                    except Exception:
+                        pass
+                    student_user = getattr(payment.student, 'user', None)
+                    if student_user and getattr(student_user, 'phone', None):
+                        wa_phones.add(student_user.phone)
+
+                    for phone in filter(None, wa_phones):
+                        try:
+                            send_whatsapp_with_fallback(
+                                to=phone,
+                                template_name="payment_rejected_",
+                                language_code="en",
+                                components=[{
+                                    "type": "body",
+                                    "parameters": [
+                                        {"type": "text", "text": student_name},
+                                        {"type": "text", "text": amount_str},
+                                        {"type": "text", "text": rejection_reason},
+                                    ]
+                                }],
+                                fallback_body=wa_fallback,
+                            )
+                            logger.info(f"[Payment Rejected] WhatsApp sent to {phone}")
+                        except Exception as wa_err:
+                            logger.error(f"[Payment Rejected] WhatsApp to {phone} failed: {wa_err}")
+                except Exception as wa_import_err:
+                    logger.error(f"[Payment Rejected] WhatsApp block failed: {wa_import_err}")
+
         return Response(
             {'success': True, 'message': f'Payment {new_status}.',
              'data': PaymentDetailSerializer(payment).data},

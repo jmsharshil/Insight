@@ -1994,10 +1994,69 @@ class OMRBulkUploadView(APIView):
 
             results.append(sheet_result)
 
+        total = len(results)
+        succeeded = sum(1 for r in results if r['status'] == 'success')
+        failed = total - succeeded
+
+        # WhatsApp: notify the uploader about bulk processing outcome
+        try:
+            from chat.notifications import send_whatsapp_with_fallback
+            uploader_phone = getattr(request.user, 'phone', None)
+            uploader_name = getattr(request.user, 'name', 'Admin')
+            if uploader_phone:
+                if failed > 0:
+                    send_whatsapp_with_fallback(
+                        to=uploader_phone,
+                        template_name="bulk_results_with_errors_",
+                        language_code="en",
+                        components=[{
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": uploader_name},
+                                {"type": "text", "text": exam.title},
+                                {"type": "text", "text": str(total)},
+                                {"type": "text", "text": str(succeeded)},
+                                {"type": "text", "text": str(failed)},
+                            ]
+                        }],
+                        fallback_body=(
+                            f"Hello {uploader_name},\n\n"
+                            f"Bulk results upload for {exam.title} is complete.\n"
+                            f"Total processed: {total} | Successful: {succeeded} | Failed: {failed}\n\n"
+                            "Please review the error report for failed records."
+                        ),
+                        user_id=str(request.user.id),
+                    )
+                else:
+                    send_whatsapp_with_fallback(
+                        to=uploader_phone,
+                        template_name="bulk_results_success_",
+                        language_code="en",
+                        components=[{
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": uploader_name},
+                                {"type": "text", "text": exam.title},
+                                {"type": "text", "text": str(total)},
+                                {"type": "text", "text": str(succeeded)},
+                                {"type": "text", "text": str(failed)},
+                            ]
+                        }],
+                        fallback_body=(
+                            f"Hello {uploader_name},\n\n"
+                            f"Bulk results upload for {exam.title} is complete.\n"
+                            f"Total processed: {total} | Successful: {succeeded} | Failed: {failed}\n\n"
+                            "Thank You!"
+                        ),
+                        user_id=str(request.user.id),
+                    )
+        except Exception as wa_err:
+            logger.error(f"[Bulk OMR] WhatsApp notification to uploader failed: {wa_err}")
+
         return Response({
             'success': True,
-            'processed': len(results),
-            'succeeded': sum(1 for r in results if r['status'] == 'success'),
-            'failed': sum(1 for r in results if r['status'] != 'success'),
+            'processed': total,
+            'succeeded': succeeded,
+            'failed': failed,
             'results': results,
         }, status=status.HTTP_200_OK)

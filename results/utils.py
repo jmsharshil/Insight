@@ -35,6 +35,32 @@ def notify_students_and_parents_of_exam_result(published_results):
                             "result_id": str(pr.id)
                         }
                     )
+
+                    # WhatsApp: notify parent
+                    try:
+                        if getattr(link.parent, 'phone', None):
+                            from chat.notifications import send_whatsapp_with_fallback
+                            rank_str = str(pr.rank) if getattr(pr, 'rank', None) else 'N/A'
+                            send_whatsapp_with_fallback(
+                                to=link.parent.phone,
+                                template_name="result_published_",
+                                language_code="en",
+                                components=[{
+                                    "type": "body",
+                                    "parameters": [
+                                        {"type": "text", "text": link.parent.name},
+                                        {"type": "text", "text": exam_title},
+                                        {"type": "text", "text": str(pr.marks_obtained)},
+                                        {"type": "text", "text": str(pr.total_marks)},
+                                        {"type": "text", "text": str(pr.percentage)},
+                                        {"type": "text", "text": rank_str},
+                                    ]
+                                }],
+                                fallback_body=body,
+                                user_id=str(link.parent.id),
+                            )
+                    except Exception as wa_err:
+                        logger.error(f"[Result Published] WhatsApp to parent {link.parent.id} failed: {wa_err}")
             
             # Notify the student
             try:
@@ -54,6 +80,33 @@ def notify_students_and_parents_of_exam_result(published_results):
                             "result_id": str(pr.id)
                         }
                     )
+
+                    # WhatsApp: notify student
+                    try:
+                        if getattr(pr.student.user, 'phone', None):
+                            from chat.notifications import send_whatsapp_with_fallback
+                            student_name = pr.student.user.name
+                            rank_str = str(pr.rank) if getattr(pr, 'rank', None) else 'N/A'
+                            send_whatsapp_with_fallback(
+                                to=pr.student.user.phone,
+                                template_name="result_published_",
+                                language_code="en",
+                                components=[{
+                                    "type": "body",
+                                    "parameters": [
+                                        {"type": "text", "text": student_name},
+                                        {"type": "text", "text": exam_title},
+                                        {"type": "text", "text": str(pr.marks_obtained)},
+                                        {"type": "text", "text": str(pr.total_marks)},
+                                        {"type": "text", "text": str(pr.percentage)},
+                                        {"type": "text", "text": rank_str},
+                                    ]
+                                }],
+                                fallback_body=body,
+                                user_id=str(pr.student.user.id),
+                            )
+                    except Exception as wa_err:
+                        logger.error(f"[Result Published] WhatsApp to student {pr.student.id} failed: {wa_err}")
             except Exception as e:
                 logger.error(f"Failed to notify student for published result {pr.id}: {e}")
 

@@ -307,6 +307,29 @@ class LeaveListCreateView(APIView):
                 email_template='emails/leave_applied.html',
                 email_context=notif_ctx,
             )
+            # WhatsApp: leave_applied_ to each approver
+            try:
+                if getattr(approver, 'phone', None):
+                    from chat.notifications import send_whatsapp_with_fallback
+                    send_whatsapp_with_fallback(
+                        to=approver.phone,
+                        template_name="leave_applied_",
+                        language_code="en",
+                        components=[{
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": request.user.name},
+                                {"type": "text", "text": d['leave_type']},
+                                {"type": "text", "text": str(d['from_date'])},
+                                {"type": "text", "text": str(d['to_date'])},
+                                {"type": "text", "text": d['reason'][:100]},
+                            ]
+                        }],
+                        fallback_body=notif_body,
+                        user_id=str(approver.id),
+                    )
+            except Exception as wa_err:
+                logger.error(f"[Leave Applied] WhatsApp to approver {approver.id} failed: {wa_err}")
 
         return Response({
             'success': True, 'message': 'Leave application submitted.',
@@ -398,6 +421,29 @@ class LeaveApproveView(APIView):
                 'reviewer_name': approver.name,
             },
         )
+        # WhatsApp: leave_status_update_ to applicant on approval
+        try:
+            if getattr(app.applied_by, 'phone', None):
+                from chat.notifications import send_whatsapp_with_fallback
+                send_whatsapp_with_fallback(
+                    to=app.applied_by.phone,
+                    template_name="leave_status_update_",
+                    language_code="en",
+                    components=[{
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": app.applied_by.name},
+                            {"type": "text", "text": app.leave_type},
+                            {"type": "text", "text": "approved"},
+                            {"type": "text", "text": approver.name},
+                            {"type": "text", "text": ""},
+                        ]
+                    }],
+                    fallback_body=f"Hello {app.applied_by.name}, your {app.leave_type} leave has been approved by {approver.name}.",
+                    user_id=str(app.applied_by.id),
+                )
+        except Exception as wa_err:
+            logger.error(f"[Leave Approved] WhatsApp to applicant {app.applied_by.id} failed: {wa_err}")
 
     def post(self, request, leave_id):
         role = _user_role(request.user)
@@ -575,6 +621,29 @@ class LeaveRejectView(APIView):
                 'reason': reason
             }
         )
+        # WhatsApp: leave_status_update_ to applicant on rejection
+        try:
+            if getattr(app.applied_by, 'phone', None):
+                from chat.notifications import send_whatsapp_with_fallback
+                send_whatsapp_with_fallback(
+                    to=app.applied_by.phone,
+                    template_name="leave_status_update_",
+                    language_code="en",
+                    components=[{
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": app.applied_by.name},
+                            {"type": "text", "text": app.leave_type},
+                            {"type": "text", "text": "rejected"},
+                            {"type": "text", "text": request.user.name},
+                            {"type": "text", "text": reason or 'No reason provided'},
+                        ]
+                    }],
+                    fallback_body=f"Hello {app.applied_by.name}, your {app.leave_type} leave has been rejected by {request.user.name}. Reason: {reason or 'No reason provided'}.",
+                    user_id=str(app.applied_by.id),
+                )
+        except Exception as wa_err:
+            logger.error(f"[Leave Rejected] WhatsApp to applicant {app.applied_by.id} failed: {wa_err}")
 
         return Response({'success': True, 'message': 'Leave rejected.'})
 

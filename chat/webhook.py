@@ -217,6 +217,12 @@ class WhatsAppWebhookView(View):
             msg_id=msg_id,
         )
 
+        try:
+            from leave.utils import handle_student_leave_whatsapp_approval
+            handle_student_leave_whatsapp_approval(sender_wa_id, text_body, text_body)
+        except Exception as e:
+            logger.error("[WHATSAPP WEBHOOK] Error in student leave text approval handler: %s", e)
+
     def _on_media_message(self, sender_wa_id, sender_name, media_type, media_data, msg_id):
         """Handle an incoming media message (image, document, video, audio)."""
         media_id = media_data.get('id')
@@ -276,6 +282,12 @@ class WhatsAppWebhookView(View):
             extra_data={'reply_type': reply_type, 'reply_id': reply_id},
         )
 
+        try:
+            from leave.utils import handle_student_leave_whatsapp_approval
+            handle_student_leave_whatsapp_approval(sender_wa_id, reply_id, reply_title)
+        except Exception as e:
+            logger.error("[WHATSAPP WEBHOOK] Error in student leave interactive approval handler: %s", e)
+
     def _on_button_reply(self, sender_wa_id, sender_name, button_data, msg_id):
         """Handle template quick-reply button responses."""
         payload = button_data.get('payload', '')
@@ -290,6 +302,12 @@ class WhatsAppWebhookView(View):
             content=f"[Button] {text} (payload={payload})",
             msg_id=msg_id,
         )
+
+        try:
+            from leave.utils import handle_student_leave_whatsapp_approval
+            handle_student_leave_whatsapp_approval(sender_wa_id, payload, text)
+        except Exception as e:
+            logger.error("[WHATSAPP WEBHOOK] Error in student leave button approval handler: %s", e)
 
     def _on_reaction(self, sender_wa_id, sender_name, reaction_data, msg_id):
         """Handle emoji reactions to messages."""
