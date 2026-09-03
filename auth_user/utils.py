@@ -48,20 +48,24 @@ Thank you,
     )
 
     try:
+        org_name = user.organization.name if user.organization else 'Insight ERP'
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="no_one_institute_in_gujarat",
+            template_name="password_set_",
             language_code="en",
             components=[
                 {
                     "type": "body",
-                    "parameters": [{"type": "text", "text": user.name}],
+                    "parameters": [
+                        {"type": "text", "text": user.name},
+                        {"type": "text", "text": org_name},
+                    ],
                 },
                 {
                     "type": "button",
                     "sub_type": "url",
                     "index": 0,
-                    "parameters": [{"type": "text", "text": token}],
+                    "parameters": [{"type": "text", "text": password_set_link}],
                 }
             ],
             fallback_body=text_content,

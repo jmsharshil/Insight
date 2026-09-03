@@ -359,31 +359,39 @@ def send_payment_receipt(payment):
 
                 for phone in wa_phones:
                     try:
+                        components = [{
+                            "type": "body", 
+                            "parameters": [
+                                {"type": "text", "text": student_name},
+                                {"type": "text", "text": f"{payment.amount:,.2f}"},
+                                {"type": "text", "text": payment.receipt_number or "N/A"},
+                                {"type": "text", "text": getattr(payment, 'payment_mode', 'N/A').title()},
+                                {"type": "text", "text": payment.transaction_ref or "N/A"},
+                            ]
+                        }]
                         if pdf_url:
-                            send_whatsapp_media(
-                                to=phone,
-                                media_type='document',
-                                link=pdf_url,
-                                caption=wa_caption,
-                                filename=f"Receipt_{payment.receipt_number or payment.id}.pdf",
-                            )
-                            logger.info(
-                                f"WhatsApp receipt (PDF document) sent to {phone} "
-                                f"for payment {payment.id}"
-                            )
-                        else:
-                            # Fallback: text-only WhatsApp if no PDF URL, but try template first
-                            send_whatsapp_with_fallback(
-                                to=phone,
-                                template_name="payment_reciept_",
-                                language_code="en",
-                                components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
-                                fallback_body=wa_caption,
-                            )
-                            logger.info(
-                                f"WhatsApp receipt (template/text fallback) sent to {phone} "
-                                f"for payment {payment.id} (no PDF URL)"
-                            )
+                            components.insert(0, {
+                                "type": "header",
+                                "parameters": [{
+                                    "type": "document",
+                                    "document": {
+                                        "link": pdf_url,
+                                        "filename": f"Receipt_{payment.receipt_number or payment.id}.pdf"
+                                    }
+                                }]
+                            })
+
+                        send_whatsapp_with_fallback(
+                            to=phone,
+                            template_name="payment_reciept_",
+                            language_code="en",
+                            components=components,
+                            fallback_body=wa_caption,
+                        )
+                        logger.info(
+                            f"WhatsApp receipt (template/text) sent to {phone} "
+                            f"for payment {payment.id}"
+                        )
                     except Exception as wa_phone_err:
                         logger.error(
                             f"WhatsApp to {phone} failed for payment {payment.id}: {wa_phone_err}"

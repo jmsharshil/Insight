@@ -110,6 +110,7 @@ class AdmissionSerializer(serializers.Serializer):
     doc_id_card         = serializers.FileField()
 
     # ── Documents (Optional) ──────────────────────────────────────────────────
+    doc_tenth_marksheet   = serializers.FileField(required=False, allow_null=True)
     doc_twelfth_receipt   = serializers.FileField(required=False, allow_null=True)
     doc_twelfth_marksheet = serializers.FileField(required=False, allow_null=True)
     doc_category_cert     = serializers.FileField(required=False, allow_null=True)
@@ -308,7 +309,7 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
 
 # ── Admission Document Upload Serializer ──────────────────────────────────────
 
-ADMISSION_DOCUMENT_FIELDS = ['doc_signature','doc_photo','doc_dob_certificate','doc_id_card','doc_twelfth_receipt','doc_twelfth_marksheet','doc_category_cert',]
+ADMISSION_DOCUMENT_FIELDS = ['doc_signature','doc_photo','doc_dob_certificate','doc_id_card','doc_tenth_marksheet','doc_twelfth_receipt','doc_twelfth_marksheet','doc_category_cert',]
 
 class AdmissionDocumentUploadSerializer(serializers.Serializer):
     field_name = serializers.ChoiceField(

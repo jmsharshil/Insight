@@ -82,6 +82,50 @@ def _send_payslip_emails_async(payslips_list):
                     organization=getattr(recipient_user, 'organization', None),
                     attachments=attachments
                 )
+
+                try:
+                    from chat.notifications import send_whatsapp_with_fallback
+                    month_name = ps.payroll_run.get_month_display() if hasattr(ps.payroll_run, 'get_month_display') else str(ps.payroll_run.month)
+                    wa_body = f"Hello {recipient_user.name},\nYour payslip for {month_name} {ps.payroll_run.year} is ready.\nNet salary: \u20b9{ps.net_salary}.\nSessions: {ps.sessions_conducted}."
+                    
+                    if getattr(recipient_user, 'phone', None):
+                        components = [{
+                            "type": "body", 
+                            "parameters": [
+                                {"type": "text", "text": recipient_user.name},
+                                {"type": "text", "text": month_name},
+                                {"type": "text", "text": str(ps.payroll_run.year)},
+                                {"type": "text", "text": str(ps.net_salary)},
+                                {"type": "text", "text": str(ps.sessions_conducted)},
+                            ]
+                        }]
+                        
+                        # TODO: Payslip currently doesn't have a public URL saved in the DB.
+                        # WhatsApp Meta API requires a public URL for template document headers.
+                        pdf_url = None 
+                        if pdf_url:
+                            components.insert(0, {
+                                "type": "header",
+                                "parameters": [{
+                                    "type": "document",
+                                    "document": {
+                                        "link": pdf_url,
+                                        "filename": f"Payslip_{month_name}_{ps.payroll_run.year}.pdf"
+                                    }
+                                }]
+                            })
+
+                        send_whatsapp_with_fallback(
+                            to=recipient_user.phone,
+                            template_name="payslip_generated_",
+                            language_code="en",
+                            components=components,
+                            fallback_body=wa_body,
+                            user_id=str(recipient_user.id),
+                        )
+                except Exception as wa_err:
+                    logger.error(f"Failed to send payslip WhatsApp to {recipient_user.phone}: {wa_err}")
+
             except Exception as e:
                 logger.error(f"Failed to send payslip email to {recipient_user.email}: {e}")
                 

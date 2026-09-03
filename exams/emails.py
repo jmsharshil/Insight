@@ -262,7 +262,15 @@ def send_recheck_request_notification(recheck_request):
                 to=admin_phone,
                 template_name="recheck_request_",
                 language_code="en",
-                components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
+                components=[{
+                    "type": "body", 
+                    "parameters": [
+                        {"type": "text", "text": "Admin"},
+                        {"type": "text", "text": student_name},
+                        {"type": "text", "text": exam_title},
+                        {"type": "text", "text": recheck_request.reason or "No reason provided"},
+                    ]
+                }],
                 fallback_body=text_content,
                 user_id=str(admin_id),
             )

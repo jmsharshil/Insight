@@ -241,9 +241,23 @@ def _setup_payment_bank_and_notify(admission):
                 from chat.notifications import send_whatsapp_with_fallback
                 send_whatsapp_with_fallback(
                     to=admission.phone_student,
-                    template_name="admission_process_",
+                    template_name="payment_setup_",
                     language_code="en",
-                    components=[{"type": "body", "parameters": [{"type": "text", "text": admission.first_name}]}],
+                    components=[
+                        {
+                            "type": "body", 
+                            "parameters": [
+                                {"type": "text", "text": admission.first_name},
+                                {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "sub_type": "url",
+                            "index": 0,
+                            "parameters": [{"type": "text", "text": razorpay_link_url if razorpay_link_url else payment_link}]
+                        }
+                    ],
                     fallback_body=text_content,
                 )
             except Exception as e:

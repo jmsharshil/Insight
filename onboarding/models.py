@@ -159,6 +159,7 @@ class Admission(models.Model):
     doc_id_card         = models.FileField(upload_to=admission_document_path)
 
     # ── Documents (Optional) ──────────────────────────────────────────────────
+    doc_tenth_marksheet   = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     doc_twelfth_receipt   = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     doc_twelfth_marksheet = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     doc_category_cert     = models.FileField(upload_to=admission_document_path, null=True, blank=True)
