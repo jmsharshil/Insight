@@ -224,8 +224,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         att_records = EmployeeAttendanceRecord.objects.filter(
             user=faculty_profile.user,
             date=log_date,
-            timetable_slot__isnull=False
-        ).select_related('timetable_slot')
+            timetable_slot__isnull=False,
+            checked_in_at__isnull=False,
+            checked_out_at__isnull=False,
+        ).exclude(status__in=('absent', 'on_leave')).select_related('timetable_slot')
         
         if att_records.exists():
             # V3 logic: precise slot-based check-in/out
@@ -238,8 +240,6 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                     if e_dt < s_dt:
                         e_dt += timedelta(days=1)
                     slot_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
-                    scheduled_minutes += slot_mins
-                    
                     if att.checked_in_at:
                         actual_in_dt = dj_timezone.localtime(att.checked_in_at).replace(tzinfo=None)
                         late_in = max(Decimal(0), Decimal((actual_in_dt - s_dt).total_seconds()) / Decimal(60))
@@ -249,6 +249,15 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                         actual_out_dt = dj_timezone.localtime(att.checked_out_at).replace(tzinfo=None)
                         early_out = max(Decimal(0), Decimal((e_dt - actual_out_dt).total_seconds()) / Decimal(60))
                         qr_slot_deviation[d_str]['early_out'] += early_out
+
+                    if faculty_profile.employment_type in ('visiting', 'part_time'):
+                        worked_mins = max(
+                            Decimal(0),
+                            Decimal((actual_out_dt - actual_in_dt).total_seconds()) / Decimal(60),
+                        )
+                        scheduled_minutes += min(worked_mins, slot_mins)
+                    else:
+                        scheduled_minutes += slot_mins
             
             if scheduled_minutes > 0:
                 diff_minutes = scheduled_minutes
@@ -354,10 +363,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         # Hourly rate is the effective take-home rate for part-time/visiting
         implicit_deduction_per_minute = fac_hourly_rate / Decimal(60) if fac_hourly_rate else Decimal(0)
         
-    if faculty_profile.employment_type == 'full_time':
-        deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
-    else:
-        deduction_rate = implicit_deduction_per_minute
+    deduction_rate = policy.deduction_per_minute if policy and policy.deduction_per_minute > 0 else implicit_deduction_per_minute
         
     grace = policy.grace_period_minutes if policy else 5
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
@@ -851,7 +857,39 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         check_ins = [l for l in logs if l.scan_type == 'check_in']
         check_outs = [l for l in logs if l.scan_type == 'check_out']
         diff_minutes = Decimal(0)
-        if check_ins and check_outs:
+        from attendance.models import EmployeeAttendanceRecord
+        att_records = EmployeeAttendanceRecord.objects.filter(
+            user=faculty_profile.user,
+            date=log_date,
+            timetable_slot__isnull=False,
+            checked_in_at__isnull=False,
+            checked_out_at__isnull=False,
+        ).exclude(status__in=('absent', 'on_leave')).select_related('timetable_slot')
+
+        if att_records.exists():
+            for att in att_records:
+                slot = att.timetable_slot
+                if not slot.start_time or not slot.end_time:
+                    continue
+                s_dt = datetime.combine(log_date, slot.start_time)
+                e_dt = datetime.combine(log_date, slot.end_time)
+                if e_dt < s_dt:
+                    e_dt += timedelta(days=1)
+                actual_in_dt = dj_timezone.localtime(att.checked_in_at).replace(tzinfo=None)
+                actual_out_dt = dj_timezone.localtime(att.checked_out_at).replace(tzinfo=None)
+                qr_slot_deviation[log_date.strftime('%Y-%m-%d')]['late_in'] += max(
+                    Decimal(0), Decimal((actual_in_dt - s_dt).total_seconds()) / Decimal(60)
+                )
+                qr_slot_deviation[log_date.strftime('%Y-%m-%d')]['early_out'] += max(
+                    Decimal(0), Decimal((e_dt - actual_out_dt).total_seconds()) / Decimal(60)
+                )
+                worked_mins = max(
+                    Decimal(0),
+                    Decimal((actual_out_dt - actual_in_dt).total_seconds()) / Decimal(60),
+                )
+                slot_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
+                diff_minutes += min(worked_mins, slot_mins) if faculty_profile.employment_type in ('visiting', 'part_time') else slot_mins
+        elif check_ins and check_outs:
             first_in_local = dj_timezone.localtime(min(l.scanned_at for l in check_ins))
             last_out_local = dj_timezone.localtime(max(l.scanned_at for l in check_outs))
             actual_in_dt = first_in_local.replace(tzinfo=None)
