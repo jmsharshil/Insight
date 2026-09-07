@@ -924,6 +924,9 @@ class NotificationHistoryAPIView(APIView):
 
         # ── Fetch the remaining valid history ──
         qs = NotificationHistory.objects.filter(user=request.user)
+        notification_type = request.query_params.get('type') or request.query_params.get('notification_type')
+        if notification_type:
+            qs = qs.filter(notification_type=notification_type)
         return paginate_queryset(qs, request, NotificationHistorySerializer)
 
     def patch(self, request):

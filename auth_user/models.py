@@ -158,11 +158,29 @@ class PasswordSetToken(models.Model):
 
 
 class NotificationHistory(models.Model):
+    NOTIFICATION_TYPE_CHOICES = [
+        ('system', 'System'),
+        ('authentication', 'Authentication'),
+        ('admission', 'Admission'),
+        ('attendance', 'Attendance'),
+        ('timetable', 'Timetable'),
+        ('chat', 'Chat'),
+        ('exam', 'Exam'),
+        ('fees', 'Fees'),
+        ('inventory', 'Inventory'),
+        ('leads', 'Leads'),
+        ('leave', 'Leave'),
+        ('payroll', 'Payroll'),
+        ('results', 'Results'),
+        ('support', 'Support'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     title = models.CharField(max_length=255)
     body = models.TextField()
     data = models.JSONField(default=dict, blank=True)
+    notification_type = models.CharField(max_length=50, choices=NOTIFICATION_TYPE_CHOICES, default='system')
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

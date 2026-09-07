@@ -159,7 +159,50 @@ def _get_project_id() -> Optional[str]:
     return None
 
 
-def send_fcm_notification(*, token: str, title: str, body: str, data: dict = None, route: str = None, user_id=None):
+NOTIFICATION_TYPES = {
+    'system', 'authentication', 'admission', 'attendance', 'timetable',
+    'chat', 'exam', 'fees', 'inventory', 'leads', 'leave', 'payroll',
+    'results', 'support',
+}
+
+
+def _resolve_notification_type(notification_type=None, data=None):
+    """Resolve a history category without changing the push payload contract."""
+    data = data if isinstance(data, dict) else {}
+    candidate = notification_type or data.get('module')
+    if candidate == 'exams':
+        candidate = 'exam'
+    if candidate in NOTIFICATION_TYPES:
+        return candidate
+
+    event_type = data.get('type', '')
+    if event_type == 'timetable_publish':
+        return 'timetable'
+    if event_type.startswith('chat.') or event_type in {'new_message', 'typing', 'read_receipt'}:
+        return 'chat'
+    if event_type.startswith('support_'):
+        return 'support'
+    if event_type == 'exam_result':
+        return 'results'
+
+    metadata_keys = set(data)
+    for category, keys in {
+        'admission': {'admission_id'},
+        'attendance': {'student_id', 'violation_type'},
+        'exam': {'exam_id', 'marksheet_id'},
+        'fees': {'payment_id', 'receipt_id'},
+        'inventory': {'allocation_id', 'item_id'},
+        'leads': {'lead_id'},
+        'leave': {'leave_id', 'student_leave_id'},
+        'payroll': {'payroll_id', 'payslip_id'},
+        'results': {'recheck_id'},
+    }.items():
+        if metadata_keys & keys:
+            return category
+    return 'system'
+
+
+def send_fcm_notification(*, token: str, title: str, body: str, data: dict = None, route: str = None, user_id=None, notification_type: str = None):
     """
     Send a push notification to a single FCM device token using the HTTP v1 API.
     Also saves a record in NotificationHistory.
@@ -175,7 +218,8 @@ def send_fcm_notification(*, token: str, title: str, body: str, data: dict = Non
                 user_id=user_id,
                 title=title,
                 body=body,
-                data=data_payload
+                data=data_payload,
+                notification_type=_resolve_notification_type(notification_type, data_payload),
             )
         except Exception as e:
             logger.error("FCM: Failed to save notification history: %s", e)
@@ -453,7 +497,8 @@ def send_system_notification(
     whatsapp_context: dict = None,
     whatsapp_template_lang_code: str = "en_US",
     delay_seconds: int = 0,
-    whatsapp_media: dict = None
+    whatsapp_media: dict = None,
+    notification_type: str = None
 ):
     """
     Centralized helper to send a push notification (FCM) and/or an email.
@@ -478,7 +523,8 @@ def send_system_notification(
                 body=body,
                 data=metadata or {},
                 route=route,
-                user_id=str(user.id)
+                user_id=str(user.id),
+                notification_type=notification_type,
             )
 
             # 2. Send Email Notification

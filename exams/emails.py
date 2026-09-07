@@ -192,6 +192,7 @@ def send_material_upload_reminder_email(faculty_user, exam, missing_items):
             user=faculty_user,
             title='Reminder: Submit Exam Materials',
             body=f"Please submit the {missing_str} to the admin for '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
+            notification_type='exam',
             data={'exam_id': str(exam.id), 'missing_items': missing_items, 'channel': 'email'},
         )
     except Exception as e:
