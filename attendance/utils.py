@@ -708,13 +708,22 @@ def evaluate_daily_slots_attendance(
         # 30-minute tolerance for late check-in / early check-out
         allowed_checkin_limit = slot_start_dt + dt_mod.timedelta(minutes=30)
 
+        if check_out_time and slot_start_dt >= check_out_time:
+            # A slot that has not started by checkout must be evaluated later,
+            # not marked absent as a side effect of leaving early.
+            AttendanceRecord.objects.filter(
+                student=student,
+                date=date_obj,
+                timetable_slot=slot,
+                status='checkout_pending',
+                checked_out_at__isnull=True,
+            ).delete()
+            continue
+
         # ── Determine status ────────────────────────────────────────────────
         if check_out_time:  # ← CHECK-OUT path (final evaluation)
             if slot_end_dt <= check_in_time:
                 # Session ended before the student arrived
-                att_status = 'absent'
-            elif slot_start_dt >= check_out_time:
-                # Session starts after the student left
                 att_status = 'absent'
             else:
                 # Session overlaps the student's attendance window

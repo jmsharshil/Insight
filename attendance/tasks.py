@@ -708,7 +708,7 @@ def auto_mark_student_absentees():
                     date=today,
                     timetable_slot=slot,
                     student_id__in=enrolled_student_ids,
-                ).values_list('student_id', flat=True)
+                ).exclude(status='checkout_pending').values_list('student_id', flat=True)
             )
 
             # Students to mark absent = enrolled - already recorded - on leave
@@ -717,13 +717,23 @@ def auto_mark_student_absentees():
             if not to_mark_absent:
                 continue
 
+            pending_ids = set(
+                AttendanceRecord.objects.filter(
+                    date=today,
+                    timetable_slot=slot,
+                    student_id__in=to_mark_absent,
+                    status='checkout_pending',
+                ).values_list('student_id', flat=True)
+            )
+            new_absent_ids = to_mark_absent - pending_ids
+
             # Resolve branch — prefer batch.branch, else student's branch
             batch_branch = getattr(batch, 'branch', None)
             batch_branch_id = batch_branch.id if batch_branch else None
 
             # Batch-create absent records
             records_to_create = []
-            for student_id in to_mark_absent:
+            for student_id in new_absent_ids:
                 # Try to get branch from student if batch has no branch
                 branch_id = batch_branch_id
                 if not branch_id:
@@ -750,12 +760,28 @@ def auto_mark_student_absentees():
                 created = AttendanceRecord.objects.bulk_create(
                     records_to_create, ignore_conflicts=True
                 )
-                total_marked += len(records_to_create)
+                total_marked += len(created)
                 logger.info(
                     f"[auto_mark_absentees] Slot {slot.id} "
                     f"({slot.start_time} batch={batch.batch_code}): "
-                    f"auto-marked {len(records_to_create)} absent."
+                    f"auto-marked {len(created)} absent."
                 )
+
+            pending_records = AttendanceRecord.objects.filter(
+                date=today,
+                timetable_slot=slot,
+                student_id__in=pending_ids,
+                status='checkout_pending',
+            )
+            pending_updated = pending_records.update(
+                status='absent',
+                checked_in_at=None,
+                checked_out_at=None,
+                latitude=None,
+                longitude=None,
+                location_verified=False,
+            )
+            total_marked += pending_updated
 
             # ----- FACULTY AUTO-ABSENT LOGIC -----
             faculty_profile = getattr(slot, 'faculty', None)

@@ -20,7 +20,27 @@ def notify_exam_scheduled(exam):
     Called when an exam is created/scheduled.
     Notifies students (system), parents (email), and examiners (system).
     """
+    def notify_faculty_materials():
+        if not exam.faculty or not exam.faculty.user:
+            return
+
+        missing = []
+        if exam.exam_mode == 'offline' and not exam.selected_papers.exists():
+            missing.append("Question Paper")
+        if not exam.answer_key:
+            missing.append("Answer Key")
+
+        if missing:
+            from exams.emails import send_material_upload_reminder_email
+            send_material_upload_reminder_email(exam.faculty.user, exam, missing)
+
+    # Draft exams still need to tell the assigned faculty which materials to submit.
+    # Student and examiner notifications wait until the exam is scheduled.
     if exam.status not in ['scheduled', 'ongoing']:
+        try:
+            notify_faculty_materials()
+        except Exception as e:
+            logger.error(f"Failed to notify faculty about exam materials for {exam.id}: {e}")
         return
 
     # Notify students and parents
@@ -63,23 +83,11 @@ def notify_exam_scheduled(exam):
             metadata={'exam_id': str(exam.id)}
         )
 
-    # Notify faculty to upload materials if missing
-    if exam.faculty and exam.faculty.user:
-        missing = []
-        if not exam.selected_papers.exists():
-            missing.append("Question Paper")
-        # Online exams might use `questions` but often still need an answer key or we can just ask for answer key for both if missing
-        if not exam.answer_key:
-            missing.append("Answer Key")
-            
-        if missing:
-            missing_str = " and ".join(missing)
-            send_system_notification(
-                user_id=str(exam.faculty.user.id),
-                title='Action Required: Upload Exam Materials',
-                body=f"Please upload the {missing_str} for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
-                metadata={'exam_id': str(exam.id)}
-            )
+    # Notify faculty to upload missing materials through email, WhatsApp, and in-app history.
+    try:
+        notify_faculty_materials()
+    except Exception as e:
+        logger.error(f"Failed to notify faculty about exam materials for {exam.id}: {e}")
 
 def exam_reminders_task(*args, **kwargs):
     """
