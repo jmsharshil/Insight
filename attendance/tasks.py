@@ -708,7 +708,7 @@ def auto_mark_student_absentees():
                     date=today,
                     timetable_slot=slot,
                     student_id__in=enrolled_student_ids,
-                ).exclude(status='checkout_pending').values_list('student_id', flat=True)
+                ).values_list('student_id', flat=True)
             )
 
             # Students to mark absent = enrolled - already recorded - on leave
@@ -717,15 +717,7 @@ def auto_mark_student_absentees():
             if not to_mark_absent:
                 continue
 
-            pending_ids = set(
-                AttendanceRecord.objects.filter(
-                    date=today,
-                    timetable_slot=slot,
-                    student_id__in=to_mark_absent,
-                    status='checkout_pending',
-                ).values_list('student_id', flat=True)
-            )
-            new_absent_ids = to_mark_absent - pending_ids
+            new_absent_ids = to_mark_absent
 
             # Resolve branch — prefer batch.branch, else student's branch
             batch_branch = getattr(batch, 'branch', None)
@@ -766,22 +758,6 @@ def auto_mark_student_absentees():
                     f"({slot.start_time} batch={batch.batch_code}): "
                     f"auto-marked {len(created)} absent."
                 )
-
-            pending_records = AttendanceRecord.objects.filter(
-                date=today,
-                timetable_slot=slot,
-                student_id__in=pending_ids,
-                status='checkout_pending',
-            )
-            pending_updated = pending_records.update(
-                status='absent',
-                checked_in_at=None,
-                checked_out_at=None,
-                latitude=None,
-                longitude=None,
-                location_verified=False,
-            )
-            total_marked += pending_updated
 
             # ----- FACULTY AUTO-ABSENT LOGIC -----
             faculty_profile = getattr(slot, 'faculty', None)

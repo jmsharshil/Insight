@@ -161,8 +161,7 @@ class AttendanceListCreateView(APIView):
 
         timetable_slot_id = request.data.get('timetable_slot_id')
 
-        if AttendanceRecord.objects.filter(batch_id=batch_id, date=att_date, timetable_slot_id=timetable_slot_id).exists():
-            return Response({'success': False, 'message': 'Already marked for this slot.'}, status=status.HTTP_409_CONFLICT)
+        # Removed the batch-level `exists()` block that prevented manual updates if an auto-generated record already existed
 
         created, errors = [], []
         from students.models import Student
@@ -191,11 +190,24 @@ class AttendanceListCreateView(APIView):
                     else:
                         raise Exception("Student ID does not exist in the database.")
 
-                r = AttendanceRecord.objects.create(
-                    student_id=sid, batch_id=batch_id, branch_id=branch_id,
-                    date=att_date, status=entry['status'], marked_by=user,
-                    timetable_slot_id=timetable_slot_id,
-                )
+                # Find existing record (auto-generated or otherwise) to update and avoid duplicates
+                qs = AttendanceRecord.objects.filter(student_id=sid, date=att_date, batch_id=batch_id)
+                if timetable_slot_id:
+                    qs = qs.filter(timetable_slot_id=timetable_slot_id)
+                    
+                r = qs.first()
+                if r:
+                    r.status = entry['status']
+                    r.marked_by = user
+                    if timetable_slot_id and not r.timetable_slot_id:
+                        r.timetable_slot_id = timetable_slot_id
+                    r.save(update_fields=['status', 'marked_by', 'timetable_slot_id'])
+                else:
+                    r = AttendanceRecord.objects.create(
+                        student_id=sid, batch_id=batch_id, branch_id=branch_id,
+                        date=att_date, status=entry['status'], marked_by=user,
+                        timetable_slot_id=timetable_slot_id,
+                    )
                 created.append(str(r.id))
 
                 # Notify student + parent
