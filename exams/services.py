@@ -33,6 +33,13 @@ def notify_exam_scheduled(exam):
         if missing:
             from exams.emails import send_material_upload_reminder_email
             send_material_upload_reminder_email(exam.faculty.user, exam, missing)
+            missing_str = " and ".join(missing)
+            send_system_notification(
+                user_id=str(exam.faculty.user.id),
+                title='Action Required: Upload Exam Materials',
+                body=f"Please upload the {missing_str} for the exam '{exam.title}' scheduled on {exam.scheduled_date.strftime('%d %b %Y')}.",
+                metadata={'exam_id': str(exam.id)}
+            )
 
     # Draft exams still need to tell the assigned faculty which materials to submit.
     # Student and examiner notifications wait until the exam is scheduled.
