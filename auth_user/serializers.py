@@ -317,18 +317,26 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         return value
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices."""
+        """Validate that additional roles are valid role choices and remove duplicates."""
         if not value:
-            return value
+            return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
         valid_roles = set(ROLE_PERMISSIONS.keys())
         
-        invalid_roles = [role for role in value if role not in valid_roles]
+        # Make distinct - remove duplicates while preserving order
+        seen = set()
+        distinct_roles = []
+        for role in value:
+            if role not in seen:
+                distinct_roles.append(role)
+                seen.add(role)
+        
+        invalid_roles = [role for role in distinct_roles if role not in valid_roles]
         if invalid_roles:
             raise serializers.ValidationError(f"Invalid roles: {', '.join(invalid_roles)}")
         
-        return value
+        return distinct_roles
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -529,18 +537,26 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices."""
+        """Validate that additional roles are valid role choices and remove duplicates."""
         if not value:
-            return value
+            return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
         valid_roles = set(ROLE_PERMISSIONS.keys())
         
-        invalid_roles = [role for role in value if role not in valid_roles]
+        # Make distinct - remove duplicates while preserving order
+        seen = set()
+        distinct_roles = []
+        for role in value:
+            if role not in seen:
+                distinct_roles.append(role)
+                seen.add(role)
+        
+        invalid_roles = [role for role in distinct_roles if role not in valid_roles]
         if invalid_roles:
             raise serializers.ValidationError(f"Invalid roles: {', '.join(invalid_roles)}")
         
-        return value
+        return distinct_roles
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -561,20 +577,32 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         if additional_roles is not None:
             from auth_user.permissions import merge_modules_from_roles
             role = validated_data.get('role', instance.role)
-            merged_modules = merge_modules_from_roles(role, additional_roles)
             
-            # If accessible_modules is not being updated, merge with merged modules
-            if 'accessible_modules' not in validated_data:
-                existing_modules = set(instance.accessible_modules or [])
-                existing_modules.update(merged_modules)
-                validated_data['accessible_modules'] = sorted(list(existing_modules))
-            else:
-                # If accessible_modules is being updated, merge with both
-                existing_accessible = set(validated_data['accessible_modules'] or [])
-                existing_accessible.update(merged_modules)
-                validated_data['accessible_modules'] = sorted(list(existing_accessible))
-            
+            # Ensure additional_roles is distinct
+            additional_roles = list(set(additional_roles)) if additional_roles else []
             validated_data['additional_roles'] = additional_roles
+            
+            # If additional_roles is empty, reset accessible_modules to just primary role modules
+            if not additional_roles:
+                if 'accessible_modules' not in validated_data:
+                    # Reset to primary role's default modules
+                    from auth_user.permissions import get_role_config
+                    role_config = get_role_config(role)
+                    validated_data['accessible_modules'] = role_config.get('default_modules', [])
+            else:
+                # Merge modules from additional roles
+                merged_modules = merge_modules_from_roles(role, additional_roles)
+                
+                # If accessible_modules is not being updated, merge with merged modules
+                if 'accessible_modules' not in validated_data:
+                    existing_modules = set(instance.accessible_modules or [])
+                    existing_modules.update(merged_modules)
+                    validated_data['accessible_modules'] = sorted(list(existing_modules))
+                else:
+                    # If accessible_modules is being updated, merge with both
+                    existing_accessible = set(validated_data['accessible_modules'] or [])
+                    existing_accessible.update(merged_modules)
+                    validated_data['accessible_modules'] = sorted(list(existing_accessible))
         
         instance = super().update(instance, validated_data)
 
@@ -670,7 +698,7 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'branch_details', 'branches', 'branches_details', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'branch', 'branch_name', 'branch_details', 'branches', 'branches_details', 'linked_students', 'organization', 'organization_name', 'profile_pic', 'role_display', 'linked_student_names', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
         read_only_fields = ['id', 'username', 'role', 'branch', 'branch_name', 'branch_details', 'branches', 'branches_details', 'linked_students', 'organization', 'organization_name', 'linked_student_names']
 
     def get_branch_details(self, obj):

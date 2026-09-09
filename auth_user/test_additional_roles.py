@@ -248,3 +248,90 @@ class AdditionalRolesTestCase(TestCase):
             user.additional_roles == [] or 
             user.additional_roles == dict()
         )
+    
+    def test_additional_roles_duplicates_removed(self):
+        """Test that duplicate additional_roles are removed during creation"""
+        data = {
+            'email': 'duplicates@test.org',
+            'phone': '1111111111',
+            'name': 'Duplicates User',
+            'role': 'admin_executive',
+            'branch': str(self.branch.id),
+            'organization': str(self.org.id),
+            'additional_roles': ['accountant', 'accountant', 'counsellor', 'accountant'],
+        }
+        
+        serializer = AddUserSerializer(data=data)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        
+        user = serializer.save()
+        
+        # Should have distinct roles only
+        self.assertEqual(len(set(user.additional_roles)), len(user.additional_roles))
+        self.assertEqual(set(user.additional_roles), {'accountant', 'counsellor'})
+    
+    def test_clear_additional_roles_on_update(self):
+        """Test that empty additional_roles list clears existing roles on update"""
+        # Create a user with additional_roles
+        user = User.objects.create_user(
+            username='clearroles',
+            email='clearroles@test.org',
+            password='Secret123!',
+            role='admin_executive',
+            organization=self.org,
+            branch=self.branch,
+            phone='0000000000',
+            name='Clear Roles User',
+            additional_roles=['accountant', 'counsellor'],
+            is_active=True,
+        )
+        
+        # Verify initial state
+        self.assertEqual(set(user.additional_roles), {'accountant', 'counsellor'})
+        initial_modules = user.accessible_modules
+        
+        # Update with empty additional_roles
+        data = {
+            'additional_roles': [],
+        }
+        
+        serializer = UpdateUserSerializer(user, data=data, partial=True)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        
+        updated_user = serializer.save()
+        
+        # Check that additional_roles is now empty
+        self.assertEqual(updated_user.additional_roles, [])
+        
+        # Check that accessible_modules was reset to just primary role's modules
+        admin_modules = set(ROLE_PERMISSIONS['admin_executive']['default_modules'])
+        self.assertEqual(set(updated_user.accessible_modules or []), admin_modules)
+    
+    def test_update_additional_roles_with_duplicates(self):
+        """Test that duplicate additional_roles are removed on update"""
+        user = User.objects.create_user(
+            username='updatedup',
+            email='updatedup@test.org',
+            password='Secret123!',
+            role='counsellor',
+            organization=self.org,
+            branch=self.branch,
+            phone='1234567890',
+            name='Update Dup User',
+            additional_roles=['accountant'],
+            is_active=True,
+        )
+        
+        # Update with duplicates
+        data = {
+            'additional_roles': ['accountant', 'accountant', 'fees', 'accountant'],
+        }
+        
+        serializer = UpdateUserSerializer(user, data=data, partial=True)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        
+        updated_user = serializer.save()
+        
+        # Check that only distinct roles are stored
+        self.assertEqual(set(updated_user.additional_roles), {'accountant', 'fees'})
+        self.assertEqual(len(updated_user.additional_roles), 2)
