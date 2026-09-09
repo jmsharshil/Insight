@@ -576,12 +576,12 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     def update(self, instance, validated_data):
         extra_branches = validated_data.pop('branches', None)
         linked_students = validated_data.pop('linked_students', None)
+
+        # Check whether additional_roles was explicitly sent in request
+        additional_roles_sent = 'additional_roles' in self.initial_data
         additional_roles = validated_data.pop('additional_roles', None)
-        
-        # ── Handle additional_roles (including explicit clear to []) ────────
-        # This fixes the bug where removing all additional roles did nothing in DB.
-        # We check for explicit presence of the key (even if value is empty list).
-        if 'additional_roles' in locals() and additional_roles is not None:
+        # ── Handle additional_roles ──────────────────────────────────────────
+        if additional_roles_sent:
             from auth_user.permissions import merge_modules_from_roles, get_role_config
             role = validated_data.get('role', instance.role)
             
@@ -591,14 +591,20 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             
             # If additional_roles is empty, reset accessible_modules to just primary role modules
             if not additional_roles:
+                # Explicitly cleared -> make DB field empty
+                validated_data['additional_roles'] = []
                 if 'accessible_modules' not in validated_data:
                     role_config = get_role_config(role)
                     validated_data['accessible_modules'] = role_config.get('default_modules', [])
                 else:
-                    # If accessible_modules also provided, keep it but ensure no extra from old roles
+                    primary_modules = get_role_config(role).get(
+                        'default_modules', []
+                    )
+
                     validated_data['accessible_modules'] = [
-                        m for m in validated_data['accessible_modules']
-                        if m in get_role_config(role).get('default_modules', [])
+                        module
+                        for module in validated_data['accessible_modules']
+                        if module in primary_modules
                     ]
             else:
                 # Merge modules from additional roles (merge_modules_from_roles already dedups)
@@ -607,7 +613,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
                 if 'accessible_modules' not in validated_data:
                     existing_modules = set(instance.accessible_modules or [])
                     existing_modules.update(merged_modules)
-                    validated_data['accessible_modules'] = sorted(list(existing_modules))
+                    validated_data['accessible_modules'] = sorted(existing_modules)
                 else:
                     existing_accessible = set(validated_data.get('accessible_modules') or [])
                     existing_accessible.update(merged_modules)
@@ -692,6 +698,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
                     'ifsc_code', 'pan_number', 'work_start_time', 'work_end_time',
                 ])
             except:
+                print("Exception:",e)
                 pass
                 
         return instance
