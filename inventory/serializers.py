@@ -44,6 +44,7 @@ class ItemAllocationSerializer(serializers.ModelSerializer):
     item_name = serializers.CharField(source='item.name', read_only=True)
     student_name = serializers.CharField(source='student.user.name', read_only=True)
     faculty_name = serializers.CharField(source='faculty.user.name', read_only=True)
+    sales_user_name = serializers.CharField(source='sales_user.name', read_only=True)
     issued_by_name = serializers.CharField(source='issued_by.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     
@@ -51,7 +52,28 @@ class ItemAllocationSerializer(serializers.ModelSerializer):
         model = ItemAllocation
         fields = [
             'id', 'item', 'item_name', 'student', 'student_name', 'faculty', 'faculty_name',
+            'sales_user', 'sales_user_name',
             'quantity', 'status', 'status_display', 'issued_at', 'issued_by', 'issued_by_name',
             'returned_at', 'return_notes', 'notes'
         ]
         read_only_fields = ['issued_by', 'issued_at', 'returned_at']
+
+    def validate(self, attrs):
+        targets = [
+            attrs.get('student', getattr(self.instance, 'student', None)),
+            attrs.get('faculty', getattr(self.instance, 'faculty', None)),
+            attrs.get('sales_user', getattr(self.instance, 'sales_user', None)),
+        ]
+        if sum(target is not None for target in targets) != 1:
+            raise serializers.ValidationError(
+                'Provide exactly one of student, faculty, or sales_user.'
+            )
+
+        sales_user = attrs.get('sales_user', getattr(self.instance, 'sales_user', None))
+        if sales_user and sales_user.role not in {
+            'sales_senior_executive', 'sales_executive', 'tele_caller'
+        }:
+            raise serializers.ValidationError({
+                'sales_user': 'The selected user must have a sales role.'
+            })
+        return attrs

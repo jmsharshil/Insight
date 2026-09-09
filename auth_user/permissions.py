@@ -92,6 +92,39 @@ ROLE_PERMISSIONS = {
         'canDelete': False,
         'canExport': False,
     },
+    'head_coordinator': {
+        'default_modules': ['support', 
+            'crm', 'students', 'courses_batches', 'timetable', 'attendance',
+            'fees', 'exams', 'results', 'faculty', 'leave', 'chat',
+            'notifications', 'payroll', 'settings',
+        ],
+        'canDelete': False,
+        'canExport': True,
+    },
+    'senior_tele_caller': {
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'canDelete': False,
+        'canExport': True,
+    },
+    'cmo': {
+        'default_modules': ['support', 
+            'crm', 'students', 'courses_batches', 'timetable', 'attendance',
+            'fees', 'exams', 'results', 'reports', 'dashboard', 'notifications',
+            'settings', 'leave',
+        ],
+        'canDelete': False,
+        'canExport': True,
+    },
+    'associate_bdm': {
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave'],
+        'canDelete': False,
+        'canExport': True,
+    },
+    'printers': {
+        'default_modules': ['support', 'inventory', 'notifications', 'settings'],
+        'canDelete': False,
+        'canExport': False,
+    },
     'student': {
         'default_modules': ['support', 
             'timetable', 'attendance', 'courses_batches', 'exams', 'fees',
@@ -293,6 +326,30 @@ def get_user_modules(user):
     # Every authenticated user can access the support module to raise queries
     modules.add('support')
     return modules
+
+
+def merge_modules_from_roles(primary_role, additional_roles_list):
+    """
+    Merge modules from a primary role and a list of additional roles.
+    Returns a sorted list of unique modules.
+    
+    Args:
+        primary_role: The main role of the user
+        additional_roles_list: List of additional role strings
+    
+    Returns:
+        Sorted list of unique module names
+    """
+    # Start with primary role's default modules
+    merged_modules = set(get_role_config(primary_role).get('default_modules', []))
+    
+    # Add modules from each additional role
+    if additional_roles_list:
+        for role in additional_roles_list:
+            role_config = get_role_config(role)
+            merged_modules.update(role_config.get('default_modules', []))
+    
+    return sorted(list(merged_modules))
 
 
 def can_user_delete(user):

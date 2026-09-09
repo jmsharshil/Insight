@@ -47,7 +47,13 @@ class EmployeeFieldsMixin:
             from payroll.utils import EMPLOYEE_ROLES
             all_employee_roles = EMPLOYEE_ROLES + ['faculty']
         except ImportError:
-            all_employee_roles = ['branch_manager', 'admin_senior_executive', 'admin_executive', 'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant', 'house_keeping', 'security', 'faculty']
+            all_employee_roles = [
+                'branch_manager', 'admin_senior_executive', 'admin_executive',
+                'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
+                'tele_caller', 'head_coordinator', 'senior_tele_caller', 'cmo',
+                'associate_bdm', 'exam_supervisor', 'paper_checker',
+                'accountant', 'house_keeping', 'security', 'faculty'
+            ]
         
         if role not in all_employee_roles:
             for f in EMPLOYEE_FIELDS:
@@ -135,7 +141,13 @@ class EmployeeFieldsMixin:
             from payroll.utils import EMPLOYEE_ROLES
             all_employee_roles = EMPLOYEE_ROLES + ['faculty']
         except ImportError:
-            all_employee_roles = ['branch_manager', 'admin_senior_executive', 'admin_executive', 'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant', 'house_keeping', 'security', 'faculty']
+            all_employee_roles = [
+                'branch_manager', 'admin_senior_executive', 'admin_executive',
+                'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
+                'tele_caller', 'head_coordinator', 'senior_tele_caller', 'cmo',
+                'associate_bdm', 'exam_supervisor', 'paper_checker',
+                'accountant', 'house_keeping', 'security', 'faculty'
+            ]
 
         if role not in all_employee_roles:
             for f in EMPLOYEE_FIELDS:
@@ -166,7 +178,7 @@ class UserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'branches', 'organization', 'organization_name', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'branch', 'branches', 'organization', 'organization_name', 'profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
 
     def get_branches(self, obj):
         b_ids = [str(b.id) for b in obj.branches.all()]
@@ -201,7 +213,7 @@ class UserListSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'branches', 'profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['id', 'username', 'email', 'phone', 'name', 'role', 'role_display', 'is_active', 'created_at', 'branch', 'branch_name', 'branches', 'profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
 
     def get_branches(self, obj):
         b_ids = [str(b.id) for b in obj.branches.all()]
@@ -281,10 +293,16 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    additional_roles = serializers.ListField(
+        child=serializers.CharField(max_length=50),
+        required=False,
+        allow_empty=True,
+        help_text="List of additional roles for this user. Modules from these roles will be merged into accessible_modules."
+    )
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
         extra_kwargs = {
             'username': {'required': False, 'allow_null': True, 'allow_blank': True}
         }
@@ -298,6 +316,20 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             raise serializers.ValidationError(f"Users with role '{value}' cannot be created directly from the Add User interface. This role is managed automatically.")
         return value
 
+    def validate_additional_roles(self, value):
+        """Validate that additional roles are valid role choices."""
+        if not value:
+            return value
+        
+        from auth_user.permissions import ROLE_PERMISSIONS
+        valid_roles = set(ROLE_PERMISSIONS.keys())
+        
+        invalid_roles = [role for role in value if role not in valid_roles]
+        if invalid_roles:
+            raise serializers.ValidationError(f"Invalid roles: {', '.join(invalid_roles)}")
+        
+        return value
+
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("User with this email already exists")
@@ -306,6 +338,8 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     def create(self, validated_data):
         linked_students = validated_data.pop('linked_students', None)
         extra_branches = validated_data.pop('branches', None)
+        additional_roles = validated_data.pop('additional_roles', None) or []
+        
         request = self.context.get('request')
         if ('organization' not in validated_data or validated_data['organization'] is None) and request is not None:
             request_org = getattr(request.user, 'organization', None)
@@ -314,6 +348,21 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
 
         role = validated_data.get('role')
         branch = validated_data.get('branch')
+        
+        # ── Merge modules from additional roles ─────────────────────────────
+        # If additional_roles are provided, merge their default modules into accessible_modules
+        if additional_roles:
+            from auth_user.permissions import merge_modules_from_roles
+            merged_modules = merge_modules_from_roles(role, additional_roles)
+            validated_data['additional_roles'] = additional_roles
+            # If accessible_modules is not already set, use the merged modules
+            if validated_data.get('accessible_modules') is None:
+                validated_data['accessible_modules'] = merged_modules
+            else:
+                # If accessible_modules is already set, merge with additional role modules
+                existing_modules = set(validated_data['accessible_modules'])
+                existing_modules.update(merged_modules)
+                validated_data['accessible_modules'] = sorted(list(existing_modules))
         
         # ── Sync branch ↔ branches ────────────────────────────────────────
         # Build the final set of branches from both sources
@@ -468,10 +517,30 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    additional_roles = serializers.ListField(
+        child=serializers.CharField(max_length=50),
+        required=False,
+        allow_empty=True,
+        help_text="List of additional roles for this user. Modules from these roles will be merged into accessible_modules."
+    )
 
     class Meta:
         model = User
-        fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules'] + EMPLOYEE_FIELDS
+        fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
+
+    def validate_additional_roles(self, value):
+        """Validate that additional roles are valid role choices."""
+        if not value:
+            return value
+        
+        from auth_user.permissions import ROLE_PERMISSIONS
+        valid_roles = set(ROLE_PERMISSIONS.keys())
+        
+        invalid_roles = [role for role in value if role not in valid_roles]
+        if invalid_roles:
+            raise serializers.ValidationError(f"Invalid roles: {', '.join(invalid_roles)}")
+        
+        return value
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -486,6 +555,27 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     def update(self, instance, validated_data):
         extra_branches = validated_data.pop('branches', None)
         linked_students = validated_data.pop('linked_students', None)
+        additional_roles = validated_data.pop('additional_roles', None)
+        
+        # ── Merge modules from additional roles if provided ─────────────────
+        if additional_roles is not None:
+            from auth_user.permissions import merge_modules_from_roles
+            role = validated_data.get('role', instance.role)
+            merged_modules = merge_modules_from_roles(role, additional_roles)
+            
+            # If accessible_modules is not being updated, merge with merged modules
+            if 'accessible_modules' not in validated_data:
+                existing_modules = set(instance.accessible_modules or [])
+                existing_modules.update(merged_modules)
+                validated_data['accessible_modules'] = sorted(list(existing_modules))
+            else:
+                # If accessible_modules is being updated, merge with both
+                existing_accessible = set(validated_data['accessible_modules'] or [])
+                existing_accessible.update(merged_modules)
+                validated_data['accessible_modules'] = sorted(list(existing_accessible))
+            
+            validated_data['additional_roles'] = additional_roles
+        
         instance = super().update(instance, validated_data)
 
         # ── Sync branch ↔ branches ────────────────────────────────────────

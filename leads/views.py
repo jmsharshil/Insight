@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.exceptions import ValidationError
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
@@ -16,9 +17,10 @@ from django.conf import settings
 from .serializers import (
     get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer,
     LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
+    SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
 )
 from .utils import LeadService
-from .models import Lead, LeadStage, LeadAssignmentLog, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
+from .models import Lead, LeadStage, LeadAssignmentLog, SalesDailyActivity, SalesActivityPhoto, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
 from django.db.models import Q
 import re
 from rest_framework.permissions import AllowAny
@@ -40,6 +42,75 @@ RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}
 
 # Roles that can see all leads and reassign them
 SENIOR_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
+SALES_ROLES = {'sales_senior_executive', 'sales_executive', 'tele_caller'}
+
+def _sales_activity_access(user, activity=None):
+    if getattr(user, 'role', None) not in SALES_ROLES | {'branch_manager', 'super_admin'}:
+        return False
+    return activity is None or activity.user_id == user.id or getattr(user, 'role', None) in {'branch_manager', 'super_admin'}
+
+class SalesDailyActivityView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get(self, request):
+        if not _sales_activity_access(request.user):
+            return Response({'detail': 'Only sales staff can access sales activities.'}, status=status.HTTP_403_FORBIDDEN)
+        queryset = SalesDailyActivity.objects.prefetch_related('photos').select_related('user')
+        if request.user.role not in {'branch_manager', 'super_admin'}:
+            queryset = queryset.filter(user=request.user)
+        serializer = SalesDailyActivitySerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        if not _sales_activity_access(request.user):
+            return Response({'detail': 'Only sales staff can upload sales activities.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = SalesDailyActivitySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity_date = serializer.validated_data.get('activity_date') or timezone.localdate()
+        activity, _ = SalesDailyActivity.objects.get_or_create(
+            user=request.user,
+            activity_date=activity_date,
+            defaults={'notes': serializer.validated_data.get('notes', '')},
+        )
+        if 'notes' in serializer.validated_data:
+            activity.notes = serializer.validated_data['notes']
+            activity.save(update_fields=['notes', 'updated_at'])
+
+        return Response(
+            SalesDailyActivitySerializer(activity).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+class SalesActivityPhotoView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, activity_id):
+        try:
+            activity = SalesDailyActivity.objects.get(id=activity_id)
+        except SalesDailyActivity.DoesNotExist:
+            return Response({'detail': 'Sales activity not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not _sales_activity_access(request.user, activity):
+            return Response({'detail': 'You cannot upload photos for this activity.'}, status=status.HTTP_403_FORBIDDEN)
+
+        photo_type = request.data.get('photo_type')
+        if photo_type == 'exhibition' and activity.photos.filter(photo_type='exhibition').count() >= 6:
+            return Response({'detail': 'A maximum of 6 exhibition photos is allowed.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = SalesActivityPhotoSerializer(data={
+            'photo_type': photo_type,
+            'photo': request.FILES.get('photo'),
+            'latitude': request.data.get('latitude'),
+            'longitude': request.data.get('longitude'),
+            'odometer_kms': request.data.get('odometer_kms') or None,
+            'captured_at': request.data.get('captured_at') or timezone.now(),
+        })
+        serializer.is_valid(raise_exception=True)
+        photo = serializer.save(activity=activity)
+        return Response(SalesActivityPhotoSerializer(photo).data, status=status.HTTP_201_CREATED)
 
 
 def get_lead_queryset(request):

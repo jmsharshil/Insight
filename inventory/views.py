@@ -18,6 +18,7 @@ from faculty.models import FacultyProfile
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
+SALES_ROLES = {'sales_senior_executive', 'sales_executive'}
 
 def resolve_profile_id(model_class, id_val):
     if not id_val:
@@ -113,11 +114,11 @@ class StockTransactionViewSet(viewsets.ModelViewSet):
 
 
 class ItemAllocationViewSet(viewsets.ModelViewSet):
-    queryset = ItemAllocation.objects.select_related('item', 'student', 'faculty', 'issued_by').all()
+    queryset = ItemAllocation.objects.select_related('item', 'student', 'faculty', 'sales_user', 'issued_by').all()
     serializer_class = ItemAllocationSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['item', 'status', 'student', 'faculty', 'item__category__branch']
-    search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name']
+    search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name', 'sales_user__name']
 
     def get_queryset(self):
         user = self.request.user
@@ -152,7 +153,7 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                 item=allocation.item,
                 transaction_type='allocation',
                 quantity=-allocation.quantity,
-                reference=f"Allocated to {allocation.student.admission_number if allocation.student else allocation.faculty.user.name if allocation.faculty else 'Unknown'}",
+                reference=f"Allocated to {self._allocation_recipient(allocation)}",
                 notes=allocation.notes,
                 created_by=self.request.user
             )
@@ -186,14 +187,19 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     def bulk_issue(self, request):
         student_id = request.data.get('student')
         faculty_id = request.data.get('faculty')
+        sales_user_id = request.data.get('sales_user')
         
         student_id = resolve_profile_id(StudentProfile, student_id)
         faculty_id = resolve_profile_id(FacultyProfile, faculty_id)
+        sales_user = User.objects.filter(id=sales_user_id).first() if sales_user_id else None
 
         allocations_data = request.data.get('allocations', [])
 
-        if not student_id and not faculty_id:
-            return Response({'error': 'Must provide either student or faculty ID.'}, status=status.HTTP_400_BAD_REQUEST)
+        target_count = sum(bool(target) for target in (student_id, faculty_id, sales_user_id))
+        if target_count != 1:
+            return Response({'error': 'Provide exactly one of student, faculty, or sales_user.'}, status=status.HTTP_400_BAD_REQUEST)
+        if sales_user_id and (not sales_user or sales_user.role not in SALES_ROLES):
+            return Response({'error': 'The selected sales_user must have a sales role.'}, status=status.HTTP_400_BAD_REQUEST)
         
         if not allocations_data or not isinstance(allocations_data, list):
             return Response({'error': 'Must provide a list of allocations.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -221,6 +227,7 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                         item=item,
                         student_id=student_id,
                         faculty_id=faculty_id,
+                        sales_user=sales_user,
                         quantity=quantity,
                         status='issued',
                         notes=notes,
@@ -232,7 +239,7 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                         item=item,
                         transaction_type='allocation',
                         quantity=-quantity,
-                        reference=f"Bulk allocation to {allocation.student.admission_number if allocation.student else allocation.faculty.user.name if allocation.faculty else 'Unknown'}",
+                        reference=f"Bulk allocation to {self._allocation_recipient(allocation)}",
                         notes=notes,
                         created_by=request.user
                     )
@@ -251,15 +258,21 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(created_allocations, many=True)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @staticmethod
+    def _allocation_recipient(allocation):
+        if allocation.student:
+            return allocation.student.admission_number
+        if allocation.faculty:
+            return allocation.faculty.user.name
+        if allocation.sales_user:
+            return allocation.sales_user.name
+        return 'Unknown'
+
     def _notify_allocation(self, allocation):
         """Send system notification to super_admins when inventory is allocated."""
         try:
             from core.utils import notify_users_by_role
-            recipient_name = (
-                allocation.student.admission_number if allocation.student
-                else allocation.faculty.user.name if allocation.faculty
-                else 'Unknown'
-            )
+            recipient_name = self._allocation_recipient(allocation)
             notify_users_by_role(
                 roles=['super_admin'],
                 title='Inventory Allocated',

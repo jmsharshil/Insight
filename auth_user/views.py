@@ -64,6 +64,8 @@ def build_login_success_response(user, request):
     accessible_modules = getattr(user, 'accessible_modules', None)
     if accessible_modules is None:
         accessible_modules = role_config.get('default_modules', [])
+    
+    additional_roles = getattr(user, 'additional_roles', None) or []
 
     return {
         "message": "Login successful",
@@ -82,6 +84,7 @@ def build_login_success_response(user, request):
             "organization_name": user.organization.name if user.organization else None,
             "linked_students": actual_student_ids,
             "accessible_modules": accessible_modules,
+            "additional_roles": additional_roles,
             "canDelete": role_config.get('canDelete', False),
             "canExport": role_config.get('canExport', False),
         }

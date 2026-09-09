@@ -2,6 +2,8 @@
 
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
+import uuid
 from auth_user.models import User
 
 FORM_TYPE_CHOICES = [
@@ -248,3 +250,61 @@ class LeadTransferRequest(models.Model):
 
     def __str__(self):
         return f"Transfer Request for {self.lead} by {self.requested_by}"
+
+class SalesDailyActivity(models.Model):
+    """One field-activity container per sales user and calendar day."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sales_daily_activities',
+    )
+    activity_date = models.DateField(default=timezone.localdate)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_daily_activities'
+        ordering = ['-activity_date', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'activity_date'],
+                name='unique_sales_activity_per_user_day',
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user.name} - {self.activity_date}"
+
+SALES_ACTIVITY_PHOTO_TYPES = [
+    ('start_selfie', 'Start of Day Selfie'),
+    ('start_odometer', 'Start of Day Odometer'),
+    ('end_selfie', 'End of Day Selfie'),
+    ('end_odometer', 'End of Day Odometer'),
+    ('school_interior', 'School Interior'),
+    ('school_exterior', 'School Exterior'),
+    ('exhibition', 'Exhibition'),
+]
+
+class SalesActivityPhoto(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        SalesDailyActivity,
+        on_delete=models.CASCADE,
+        related_name='photos',
+    )
+    photo_type = models.CharField(max_length=30, choices=SALES_ACTIVITY_PHOTO_TYPES)
+    photo = models.ImageField(upload_to='sales/activity_photos/')
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    odometer_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    captured_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sales_activity_photos'
+        ordering = ['captured_at', 'created_at']
+
+    def __str__(self):
+        return f"{self.activity_id} - {self.photo_type}"

@@ -1237,8 +1237,9 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
 EMPLOYEE_ROLES = [
     'branch_manager', 'admin_senior_executive', 'admin_executive',
     'front_desk', 'counsellor', 'sales_senior_executive', 'sales_executive',
-    'tele_caller', 'exam_supervisor', 'paper_checker', 'accountant',
-    'house_keeping', 'security',
+    'tele_caller', 'head_coordinator', 'senior_tele_caller', 'cmo',
+    'associate_bdm', 'exam_supervisor',
+    'paper_checker', 'accountant', 'house_keeping', 'security',
 ]
 
 
