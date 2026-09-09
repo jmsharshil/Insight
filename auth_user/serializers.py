@@ -108,16 +108,24 @@ class EmployeeFieldsMixin:
                 mutable_data['branches'] = [branches_val]
 
         # Normalize 'additional_roles' (critical for FormParser/MultiPartParser + ListField)
-        # Single string from getlist() would otherwise fail ListField validation
+        # Handles: single str, list, empty str/list (for clearing via form data), None
         if 'additional_roles' in mutable_data:
             roles_val = mutable_data.get('additional_roles')
-            if isinstance(roles_val, (str, bytes)) and roles_val.strip():
-                mutable_data['additional_roles'] = [roles_val.strip()]
+            if isinstance(roles_val, (str, bytes)):
+                stripped = roles_val.strip()
+                mutable_data['additional_roles'] = [stripped] if stripped else []
             elif isinstance(roles_val, (list, tuple)):
-                mutable_data['additional_roles'] = [
-                    r.strip() if isinstance(r, (str, bytes)) else r 
-                    for r in roles_val if r
-                ]
+                cleaned = []
+                for r in roles_val:
+                    if isinstance(r, (str, bytes)):
+                        stripped = r.strip()
+                        if stripped:
+                            cleaned.append(stripped)
+                    elif r:  # non-string truthy values
+                        cleaned.append(r)
+                mutable_data['additional_roles'] = cleaned or []
+            elif roles_val in (None, '', [], ['']):
+                mutable_data['additional_roles'] = []
 
         choice_fields_defaults = {
             'level': 'executive',
