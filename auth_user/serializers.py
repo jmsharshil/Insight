@@ -600,7 +600,6 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
                     primary_modules = get_role_config(role).get(
                         'default_modules', []
                     )
-
                     validated_data['accessible_modules'] = [
                         module
                         for module in validated_data['accessible_modules']
@@ -613,7 +612,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
                 if 'accessible_modules' not in validated_data:
                     existing_modules = set(instance.accessible_modules or [])
                     existing_modules.update(merged_modules)
-                    validated_data['accessible_modules'] = sorted(existing_modules)
+                    validated_data['accessible_modules'] = sorted(list(existing_modules))
                 else:
                     existing_accessible = set(validated_data.get('accessible_modules') or [])
                     existing_accessible.update(merged_modules)
