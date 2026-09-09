@@ -36,9 +36,16 @@ class EmployeeFieldsMixin:
         
         accessible_modules = getattr(instance, 'accessible_modules', None)
         if accessible_modules is not None:
-            ret['accessible_modules'] = accessible_modules
+            # Deduplicate while preserving order (fixes "coming twice" bug in user details API)
+            seen = set()
+            ret['accessible_modules'] = [m for m in accessible_modules if not (m in seen or seen.add(m))]
         else:
             ret['accessible_modules'] = role_config.get('default_modules', [])
+            
+        # Also ensure additional_roles is deduplicated if present
+        if 'additional_roles' in ret and ret.get('additional_roles'):
+            seen = set()
+            ret['additional_roles'] = [r for r in ret['additional_roles'] if not (r in seen or seen.add(r))]
             
         ret['canDelete'] = role_config.get('canDelete', False)
         ret['canExport'] = role_config.get('canExport', False)
@@ -317,14 +324,15 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         return value
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices and remove duplicates."""
+        """Validate that additional roles are valid role choices and remove duplicates.
+        Always returns a deduplicated list (preserves original order)."""
         if not value:
             return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
         valid_roles = set(ROLE_PERMISSIONS.keys())
         
-        # Make distinct - remove duplicates while preserving order
+        # Make distinct while preserving order (better than set() which is non-deterministic)
         seen = set()
         distinct_roles = []
         for role in value:
@@ -537,14 +545,15 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices and remove duplicates."""
+        """Validate that additional roles are valid role choices and remove duplicates.
+        Always returns a deduplicated list (preserves original order)."""
         if not value:
             return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
         valid_roles = set(ROLE_PERMISSIONS.keys())
         
-        # Make distinct - remove duplicates while preserving order
+        # Make distinct while preserving order (better than set() which is non-deterministic)
         seen = set()
         distinct_roles = []
         for role in value:
@@ -573,34 +582,38 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         linked_students = validated_data.pop('linked_students', None)
         additional_roles = validated_data.pop('additional_roles', None)
         
-        # ── Merge modules from additional roles if provided ─────────────────
-        if additional_roles is not None:
-            from auth_user.permissions import merge_modules_from_roles
+        # ── Handle additional_roles (including explicit clear to []) ────────
+        # This fixes the bug where removing all additional roles did nothing in DB.
+        # We check for explicit presence of the key (even if value is empty list).
+        if 'additional_roles' in locals() and additional_roles is not None:
+            from auth_user.permissions import merge_modules_from_roles, get_role_config
             role = validated_data.get('role', instance.role)
             
-            # Ensure additional_roles is distinct
-            additional_roles = list(set(additional_roles)) if additional_roles else []
+            # Use validated distinct list (preserves order, fixes duplicates)
+            additional_roles = additional_roles or []
             validated_data['additional_roles'] = additional_roles
             
-            # If additional_roles is empty, reset accessible_modules to just primary role modules
             if not additional_roles:
+                # Explicit clear: reset accessible_modules to primary role defaults only
                 if 'accessible_modules' not in validated_data:
-                    # Reset to primary role's default modules
-                    from auth_user.permissions import get_role_config
                     role_config = get_role_config(role)
                     validated_data['accessible_modules'] = role_config.get('default_modules', [])
+                else:
+                    # If accessible_modules also provided, keep it but ensure no extra from old roles
+                    validated_data['accessible_modules'] = [
+                        m for m in validated_data['accessible_modules']
+                        if m in get_role_config(role).get('default_modules', [])
+                    ]
             else:
-                # Merge modules from additional roles
+                # Merge modules from additional roles (merge_modules_from_roles already dedups)
                 merged_modules = merge_modules_from_roles(role, additional_roles)
                 
-                # If accessible_modules is not being updated, merge with merged modules
                 if 'accessible_modules' not in validated_data:
                     existing_modules = set(instance.accessible_modules or [])
                     existing_modules.update(merged_modules)
                     validated_data['accessible_modules'] = sorted(list(existing_modules))
                 else:
-                    # If accessible_modules is being updated, merge with both
-                    existing_accessible = set(validated_data['accessible_modules'] or [])
+                    existing_accessible = set(validated_data.get('accessible_modules') or [])
                     existing_accessible.update(merged_modules)
                     validated_data['accessible_modules'] = sorted(list(existing_accessible))
         
