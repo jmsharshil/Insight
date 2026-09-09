@@ -566,7 +566,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         Explicitly supports empty list (or None) so that sending [] clears all additional_roles
         (which resets accessible_modules to primary role modules in UpdateUserSerializer.update).
         """
-        if value is None or (isinstance(value, (list, tuple)) and not value):
+        if value is None or (isinstance(value, (list, tuple)) and not any(str(r).strip() for r in value if r is not None)):
             return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
