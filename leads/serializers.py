@@ -1,7 +1,7 @@
 # leads/serializers.py
 
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyActivity, SalesActivityPhoto, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -72,6 +72,35 @@ class FlexibleDateTimeField(serializers.DateTimeField):
             raise serializers.ValidationError(
                 "Invalid datetime format."
             )
+
+class SalesActivityPhotoSerializer(serializers.ModelSerializer):
+    photo_type_display = serializers.CharField(source='get_photo_type_display', read_only=True)
+
+    class Meta:
+        model = SalesActivityPhoto
+        fields = [
+            'id', 'activity', 'photo_type', 'photo_type_display', 'photo',
+            'latitude', 'longitude', 'odometer_kms', 'captured_at', 'created_at',
+        ]
+        read_only_fields = ['id', 'activity', 'created_at']
+
+    def validate(self, attrs):
+        photo_type = attrs.get('photo_type')
+        odometer_kms = attrs.get('odometer_kms')
+        if photo_type in {'start_odometer', 'end_odometer'} and odometer_kms is None:
+            raise serializers.ValidationError({'odometer_kms': 'Required for odometer photos.'})
+        if photo_type not in {'start_odometer', 'end_odometer'} and odometer_kms is not None:
+            raise serializers.ValidationError({'odometer_kms': 'Only valid for odometer photos.'})
+        return attrs
+
+class SalesDailyActivitySerializer(serializers.ModelSerializer):
+    photos = SalesActivityPhotoSerializer(many=True, read_only=True)
+    user_name = serializers.CharField(source='user.name', read_only=True)
+
+    class Meta:
+        model = SalesDailyActivity
+        fields = ['id', 'user', 'user_name', 'activity_date', 'notes', 'photos', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'created_at', 'updated_at']
 
 # ── Contact Serializer ────────────────────────────────────────────────────────
 

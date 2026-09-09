@@ -57,6 +57,11 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('sales_senior_executive','Sales Senior Executive'),
         ('sales_executive','Sales Executive'),
         ('tele_caller','Tele Caller'),
+        ('head_coordinator', 'Head Coordinator'),
+        ('senior_tele_caller', 'Senior Tele Caller'),
+        ('cmo', 'CMO'),
+        ('associate_bdm', 'Associate Business Development Manager'),
+        ('printers', 'Printers'),
         ('exam_supervisor', 'Exam Supervisor'),
         ('paper_checker', 'Paper Checker'),
         ('accountant', 'Accountant'),
@@ -111,6 +116,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     accessible_modules = models.JSONField(
         null=True, blank=True,
         help_text="List of modules this user has access to. If null, falls back to role default modules."
+    )
+    additional_roles = models.JSONField(
+        null=True, blank=True, default=list,
+        help_text="List of additional roles for this user. Modules from these roles are merged into accessible_modules."
     )
     created_at = models.DateTimeField(auto_now_add=True)
     

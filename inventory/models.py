@@ -105,9 +105,10 @@ class ItemAllocation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='allocations')
     
-    # Can be assigned to either a student or a faculty
+    # Can be assigned to a student, faculty member, or sales user
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, null=True, blank=True, related_name='inventory_allocations')
     faculty = models.ForeignKey(FacultyProfile, on_delete=models.CASCADE, null=True, blank=True, related_name='inventory_allocations')
+    sales_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='sales_inventory_allocations')
     
     quantity = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='issued')
@@ -125,5 +126,10 @@ class ItemAllocation(models.Model):
         ordering = ['-issued_at']
 
     def __str__(self):
-        assignee = self.student.admission_number if self.student else (self.faculty.user.name if self.faculty else 'Unknown')
+        assignee = (
+            self.student.admission_number if self.student
+            else self.faculty.user.name if self.faculty
+            else self.sales_user.name if self.sales_user
+            else 'Unknown'
+        )
         return f"Allocated {self.item.name} to {assignee}"
