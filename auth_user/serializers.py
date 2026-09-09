@@ -36,9 +36,7 @@ class EmployeeFieldsMixin:
         
         accessible_modules = getattr(instance, 'accessible_modules', None)
         if accessible_modules is not None:
-            # Deduplicate while preserving order (fixes "coming twice" bug in user details API)
-            seen = set()
-            ret['accessible_modules'] = [m for m in accessible_modules if not (m in seen or seen.add(m))]
+            ret['accessible_modules'] = accessible_modules
         else:
             ret['accessible_modules'] = role_config.get('default_modules', [])
             
@@ -324,15 +322,14 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         return value
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices and remove duplicates.
-        Always returns a deduplicated list (preserves original order)."""
+        """Validate that additional roles are valid role choices and remove duplicates."""
         if not value:
             return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
         valid_roles = set(ROLE_PERMISSIONS.keys())
         
-        # Make distinct while preserving order (better than set() which is non-deterministic)
+        # Make distinct - remove duplicates while preserving order
         seen = set()
         distinct_roles = []
         for role in value:
@@ -545,15 +542,14 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices and remove duplicates.
-        Always returns a deduplicated list (preserves original order)."""
+        """Validate that additional roles are valid role choices and remove duplicates."""
         if not value:
             return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
         valid_roles = set(ROLE_PERMISSIONS.keys())
         
-        # Make distinct while preserving order (better than set() which is non-deterministic)
+        # Make distinct - remove duplicates while preserving order
         seen = set()
         distinct_roles = []
         for role in value:
@@ -593,8 +589,8 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             additional_roles = additional_roles or []
             validated_data['additional_roles'] = additional_roles
             
+            # If additional_roles is empty, reset accessible_modules to just primary role modules
             if not additional_roles:
-                # Explicit clear: reset accessible_modules to primary role defaults only
                 if 'accessible_modules' not in validated_data:
                     role_config = get_role_config(role)
                     validated_data['accessible_modules'] = role_config.get('default_modules', [])
