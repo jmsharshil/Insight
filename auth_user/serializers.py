@@ -562,8 +562,11 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         fields = ['username','email','phone','name','role','branch','branches','linked_students','is_active','organization','profile_pic', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
 
     def validate_additional_roles(self, value):
-        """Validate that additional roles are valid role choices and remove duplicates."""
-        if not value:
+        """Validate that additional roles are valid role choices and remove duplicates.
+        Explicitly supports empty list (or None) so that sending [] clears all additional_roles
+        (which resets accessible_modules to primary role modules in UpdateUserSerializer.update).
+        """
+        if value is None or (isinstance(value, (list, tuple)) and not value):
             return []
         
         from auth_user.permissions import ROLE_PERMISSIONS
@@ -572,8 +575,10 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         # Make distinct - remove duplicates while preserving order
         seen = set()
         distinct_roles = []
-        for role in value:
-            if role not in seen:
+        for role in (value if isinstance(value, (list, tuple)) else [value]):
+            if isinstance(role, (str, bytes)):
+                role = role.strip()
+            if role and role not in seen:
                 distinct_roles.append(role)
                 seen.add(role)
         
