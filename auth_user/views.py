@@ -426,6 +426,10 @@ class ForgotPasswordAPIView(APIView):
             user = User.objects.filter(email=email).first()
             if not user:
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            if not user.is_active:
+                user.is_active = True
+                user.save(update_fields=['is_active'])
             
             otp = EmailOTP.generate_otp()
             EmailOTP.objects.create(user=user,otp=otp)
