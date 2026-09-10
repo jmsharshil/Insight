@@ -229,7 +229,24 @@ When stage=`converted`:
 
 ---
 
+## Sales Daily Activities & Lead Transfer Requests
+
+Starting with the sales field-activity release, the `leads` application also powers:
+1. **Sales Daily Activity & GPS Verification**: Field tracking for sales executives with odometer, visit, and exhibition photo uploads.
+   - `GET /api/v1/sales/activities/`
+   - `POST /api/v1/sales/activities/`
+   - `POST /api/v1/sales/activities/<activity_id>/photos/`
+2. **Lead Transfer Requests**: Workflow for sales representatives and counsellors to request lead handovers to colleagues.
+   - `POST /api/v1/leads/transfer-requests/`
+   - `GET /api/v1/leads/transfer-requests/`
+   - `PATCH /api/v1/leads/transfer-requests/<id>/review/`
+
+👉 **Full Guide**: For detailed request/response examples and constraints, see [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md).
+
+---
+
 **Related Modules & Docs:**
+- `sales_module_api_documentation.md` (Sales field activities, GPS/meter verification, lead transfers)
 - `onboarding_admissions_api_documentation.md` (conversion target)
 - `students_module_api_documentation.md` (post-enrollment profile)
 - `fees_module_api_documentation.md` (bank selection on form submit, installment creation on enrollment)

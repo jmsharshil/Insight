@@ -65,7 +65,8 @@ EMPLOYEE_ROLES = [
 | Model | Purpose |
 |-------|---------|
 | `PayrollRun` | Monthly batch (per branch/month/year). Status + `total_amount`, `notes`. Auto-regen on draft. |
-| `PaySlip` | Per-employee (fields: basic_salary, total_session_hours, hour_based_amount, late_penalty, absence_deductions, leave_deductions, retention_deduction, other_deductions, bonus, attendance_bonus, leave_encashment, net_salary, sessions_conducted, deduction_note, working_days, leaves_taken, is_disbursed). Links to **either** `faculty` or `user`. |
+| `PaySlip` | Per-employee (fields: basic_salary, total_session_hours, hour_based_amount, late_penalty, absence_deductions, leave_deductions, retention_deduction, other_deductions, bonus, attendance_bonus, leave_encashment, reimbursements_amount, net_salary, sessions_conducted, deduction_note, working_days, leaves_taken, is_disbursed). Links to **either** `faculty` or `user`. |
+| `Reimbursement` | Staff expense claims (`reimbursements` module); approved unpaid claims are automatically linked to `payslip` & `payroll_run`, added to `net_salary`, and marked `is_paid=True` upon disbursal. See [reimbursements_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/reimbursements_module_api_documentation.md). |
 | `LateEntryPolicy` | Branch config (grace_period_minutes, deduction_per_minute, max_deduction_per_session, absence_deduction_per_day, late_entry_threshold, auto_halfday_deduction). |
 | `SessionLatePenaltyLog` | Audit trail for faculty late sessions (linked to SessionReport). |
 | `ExtraHoursApproval` | Auto-created for faculty overtime vs chapter allocation; status=pending/approved/rejected. |
@@ -206,7 +207,7 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
 
 ### Approve / Disburse
 - **POST** `/payroll/<run_id>/approve/` → approved + notify.
-- **POST** `/payroll/<run_id>/disburse/` → disbursed, update slips, **individual notifications** to each recipient_user.
+- **POST** `/payroll/<run_id>/disburse/` → disbursed, update slips, **marks all linked `Reimbursement` records as `is_paid=True`**, **individual notifications** to each recipient_user.
 
 **Example Disburse Response:**
 ```json

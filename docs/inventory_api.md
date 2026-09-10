@@ -16,9 +16,9 @@ This document provides a **complete walkthrough** of the inventory system, inclu
 | `ItemCategory` | Groups items (per branch) | Unique per branch+name |
 | `Item` | Stock item definition | `total_stock` is **read-only** — updated exclusively via `StockTransaction` or `ItemAllocation` |
 | `StockTransaction` | Immutable ledger for all stock movements | Auto-updates `Item.total_stock`; prevents negative stock on outward transactions |
-| `ItemAllocation` | Issues items to Student or Faculty | Auto-creates `allocation` transaction on issue; `return_item` action restores stock |
+| `ItemAllocation` | Issues items to Student, Faculty, or Sales User | Auto-creates `allocation` transaction on issue; `return_item` action restores stock |
 
-**Note:** `ItemAllocation` supports both `student` and `faculty` FKs (one must be provided). Status flows: `pending` → `issued` → `returned`.
+**Note:** `ItemAllocation` supports `student`, `faculty`, and `sales_user` FKs (exactly one must be provided). When assigning to a sales user, their role must be in `{'sales_senior_executive', 'sales_executive', 'tele_caller'}`. See [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md). Status flows: `pending` → `issued` → `returned`.
 
 ---
 
@@ -30,7 +30,7 @@ This document provides a **complete walkthrough** of the inventory system, inclu
 3. Add initial stock via **Purchase Transaction** (positive `quantity`).
 
 ### 2. Daily Operations (Issue / Return)
-1. **Issue items** to student or faculty → `POST /allocations/` or `bulk_issue/` (automatically deducts from `total_stock` via transaction).
+1. **Issue items** to student, faculty, or sales user → `POST /allocations/` or `bulk_issue/` (automatically deducts from `total_stock` via transaction).
 2. Faculty/Student uses the item.
 3. **Return** via `POST /allocations/<id>/return_item/` → restores stock via positive `return` transaction.
 4. Monitor **reorder alerts** via `/forecast/` endpoint (uses last 30 days of allocations to project burn rate).
