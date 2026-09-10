@@ -134,6 +134,19 @@ class User(AbstractBaseUser, PermissionsMixin):
             self.employee_id = self.username
         super().save(*args, **kwargs)
 
+    def get_all_roles(self):
+        """Return a set of all roles for this user (primary role + additional_roles)."""
+        roles = set()
+        if self.role:
+            roles.add(self.role)
+        if self.additional_roles and isinstance(self.additional_roles, (list, tuple, set)):
+            roles.update(self.additional_roles)
+        return roles
+
+    def has_role(self, *roles):
+        """Check if user has any of the given roles."""
+        return bool(self.get_all_roles().intersection(roles))
+
     def __str__(self):
         return self.email
     

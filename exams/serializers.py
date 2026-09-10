@@ -8,6 +8,8 @@ from .models import (
     SubjectPaper,
 )
 
+from core.utils import get_role_filter_q
+
 User = get_user_model()
 
 
@@ -379,11 +381,11 @@ class ExamListSerializer(serializers.ModelSerializer):
 class ExamCreateSerializer(serializers.ModelSerializer):
     total_marks = serializers.IntegerField(required=False, default=0)
     paper_checkers = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.filter(role='paper_checker', is_active=True),
+        queryset=User.objects.filter(get_role_filter_q('paper_checker'), is_active=True),
         many=True, required=False, allow_empty=True, write_only=True
     )
     supervisors = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.filter(role='exam_supervisor', is_active=True),
+        queryset=User.objects.filter(get_role_filter_q('exam_supervisor'), is_active=True),
         many=True, required=False, allow_empty=True, write_only=True
     )
     selected_papers = serializers.PrimaryKeyRelatedField(

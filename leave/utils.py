@@ -103,12 +103,12 @@ def initialize_leave_balances_for_year(branch, year):
     ]
     
     # Filter users to only those in the given branch (or if they are super_admin and want to test)
-    from core.utils import get_user_branch_id
-    all_staff = User.objects.filter(role__in=staff_roles, is_active=True)
+    from core.utils import get_user_branch_id, get_role_filter_q
+    all_staff = User.objects.filter(get_role_filter_q(staff_roles), is_active=True)
     staff = []
     for u in all_staff:
         u_bid = get_user_branch_id(u)
-        if str(u_bid) == str(branch.id) or u.role == 'super_admin':
+        if str(u_bid) == str(branch.id) or u.role == 'super_admin' or (u.additional_roles and 'super_admin' in u.additional_roles):
             staff.append(u)
     policies = LeavePolicy.objects.filter(branch=branch, is_active=True)
 
@@ -469,9 +469,10 @@ def handle_student_leave_whatsapp_approval(sender_wa_id, payload_str, text_str="
             STUDENT_LEAVE_ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
 
         try:
+            from core.utils import get_role_filter_q
             org = getattr(getattr(app.student, 'branch', None), 'organization', None)
             bid = getattr(app.student, 'branch_id', None)
-            admin_qs = User.objects.filter(role__in=STUDENT_LEAVE_ADMIN_ROLES, is_active=True)
+            admin_qs = User.objects.filter(get_role_filter_q(STUDENT_LEAVE_ADMIN_ROLES), is_active=True)
             if org:
                 admin_qs = admin_qs.filter(organization=org)
             if bid:

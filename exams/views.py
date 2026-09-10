@@ -52,7 +52,8 @@ ANSWER_KEY_ROLES = ['super_admin', 'admin_senior_executive', 'branch_manager']
 
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

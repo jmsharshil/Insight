@@ -24,6 +24,13 @@ def notify_exam_scheduled(exam):
         if not exam.faculty or not exam.faculty.user:
             return
 
+        if exam.status in ['completed', 'results_published', 'ongoing']:
+            return
+
+        now = timezone.localtime(timezone.now())
+        if exam.scheduled_date < now.date() or (exam.scheduled_date == now.date() and exam.start_time <= now.time()):
+            return
+
         missing = []
         if exam.exam_mode == 'offline' and not exam.selected_papers.exists():
             missing.append("Question Paper")
@@ -175,3 +182,26 @@ def _send_exam_reminder(exam, timeframe, dt_start):
             body=f"Reminder: You are assigned to the exam '{exam.title}' which starts in {timeframe} at {time_str}.",
             metadata={'exam_id': str(exam.id)}
         )
+
+    # Faculty missing materials reminder (stops once exam starts or completes)
+    if exam.faculty and exam.faculty.user and exam.status not in ['completed', 'results_published', 'ongoing']:
+        now_local = timezone.localtime(timezone.now())
+        if exam.scheduled_date > now_local.date() or (exam.scheduled_date == now_local.date() and exam.start_time > now_local.time()):
+            missing = []
+            if exam.exam_mode == 'offline' and not exam.selected_papers.exists():
+                missing.append("Question Paper")
+            if not exam.answer_key:
+                missing.append("Answer Key")
+            if missing:
+                missing_str = " and ".join(missing)
+                send_system_notification(
+                    user_id=str(exam.faculty.user.id),
+                    title=f'Urgent: Submit Exam Materials (Exam in {timeframe})',
+                    body=f"Urgent Reminder: Your exam '{exam.title}' starts in {timeframe} at {time_str}. Please submit the {missing_str} immediately.",
+                    metadata={'exam_id': str(exam.id)}
+                )
+                try:
+                    from exams.emails import send_material_upload_reminder_email
+                    send_material_upload_reminder_email(exam.faculty.user, exam, missing)
+                except Exception as e:
+                    logger.error(f"Failed to send {timeframe} material upload reminder email for exam {exam.id}: {e}")

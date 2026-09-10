@@ -40,7 +40,8 @@ NINE_HOUR_EXEMPT_ROLES = ['faculty', 'exam_supervisor', 'paper_checker', 'house_
 
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 
 def _user_batch_ids(user):

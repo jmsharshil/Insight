@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from .models import SupportQuery, SupportQueryMessage
 from .serializers import SupportQuerySerializer, SupportQueryMessageSerializer
 from chat.notifications import send_system_notification
+from core.utils import get_role_filter_q
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class SupportQueryViewSet(viewsets.ModelViewSet):
         # Notify super admins in the same organization
         try:
             org = query.organization
-            super_admins = User.objects.filter(role='super_admin', is_active=True)
+            super_admins = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
             if org:
                 super_admins = super_admins.filter(organization=org)
                 
@@ -124,7 +125,7 @@ class SupportQueryViewSet(viewsets.ModelViewSet):
             if request.user == query.user:
                 # User replied, notify admins
                 org = query.organization
-                super_admins = User.objects.filter(role='super_admin', is_active=True)
+                super_admins = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
                 if org:
                     super_admins = super_admins.filter(organization=org)
                 for admin in super_admins:

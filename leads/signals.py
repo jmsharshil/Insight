@@ -30,15 +30,16 @@ def auto_assign_lead(sender, instance, **kwargs):
         
         if role_to_assign:
             User = get_user_model()
+            from core.utils import get_role_filter_q
             # Fetch active users of the required role, order by ID for consistent round-robin
-            users = User.objects.filter(role=role_to_assign, is_active=True).order_by('id')
+            users = User.objects.filter(get_role_filter_q(role_to_assign), is_active=True).order_by('id')
             
             if users.exists():
                 users_list = list(users)
                 # Find the most recently created lead that was assigned to this role for this form type
                 last_lead = sender.objects.filter(
+                    get_role_filter_q(role_to_assign, prefix='assigned_to__'),
                     form_type=instance.form_type,
-                    assigned_to__role=role_to_assign
                 ).order_by('-created_at').first()
                 
                 if last_lead and last_lead.assigned_to:

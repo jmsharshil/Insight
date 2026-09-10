@@ -194,17 +194,26 @@ def send_exam_material_upload_reminders():
     from .emails import send_material_upload_reminder_email
     from chat.notifications import send_system_notification
 
-    # Only look at exams that are scheduled or draft, not completed
-    # It should have a faculty assigned
+    now = timezone.localtime(timezone.now())
+    current_date = now.date()
+    current_time = now.time()
+
+    # Only look at exams that are scheduled or draft, not completed, ongoing, or past their start time
+    # Restrict reminders strictly to before exam start time
     upcoming_exams = Exam.objects.filter(
         status__in=['draft', 'scheduled'],
         is_deleted=False,
-        faculty__isnull=False
+        faculty__isnull=False,
+        scheduled_date__gte=current_date,
     ).select_related('faculty__user').prefetch_related('selected_papers', 'questions')
 
     count = 0
     for exam in upcoming_exams:
         if not exam.faculty or not exam.faculty.user:
+            continue
+
+        # Stop all paper reminders once exam start time has arrived or passed
+        if exam.scheduled_date == current_date and exam.start_time <= current_time:
             continue
 
         faculty_user = exam.faculty.user

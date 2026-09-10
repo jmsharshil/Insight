@@ -1126,7 +1126,8 @@ class StudentFeeSummaryView(APIView):
         return Response({'success': True, 'data': results})
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 class MyFeesAPIView(APIView):
     """

@@ -143,6 +143,88 @@ def get_student_profile(user):
         return None
 
 
+class RoleChecker(str):
+    """
+    A string-like object representing a user's role that also matches any of their additional_roles.
+    Enables `role in ROLE_LIST`, `role == 'some_role'`, etc. to match both primary role and additional_roles.
+    """
+    def __new__(cls, primary_role, all_roles=None):
+        obj = str.__new__(cls, primary_role or '')
+        all_set = {primary_role} if primary_role else set()
+        if all_roles:
+            all_set.update(all_roles)
+        obj.all_roles = all_set
+        return obj
+
+    def __eq__(self, other):
+        return other in self.all_roles or super().__eq__(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return super().__hash__()
+
+
+def get_user_role(user):
+    """
+    Return a RoleChecker instance for the user's role that checks both
+    user.role and user.additional_roles.
+    """
+    if not user:
+        return None
+    primary = getattr(user, 'role', None)
+    if not primary:
+        return None
+    all_roles = {primary}
+    add_roles = getattr(user, 'additional_roles', None)
+    if add_roles and isinstance(add_roles, (list, tuple, set)):
+        all_roles.update(add_roles)
+    return RoleChecker(primary, all_roles)
+
+
+def get_role_filter_q(roles, prefix=''):
+    """
+    Build a Q object matching users who have any of the given roles
+    either as their primary role or within their additional_roles list.
+    Supports a relation prefix such as 'user__' or 'assigned_to__'.
+    """
+    from django.db import connection
+    from django.db.models import Q
+
+    if not roles:
+        return Q()
+
+    if isinstance(roles, str):
+        if ',' in roles:
+            roles = [r.strip() for r in roles.split(',')]
+        else:
+            roles = [roles.strip()]
+    else:
+        flat_roles = []
+        for r in roles:
+            if isinstance(r, str) and ',' in r:
+                flat_roles.extend([x.strip() for x in r.split(',')])
+            elif r:
+                flat_roles.append(r.strip() if isinstance(r, str) else str(r))
+        roles = flat_roles
+
+    roles = [r for r in roles if r]
+    if not roles:
+        return Q()
+
+    role_field = f"{prefix}role"
+    add_field = f"{prefix}additional_roles"
+
+    q = Q(**{f"{role_field}__in": roles})
+    for r in roles:
+        if connection.vendor == 'postgresql':
+            q |= Q(**{f"{add_field}__contains": [r]})
+        else:
+            q |= Q(**{f"{add_field}__icontains": f'"{r}"'})
+    return q
+
+
 def apply_filters(view_instance, request, queryset):
     """
     Helper to apply DRF filter backends manually to an APIView.
@@ -174,7 +256,7 @@ def notify_users_by_role(
     from chat.notifications import send_system_notification
 
     User = get_user_model()
-    qs = User.objects.filter(role__in=roles, is_active=True)
+    qs = User.objects.filter(get_role_filter_q(roles), is_active=True)
 
     if branch:
         qs = qs.filter(branch=branch)

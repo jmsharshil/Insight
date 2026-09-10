@@ -181,7 +181,8 @@ class Exam(models.Model):
         if self.supervisors.exists():
             return list(self.supervisors.values_list('id', flat=True))
 
-        qs = User.objects.filter(role='exam_supervisor', is_active=True)
+        from core.utils import get_role_filter_q
+        qs = User.objects.filter(get_role_filter_q('exam_supervisor'), is_active=True)
         if getattr(self, 'branch_id', None):
             qs = qs.filter(branch_id=self.branch_id)
         elif getattr(self, 'branch', None):

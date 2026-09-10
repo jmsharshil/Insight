@@ -41,7 +41,8 @@ QUERY_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 
 def build_exam_export_workbook(rows):

@@ -118,12 +118,13 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
         if not obj.branch_id:
             return None
         from django.contrib.auth import get_user_model
+        from core.utils import get_role_filter_q
         User = get_user_model()
-        approver = User.objects.filter(role=role, branch_id=obj.branch_id, is_active=True).first()
+        approver = User.objects.filter(get_role_filter_q(role), branch_id=obj.branch_id, is_active=True).first()
         if approver: return approver
         
         if obj.branch and getattr(obj.branch, 'organization_id', None):
-            approver = User.objects.filter(role=role, organization_id=obj.branch.organization_id, branch_id__isnull=True, is_active=True).first()
+            approver = User.objects.filter(get_role_filter_q(role), organization_id=obj.branch.organization_id, branch_id__isnull=True, is_active=True).first()
             if approver: return approver
             
         return None

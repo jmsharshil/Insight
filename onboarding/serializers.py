@@ -213,8 +213,9 @@ class AdmissionSerializer(serializers.Serializer):
         counsellor_id = data.get('assigned_counsellor')
         if counsellor_id:
             from auth_user.models import User
+            from core.utils import get_role_filter_q
             try:
-                counsellor = User.objects.get(id=counsellor_id, role='counsellor')
+                counsellor = User.objects.filter(get_role_filter_q('counsellor')).get(id=counsellor_id)
                 data['assigned_counsellor'] = counsellor
             except User.DoesNotExist:
                 raise serializers.ValidationError({

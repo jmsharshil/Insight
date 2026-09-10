@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access
+from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access, get_role_filter_q
 
 from .models import PayrollRun, PaySlip, LateEntryPolicy
 from .serializers import (
@@ -29,7 +29,8 @@ LATE_POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
 
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
@@ -208,7 +209,7 @@ class PayrollListCreateView(APIView):
                         staff_users = staff_users.none()
                     else:
                         faculty_list = faculty_list.none()
-                        staff_users = staff_users.filter(role=role_filter)
+                        staff_users = staff_users.filter(get_role_filter_q(role_filter))
 
                 if not faculty_list.exists() and not staff_users.exists():
                     continue
@@ -236,7 +237,7 @@ class PayrollListCreateView(APIView):
                         if role_filter == 'faculty':
                             pr.payslips.filter(faculty__isnull=False).delete()
                         else:
-                            pr.payslips.filter(user__role=role_filter).delete()
+                            pr.payslips.filter(get_role_filter_q(role_filter, prefix='user__')).delete()
                     else:
                         pr.payslips.all().delete()
 
@@ -528,7 +529,7 @@ class PayrollPayslipsView(APIView):
             if role_filter == 'faculty':
                 slips = slips.filter(faculty__isnull=False)
             else:
-                slips = slips.filter(user__role=role_filter)
+                slips = slips.filter(get_role_filter_q(role_filter, prefix='user__'))
                 
         serialized_data = PaySlipSerializer(slips, many=True).data
         

@@ -12,7 +12,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import apply_filters, get_role_filter_q
 from .models import User, Organization, EmailOTP, PasswordSetToken
 from .serializers import (
     AddUserSerializer,
@@ -647,7 +647,7 @@ class DeleteUserAPIView(APIView):
 class UserListAPIView(APIView):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['is_active', 'role', 'branch', 'organization']
+    filterset_fields = ['is_active', 'branch', 'organization']
     search_fields = ['name', 'email', 'phone']
     ordering_fields = '__all__'
     pagination_class = None
@@ -661,7 +661,7 @@ class UserListAPIView(APIView):
             ).order_by('-created_at')
         else:
             users = User.objects.select_related('branch').prefetch_related('branches').filter(organization=request.user.organization).order_by('-created_at')
-        roles = self.request.query_params.getlist('role')
+        roles = self.request.query_params.getlist('role') or self.request.query_params.getlist('roles')
         is_active = self.request.query_params.get('is_active')
         branch = self.request.query_params.get('branch')  # explicit support for branch param
 
@@ -669,7 +669,7 @@ class UserListAPIView(APIView):
             # Handle comma-separated list if passed as ?role=admin,student
             if len(roles) == 1 and ',' in roles[0]:
                 roles = [r.strip() for r in roles[0].split(',')]
-            users = users.filter(role__in=roles)
+            users = users.filter(get_role_filter_q(roles))
             
         if is_active is not None:  # support ?is_active=true/false or 1/0
             users = users.filter(is_active=is_active.lower() in ('true', '1', 'yes') if isinstance(is_active, str) else bool(is_active))

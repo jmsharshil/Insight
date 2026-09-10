@@ -11,7 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access
+from core.utils import apply_filters, get_user_branch_id, get_user_branch_ids, has_user_branch_access, get_role_filter_q
 
 from .models import LeavePolicy, LeaveBalance, LeaveApplication, LateEntryRecord, PublicHoliday, StudentLeaveApplication
 from .serializers import (
@@ -35,7 +35,8 @@ HOLIDAY_EDIT_ROLES = ['branch_manager', 'super_admin']
 
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
@@ -277,13 +278,13 @@ class LeaveListCreateView(APIView):
 
         if role == 'branch_manager':
             # BM's leave → notify only super_admin(s) in the same organization
-            approvers = User.objects.filter(role='super_admin', is_active=True)
+            approvers = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
             if org:
                 approvers = approvers.filter(organization=org)
         elif role == 'admin_senior_executive':
             # ASE's leave → notify branch_manager(s) and super_admin(s)
-            bm_q = User.objects.filter(role='branch_manager', is_active=True)
-            sa_q = User.objects.filter(role='super_admin', is_active=True)
+            bm_q = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
+            sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
             if org:
                 bm_q = bm_q.filter(organization=org)
                 sa_q = sa_q.filter(organization=org)
@@ -292,7 +293,7 @@ class LeaveListCreateView(APIView):
             approvers = (bm_q | sa_q).distinct()
         else:
             # Regular staff → notify branch-scoped ASE(s) only
-            approvers = User.objects.filter(role='admin_senior_executive', is_active=True)
+            approvers = User.objects.filter(get_role_filter_q('admin_senior_executive'), is_active=True)
             if org:
                 approvers = approvers.filter(organization=org)
             if bid:
@@ -515,7 +516,7 @@ class LeaveApproveView(APIView):
             # FRD §4.9.2: Push notification to branch_manager (Step 2)
             from django.contrib.auth import get_user_model
             User = get_user_model()
-            bm_users = User.objects.filter(role='branch_manager', is_active=True)
+            bm_users = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
             if app.branch_id:
                 bm_users = bm_users.filter(models.Q(branch_id=app.branch_id) | models.Q(branch_id__isnull=True, organization_id=app.branch.organization_id))
 
@@ -1298,7 +1299,7 @@ class StudentLeaveListCreateView(APIView):
                     from django.contrib.auth import get_user_model
                     User = get_user_model()
                     admin_qs = User.objects.filter(
-                        role__in=STUDENT_LEAVE_ADMIN_ROLES,
+                        get_role_filter_q(STUDENT_LEAVE_ADMIN_ROLES),
                         is_active=True,
                         organization=org
                     )
@@ -1406,7 +1407,7 @@ class StudentLeaveApproveView(APIView):
             org = getattr(getattr(app.student, 'branch', None), 'organization', None)
             bid = getattr(app.student, 'branch_id', None)
             admin_qs = User.objects.filter(
-                role__in=STUDENT_LEAVE_ADMIN_ROLES,
+                get_role_filter_q(STUDENT_LEAVE_ADMIN_ROLES),
                 is_active=True
             )
             if org:

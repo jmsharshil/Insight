@@ -20,8 +20,9 @@ class AdmissionService:
 
     @staticmethod
     def get_next_counsellor():
+        from core.utils import get_role_filter_q
         counsellors = list(
-            User.objects.filter(role='counsellor', is_active=True).order_by('id')
+            User.objects.filter(get_role_filter_q('counsellor'), is_active=True).order_by('id')
         )
 
         if not counsellors:

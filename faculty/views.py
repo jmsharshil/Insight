@@ -32,7 +32,8 @@ SUBJECT_RATE_EDIT_ROLES = ['branch_manager', 'admin_senior_executive', 'super_ad
 
 
 def _user_role(user):
-    return getattr(user, 'role', None)
+    from core.utils import get_user_role
+    return get_user_role(user)
 
 
 # ── Stub notification helper ──────────────────────────────────────────────────
