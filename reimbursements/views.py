@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
-from core.utils import get_user_role
+from core.utils import get_user_role, has_user_branch_access, get_user_branch_ids
 from chat.notifications import send_system_notification
 from .models import Reimbursement
 from .serializers import (
@@ -20,7 +20,17 @@ from .serializers import (
 
 logger = logging.getLogger(__name__)
 
-APPROVER_ROLES = {'super_admin', 'admin', 'center_in_charge'}
+# Roles allowed to approve / reject claims across all branches (strictly from User.ROLE_CHOICES)
+GLOBAL_ADMIN_ROLES = {'super_admin', 'admin_senior_executive', 'admin_executive', 'accountant'}
+
+# Roles allowed to approve / reject claims for their assigned branch(es) (strictly from User.ROLE_CHOICES)
+BRANCH_APPROVER_ROLES = {'branch_manager'}
+
+# All roles authorized to review (approve/reject) claims
+APPROVER_ROLES = GLOBAL_ADMIN_ROLES | BRANCH_APPROVER_ROLES
+
+# Non-staff roles that cannot submit reimbursement claims (strictly from User.ROLE_CHOICES)
+NON_STAFF_ROLES = {'student', 'parents', 'printers'}
 
 
 def _is_approver(user):
@@ -44,10 +54,13 @@ class ReimbursementListCreateAPIView(APIView):
         my_only = request.query_params.get('my', '').lower() in ('true', '1')
         if not is_appr or my_only:
             qs = qs.filter(user=user)
-        elif role == 'center_in_charge':
-            # Center in-charge sees claims from their branch
-            if user.branch:
-                qs = qs.filter(Q(branch=user.branch) | Q(user=user))
+        elif role in BRANCH_APPROVER_ROLES and role not in GLOBAL_ADMIN_ROLES:
+            # Branch manager sees claims from their branch
+            branch_ids = get_user_branch_ids(user) or []
+            if getattr(user, 'branch_id', None) and user.branch_id not in branch_ids:
+                branch_ids.append(user.branch_id)
+            if branch_ids:
+                qs = qs.filter(Q(branch_id__in=branch_ids) | Q(user=user))
             else:
                 qs = qs.filter(user=user)
 
@@ -61,7 +74,7 @@ class ReimbursementListCreateAPIView(APIView):
             qs = qs.filter(user_id=user_id)
 
         branch_id = request.query_params.get('branch_id')
-        if branch_id and (role in ['super_admin', 'admin']):
+        if branch_id and role in GLOBAL_ADMIN_ROLES:
             qs = qs.filter(branch_id=branch_id)
 
         from_date = request.query_params.get('from_date')
@@ -87,6 +100,13 @@ class ReimbursementListCreateAPIView(APIView):
         })
 
     def post(self, request):
+        role = get_user_role(request.user)
+        if role in NON_STAFF_ROLES:
+            return Response({
+                'success': False,
+                'message': 'Only staff members can apply for expense reimbursements.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
         serializer = ReimbursementCreateSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response({
@@ -101,12 +121,24 @@ class ReimbursementListCreateAPIView(APIView):
         try:
             from core.utils import notify_users_by_role
             applicant_name = request.user.name or request.user.email
+            # Global approver notifications (roles from User.ROLE_CHOICES)
             notify_users_by_role(
-                roles=['super_admin', 'admin'],
+                roles=['super_admin', 'admin_senior_executive', 'accountant'],
                 title='New Reimbursement Claim',
                 body=f"{applicant_name} submitted a reimbursement claim '{reimbursement.title}' for ₹{reimbursement.amount}.",
-                metadata={'reimbursement_id': str(reimbursement.id)}
+                metadata={'reimbursement_id': str(reimbursement.id), 'type': 'reimbursement_claim', 'route': f"/reimbursements/{reimbursement.id}"},
+                notification_type='payroll',
             )
+            # Branch manager notification
+            if reimbursement.branch:
+                notify_users_by_role(
+                    roles=['branch_manager'],
+                    branch=reimbursement.branch,
+                    title='New Branch Reimbursement Claim',
+                    body=f"{applicant_name} submitted a reimbursement claim '{reimbursement.title}' for ₹{reimbursement.amount}.",
+                    metadata={'reimbursement_id': str(reimbursement.id), 'type': 'reimbursement_claim', 'route': f"/reimbursements/{reimbursement.id}"},
+                    notification_type='payroll',
+                )
         except Exception as e:
             logger.error(f"Failed to send notification for reimbursement {reimbursement.id}: {e}")
 
@@ -129,8 +161,11 @@ class ReimbursementDetailAPIView(APIView):
         except Reimbursement.DoesNotExist:
             return None
 
-        if reimb.user == user or role in ['super_admin', 'admin'] or (role == 'center_in_charge' and reimb.branch == user.branch):
+        if reimb.user == user or role in GLOBAL_ADMIN_ROLES:
             return reimb
+        if role in BRANCH_APPROVER_ROLES:
+            if reimb.branch_id and has_user_branch_access(user, reimb.branch_id):
+                return reimb
         return None
 
     def get(self, request, pk):
@@ -162,7 +197,8 @@ class ReimbursementDetailAPIView(APIView):
         if not reimb:
             return Response({'success': False, 'message': 'Reimbursement not found or access denied.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if reimb.user != request.user and get_user_role(request.user) not in ['super_admin', 'admin']:
+        role = get_user_role(request.user)
+        if reimb.user != request.user and role not in GLOBAL_ADMIN_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         if reimb.status != 'pending':
@@ -177,12 +213,17 @@ class ReimbursementApproveAPIView(APIView):
 
     def post(self, request, pk):
         if not _is_approver(request.user):
-            return Response({'success': False, 'message': 'Permission denied. Only admins or center in-charges can approve.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'success': False, 'message': 'Permission denied. Only admins or branch managers can approve.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             reimb = Reimbursement.objects.select_related('user', 'branch').get(pk=pk)
         except Reimbursement.DoesNotExist:
             return Response({'success': False, 'message': 'Reimbursement not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        role = get_user_role(request.user)
+        if role in BRANCH_APPROVER_ROLES and role not in GLOBAL_ADMIN_ROLES:
+            if not reimb.branch_id or not has_user_branch_access(request.user, reimb.branch_id):
+                return Response({'success': False, 'message': 'Permission denied. Branch managers can only approve claims for their branch.'}, status=status.HTTP_403_FORBIDDEN)
 
         if reimb.status == 'approved':
             return Response({'success': False, 'message': 'Claim is already approved.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -204,7 +245,8 @@ class ReimbursementApproveAPIView(APIView):
                 user_id=str(reimb.user.id),
                 title='Reimbursement Approved',
                 body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved and will be added to your monthly pay.",
-                metadata={'reimbursement_id': str(reimb.id)}
+                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_approved', 'route': f"/reimbursements/{reimb.id}"},
+                notification_type='payroll',
             )
         except Exception as e:
             logger.error(f"Failed to notify user for approved reimbursement {reimb.id}: {e}")
@@ -221,12 +263,17 @@ class ReimbursementRejectAPIView(APIView):
 
     def post(self, request, pk):
         if not _is_approver(request.user):
-            return Response({'success': False, 'message': 'Permission denied. Only admins or center in-charges can reject.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'success': False, 'message': 'Permission denied. Only admins or branch managers can reject.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             reimb = Reimbursement.objects.select_related('user', 'branch').get(pk=pk)
         except Reimbursement.DoesNotExist:
             return Response({'success': False, 'message': 'Reimbursement not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        role = get_user_role(request.user)
+        if role in BRANCH_APPROVER_ROLES and role not in GLOBAL_ADMIN_ROLES:
+            if not reimb.branch_id or not has_user_branch_access(request.user, reimb.branch_id):
+                return Response({'success': False, 'message': 'Permission denied. Branch managers can only reject claims for their branch.'}, status=status.HTTP_403_FORBIDDEN)
 
         if reimb.is_paid:
             return Response({'success': False, 'message': 'Cannot reject a claim that has already been paid.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -249,7 +296,8 @@ class ReimbursementRejectAPIView(APIView):
                 user_id=str(reimb.user.id),
                 title='Reimbursement Rejected',
                 body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} was rejected. Reason: {reimb.rejection_reason}",
-                metadata={'reimbursement_id': str(reimb.id)}
+                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_rejected', 'route': f"/reimbursements/{reimb.id}"},
+                notification_type='payroll',
             )
         except Exception as e:
             logger.error(f"Failed to notify user for rejected reimbursement {reimb.id}: {e}")
@@ -274,11 +322,17 @@ class ReimbursementSummaryAPIView(APIView):
         qs = Reimbursement.objects.all()
         if not is_appr or my_only:
             qs = qs.filter(user=user)
-        elif role == 'center_in_charge' and user.branch:
-            qs = qs.filter(Q(branch=user.branch) | Q(user=user))
+        elif role in BRANCH_APPROVER_ROLES and role not in GLOBAL_ADMIN_ROLES:
+            branch_ids = get_user_branch_ids(user) or []
+            if getattr(user, 'branch_id', None) and user.branch_id not in branch_ids:
+                branch_ids.append(user.branch_id)
+            if branch_ids:
+                qs = qs.filter(Q(branch_id__in=branch_ids) | Q(user=user))
+            else:
+                qs = qs.filter(user=user)
 
         branch_id = request.query_params.get('branch_id')
-        if branch_id and role in ['super_admin', 'admin']:
+        if branch_id and role in GLOBAL_ADMIN_ROLES:
             qs = qs.filter(branch_id=branch_id)
 
         pending_qs = qs.filter(status='pending')

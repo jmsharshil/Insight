@@ -247,6 +247,7 @@ def notify_users_by_role(
     email_template=None,
     email_context=None,
     email_subject=None,
+    notification_type=None,
 ):
     """
     Find users with the given roles (optionally scoped by organization or branch)
@@ -272,6 +273,7 @@ def notify_users_by_role(
             email_template=email_template,
             email_context=email_context,
             email_subject=email_subject,
+            notification_type=notification_type,
         )
 
 #whatsapp task

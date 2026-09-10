@@ -172,6 +172,8 @@ def _resolve_notification_type(notification_type=None, data=None):
     candidate = notification_type or data.get('module')
     if candidate == 'exams':
         candidate = 'exam'
+    if candidate in {'reimbursement', 'reimbursements'}:
+        return 'payroll'
     if candidate in NOTIFICATION_TYPES:
         return candidate
 
@@ -184,6 +186,8 @@ def _resolve_notification_type(notification_type=None, data=None):
         return 'support'
     if event_type == 'exam_result':
         return 'results'
+    if event_type.startswith('reimbursement'):
+        return 'payroll'
 
     metadata_keys = set(data)
     for category, keys in {
@@ -194,7 +198,7 @@ def _resolve_notification_type(notification_type=None, data=None):
         'inventory': {'allocation_id', 'item_id'},
         'leads': {'lead_id'},
         'leave': {'leave_id', 'student_leave_id'},
-        'payroll': {'payroll_id', 'payslip_id'},
+        'payroll': {'payroll_id', 'payslip_id', 'reimbursement_id'},
         'results': {'recheck_id'},
     }.items():
         if metadata_keys & keys:

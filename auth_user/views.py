@@ -932,7 +932,12 @@ class NotificationHistoryAPIView(APIView):
         # ── Fetch the remaining valid history ──
         qs = NotificationHistory.objects.filter(user=request.user)
         notification_type = request.query_params.get('type') or request.query_params.get('notification_type')
-        if notification_type:
+        if notification_type in ('reimbursement', 'reimbursements'):
+            qs = qs.filter(
+                Q(notification_type='payroll', data__has_key='reimbursement_id') |
+                Q(notification_type=notification_type)
+            )
+        elif notification_type:
             qs = qs.filter(notification_type=notification_type)
         return paginate_queryset(qs, request, NotificationHistorySerializer)
 

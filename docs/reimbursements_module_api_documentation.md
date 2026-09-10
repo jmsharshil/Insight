@@ -3,7 +3,7 @@
 > **Base URL:** `https://api.example.com/api/v1/reimbursements/`  
 > **Auth Header:** `Authorization: Bearer <access_token>`  
 > **Content-Type:** `multipart/form-data` (for submission & proof uploads) / `application/json`  
-> **Role-based Access:** All authenticated staff & employees can submit claims; `super_admin`, `admin`, and `center_in_charge` can approve or reject claims.  
+> **Role-based Access:** All authenticated staff & employees can submit claims; `super_admin`, `admin_senior_executive`, `admin_executive`, `accountant`, and `branch_manager` can approve or reject claims.  
 > **Standard Response Envelope:** `{ "success": true/false, "message": "...", "data": {...} }`  
 
 ---
@@ -71,28 +71,39 @@ The `reimbursements` module provides an automated expense reimbursement workflow
 
 ## Role-Based Access Control (RBAC)
 
+All roles are strictly validated against `User.ROLE_CHOICES`:
+
 | Role | Submit Claims | View Own Claims | View Branch Claims | View All Claims | Edit / Delete | Approve / Reject |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Standard Staff / Faculty / Sales / Admin Exec** | ✅ | ✅ | ❌ | ❌ | ✅ (pending only) | ❌ |
-| **`center_in_charge`** | ✅ | ✅ | ✅ | ❌ | ✅ (own pending) | ✅ (branch claims) |
-| **`admin`** | ✅ | ✅ | ✅ | ✅ | ✅ (own pending) | ✅ |
-| **`super_admin`** | ✅ | ✅ | ✅ | ✅ | ✅ (own pending) | ✅ |
+| **Standard Staff / Faculty / Sales / Admin Exec / Coordinators** | ✅ | ✅ | ❌ | ❌ | ✅ (pending only) | ❌ |
+| **`branch_manager`** | ✅ | ✅ | ✅ (assigned branch) | ❌ | ✅ (own pending) | ✅ (assigned branch) |
+| **`admin_senior_executive` / `admin_executive`** | ✅ | ✅ | ✅ | ✅ | ✅ (own pending, delete any pending) | ✅ |
+| **`accountant`** | ✅ | ✅ | ✅ | ✅ | ✅ (own pending, delete any pending) | ✅ |
+| **`super_admin`** | ✅ | ✅ | ✅ | ✅ | ✅ (own pending, delete any pending) | ✅ |
+| **`student` / `parents`** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-- Constant defined in `reimbursements/views.py`: `APPROVER_ROLES = {'super_admin', 'admin', 'center_in_charge'}`.
+- Constants defined in `reimbursements/views.py`:
+  - `GLOBAL_ADMIN_ROLES = {'super_admin', 'admin_senior_executive', 'admin_executive', 'accountant'}`
+  - `BRANCH_APPROVER_ROLES = {'branch_manager'}`
+  - `APPROVER_ROLES = GLOBAL_ADMIN_ROLES | BRANCH_APPROVER_ROLES`
+  - `NON_STAFF_ROLES = {'student', 'parents', 'printers'}`
 - Non-approvers can only view their own claims (even if omitting `?my=true`).
-- `center_in_charge` is automatically restricted to claims originating from staff in their assigned branch.
+- `branch_manager` is automatically restricted to claims originating from staff in their assigned branch(es).
+- Students, parents, and printers are blocked from submitting expense reimbursement claims.
+- **RBAC Default Accessible Modules**: `reimbursements` is included in `ROLE_PERMISSIONS` under `default_modules` for all staff roles and in `URL_MODULE_MAP` (`^api/v1/reimbursements?/`).
+- **Notification API Category**: All reimbursement notifications (submission, approval, rejection) are categorized under `notification_type = 'payroll'`, ensuring they show up in `GET /api/auth/notifications/?type=payroll` (and also in `?type=reimbursement`).
 
 ---
 
 ## Architecture & Lifecycle Walkthrough
 
 ```text
-STAFF USER                                   APPROVER (Admin / Center In-charge)          PAYROLL ENGINE
+STAFF USER                                   APPROVER (Admin / Branch Manager)            PAYROLL ENGINE
     │                                                        │                                  │
     │── 1. POST /api/v1/reimbursements/ (multipart) ────────►│                                  │
     │      (status='pending', uploads proof)                 │                                  │
     │                                                        │                                  │
-    │◄─── [In-app notification sent to super_admin/admin] ───│                                  │
+    │◄─── [In-app notification sent to super_admin/admins/accountants/branch_managers] ───│                                  │
     │                                                        │                                  │
     │                                                        │── 2. GET /reimbursements/<id>/   │
     │                                                        │      (inspect proof & notes)     │
@@ -119,11 +130,11 @@ STAFF USER                                   APPROVER (Admin / Center In-charge)
 - Branch is automatically populated from the user profile. Status is set to `pending`.
 
 ### Step 2: System Dispatches Real-Time Alert
-- Centralized `notify_users_by_role(['super_admin', 'admin'])` triggers a push notification and records an entry in `NotificationHistory` with `metadata={'reimbursement_id': str(id)}`.
+- Global approver alert: `notify_users_by_role(['super_admin', 'admin_senior_executive', 'accountant'])` and branch alert to `branch_manager` trigger notifications with `metadata={'reimbursement_id': str(id)}`.
 
 ### Step 3: Review & Scoping
 - Approvers view pending claims via `GET /api/v1/reimbursements/?status=pending`.
-- `center_in_charge` only sees claims from their branch.
+- `branch_manager` only sees claims from their branch.
 - Admins inspect the claim details and proof URL via `GET /api/v1/reimbursements/<id>/`.
 
 ### Step 4: Modifications & Cancellations
@@ -504,7 +515,7 @@ Allows the owner or `super_admin`/`admin` to cancel and delete a pending reimbur
 
 **`POST /api/v1/reimbursements/<uuid:pk>/approve/`**
 
-Approves the expense claim. Restricted to `super_admin`, `admin`, and `center_in_charge`. Once approved, the claim is queued for inclusion in the user's next monthly payroll run.
+Approves the expense claim. Restricted to `super_admin`, `admin_senior_executive`, `admin_executive`, `accountant`, and `branch_manager` (for claims in their assigned branch). Once approved, the claim is queued for inclusion in the user's next monthly payroll run.
 
 #### Request Headers
 ```http
@@ -534,7 +545,7 @@ Authorization: Bearer <access_token>
 ```json
 {
   "success": false,
-  "message": "Permission denied. Only admins or center in-charges can approve."
+  "message": "Permission denied. Only admins or branch managers can approve."
 }
 ```
 
@@ -552,7 +563,7 @@ Authorization: Bearer <access_token>
 
 **`POST /api/v1/reimbursements/<uuid:pk>/reject/`**
 
-Rejects the expense claim. Restricted to `super_admin`, `admin`, and `center_in_charge`. Requires an explicit explanation in `rejection_reason`.
+Rejects the expense claim. Restricted to `super_admin`, `admin_senior_executive`, `admin_executive`, `accountant`, and `branch_manager` (for claims in their assigned branch). Requires an explicit explanation in `rejection_reason`.
 
 #### Request Headers
 ```http
@@ -636,7 +647,7 @@ Content-Type: application/json
 - **PDF Payslip Generation (`generate_payslip_pdf`)**: Displays `reimbursements_amount` under earnings and calculates `gross_salary` including reimbursements.
 
 ### 2. Notifications Integration (`chat.notifications`)
-- When a claim is created: `notify_users_by_role(['super_admin', 'admin'])` triggers system and push alerts.
+- When a claim is created: `notify_users_by_role(['super_admin', 'admin_senior_executive', 'accountant'])` and branch notification to `branch_manager` trigger system and push alerts.
 - When approved: `send_system_notification` sends instant alert to claimant:
   > *"Your reimbursement claim '...' for ₹... has been approved and will be added to your monthly pay."*
 - When rejected: Alert sent to claimant with rejection reason:
@@ -644,7 +655,7 @@ Content-Type: application/json
 
 ### 3. Role Matrix & Branch Scoping
 - Staff members inherit branch assignment automatically.
-- Approver resolution verifies `get_user_role(user) in {'super_admin', 'admin', 'center_in_charge'}`.
+- Approver resolution verifies `get_user_role(user) in APPROVER_ROLES` (strictly defined from `User.ROLE_CHOICES`).
 
 ---
 
@@ -653,7 +664,7 @@ Content-Type: application/json
 - [x] **Claim Creation**: Submit valid claim with file upload ➔ Returns `201 Created` with `status='pending'`.
 - [x] **Zero / Negative Amount**: Submit claim with amount `0.00` or `-50.00` ➔ Returns `400 Bad Request`.
 - [x] **Role Visibility**: Non-approvers receive only their own claims from `GET /api/v1/reimbursements/`.
-- [x] **Branch Isolation**: `center_in_charge` only sees claims belonging to staff in their assigned branch.
+- [x] **Branch Isolation**: `branch_manager` only sees claims belonging to staff in their assigned branch.
 - [x] **Approval Flow**: Approver calls `approve/` ➔ Returns `200 OK`, sets `approved_by` and `approved_at`.
 - [x] **Rejection Flow**: Approver calls `reject/` with reason ➔ Returns `200 OK`, sets `rejection_reason`.
 - [x] **Editing Guard**: Attempting to edit or delete approved claim ➔ Returns `400 Bad Request`.
