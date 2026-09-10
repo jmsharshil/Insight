@@ -584,8 +584,9 @@ class PayslipAdjustView(APIView):
                 setattr(ps, field, d[field])
 
         # Recompute net salary
+        reimb_amt = getattr(ps, 'reimbursements_amount', Decimal('0')) or Decimal('0')
         ps.net_salary = (
-            ps.basic_salary + ps.hour_based_amount + ps.bonus
+            ps.basic_salary + ps.hour_based_amount + ps.bonus + reimb_amt
             - ps.late_penalty - ps.absence_deductions - ps.leave_deductions - ps.other_deductions
         )
         ps.save()
@@ -695,6 +696,13 @@ class PayrollDisburseView(APIView):
         pr.status = 'disbursed'
         pr.disbursed_at = timezone.now()
         pr.save()
+
+        # Mark all linked reimbursements as paid
+        try:
+            from reimbursements.models import Reimbursement
+            Reimbursement.objects.filter(payroll_run=pr).update(is_paid=True)
+        except Exception as e:
+            logger.error(f"Failed to update reimbursements as paid for payroll run {pr.id}: {e}")
 
         # Send IN-APP notification to each employee with payslip data
         for ps in payslips:

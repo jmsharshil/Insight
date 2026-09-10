@@ -42,6 +42,7 @@ urlpatterns = [
     path('api/v1/inventory/', include('inventory.urls')),
     path('api/v1/dashboard/', include('dashboard.urls')),
     path('api/v1/support/', include('support.urls')),
+    path('api/v1/reimbursements/', include('reimbursements.urls')),
 ]
 
 if settings.DEBUG:

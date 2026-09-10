@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     'inventory',
     'dashboard',
     'support',
+    'reimbursements',
     'django_filters',
 ]
 

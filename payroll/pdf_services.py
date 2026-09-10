@@ -106,6 +106,11 @@ def _reportlab_payslip_pdf(context):
     t_data = [
         [Paragraph('<b>Earnings</b>', label_style), Paragraph('<b>Amount (Rs.)</b>', ParagraphStyle('R', parent=label_style, alignment=TA_RIGHT))],
         [Paragraph('Gross Salary', label_style), Paragraph(str(context.get('gross_salary', 0)), ParagraphStyle('R', parent=value_style, alignment=TA_RIGHT))],
+    ]
+    reimb_amt = context.get('reimbursements_amount', 0)
+    if reimb_amt and float(reimb_amt) > 0:
+        t_data.append([Paragraph('Expense Reimbursements', label_style), Paragraph(str(reimb_amt), ParagraphStyle('R', parent=value_style, alignment=TA_RIGHT))])
+    t_data += [
         [Paragraph('<b>Deductions</b>', label_style), Paragraph('<b>Amount (Rs.)</b>', ParagraphStyle('R', parent=label_style, alignment=TA_RIGHT))],
         [Paragraph('Total Deductions', label_style), Paragraph(str(context.get('total_deductions', 0)), ParagraphStyle('R', parent=value_style, alignment=TA_RIGHT))],
     ]
@@ -221,6 +226,7 @@ def generate_payslip_pdf(payslip):
         employee_id = payslip.faculty.employee_id if payslip.faculty else (payslip.user.employee_id if getattr(payslip.user, 'employee_id', None) else 'N/A')
         role = payslip.faculty.employment_type if payslip.faculty else (payslip.user.role if payslip.user else 'N/A')
         
+        reimb_amount = getattr(payslip, 'reimbursements_amount', 0) or 0
         gross_salary = payslip.basic_salary + payslip.hour_based_amount + payslip.bonus + payslip.attendance_bonus + payslip.leave_encashment
         total_deductions = payslip.late_penalty + payslip.absence_deductions + payslip.leave_deductions + payslip.retention_deduction + payslip.other_deductions
         
@@ -264,6 +270,7 @@ def generate_payslip_pdf(payslip):
             'attendance_bonus': payslip.attendance_bonus,
             'leave_encashment': payslip.leave_encashment,
             'bonus': payslip.bonus,
+            'reimbursements_amount': reimb_amount,
             'gross_salary': gross_salary,
             
             'late_penalty': payslip.late_penalty,

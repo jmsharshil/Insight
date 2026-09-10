@@ -87,6 +87,7 @@ class PaySlip(models.Model):
     bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     attendance_bonus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     leave_encashment = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    reimbursements_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Total approved expense reimbursements added to this payslip")
     net_salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     leaves_taken = models.IntegerField(default=0)
     working_days = models.IntegerField(default=0)

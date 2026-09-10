@@ -12,6 +12,28 @@ def _fmt_currency(value):
     return format(value.quantize(Decimal('0.01')), '.2f')
 
 
+def _get_reimbursements_for_user(user, payroll_run):
+    """
+    Look up approved, unpaid reimbursements for a user to be credited in this payroll run.
+    Returns (reimbursements_qs, total_amount).
+    """
+    if not user:
+        return None, Decimal('0')
+    try:
+        from reimbursements.models import Reimbursement
+        from django.db.models import Q
+        reimbs = Reimbursement.objects.filter(
+            user=user,
+            status='approved',
+            is_paid=False,
+        ).filter(Q(payslip__isnull=True) | Q(payroll_run=payroll_run))
+        total = sum((r.amount for r in reimbs), Decimal('0'))
+        return reimbs, total
+    except Exception as e:
+        logger.error(f"Error fetching reimbursements for user {getattr(user, 'id', 'N/A')}: {e}")
+        return None, Decimal('0')
+
+
 def build_deduction_note(
     late_penalty,
     late_penalty_minutes=0,
@@ -661,6 +683,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     net = net_before_retention - retention_deduction
     net = max(net, Decimal(0))
 
+    # Add approved expense reimbursements
+    reimbs, reimbursements_total = _get_reimbursements_for_user(faculty_profile.user, payroll_run)
+    net = max(Decimal(0), net + reimbursements_total)
+
     deduction_note_str = build_deduction_note(
         late_penalty=late_penalty,
         late_penalty_minutes=total_late_penalty_minutes,
@@ -692,12 +718,16 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         retention_deduction=retention_deduction,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
+        reimbursements_amount=reimbursements_total,
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
         working_days=days_with_attendance if faculty_profile.employment_type != 'full_time' else working_days,
         sessions_conducted=sessions_count,
     )
+    if reimbs:
+        reimbs.update(payslip=payslip, payroll_run=payroll_run)
+
 
     # 11. Save Late penalty logs (per session)
     for detail in session_late_details:
@@ -1320,6 +1350,11 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             retention_deduction = net_before_retention * (Decimal(user.salary_retention_percentage) / Decimal(100))
         net = net_before_retention - retention_deduction
         net = max(net, Decimal(0))
+
+        # Add approved expense reimbursements
+        reimbs, reimbursements_total = _get_reimbursements_for_user(user, payroll_run)
+        net = max(Decimal(0), net + reimbursements_total)
+
         # Delete existing for regeneration
         PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
         payslip = PaySlip.objects.create(
@@ -1335,11 +1370,14 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             retention_deduction=retention_deduction,
             attendance_bonus=attendance_bonus,
             leave_encashment=leave_encashment,
+            reimbursements_amount=reimbursements_total,
             net_salary=net,
             leaves_taken=leaves_taken,
             working_days=working_days,
             sessions_conducted=sessions_conducted,
         )
+        if reimbs:
+            reimbs.update(payslip=payslip, payroll_run=payroll_run)
         return payslip
 
     # 1. Working days in month (Mon-Fri for most; Sundays excluded from pay for HK/security)
@@ -1623,6 +1661,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         sunday_deduction=sunday_deduction,
     )
 
+    # Add approved expense reimbursements
+    reimbs, reimbursements_total = _get_reimbursements_for_user(user, payroll_run)
+    net = max(Decimal(0), net + reimbursements_total)
+
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=None,
@@ -1636,11 +1678,14 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         retention_deduction=retention_deduction,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
+        reimbursements_amount=reimbursements_total,
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
         working_days=working_days,
         sessions_conducted=0,
     )
+    if reimbs:
+        reimbs.update(payslip=payslip, payroll_run=payroll_run)
 
     return payslip

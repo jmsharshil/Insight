@@ -47,7 +47,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
-            'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
@@ -216,7 +216,7 @@ class MyPaySlipSerializer(PaySlipSerializer):
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
-            'attendance_bonus', 'leave_encashment', 'bonus', 'net_salary', 'leaves_taken', 'working_days',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
