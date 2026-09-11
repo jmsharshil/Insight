@@ -697,12 +697,18 @@ class PayrollDisburseView(APIView):
         pr.disbursed_at = timezone.now()
         pr.save()
 
-        # Mark all linked reimbursements as paid
+        # Mark all linked reimbursements and odometer travel expenses as paid
         try:
             from reimbursements.models import Reimbursement
             Reimbursement.objects.filter(payroll_run=pr).update(is_paid=True)
         except Exception as e:
             logger.error(f"Failed to update reimbursements as paid for payroll run {pr.id}: {e}")
+
+        try:
+            from leads.models import OdometerReading
+            OdometerReading.objects.filter(payroll_run=pr).update(is_paid=True)
+        except Exception as e:
+            logger.error(f"Failed to update odometer readings as paid for payroll run {pr.id}: {e}")
 
         # Send IN-APP notification to each employee with payslip data
         for ps in payslips:

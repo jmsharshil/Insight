@@ -1,5 +1,6 @@
 # leads/models.py  (updated — registration fields removed)
 
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
@@ -308,3 +309,111 @@ class SalesActivityPhoto(models.Model):
 
     def __str__(self):
         return f"{self.activity_id} - {self.photo_type}"
+
+
+ODOMETER_STATUS_CHOICES = [
+    ('pending', 'Pending'),
+    ('approved', 'Approved'),
+    ('rejected', 'Rejected'),
+]
+
+
+class OdometerReading(models.Model):
+    """
+    Daily travel odometer claim linked to a SalesDailyActivity.
+    Approved amounts are credited to the user's monthly pay on their payslip.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.OneToOneField(
+        SalesDailyActivity,
+        on_delete=models.CASCADE,
+        related_name='odometer_reading',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='odometer_readings',
+    )
+    start_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    end_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    total_kms = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    expense_per_km = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Reimbursement rate per kilometer (editable by approver)"
+    )
+    total_expense = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Calculated as total_kms * expense_per_km"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ODOMETER_STATUS_CHOICES,
+        default='pending'
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_odometer_readings'
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='rejected_odometer_readings'
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
+    # Monthly Payroll Integration
+    payroll_run = models.ForeignKey(
+        'payroll.PayrollRun',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='odometer_readings',
+        help_text="Payroll run in which this travel expense was included"
+    )
+    payslip = models.ForeignKey(
+        'payroll.PaySlip',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='odometer_readings',
+        help_text="Payslip in which this travel expense was credited"
+    )
+    is_paid = models.BooleanField(
+        default=False,
+        help_text="True when the corresponding payslip/payroll run has been disbursed"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_odometer_readings'
+        ordering = ['-activity__activity_date', '-created_at']
+
+    def calculate_totals(self):
+        if self.start_kms is not None and self.end_kms is not None:
+            self.total_kms = max(Decimal('0.00'), Decimal(str(self.end_kms)) - Decimal(str(self.start_kms)))
+        else:
+            self.total_kms = Decimal('0.00')
+
+        if self.expense_per_km and self.total_kms:
+            self.total_expense = (self.total_kms * Decimal(str(self.expense_per_km))).quantize(Decimal('0.01'))
+        else:
+            self.total_expense = Decimal('0.00')
+
+    def save(self, *args, **kwargs):
+        self.calculate_totals()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Odometer {self.activity.activity_date} - {self.user.name or self.user.email} ({self.total_kms} km, ₹{self.total_expense}) [{self.status}]"

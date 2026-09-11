@@ -12,6 +12,9 @@
 
 The `reimbursements` module provides an automated expense reimbursement workflow for all institute staff, faculty, and employee roles. Staff members can submit expense claims with supporting receipt/invoice proofs. Authorized managerial roles review and approve/reject claims. Approved claims automatically integrate into the monthly **Payroll** cycle: approved amounts are credited to the employee's payslip (`reimbursements_amount`), added to their `net_salary`, and marked as paid when the payroll run is disbursed.
 
+> [!NOTE]
+> In addition to general expense claims submitted through this module, travel kilometer expenses for sales representatives are tracked via `OdometerReading` in the Sales module and credited to `PaySlip.reimbursements_amount` under the same payroll settlement workflow. See [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md).
+
 ---
 
 ## Data Models & Statuses

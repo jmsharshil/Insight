@@ -34,6 +34,28 @@ def _get_reimbursements_for_user(user, payroll_run):
         return None, Decimal('0')
 
 
+def _get_odometer_expenses_for_user(user, payroll_run):
+    """
+    Look up approved, unpaid odometer travel expenses for a user to be credited in this payroll run.
+    Returns (odometer_qs, total_amount).
+    """
+    if not user:
+        return None, Decimal('0')
+    try:
+        from leads.models import OdometerReading
+        from django.db.models import Q
+        readings = OdometerReading.objects.filter(
+            user=user,
+            status='approved',
+            is_paid=False,
+        ).filter(Q(payslip__isnull=True) | Q(payroll_run=payroll_run))
+        total = sum((r.total_expense for r in readings), Decimal('0'))
+        return readings, total
+    except Exception as e:
+        logger.error(f"Error fetching odometer travel expenses for user {getattr(user, 'id', 'N/A')}: {e}")
+        return None, Decimal('0')
+
+
 def build_deduction_note(
     late_penalty,
     late_penalty_minutes=0,
@@ -683,9 +705,11 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     net = net_before_retention - retention_deduction
     net = max(net, Decimal(0))
 
-    # Add approved expense reimbursements
+    # Add approved expense reimbursements and travel odometer expenses
     reimbs, reimbursements_total = _get_reimbursements_for_user(faculty_profile.user, payroll_run)
-    net = max(Decimal(0), net + reimbursements_total)
+    odometer_readings, odometer_total = _get_odometer_expenses_for_user(faculty_profile.user, payroll_run)
+    total_reimbursements = reimbursements_total + odometer_total
+    net = max(Decimal(0), net + total_reimbursements)
 
     deduction_note_str = build_deduction_note(
         late_penalty=late_penalty,
@@ -718,7 +742,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         retention_deduction=retention_deduction,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
-        reimbursements_amount=reimbursements_total,
+        reimbursements_amount=total_reimbursements,
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
@@ -727,6 +751,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     )
     if reimbs:
         reimbs.update(payslip=payslip, payroll_run=payroll_run)
+    if odometer_readings:
+        odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
 
 
     # 11. Save Late penalty logs (per session)
@@ -1351,9 +1377,11 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         net = net_before_retention - retention_deduction
         net = max(net, Decimal(0))
 
-        # Add approved expense reimbursements
+        # Add approved expense reimbursements and travel odometer expenses
         reimbs, reimbursements_total = _get_reimbursements_for_user(user, payroll_run)
-        net = max(Decimal(0), net + reimbursements_total)
+        odometer_readings, odometer_total = _get_odometer_expenses_for_user(user, payroll_run)
+        total_reimbursements = reimbursements_total + odometer_total
+        net = max(Decimal(0), net + total_reimbursements)
 
         # Delete existing for regeneration
         PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
@@ -1370,7 +1398,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             retention_deduction=retention_deduction,
             attendance_bonus=attendance_bonus,
             leave_encashment=leave_encashment,
-            reimbursements_amount=reimbursements_total,
+            reimbursements_amount=total_reimbursements,
             net_salary=net,
             leaves_taken=leaves_taken,
             working_days=working_days,
@@ -1378,6 +1406,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         )
         if reimbs:
             reimbs.update(payslip=payslip, payroll_run=payroll_run)
+        if odometer_readings:
+            odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
         return payslip
 
     # 1. Working days in month (Mon-Fri for most; Sundays excluded from pay for HK/security)
@@ -1661,9 +1691,11 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         sunday_deduction=sunday_deduction,
     )
 
-    # Add approved expense reimbursements
+    # Add approved expense reimbursements and travel odometer expenses
     reimbs, reimbursements_total = _get_reimbursements_for_user(user, payroll_run)
-    net = max(Decimal(0), net + reimbursements_total)
+    odometer_readings, odometer_total = _get_odometer_expenses_for_user(user, payroll_run)
+    total_reimbursements = reimbursements_total + odometer_total
+    net = max(Decimal(0), net + total_reimbursements)
 
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
@@ -1678,7 +1710,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         retention_deduction=retention_deduction,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
-        reimbursements_amount=reimbursements_total,
+        reimbursements_amount=total_reimbursements,
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
@@ -1687,5 +1719,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     )
     if reimbs:
         reimbs.update(payslip=payslip, payroll_run=payroll_run)
+    if odometer_readings:
+        odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
 
     return payslip

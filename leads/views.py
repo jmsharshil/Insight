@@ -10,7 +10,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import (
+    apply_filters, has_user_branch_access,
+    notify_users_by_role, get_user_branch_ids,
+)
 from core.sender import send_email
 from django.conf import settings
 
@@ -18,14 +21,20 @@ from .serializers import (
     get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer,
     LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
     SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
+    OdometerReadingSerializer, OdometerApproveSerializer, OdometerRejectSerializer,
 )
 from .utils import LeadService
-from .models import Lead, LeadStage, LeadAssignmentLog, SalesDailyActivity, SalesActivityPhoto, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES
+from .models import (
+    Lead, LeadStage, LeadAssignmentLog, SalesDailyActivity, SalesActivityPhoto,
+    OdometerReading, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES,
+    GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES,
+)
 from django.db.models import Q
 import re
 from rest_framework.permissions import AllowAny
+from datetime import datetime
 from django.utils import timezone
-from chat.notifications import send_whatsapp_with_fallback
+from chat.notifications import send_whatsapp_with_fallback, send_system_notification
 
 FORM_TYPE_DISPLAY = dict(FORM_TYPE_CHOICES)
 STAGE_DISPLAY = dict(STAGE_CHOICES)
@@ -44,10 +53,13 @@ RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}
 SENIOR_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
 SALES_ROLES = {'sales_senior_executive', 'sales_executive', 'tele_caller'}
 
+ODOMETER_APPROVER_ROLES = {'super_admin', 'admin_senior_executive', 'accountant', 'branch_manager'}
+
 def _sales_activity_access(user, activity=None):
-    if getattr(user, 'role', None) not in SALES_ROLES | {'branch_manager', 'super_admin'}:
+    user_role = getattr(user, 'role', None)
+    if user_role not in SALES_ROLES | ODOMETER_APPROVER_ROLES:
         return False
-    return activity is None or activity.user_id == user.id or getattr(user, 'role', None) in {'branch_manager', 'super_admin'}
+    return activity is None or activity.user_id == user.id or user_role in ODOMETER_APPROVER_ROLES
 
 class SalesDailyActivityView(APIView):
     permission_classes = [IsAuthenticated]
@@ -55,11 +67,64 @@ class SalesDailyActivityView(APIView):
 
     def get(self, request):
         if not _sales_activity_access(request.user):
-            return Response({'detail': 'Only sales staff can access sales activities.'}, status=status.HTTP_403_FORBIDDEN)
-        queryset = SalesDailyActivity.objects.prefetch_related('photos').select_related('user')
-        if request.user.role not in {'branch_manager', 'super_admin'}:
+            return Response({'detail': 'Only sales staff and managers can access sales activities.'}, status=status.HTTP_403_FORBIDDEN)
+        queryset = SalesDailyActivity.objects.prefetch_related('photos').select_related('user', 'odometer_reading')
+        if request.user.role not in ODOMETER_APPROVER_ROLES:
             queryset = queryset.filter(user=request.user)
-        serializer = SalesDailyActivitySerializer(queryset, many=True)
+        elif request.user.role == 'branch_manager':
+            branch_ids = get_user_branch_ids(request.user)
+            if branch_ids:
+                queryset = queryset.filter(user__branch_id__in=branch_ids)
+
+        # ── Filters ──
+        # 1. Search by user name, email, phone
+        search = request.query_params.get('search') or request.query_params.get('name')
+        if search:
+            queryset = queryset.filter(
+                Q(user__name__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(user__phone__icontains=search)
+            )
+
+        # 2. Filter by date (supports YYYY-MM-DD or 'today')
+        date_param = request.query_params.get('date')
+        if date_param:
+            if date_param.lower() == 'today':
+                queryset = queryset.filter(activity_date=timezone.localdate())
+            else:
+                try:
+                    parsed_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+                    queryset = queryset.filter(activity_date=parsed_date)
+                except ValueError:
+                    return Response({'detail': 'Invalid date format. Use YYYY-MM-DD or "today".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Date range filter
+        from_date = request.query_params.get('from_date')
+        if from_date:
+            try:
+                parsed_from = datetime.strptime(from_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(activity_date__gte=parsed_from)
+            except ValueError:
+                return Response({'detail': 'Invalid from_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        to_date = request.query_params.get('to_date')
+        if to_date:
+            try:
+                parsed_to = datetime.strptime(to_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(activity_date__lte=parsed_to)
+            except ValueError:
+                return Response({'detail': 'Invalid to_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. Filter by specific user_id
+        user_id = request.query_params.get('user_id')
+        if user_id:
+            if request.user.role in ODOMETER_APPROVER_ROLES or str(request.user.id) == str(user_id):
+                queryset = queryset.filter(user_id=user_id)
+            else:
+                return Response({'detail': 'You can only view your own sales activities.'}, status=status.HTTP_403_FORBIDDEN)
+
+        queryset = queryset.order_by('-activity_date', '-created_at')
+        serializer = SalesDailyActivitySerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
     def post(self, request):
@@ -79,7 +144,7 @@ class SalesDailyActivityView(APIView):
             activity.save(update_fields=['notes', 'updated_at'])
 
         return Response(
-            SalesDailyActivitySerializer(activity).data,
+            SalesDailyActivitySerializer(activity, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -89,7 +154,7 @@ class SalesActivityPhotoView(APIView):
 
     def post(self, request, activity_id):
         try:
-            activity = SalesDailyActivity.objects.get(id=activity_id)
+            activity = SalesDailyActivity.objects.select_related('user').get(id=activity_id)
         except SalesDailyActivity.DoesNotExist:
             return Response({'detail': 'Sales activity not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -110,7 +175,307 @@ class SalesActivityPhotoView(APIView):
         })
         serializer.is_valid(raise_exception=True)
         photo = serializer.save(activity=activity)
+
+        # ── Auto-sync Odometer Reading ──
+        if photo_type in {'start_odometer', 'end_odometer'}:
+            start_photo = activity.photos.filter(photo_type='start_odometer').first()
+            end_photo = activity.photos.filter(photo_type='end_odometer').first()
+
+            start_kms = start_photo.odometer_kms if start_photo else None
+            end_kms = end_photo.odometer_kms if end_photo else None
+
+            reading, created = OdometerReading.objects.get_or_create(
+                activity=activity,
+                defaults={
+                    'user': activity.user,
+                    'start_kms': start_kms,
+                    'end_kms': end_kms,
+                }
+            )
+            if not created:
+                if start_kms is not None:
+                    reading.start_kms = start_kms
+                if end_kms is not None:
+                    reading.end_kms = end_kms
+                reading.save()
+            else:
+                reading.save()
+
+            # If both start and end odometer photos exist, notify approvers
+            if start_photo and end_photo and start_photo.odometer_kms is not None and end_photo.odometer_kms is not None:
+                try:
+                    staff_name = activity.user.name or activity.user.email
+                    notify_users_by_role(
+                        roles=['super_admin', 'admin_senior_executive', 'accountant'],
+                        title='New Odometer Reading for Approval',
+                        body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km).",
+                        metadata={
+                            'odometer_reading_id': str(reading.id),
+                            'sales_activity_id': str(activity.id),
+                            'type': 'odometer_submitted',
+                        },
+                        notification_type='sales',
+                    )
+                    if activity.user.branch:
+                        notify_users_by_role(
+                            roles=['branch_manager'],
+                            branch=activity.user.branch,
+                            title='New Odometer Reading for Approval',
+                            body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km).",
+                            metadata={
+                                'odometer_reading_id': str(reading.id),
+                                'sales_activity_id': str(activity.id),
+                                'type': 'odometer_submitted',
+                            },
+                            notification_type='sales',
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to notify approvers for odometer reading {reading.id}: {e}")
+
         return Response(SalesActivityPhotoSerializer(photo).data, status=status.HTTP_201_CREATED)
+
+
+class OdometerReadingListView(APIView):
+    """
+    GET /api/sales/odometer-readings/
+    List odometer readings.
+    - Admins/managers see all (or branch-scoped).
+    - Sales staff see only their own.
+    Supports query params:
+    - ?status=pending|approved|rejected
+    - ?user_id=<uuid>
+    - ?search=<name/email/phone>
+    - ?date=YYYY-MM-DD|today
+    - ?from_date=YYYY-MM-DD
+    - ?to_date=YYYY-MM-DD
+    - ?is_paid=true|false
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        role = getattr(user, 'role', None)
+        is_approver = role in ODOMETER_APPROVER_ROLES
+
+        if not is_approver and role not in SALES_ROLES:
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        queryset = OdometerReading.objects.select_related(
+            'activity', 'user', 'approved_by', 'rejected_by', 'payroll_run', 'payslip'
+        ).prefetch_related('activity__photos')
+
+        if not is_approver:
+            queryset = queryset.filter(user=user)
+        elif role == 'branch_manager':
+            branch_ids = get_user_branch_ids(user)
+            if branch_ids:
+                queryset = queryset.filter(user__branch_id__in=branch_ids)
+
+        # Filters
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        user_id = request.query_params.get('user_id')
+        if user_id:
+            if is_approver or str(user.id) == str(user_id):
+                queryset = queryset.filter(user_id=user_id)
+            else:
+                return Response({'detail': 'You can only view your own odometer readings.'}, status=status.HTTP_403_FORBIDDEN)
+
+        search = request.query_params.get('search') or request.query_params.get('name')
+        if search:
+            queryset = queryset.filter(
+                Q(user__name__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(user__phone__icontains=search)
+            )
+
+        date_param = request.query_params.get('date')
+        if date_param:
+            if date_param.lower() == 'today':
+                queryset = queryset.filter(activity__activity_date=timezone.localdate())
+            else:
+                try:
+                    parsed_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+                    queryset = queryset.filter(activity__activity_date=parsed_date)
+                except ValueError:
+                    return Response({'detail': 'Invalid date format. Use YYYY-MM-DD or "today".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from_date = request.query_params.get('from_date')
+        if from_date:
+            try:
+                parsed_from = datetime.strptime(from_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(activity__activity_date__gte=parsed_from)
+            except ValueError:
+                return Response({'detail': 'Invalid from_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        to_date = request.query_params.get('to_date')
+        if to_date:
+            try:
+                parsed_to = datetime.strptime(to_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(activity__activity_date__lte=parsed_to)
+            except ValueError:
+                return Response({'detail': 'Invalid to_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_paid = request.query_params.get('is_paid')
+        if is_paid is not None:
+            queryset = queryset.filter(is_paid=is_paid.lower() in ('true', '1'))
+
+        queryset = queryset.order_by('-activity__activity_date', '-created_at')
+        serializer = OdometerReadingSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+class OdometerReadingDetailView(APIView):
+    """
+    GET /api/sales/odometer-readings/<uuid:pk>/
+    Fetch a single odometer reading.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            reading = OdometerReading.objects.select_related(
+                'activity', 'user', 'approved_by', 'rejected_by', 'payroll_run', 'payslip'
+            ).prefetch_related('activity__photos').get(pk=pk)
+        except OdometerReading.DoesNotExist:
+            return Response({'detail': 'Odometer reading not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        role = getattr(request.user, 'role', None)
+        is_approver = role in ODOMETER_APPROVER_ROLES
+
+        if not is_approver and reading.user_id != request.user.id:
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = OdometerReadingSerializer(reading, context={'request': request})
+        return Response(serializer.data)
+
+
+class OdometerReadingApproveView(APIView):
+    """
+    POST /api/sales/odometer-readings/<uuid:pk>/approve/
+    Body: {"expense_per_km": 5.00}
+    Approves the reading, calculates total_expense, and sends a 'sales' notification.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        role = getattr(request.user, 'role', None)
+        if role not in ODOMETER_APPROVER_ROLES:
+            return Response({'detail': 'Permission denied. Only managers/admins can approve odometer readings.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            reading = OdometerReading.objects.select_related('activity', 'user').get(pk=pk)
+        except OdometerReading.DoesNotExist:
+            return Response({'detail': 'Odometer reading not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role == 'branch_manager' and reading.user.branch_id:
+            if not has_user_branch_access(request.user, reading.user.branch_id):
+                return Response({'detail': 'Permission denied. Branch managers can only approve readings for their branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if reading.is_paid:
+            return Response({'detail': 'Cannot modify an odometer reading that has already been paid in payroll.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reading.start_kms is None or reading.end_kms is None:
+            return Response({'detail': 'Cannot approve odometer reading: both start and end odometer readings are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = OdometerApproveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        expense_per_km = serializer.validated_data['expense_per_km']
+        reading.expense_per_km = expense_per_km
+        reading.status = 'approved'
+        reading.approved_by = request.user
+        reading.approved_at = timezone.now()
+        reading.rejected_by = None
+        reading.rejected_at = None
+        reading.rejection_reason = ''
+        reading.save()
+
+        # Send in-app notification to employee
+        try:
+            send_system_notification(
+                user_id=str(reading.user.id),
+                title='Odometer Reading Approved',
+                body=f"Your odometer reading for {reading.activity.activity_date} ({reading.total_kms} km @ ₹{reading.expense_per_km}/km = ₹{reading.total_expense}) has been approved.",
+                metadata={
+                    'odometer_reading_id': str(reading.id),
+                    'sales_activity_id': str(reading.activity_id),
+                    'type': 'odometer_approved',
+                    'route': f"/sales/odometer-readings/{reading.id}",
+                },
+                notification_type='sales',
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user for approved odometer reading {reading.id}: {e}")
+
+        return Response({
+            'success': True,
+            'message': f"Odometer reading approved ({reading.total_kms} km @ ₹{reading.expense_per_km}/km = ₹{reading.total_expense}). Added to upcoming payslip.",
+            'data': OdometerReadingSerializer(reading, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
+
+
+class OdometerReadingRejectView(APIView):
+    """
+    POST /api/sales/odometer-readings/<uuid:pk>/reject/
+    Body: {"rejection_reason": "Distance does not match logs"}
+    Rejects the reading and sends a 'sales' notification.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        role = getattr(request.user, 'role', None)
+        if role not in ODOMETER_APPROVER_ROLES:
+            return Response({'detail': 'Permission denied. Only managers/admins can reject odometer readings.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            reading = OdometerReading.objects.select_related('activity', 'user').get(pk=pk)
+        except OdometerReading.DoesNotExist:
+            return Response({'detail': 'Odometer reading not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role == 'branch_manager' and reading.user.branch_id:
+            if not has_user_branch_access(request.user, reading.user.branch_id):
+                return Response({'detail': 'Permission denied. Branch managers can only reject readings for their branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if reading.is_paid:
+            return Response({'detail': 'Cannot modify an odometer reading that has already been paid in payroll.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = OdometerRejectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        reason = serializer.validated_data.get('rejection_reason', '')
+        reading.status = 'rejected'
+        reading.rejected_by = request.user
+        reading.rejected_at = timezone.now()
+        reading.rejection_reason = reason
+        reading.approved_by = None
+        reading.approved_at = None
+        reading.save()
+
+        # Send in-app notification to employee
+        try:
+            send_system_notification(
+                user_id=str(reading.user.id),
+                title='Odometer Reading Rejected',
+                body=f"Your odometer reading for {reading.activity.activity_date} has been rejected." + (f" Reason: {reason}" if reason else ""),
+                metadata={
+                    'odometer_reading_id': str(reading.id),
+                    'sales_activity_id': str(reading.activity_id),
+                    'type': 'odometer_rejected',
+                    'route': f"/sales/odometer-readings/{reading.id}",
+                },
+                notification_type='sales',
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user for rejected odometer reading {reading.id}: {e}")
+
+        return Response({
+            'success': True,
+            'message': 'Odometer reading rejected.',
+            'data': OdometerReadingSerializer(reading, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
 
 
 def get_lead_queryset(request):

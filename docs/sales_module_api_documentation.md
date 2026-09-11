@@ -13,11 +13,12 @@
 
 This guide documents the **Sales User APIs** introduced starting from the Notification Types architectural update (`b759ee1`) through the Additional Roles & Field Tracking release (`4d7e89a`).
 
-The sales suite covers four core operational capabilities:
+The sales suite covers five core operational capabilities:
 1. **Sales Daily Field Activity & GPS/Odometer Tracking**: Daily activity logging for on-ground sales reps with geo-tagged and timestamped verification photos (start/end selfies, odometer readings, school visits, and exhibition evidence).
-2. **Sales Inventory Allocation**: Material issue and tracking (brochures, promotional kits, standees, marketing collateral) assigned directly to sales personnel.
-3. **Notification Types & Filter Integration**: Categorized push notifications and notification history filtering (`notification_type='leads'` and `notification_type='inventory'`) with auto-routing.
-4. **Lead Transfer Requests**: Workflow for field reps to request transferring assigned leads to colleagues with senior managerial review.
+2. **Odometer Reading Approval & Travel Reimbursement**: Automated odometer calculation (`total_kms = end_kms - start_kms`) with managerial approval workflow (custom editable `expense_per_km`), monthly payslip credit (`reimbursements_amount`), and automatic settlement on payroll disbursement.
+3. **Sales Inventory Allocation**: Material issue and tracking (brochures, promotional kits, standees, marketing collateral) assigned directly to sales personnel.
+4. **Notification Types & Filter Integration**: Categorized push notifications and notification history filtering (`notification_type='sales'`, `notification_type='leads'`, and `notification_type='inventory'`) with auto-routing.
+5. **Lead Transfer Requests**: Workflow for field reps to request transferring assigned leads to colleagues with senior managerial review.
 
 ---
 
@@ -34,6 +35,7 @@ Represents a single field-work container for a sales user on a specific calendar
 | `activity_date` | `DateField` | Date of field activity (default: today). Unique per user per day |
 | `notes` | `TextField` | Daily summary, school visit targets, or remarks |
 | `photos` | `Reverse(SalesActivityPhoto)` | Related verification photos captured during the day |
+| `odometer_reading` | `Reverse(OdometerReading)` | Linked travel kilometer calculation and approval record |
 | `created_at` | `DateTimeField` | Record creation timestamp |
 | `updated_at` | `DateTimeField` | Last update timestamp |
 
@@ -62,16 +64,43 @@ Stores timestamped, geo-tagged photo evidence attached to a daily activity.
 | Key | Display Label | Specific Validation Rules |
 |---|---|---|
 | `start_selfie` | Start of Day Selfie | `odometer_kms` must be `null` |
-| `start_odometer` | Start of Day Odometer | **`odometer_kms` is mandatory** |
+| `start_odometer` | Start of Day Odometer | **`odometer_kms` is mandatory**; auto-updates `OdometerReading.start_kms` |
 | `school_interior` | School Interior | `odometer_kms` must be `null` |
 | `school_exterior` | School Exterior | `odometer_kms` must be `null` |
 | `exhibition` | Exhibition | Max **6 exhibition photos** allowed per activity day |
-| `end_odometer` | End of Day Odometer | **`odometer_kms` is mandatory** |
+| `end_odometer` | End of Day Odometer | **`odometer_kms` is mandatory**; auto-updates `OdometerReading.end_kms` & computes `total_kms` |
 | `end_selfie` | End of Day Selfie | `odometer_kms` must be `null` |
 
 ---
 
-### 3. `ItemAllocation` for Sales Users (`inventory/models.py`)
+### 3. `OdometerReading` (`leads/models.py`)
+
+Represents the daily odometer travel expense claim generated for a sales employee.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `UUID` (PK) | Auto-generated UUIDv4 |
+| `activity` | `OneToOneField(SalesDailyActivity)` | Associated daily sales activity container |
+| `user` | `ForeignKey(User)` | Sales employee who completed the travel |
+| `start_kms` | `Decimal(10, 2)` | Start-of-day odometer reading from photo |
+| `end_kms` | `Decimal(10, 2)` | End-of-day odometer reading from photo |
+| `total_kms` | `Decimal(10, 2)` | `end_kms - start_kms` (auto-calculated) |
+| `expense_per_km` | `Decimal(8, 2)` | Reimbursable rate per kilometer (editable by manager on approval) |
+| `total_expense` | `Decimal(12, 2)` | `total_kms * expense_per_km` (auto-calculated) |
+| `status` | `CharField(20)` | Status: `pending`, `approved`, `rejected` |
+| `approved_by` | `ForeignKey(User)` | Approver (`super_admin`, `admin_senior_executive`, `accountant`, `branch_manager`) |
+| `approved_at` | `DateTimeField` | Approval timestamp |
+| `rejected_by` | `ForeignKey(User)` | Manager who rejected the claim |
+| `rejected_at` | `DateTimeField` | Rejection timestamp |
+| `rejection_reason` | `TextField` | Justification if rejected |
+| `payroll_run` | `ForeignKey(PayrollRun)` | Linked payroll run in which the claim was credited |
+| `payslip` | `ForeignKey(PaySlip)` | Linked employee payslip credited under `reimbursements_amount` |
+| `is_paid` | `BooleanField` | Marked `True` automatically when payroll run is disbursed |
+| `created_at` / `updated_at` | `DateTimeField` | Creation / update timestamps |
+
+---
+
+### 4. `ItemAllocation` for Sales Users (`inventory/models.py`)
 
 Material issued to sales staff from branch inventory.
 
@@ -92,12 +121,13 @@ Material issued to sales staff from branch inventory.
 
 ---
 
-### 4. `NotificationHistory` & Categories (`auth_user/models.py`)
+### 5. `NotificationHistory` & Categories (`auth_user/models.py`)
 
 System notifications stamped with `notification_type` choices:
-`system`, `authentication`, `admission`, `attendance`, `timetable`, `chat`, `exam`, `fees`, `inventory`, `leads`, `leave`, `payroll`, `results`, `support`.
+`system`, `authentication`, `admission`, `attendance`, `timetable`, `chat`, `exam`, `fees`, `inventory`, `leads`, `leave`, `payroll`, `results`, `sales`, `support`.
 
-- Sales/Leads notifications are categorized under `leads`.
+- Odometer submissions, approvals, and rejections are categorized under `sales`.
+- Sales/Leads CRM notifications are categorized under `leads`.
 - Inventory notifications are categorized under `inventory`.
 
 ---
@@ -106,8 +136,7 @@ System notifications stamped with `notification_type` choices:
 
 ### Daily Field Work Lifecycle
 
-```text
-[ SALES REP MORNING ROUTINE ]
+```tex[ SALES REP MORNING ROUTINE ]
   │
   ├── 1. POST /api/v1/sales/activities/ ────────────────────────► Creates/initializes daily activity
   │      {"activity_date": "2026-09-10", "notes": "Visiting 3 schools"}
@@ -115,6 +144,7 @@ System notifications stamped with `notification_type` choices:
   ├── 2. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_selfie' (with GPS)
   │
   ├── 3. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_odometer' (with GPS + odometer_kms)
+  │      └─► Automatically creates OdometerReading (start_kms=14250.50, status='pending')
   │
 [ FIELD VISITS DURING THE DAY ]
   │
@@ -122,11 +152,19 @@ System notifications stamped with `notification_type` choices:
   │
   ├── 5. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Exhibition: 'exhibition' photos (up to 6)
   │
-[ EVENING CHECKOUT ]
+[ EVENING CHECKOUT & REIMBURSEMENT APPROVAL ]
   │
   ├── 6. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_odometer' (with final kms)
+  │      ├─► Automatically updates OdometerReading (end_kms=14298.20, total_kms=47.70)
+  │      └─► Dispatches push notification (type='sales') to Branch Managers / Super Admins
   │
-  └── 7. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_selfie' (end of day)
+  ├── 7. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_selfie' (end of day)
+  │
+  └── 8. POST /api/v1/sales/odometer-readings/<id>/approve/ ──────► Manager approves reading + enters expense_per_km
+         ├─► Computes total_expense = total_kms * expense_per_km
+         ├─► Sends in-app notification (type='sales') to Sales Representative
+         ├─► Automatically included under 'reimbursements_amount' in monthly PaySlip
+         └─► Automatically marked 'is_paid=True' when PayrollRun is disbursed
 ```
 
 ---
@@ -137,9 +175,29 @@ System notifications stamped with `notification_type` choices:
 
 **`GET /api/v1/sales/activities/`**
 
-Retrieves daily activity logs including all attached photos and user details.
+Retrieves daily activity logs including all attached photos, linked odometer reading, and user details.
 - **Sales Staff** (`sales_executive`, `sales_senior_executive`, `tele_caller`): Sees only their own activities.
-- **Branch Managers & Super Admins**: Can view activities across all sales personnel in their branch/organization.
+- **Branch Managers**: View activities across sales personnel in their authorized branches.
+- **Super Admins & Accountants**: View activities across the entire organization.
+
+#### Query Parameters
+| Parameter | Type | Example | Description |
+|---|---|---|---|
+| `search` or `name` | `string` | `?search=Aakash` | Case-insensitive search on sales staff name, email, or phone. |
+| `date` | `string` | `?date=today` or `?date=2026-09-10` | Filter by exact activity date. Pass `'today'` for current date. |
+| `from_date` | `string` | `?from_date=2026-09-01` | Filter activities from this date onwards (`YYYY-MM-DD`). |
+| `to_date` | `string` | `?to_date=2026-09-30` | Filter activities up to this date (`YYYY-MM-DD`). |
+| `user_id` | `uuid` | `?user_id=550e8400...` | Filter by specific sales rep (managers and admins only). |
+
+#### 💡 New Day Empty Fields Behavior (Mobile / Frontend Guidance)
+To prevent the mobile app from displaying yesterday's filled fields on a new day:
+- On app launch, query:
+  ```http
+  GET /api/v1/sales/activities/?date=today
+  ```
+- **If the sales representative has not created an activity for today yet**, the API returns an **empty array (`[]`)**.
+- When the frontend receives `[]`, it must render **blank, fresh upload inputs** (Start Selfie, Start Odometer, etc.).
+- When the sales representative uploads photos or saves notes, the today record is created and will be returned on subsequent queries.
 
 #### Request Headers
 ```http
@@ -181,18 +239,6 @@ Authorization: Bearer <access_token>
         "created_at": "2026-09-10T09:07:15Z"
       },
       {
-        "id": "a6d4f3e2-901c-6de3-1234-56789abcdef0",
-        "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "photo_type": "school_exterior",
-        "photo_type_display": "School Exterior",
-        "photo": "http://api.example.com/media/sales/activity_photos/ryan_gate.jpg",
-        "latitude": "19.119800",
-        "longitude": "72.875400",
-        "odometer_kms": null,
-        "captured_at": "2026-09-10T10:45:00Z",
-        "created_at": "2026-09-10T10:45:20Z"
-      },
-      {
         "id": "b7e5a4f3-012d-7ef4-2345-6789abcdef01",
         "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
         "photo_type": "end_odometer",
@@ -205,6 +251,34 @@ Authorization: Bearer <access_token>
         "created_at": "2026-09-10T18:15:30Z"
       }
     ],
+    "odometer_reading": {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "activity_date": "2026-09-10",
+      "user": "550e8400-e29b-41d4-a716-446655440000",
+      "user_name": "Aakash Mehta",
+      "user_email": "aakash@example.com",
+      "start_kms": "14250.50",
+      "end_kms": "14298.20",
+      "total_kms": "47.70",
+      "expense_per_km": "6.00",
+      "total_expense": "286.20",
+      "status": "approved",
+      "approved_by": "110e8400-e29b-41d4-a716-446655440001",
+      "approved_by_name": "Kavita Desai",
+      "approved_at": "2026-09-10T19:00:00Z",
+      "rejected_by": null,
+      "rejected_by_name": null,
+      "rejected_at": null,
+      "rejection_reason": "",
+      "payroll_run": "220e8400-e29b-41d4-a716-446655440002",
+      "payslip": "330e8400-e29b-41d4-a716-446655440003",
+      "is_paid": false,
+      "start_odometer_photo": "http://api.example.com/media/sales/activity_photos/start_odo_100926.jpg",
+      "end_odometer_photo": "http://api.example.com/media/sales/activity_photos/end_odo_100926.jpg",
+      "created_at": "2026-09-10T09:07:15Z",
+      "updated_at": "2026-09-10T19:00:00Z"
+    },
     "created_at": "2026-09-10T09:04:00Z",
     "updated_at": "2026-09-10T18:16:00Z"
   }
@@ -353,7 +427,231 @@ Content-Type: image/jpeg
 
 ---
 
-### 4. Allocate Inventory to Sales Users
+### 4. List Odometer Readings
+
+**`GET /api/v1/sales/odometer-readings/`**
+
+Retrieves the list of odometer readings, their calculated kilometers, per-km reimbursement rates, approval statuses, and photo links.
+- **Sales Staff** (`sales_executive`, `sales_senior_executive`, `tele_caller`): Returns only their own odometer records.
+- **Branch Managers**: Returns records for sales staff in their managed branches.
+- **Super Admins & Accountants**: Returns records across the entire organization.
+
+#### Query Parameters
+| Parameter | Type | Example | Description |
+|---|---|---|---|
+| `status` | `string` | `?status=pending` | Filter by status: `pending`, `approved`, or `rejected`. |
+| `user_id` | `uuid` | `?user_id=550e...` | Filter by a specific sales user (managers and admins only). |
+| `search` or `name` | `string` | `?search=Aakash` | Case-insensitive search on user name, email, or phone. |
+| `date` | `string` | `?date=2026-09-10` | Filter by activity date (`YYYY-MM-DD` or `'today'`). |
+| `from_date` | `string` | `?from_date=2026-09-01` | Filter by activity date from (`YYYY-MM-DD`). |
+| `to_date` | `string` | `?to_date=2026-09-30` | Filter by activity date to (`YYYY-MM-DD`). |
+| `is_paid` | `boolean` | `?is_paid=false` | Filter by whether the claim has been disbursed in payroll (`true` or `false`). |
+
+#### Response Example (`200 OK`)
+```json
+[
+  {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "activity_date": "2026-09-10",
+    "user": "550e8400-e29b-41d4-a716-446655440000",
+    "user_name": "Aakash Mehta",
+    "user_email": "aakash@example.com",
+    "start_kms": "14250.50",
+    "end_kms": "14298.20",
+    "total_kms": "47.70",
+    "expense_per_km": "6.00",
+    "total_expense": "286.20",
+    "status": "approved",
+    "approved_by": "110e8400-e29b-41d4-a716-446655440001",
+    "approved_by_name": "Kavita Desai",
+    "approved_at": "2026-09-10T19:00:00Z",
+    "rejected_by": null,
+    "rejected_by_name": null,
+    "rejected_at": null,
+    "rejection_reason": "",
+    "payroll_run": "220e8400-e29b-41d4-a716-446655440002",
+    "payslip": "330e8400-e29b-41d4-a716-446655440003",
+    "is_paid": false,
+    "start_odometer_photo": "http://api.example.com/media/sales/activity_photos/start_odo_100926.jpg",
+    "end_odometer_photo": "http://api.example.com/media/sales/activity_photos/end_odo_100926.jpg",
+    "created_at": "2026-09-10T09:07:15Z",
+    "updated_at": "2026-09-10T19:00:00Z"
+  }
+]
+```
+
+---
+
+### 5. Retrieve Single Odometer Reading
+
+**`GET /api/v1/sales/odometer-readings/<uuid:pk>/`**
+
+Retrieves detailed information for a single odometer reading.
+
+#### Response Example (`200 OK`)
+```json
+{
+  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "activity_date": "2026-09-10",
+  "user": "550e8400-e29b-41d4-a716-446655440000",
+  "user_name": "Aakash Mehta",
+  "user_email": "aakash@example.com",
+  "start_kms": "14250.50",
+  "end_kms": "14298.20",
+  "total_kms": "47.70",
+  "expense_per_km": "6.00",
+  "total_expense": "286.20",
+  "status": "approved",
+  "approved_by": "110e8400-e29b-41d4-a716-446655440001",
+  "approved_by_name": "Kavita Desai",
+  "approved_at": "2026-09-10T19:00:00Z",
+  "rejected_by": null,
+  "rejected_by_name": null,
+  "rejected_at": null,
+  "rejection_reason": "",
+  "payroll_run": null,
+  "payslip": null,
+  "is_paid": false,
+  "start_odometer_photo": "http://api.example.com/media/sales/activity_photos/start_odo_100926.jpg",
+  "end_odometer_photo": "http://api.example.com/media/sales/activity_photos/end_odo_100926.jpg",
+  "created_at": "2026-09-10T09:07:15Z",
+  "updated_at": "2026-09-10T19:00:00Z"
+}
+```
+
+---
+
+### 6. Approve Odometer Reading
+
+**`POST /api/v1/sales/odometer-readings/<uuid:pk>/approve/`**
+
+Approves a pending odometer reading and applies an editable per-kilometer reimbursement rate.
+- **Allowed Roles:** `super_admin`, `admin_senior_executive`, `accountant`, `branch_manager`.
+- **Automatic Calculations:** `total_expense = total_kms * expense_per_km`.
+- **Automatic Push Notification:** Dispatches an in-app notification of type `'sales'` to the employee with approval details.
+- **Payslip Crediting:** Automatically picked up during payroll calculation for inclusion in the upcoming monthly `PaySlip` under `reimbursements_amount`.
+
+#### Request Headers
+```http
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "expense_per_km": 6.50
+}
+```
+
+#### Response Example (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Odometer reading approved (47.70 km @ ₹6.50/km = ₹310.05). Added to upcoming payslip.",
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "activity_date": "2026-09-10",
+    "user": "550e8400-e29b-41d4-a716-446655440000",
+    "user_name": "Aakash Mehta",
+    "start_kms": "14250.50",
+    "end_kms": "14298.20",
+    "total_kms": "47.70",
+    "expense_per_km": "6.50",
+    "total_expense": "310.05",
+    "status": "approved",
+    "approved_by": "110e8400-e29b-41d4-a716-446655440001",
+    "approved_by_name": "Kavita Desai",
+    "approved_at": "2026-09-10T19:00:00Z",
+    "rejected_by": null,
+    "is_paid": false
+  }
+}
+```
+
+#### Error Example: Missing End Odometer Reading (`400 Bad Request`)
+```json
+{
+  "detail": "Cannot approve odometer reading: both start and end odometer readings are required."
+}
+```
+
+#### Error Example: Modifying Disbursed Claim (`400 Bad Request`)
+```json
+{
+  "detail": "Cannot modify an odometer reading that has already been paid in payroll."
+}
+```
+
+---
+
+### 7. Reject Odometer Reading
+
+**`POST /api/v1/sales/odometer-readings/<uuid:pk>/reject/`**
+
+Rejects an odometer reading claim with an optional/mandatory reason.
+- **Allowed Roles:** `super_admin`, `admin_senior_executive`, `accountant`, `branch_manager`.
+- **Automatic Push Notification:** Dispatches an in-app notification of type `'sales'` to the employee with rejection details and reason.
+
+#### Request Body
+```json
+{
+  "rejection_reason": "End odometer photo was blurred and kilometer display was not legible."
+}
+```
+
+#### Response Example (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Odometer reading rejected.",
+  "data": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "status": "rejected",
+    "rejected_by": "110e8400-e29b-41d4-a716-446655440001",
+    "rejected_by_name": "Kavita Desai",
+    "rejected_at": "2026-09-10T19:15:00Z",
+    "rejection_reason": "End odometer photo was blurred and kilometer display was not legible."
+  }
+}
+```
+
+---
+
+### 8. Monthly Payslip Integration & Settlement Workflow
+
+Approved odometer readings follow an automated lifecycle aligned with standard expense reimbursements:
+
+```text
+[ Daily Field Work ]
+  Sales rep uploads start and end odometer photos
+          │
+          ▼
+[ Manager Review ]
+  Manager visits GET /api/v1/sales/odometer-readings/
+  Approves via POST /api/v1/sales/odometer-readings/<id>/approve/ {"expense_per_km": 6.50}
+  (Status -> 'approved', total_expense calculated)
+          │
+          ▼
+[ Monthly Payroll Generation ]
+  During draft/final payroll calculation (compute_payslip_for_user):
+  • System calls _get_odometer_expenses_for_user(user, payroll_run)
+  • Aggregates all approved, unpaid (is_paid=False) odometer readings
+  • Adds the sum to PaySlip.reimbursements_amount
+  • Links readings to PaySlip and PayrollRun
+          │
+          ▼
+[ Payroll Disbursal ]
+  Accountant/Admin marks PayrollRun as disbursed:
+  • All linked OdometerReading records are automatically marked is_paid=True
+```
+
+---
+
+### 9. Allocate Inventory to Sales Users
 
 **`POST /api/v1/inventory/allocations/`**
 
@@ -399,18 +697,9 @@ Content-Type: application/json
 }
 ```
 
-#### Error Example: Invalid Target / Non-Sales Role (`400 Bad Request`)
-```json
-{
-  "sales_user": [
-    "The selected user must have a sales role."
-  ]
-}
-```
-
 ---
 
-### 5. Bulk Issue Inventory to Sales User
+### 10. Bulk Issue Inventory to Sales User
 
 **`POST /api/v1/inventory/allocations/bulk_issue/`**
 
@@ -457,56 +746,47 @@ Allocates multiple stock items in a single atomic transaction to a sales user.
 
 ---
 
-### 6. Filtered Notifications for Sales Users
+### 11. Filtered Notifications for Sales Users
 
 **`GET /api/auth/notifications/`**
 
-Fetches notifications for the logged-in sales rep, filtered by `notification_type`.
+Fetches notifications for the logged-in user, filtered by `notification_type`.
 
 #### Query Parameters
 | Parameter | Type | Required | Description |
 |---|---|:---:|---|
-| `type` or `notification_type` | `string` | No | Category filter: `leads`, `inventory`, `system`, `payroll`, `attendance`, etc. |
+| `type` or `notification_type` | `string` | No | Category filter: `sales` (odometer submissions & approvals), `leads`, `inventory`, `payroll`, `attendance`, `system`, etc. |
 | `page` | `integer` | No | Pagination page number. |
 | `page_size` | `integer` | No | Number of records per page. |
 
-#### Request Example
+#### Request Example (Sales / Odometer Notifications)
 ```http
-GET /api/auth/notifications/?notification_type=leads
+GET /api/auth/notifications/?type=sales
 Authorization: Bearer <access_token>
 ```
 
 #### Response Example (`200 OK`)
 ```json
 {
-  "count": 3,
+  "success": true,
+  "count": 1,
   "next": null,
   "previous": null,
-  "results": [
+  "page_size": 50,
+  "data": [
     {
       "id": "d1e2f3a4-b5c6-7d8e-9f0a-1b2c3d4e5f6a",
-      "title": "Lead Transferred",
-      "body": "A lead transfer has been approved. You are now assigned to: Neha Joshi.",
+      "title": "Odometer Reading Approved",
+      "body": "Your odometer reading for 2026-09-10 (47.70 km @ ₹6.00/km = ₹286.20) has been approved.",
       "data": {
-        "type": "lead_transferred",
-        "lead_id": "105"
+        "odometer_reading_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "sales_activity_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "type": "odometer_approved",
+        "route": "/sales/odometer-readings/7c9e6679-7425-40de-944b-e07fc1f90ae7"
       },
-      "notification_type": "leads",
-      "route": "lead_transferred",
+      "notification_type": "sales",
       "is_read": false,
-      "created_at": "2026-09-10T11:30:00Z"
-    },
-    {
-      "id": "e2f3a4b5-c6d7-8e9f-0a1b-2c3d4e5f6a7b",
-      "title": "Follow-up Reminder",
-      "body": "Follow-up scheduled with Karan Singhania at 3:00 PM.",
-      "data": {
-        "lead_id": "98"
-      },
-      "notification_type": "leads",
-      "route": "",
-      "is_read": true,
-      "created_at": "2026-09-10T08:00:00Z"
+      "created_at": "2026-09-10T19:00:00Z"
     }
   ]
 }
@@ -514,7 +794,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 7. Mark All Notifications as Read
+### 12. Mark All Notifications as Read
 
 **`PATCH /api/auth/notifications/`**
 
@@ -530,7 +810,7 @@ Marks all unread notifications as read for the authenticated user.
 
 ---
 
-### 8. Lead Transfer Request & Review
+### 13. Lead Transfer Request & Review
 
 #### Request Transfer (Sales Rep)
 **`POST /api/v1/leads/transfer-requests/`**
@@ -585,13 +865,17 @@ Approves or rejects the transfer. Upon approval, updates `lead.assigned_to`, cre
 
 ## Role Permissions Matrix
 
-| Endpoint | Sales Executive / Tele Caller | Sales Senior Exec | Branch Manager | Super Admin |
+| Endpoint | Sales Executive / Tele Caller | Sales Senior Exec | Branch Manager | Super Admin / Accountant |
 |---|:---:|:---:|:---:|:---:|
 | `GET /sales/activities/` | Own activities | Own activities | Branch sales team | All sales team |
 | `POST /sales/activities/` | ✅ | ✅ | ✅ | ✅ |
 | `POST /sales/activities/<id>/photos/` | ✅ (own activity) | ✅ (own activity) | ✅ | ✅ |
+| `GET /sales/odometer-readings/` | Own readings | Own readings | Branch sales team | All sales team |
+| `GET /sales/odometer-readings/<pk>/` | Own reading | Own reading | Branch sales team | All sales team |
+| `POST /sales/odometer-readings/<pk>/approve/` | ❌ | ❌ | ✅ (own branch) | ✅ (all) |
+| `POST /sales/odometer-readings/<pk>/reject/` | ❌ | ❌ | ✅ (own branch) | ✅ (all) |
 | `POST /inventory/allocations/` (receive) | ✅ (recipient) | ✅ (recipient) | ✅ (assigner) | ✅ (assigner) |
-| `GET /notifications/?notification_type=leads` | ✅ (own) | ✅ (own) | ✅ (own) | ✅ (own) |
+| `GET /notifications/?type=sales` | ✅ (own) | ✅ (own) | ✅ (own) | ✅ (own) |
 | `POST /leads/transfer-requests/` | ✅ (assigned leads) | ✅ (assigned leads) | ❌ | ❌ |
 | `PATCH /leads/transfer-requests/<id>/review/` | ❌ | ✅ | ✅ | ✅ |
 
@@ -599,6 +883,8 @@ Approves or rejects the transfer. Upon approval, updates `lead.assigned_to`, cre
 
 ## Integration Summary
 
-- **Leads Module (`leads/`):** Links sales activity logs directly into CRM field presence and enables peer lead transfer workflows.
+- **Leads & Sales Activities (`leads/`):** Links sales activity logs directly into CRM field presence, tracks daily GPS/odometer readings, provides manager approve/reject endpoints with editable per-km rates, and enables peer lead transfer workflows.
+- **Monthly Payroll (`payroll/`):** Approved, unpaid odometer readings are automatically queried via `_get_odometer_expenses_for_user()`, credited on the employee's monthly `PaySlip` under `reimbursements_amount`, linked to `PayrollRun`, and marked `is_paid=True` upon disbursement.
 - **Inventory Module (`inventory/`):** Dedicated tracking of marketing assets, brochures, and seminar standees assigned to sales reps with `ItemAllocation.sales_user`.
-- **Chat & Notifications (`chat.notifications`, `auth_user`):** Real-time alerts stamped with `notification_type` to allow granular client-side filtering and mobile push routing.
+- **Chat & Notifications (`chat.notifications`, `auth_user`):** Real-time alerts stamped with `notification_type='sales'` for odometer reading approvals and submissions, allowing granular client-side filtering via `GET /api/auth/notifications/?type=sales`.
+

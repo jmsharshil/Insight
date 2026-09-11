@@ -240,8 +240,13 @@ Starting with the sales field-activity release, the `leads` application also pow
    - `POST /api/v1/leads/transfer-requests/`
    - `GET /api/v1/leads/transfer-requests/`
    - `PATCH /api/v1/leads/transfer-requests/<id>/review/`
+3. **Odometer Approval & Travel Reimbursement**: Tracking daily kilometers, managerial approval with editable `expense_per_km`, and automated settlement via monthly payslips (`PaySlip.reimbursements_amount`).
+   - `GET /api/v1/sales/odometer-readings/`
+   - `GET /api/v1/sales/odometer-readings/<id>/`
+   - `POST /api/v1/sales/odometer-readings/<id>/approve/`
+   - `POST /api/v1/sales/odometer-readings/<id>/reject/`
 
-👉 **Full Guide**: For detailed request/response examples and constraints, see [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md).
+👉 **Full Guide**: For detailed request/response examples, date/name filters, and constraints, see [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md).
 
 ---
 

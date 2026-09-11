@@ -1,7 +1,8 @@
 # leads/serializers.py
 
+from decimal import Decimal
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyActivity, SalesActivityPhoto, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyActivity, SalesActivityPhoto, OdometerReading, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -93,14 +94,66 @@ class SalesActivityPhotoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'odometer_kms': 'Only valid for odometer photos.'})
         return attrs
 
+class OdometerReadingSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.name', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    activity_date = serializers.DateField(source='activity.activity_date', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.name', read_only=True, default=None)
+    rejected_by_name = serializers.CharField(source='rejected_by.name', read_only=True, default=None)
+    start_odometer_photo = serializers.SerializerMethodField()
+    end_odometer_photo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OdometerReading
+        fields = [
+            'id', 'activity', 'activity_date', 'user', 'user_name', 'user_email',
+            'start_kms', 'end_kms', 'total_kms', 'expense_per_km', 'total_expense',
+            'status', 'approved_by', 'approved_by_name', 'approved_at',
+            'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
+            'payroll_run', 'payslip', 'is_paid',
+            'start_odometer_photo', 'end_odometer_photo',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+    def get_start_odometer_photo(self, obj):
+        photo = obj.activity.photos.filter(photo_type='start_odometer').first()
+        if photo and photo.photo:
+            request = self.context.get('request')
+            return request.build_absolute_uri(photo.photo.url) if request else photo.photo.url
+        return None
+
+    def get_end_odometer_photo(self, obj):
+        photo = obj.activity.photos.filter(photo_type='end_odometer').first()
+        if photo and photo.photo:
+            request = self.context.get('request')
+            return request.build_absolute_uri(photo.photo.url) if request else photo.photo.url
+        return None
+
+
+class OdometerApproveSerializer(serializers.Serializer):
+    expense_per_km = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=Decimal('0.00'), required=True,
+        help_text="Reimbursement rate per kilometer."
+    )
+
+
+class OdometerRejectSerializer(serializers.Serializer):
+    rejection_reason = serializers.CharField(
+        required=False, allow_blank=True, default="",
+        help_text="Reason for rejecting the odometer reading."
+    )
+
+
 class SalesDailyActivitySerializer(serializers.ModelSerializer):
     photos = SalesActivityPhotoSerializer(many=True, read_only=True)
     user_name = serializers.CharField(source='user.name', read_only=True)
+    odometer_reading = OdometerReadingSerializer(read_only=True)
 
     class Meta:
         model = SalesDailyActivity
-        fields = ['id', 'user', 'user_name', 'activity_date', 'notes', 'photos', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'user', 'user_name', 'photos', 'created_at', 'updated_at']
+        fields = ['id', 'user', 'user_name', 'activity_date', 'notes', 'photos', 'odometer_reading', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'created_at', 'updated_at']
 
 # ── Contact Serializer ────────────────────────────────────────────────────────
 

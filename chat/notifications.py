@@ -162,7 +162,7 @@ def _get_project_id() -> Optional[str]:
 NOTIFICATION_TYPES = {
     'system', 'authentication', 'admission', 'attendance', 'timetable',
     'chat', 'exam', 'fees', 'inventory', 'leads', 'leave', 'payroll',
-    'results', 'support',
+    'results', 'sales', 'support',
 }
 
 
@@ -188,6 +188,8 @@ def _resolve_notification_type(notification_type=None, data=None):
         return 'results'
     if event_type.startswith('reimbursement'):
         return 'payroll'
+    if event_type.startswith('odometer'):
+        return 'sales'
 
     metadata_keys = set(data)
     for category, keys in {
@@ -200,6 +202,7 @@ def _resolve_notification_type(notification_type=None, data=None):
         'leave': {'leave_id', 'student_leave_id'},
         'payroll': {'payroll_id', 'payslip_id', 'reimbursement_id'},
         'results': {'recheck_id'},
+        'sales': {'odometer_reading_id', 'sales_activity_id'},
     }.items():
         if metadata_keys & keys:
             return category

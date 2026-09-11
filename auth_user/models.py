@@ -194,6 +194,7 @@ class NotificationHistory(models.Model):
         ('leave', 'Leave'),
         ('payroll', 'Payroll'),
         ('results', 'Results'),
+        ('sales', 'Sales'),
         ('support', 'Support'),
     ]
 

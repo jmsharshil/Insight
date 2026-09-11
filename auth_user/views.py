@@ -937,6 +937,12 @@ class NotificationHistoryAPIView(APIView):
                 Q(notification_type='payroll', data__has_key='reimbursement_id') |
                 Q(notification_type=notification_type)
             )
+        elif notification_type in ('sales', 'odometer'):
+            qs = qs.filter(
+                Q(notification_type='sales') |
+                Q(data__has_key='odometer_reading_id') |
+                Q(data__has_key='sales_activity_id')
+            )
         elif notification_type:
             qs = qs.filter(notification_type=notification_type)
         return paginate_queryset(qs, request, NotificationHistorySerializer)
