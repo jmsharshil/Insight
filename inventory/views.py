@@ -35,12 +35,25 @@ def resolve_profile_id(model_class, id_val):
         profile = model_class.objects.filter(user_id=id_val).first()
         if profile:
             return str(profile.id)
-    return id_val
+from rest_framework.permissions import IsAuthenticated, SAFE_METHODS
+
+class IsStaffOrReadOnlyForStudentParent(IsAuthenticated):
+    """
+    Ensures students and parents only have read-only (GET, HEAD, OPTIONS) access to inventory.
+    Only staff, faculty, and admins can perform write/mutation actions.
+    """
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        if getattr(request.user, 'role', None) in ('student', 'parents') and request.method not in SAFE_METHODS:
+            return False
+        return True
 
 
 class ItemCategoryViewSet(viewsets.ModelViewSet):
     queryset = ItemCategory.objects.all()
     serializer_class = ItemCategorySerializer
+    permission_classes = [IsStaffOrReadOnlyForStudentParent]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['branch', 'is_active']
     search_fields = ['name', 'description']
@@ -85,6 +98,7 @@ class ItemCategoryViewSet(viewsets.ModelViewSet):
 class ItemViewSet(viewsets.ModelViewSet):
     queryset = Item.objects.select_related('category').all()
     serializer_class = ItemSerializer
+    permission_classes = [IsStaffOrReadOnlyForStudentParent]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['category', 'category__branch', 'is_active']
     search_fields = ['name', 'description']
@@ -102,6 +116,7 @@ class ItemViewSet(viewsets.ModelViewSet):
 class StockTransactionViewSet(viewsets.ModelViewSet):
     queryset = StockTransaction.objects.select_related('item', 'created_by').all()
     serializer_class = StockTransactionSerializer
+    permission_classes = [IsStaffOrReadOnlyForStudentParent]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['item', 'transaction_type', 'item__category__branch']
     ordering_fields = ['transaction_date']
@@ -122,6 +137,7 @@ class StockTransactionViewSet(viewsets.ModelViewSet):
 class ItemAllocationViewSet(viewsets.ModelViewSet):
     queryset = ItemAllocation.objects.select_related('item', 'student', 'faculty', 'sales_user', 'issued_by').all()
     serializer_class = ItemAllocationSerializer
+    permission_classes = [IsStaffOrReadOnlyForStudentParent]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['item', 'status', 'student', 'faculty', 'sales_user', 'item__category__branch']
     search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name', 'sales_user__name', 'item__name']
@@ -129,8 +145,23 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
+
         if user.role in SALES_ROLES:
             return qs.filter(sales_user=user)
+
+        if user.role == 'student':
+            return qs.filter(student__user=user)
+
+        if user.role == 'parents':
+            from students.models import ParentLink, StudentProfile
+            linked_ids = list(ParentLink.objects.filter(parent=user).values_list('student_id', flat=True))
+            if not linked_ids and hasattr(user, 'linked_students'):
+                linked_ids = list(StudentProfile.objects.filter(user__in=user.linked_students.all()).values_list('id', flat=True))
+            return qs.filter(student_id__in=linked_ids)
+
+        if user.role == 'faculty':
+            return qs.filter(faculty__user=user)
+
         if user.role != 'super_admin':
             branch_ids = get_user_branch_ids(user)
             if branch_ids:
@@ -140,14 +171,19 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='my')
     def my_allocations(self, request):
         """
-        Returns all items allocated to the currently authenticated user.
+        Returns all items allocated to the currently authenticated user
+        (supports sales users, students, parents, and faculty).
         Supports status filter (?status=issued or ?status=returned).
+        For parents, also supports ?student=<student_id> to view a specific child's items.
         """
         user = request.user
-        qs = ItemAllocation.objects.select_related('item', 'issued_by').filter(sales_user=user)
+        qs = self.get_queryset()
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
+        student_id = request.query_params.get('student')
+        if student_id and user.role == 'parents':
+            qs = qs.filter(student_id=student_id)
         page = self.paginate_queryset(qs)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -295,7 +331,7 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
         return 'Unknown'
 
     def _notify_allocation(self, allocation):
-        """Send system notification to super_admins and recipient sales user when inventory is allocated."""
+        """Send system notification to super_admins, recipient sales users, students, and parents when inventory is allocated."""
         try:
             from core.utils import notify_users_by_role, send_system_notification
             recipient_name = self._allocation_recipient(allocation)
@@ -308,6 +344,56 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
             if allocation.sales_user:
                 send_system_notification(
                     user=allocation.sales_user,
+                    title='Inventory Allocated',
+                    body=f"You have been allocated {allocation.quantity}x {allocation.item.name}.",
+                    data={
+                        'allocation_id': str(allocation.id),
+                        'item_id': str(allocation.item.id),
+                        'type': 'inventory_allocated',
+                        'route': f"/inventory/allocations/{allocation.id}"
+                    },
+                    notification_type='inventory',
+                )
+            if allocation.student:
+                student_user = getattr(allocation.student, 'user', None)
+                if student_user:
+                    send_system_notification(
+                        user=student_user,
+                        title='Inventory Issued',
+                        body=f"You have been issued {allocation.quantity}x {allocation.item.name}.",
+                        data={
+                            'allocation_id': str(allocation.id),
+                            'item_id': str(allocation.item.id),
+                            'type': 'inventory_allocated',
+                            'route': f"/inventory/allocations/{allocation.id}"
+                        },
+                        notification_type='inventory',
+                    )
+                # Also notify student's parents
+                try:
+                    from students.models import ParentLink
+                    student_display = student_user.name if student_user else allocation.student.admission_number
+                    parents = ParentLink.objects.filter(student=allocation.student).select_related('parent')
+                    for pl in parents:
+                        if pl.parent and pl.parent.is_active:
+                            send_system_notification(
+                                user=pl.parent,
+                                title='Student Inventory Issued',
+                                body=f"{allocation.quantity}x {allocation.item.name} has been issued to {student_display}.",
+                                data={
+                                    'allocation_id': str(allocation.id),
+                                    'item_id': str(allocation.item.id),
+                                    'student_id': str(allocation.student.id),
+                                    'type': 'inventory_allocated',
+                                    'route': f"/inventory/allocations/{allocation.id}"
+                                },
+                                notification_type='inventory',
+                            )
+                except Exception:
+                    pass
+            if allocation.faculty and getattr(allocation.faculty, 'user', None):
+                send_system_notification(
+                    user=allocation.faculty.user,
                     title='Inventory Allocated',
                     body=f"You have been allocated {allocation.quantity}x {allocation.item.name}.",
                     data={

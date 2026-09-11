@@ -128,7 +128,7 @@ ROLE_PERMISSIONS = {
     'student': {
         'default_modules': ['support', 
             'timetable', 'attendance', 'courses_batches', 'exams', 'fees',
-            'leave', 'chat', 'notifications', 'settings',
+            'leave', 'chat', 'notifications', 'settings', 'inventory',
         ],
         'canDelete': False,
         'canExport': False,
@@ -136,7 +136,7 @@ ROLE_PERMISSIONS = {
     'parents': {
         'default_modules': ['support', 
             'timetable', 'attendance', 'courses_batches', 'fees', 'exams',
-            'leave', 'chat', 'notifications', 'settings',
+            'leave', 'chat', 'notifications', 'settings', 'inventory',
         ],
         'canDelete': False,
         'canExport': False,
@@ -144,7 +144,7 @@ ROLE_PERMISSIONS = {
     'faculty': {
         'default_modules': ['support', 
             'timetable', 'attendance', 'exams', 'leave', 'chat',
-            'notifications', 'payroll', 'settings', 'reimbursements',
+            'notifications', 'payroll', 'settings', 'reimbursements', 'inventory',
         ],
         'canDelete': False,
         'canExport': False,

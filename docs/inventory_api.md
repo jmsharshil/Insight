@@ -219,16 +219,22 @@ Allocations are used to issue an item to a specific `Student` or `Faculty`.
 }
 ```
 
-### View Allocated Items (Sales Roles & Staff Self-Service)
+### View Allocated Items (Sales, Students, Parents & Staff Self-Service)
 
 **`GET /api/v1/inventory/allocations/`** or **`GET /api/v1/inventory/allocations/my/`**
 
-- **Sales Users** (`sales_executive`, `sales_senior_executive`, `tele_caller`, `senior_tele_caller`, `associate_bdm`): Calling `GET /api/v1/inventory/allocations/` automatically filters and returns **only items allocated to the logged-in user**.
-- **Dedicated Self-Service Route**: `GET /api/v1/inventory/allocations/my/` is available for any user to inspect their personal allocated inventory items.
+- **Students (`student`)**: Calling `GET /api/v1/inventory/allocations/` automatically filters and returns **only items issued to the logged-in student** (e.g. uniform shirts, trousers, blazers, books, ID cards).
+- **Parents (`parents`)**: Calling `GET /api/v1/inventory/allocations/` automatically returns **all items issued to their linked children**. Parents can also pass `?student=<student_uuid>` to filter for a specific child.
+- **Sales Users** (`sales_executive`, `sales_senior_executive`, `tele_caller`, `senior_tele_caller`, `associate_bdm`): Automatically returns **only items allocated to the logged-in sales rep** (e.g. brochures, promotional standees, marketing kits).
+- **Faculty (`faculty`)**: Returns items issued to the logged-in faculty member.
+- **Dedicated Self-Service Route**: `GET /api/v1/inventory/allocations/my/` is available for all roles to inspect their personal allocated inventory items.
+- **Read-Only Safety**: Students and parents have strict read-only access (GET/HEAD/OPTIONS); write or mutation attempts return `403 Forbidden`.
 - **Status Filtering**:
-  - `?status=issued`: View items currently held by the representative (e.g. brochures, promotional standees, marketing kits).
-  - `?status=returned`: View items that have been returned to branch inventory.
-- **Push Alerts**: When an item is allocated to a sales user, they immediately receive an in-app notification of type `'inventory'` (`"You have been allocated 100x CS Executive Prospectus"`).
+  - `?status=issued`: View items currently held / active.
+  - `?status=returned`: View items that have been returned.
+- **Push Alerts**:
+  - When an item is allocated to a sales user or faculty member, they receive an in-app notification of type `'inventory'`.
+  - When an item is issued to a student, **both the student and their linked parents** receive push/in-app notifications of type `'inventory'` (`"You have been issued 1x Uniform Blazer"` / `"1x Uniform Blazer has been issued to Rahul Sharma"`).
 
 #### Response Example (`200 OK`)
 ```json
