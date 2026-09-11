@@ -446,23 +446,30 @@ def detect_missing_scans_all_branches():
     """
     try:
         from branch.models import Branch
+        from datetime import timedelta
         branches = Branch.objects.filter(is_active=True)
-        date_str = timezone.localtime(timezone.now()).date().strftime('%Y-%m-%d')
+        now_local = timezone.localtime(timezone.now())
+        # Nightly task: if running before 20:00 (e.g. morning/afternoon), target yesterday
+        if now_local.hour < 20:
+            target_date = now_local.date() - timedelta(days=1)
+        else:
+            target_date = now_local.date()
+        date_str = target_date.strftime('%Y-%m-%d')
         results = []
         for branch in branches:
             result = detect_missing_scans(str(branch.id), date_str)
             results.append(f"Branch {branch.name}: {result}")
-        logger.info(f"Nightly missing scan detection done for {len(results)} branches.")
+        logger.info(f"Nightly missing scan detection done for {len(results)} branches for date {date_str}.")
         
-        # Also run EOD staff absentees check
-        auto_mark_staff_absentees_eod()
+        # Also run EOD staff absentees check for target_date
+        auto_mark_staff_absentees_eod(target_date=target_date)
         
         return "\n".join(results)
     except Exception as exc:
         logger.error(f"detect_missing_scans_all_branches error: {exc}")
         return f"Error: {exc}"
 
-def auto_mark_staff_absentees_eod():
+def auto_mark_staff_absentees_eod(target_date=None):
     """
     Nightly task: Auto-marks non-faculty staff as absent if they have no check-in for the day.
     """
@@ -470,9 +477,18 @@ def auto_mark_staff_absentees_eod():
         from django.contrib.auth import get_user_model
         from .models import EmployeeAttendanceRecord
         from leave.models import LeaveApplication
+        from datetime import timedelta
         User = get_user_model()
         
-        today = timezone.localtime(timezone.now()).date()
+        now_local = timezone.localtime(timezone.now())
+        if target_date is None:
+            # If called before 20:00 (8 PM), target yesterday so we don't prematurely mark staff absent for today
+            if now_local.hour < 20:
+                target_date = now_local.date() - timedelta(days=1)
+            else:
+                target_date = now_local.date()
+                
+        today = target_date
         
         staff_users = User.objects.filter(
             is_active=True

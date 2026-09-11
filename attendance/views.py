@@ -10,7 +10,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q
+from django.db.models import Q, Exists, OuterRef
 from core.utils import apply_filters, get_user_branch_ids, get_user_branch_id, has_user_branch_access
 
 from .models import AttendanceRecord, QRScanLog, AlertLog, ViolationRecord
@@ -431,6 +431,11 @@ class QRScanView(APIView):
                             'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.',
                         }, status=status.HTTP_400_BAD_REQUEST)
                 
+                # Remove any stale absent record for this employee today (since they are checking in)
+                EmployeeAttendanceRecord.objects.filter(
+                    user=user, date=today, status='absent'
+                ).delete()
+
                 # Create a new session record
                 record = EmployeeAttendanceRecord.objects.create(
                     user=user, date=today, timetable_slot=timetable_slot_obj,
@@ -1398,6 +1403,14 @@ class EmployeeAttendanceListCreateView(APIView):
         if user_id and role in EMPLOYEE_ATTENDANCE_ADMIN_ROLES:
             qs = qs.filter(user_id=user_id)
 
+        # Exclude ghost absent records if the employee has an active (present/late/half_day/checkout_pending) record on the same date
+        has_active = EmployeeAttendanceRecord.objects.filter(
+            user_id=OuterRef('user_id'),
+            date=OuterRef('date'),
+            status__in=['present', 'late', 'half_day', 'checkout_pending']
+        )
+        qs = qs.exclude(Q(status='absent') & Exists(has_active))
+
         qs = apply_filters(self, request, qs)
         return paginate_queryset(qs, request, EmployeeAttendanceRecordSerializer)
 
@@ -1476,14 +1489,22 @@ class EmployeeAttendanceListCreateView(APIView):
                 val = rec['checked_out_at']
                 defaults['checked_out_at'] = None if val == "" else val
 
-            record, created = EmployeeAttendanceRecord.objects.update_or_create(
-                user=emp_user, date=d['date'],
-                defaults=defaults,
-            )
-            if created:
-                created_count += 1
-            else:
+            existing_records = EmployeeAttendanceRecord.objects.filter(user=emp_user, date=d['date'])
+            if rec_status in ['present', 'late', 'half_day', 'checkout_pending']:
+                existing_records.filter(status='absent').delete()
+                existing_records = EmployeeAttendanceRecord.objects.filter(user=emp_user, date=d['date'])
+
+            if existing_records.exists():
+                record = existing_records.first()
+                for k, v in defaults.items():
+                    setattr(record, k, v)
+                record.save()
                 updated_count += 1
+            else:
+                record = EmployeeAttendanceRecord.objects.create(
+                    user=emp_user, date=d['date'], **defaults
+                )
+                created_count += 1
 
             # Notify the employee
             try:
@@ -1638,7 +1659,12 @@ class EmployeeCheckInOutView(APIView):
                         'success': False,
                         'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.',
                     }, status=status.HTTP_400_BAD_REQUEST)
-            
+
+            # Remove any stale absent record for this employee today (since they are checking in)
+            EmployeeAttendanceRecord.objects.filter(
+                user=user, date=today, status='absent'
+            ).delete()
+
             # Create a new session record
             record = EmployeeAttendanceRecord.objects.create(
                 user=user, date=today, timetable_slot=timetable_slot_obj,
@@ -1755,6 +1781,14 @@ class EmployeeAttendanceHistoryView(APIView):
             qs = qs.filter(date__gte=from_date)
         if to_date:
             qs = qs.filter(date__lte=to_date)
+
+        # Exclude ghost absent records if the employee has an active record on the same date
+        has_active = EmployeeAttendanceRecord.objects.filter(
+            user_id=OuterRef('user_id'),
+            date=OuterRef('date'),
+            status__in=['present', 'late', 'half_day', 'checkout_pending']
+        )
+        qs = qs.exclude(Q(status='absent') & Exists(has_active))
 
         qs = qs.order_by('-date')
 

@@ -2,7 +2,7 @@ import csv
 import logging
 from django.http import HttpResponse
 from django.utils import timezone
-from django.db.models import Count, Q, Avg
+from django.db.models import Count, Q, Avg, Exists, OuterRef
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -1928,6 +1928,14 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
         # Attendance data
         from attendance.models import EmployeeAttendanceRecord
         records = EmployeeAttendanceRecord.objects.filter(user=employee)
+        
+        # Deduplicate: exclude ghost 'absent' records if an active attendance record exists for the same user and date
+        has_active = EmployeeAttendanceRecord.objects.filter(
+            user=OuterRef('user'),
+            date=OuterRef('date'),
+            status__in=['present', 'late', 'half_day', 'checkout_pending']
+        )
+        records = records.exclude(Q(status='absent') & Exists(has_active))
         
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')

@@ -149,7 +149,7 @@ class SchedulerConfig(AppConfig):
 
         # ── Fix detect_missing_scans_all_branches timing ─────────
         # Cancel any existing pending task so we can re-create it
-        # with the correct delay to 8:30 AM IST.  Without this,
+        # with the correct delay to 10:30 PM IST.  Without this,
         # the singleton guard would keep the OLD task (which was
         # scheduled at the wrong time from a previous deploy).
         stale = ScheduledTask.objects.filter(
@@ -164,11 +164,11 @@ class SchedulerConfig(AppConfig):
                 f"detect_missing_scans_all_branches task(s) to re-schedule at correct time."
             )
 
-        detect_missing_scans_delay = self._seconds_until_target_ist(8, 30)
+        detect_missing_scans_delay = self._seconds_until_target_ist(22, 30)
         print(
             f"[SCHEDULER APP] detect_missing_scans_all_branches "
             f"scheduled in {detect_missing_scans_delay}s "
-            f"(next 08:30 AM IST)"
+            f"(next 10:30 PM IST)"
         )
 
         RECURRING_TASKS = [
@@ -211,7 +211,7 @@ class SchedulerConfig(AppConfig):
             {
                 "task_type": "detect_missing_scans_all_branches",
                 "interval_seconds": 86400,       # daily (every 24h)
-                "delay_seconds": detect_missing_scans_delay,  # next 08:30 AM IST
+                "delay_seconds": detect_missing_scans_delay,  # next 10:30 PM IST
                 "max_retries": 3,
             },
             {

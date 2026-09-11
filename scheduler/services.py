@@ -257,7 +257,7 @@ class TaskScheduler:
             # This prevents drift if the task runs a few minutes late.
             WALL_CLOCK_TASKS = {
                 # task_type → (target_hour, target_minute)
-                "detect_missing_scans_all_branches": (8, 30),
+                "detect_missing_scans_all_branches": (22, 30),
             }
             if task.task_type in WALL_CLOCK_TASKS:
                 target_h, target_m = WALL_CLOCK_TASKS[task.task_type]

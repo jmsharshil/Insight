@@ -688,6 +688,11 @@ class FacultyQRCheckinView(APIView):
                                 sr.chapters.set(chapters_qs)
 
         if scan_type == 'check_in':
+            EmployeeAttendanceRecord.objects.filter(
+                user=request.user,
+                date=now.date(),
+                status='absent'
+            ).delete()
             EmployeeAttendanceRecord.objects.create(
                 user=request.user, date=now.date(), timetable_slot=active_slot,
                 branch_id=fp.branch_id, status='checkout_pending', checked_in_at=now
