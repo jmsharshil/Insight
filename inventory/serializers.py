@@ -71,7 +71,8 @@ class ItemAllocationSerializer(serializers.ModelSerializer):
 
         sales_user = attrs.get('sales_user', getattr(self.instance, 'sales_user', None))
         if sales_user and sales_user.role not in {
-            'sales_senior_executive', 'sales_executive', 'tele_caller'
+            'sales_senior_executive', 'sales_executive', 'tele_caller',
+            'senior_tele_caller', 'associate_bdm'
         }:
             raise serializers.ValidationError({
                 'sales_user': 'The selected user must have a sales role.'

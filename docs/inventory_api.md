@@ -219,6 +219,43 @@ Allocations are used to issue an item to a specific `Student` or `Faculty`.
 }
 ```
 
+### View Allocated Items (Sales Roles & Staff Self-Service)
+
+**`GET /api/v1/inventory/allocations/`** or **`GET /api/v1/inventory/allocations/my/`**
+
+- **Sales Users** (`sales_executive`, `sales_senior_executive`, `tele_caller`, `senior_tele_caller`, `associate_bdm`): Calling `GET /api/v1/inventory/allocations/` automatically filters and returns **only items allocated to the logged-in user**.
+- **Dedicated Self-Service Route**: `GET /api/v1/inventory/allocations/my/` is available for any user to inspect their personal allocated inventory items.
+- **Status Filtering**:
+  - `?status=issued`: View items currently held by the representative (e.g. brochures, promotional standees, marketing kits).
+  - `?status=returned`: View items that have been returned to branch inventory.
+- **Push Alerts**: When an item is allocated to a sales user, they immediately receive an in-app notification of type `'inventory'` (`"You have been allocated 100x CS Executive Prospectus"`).
+
+#### Response Example (`200 OK`)
+```json
+[
+  {
+    "id": "801e8400-e29b-41d4-a716-446655440030",
+    "item": "501e8400-e29b-41d4-a716-446655440010",
+    "item_name": "CS Executive Information Brochure 2026-27",
+    "student": null,
+    "student_name": null,
+    "faculty": null,
+    "faculty_name": null,
+    "sales_user": "550e8400-e29b-41d4-a716-446655440000",
+    "sales_user_name": "Aakash Mehta",
+    "quantity": 100,
+    "status": "issued",
+    "status_display": "Issued",
+    "issued_at": "2026-09-10T10:00:00Z",
+    "issued_by": "770e8400-e29b-41d4-a716-446655440002",
+    "issued_by_name": "Kavita Desai",
+    "returned_at": null,
+    "return_notes": "",
+    "notes": "CSEET Flyers for school seminar"
+  }
+]
+```
+
 ### Issue Multiple Items at Once (Bulk Allocation)
 Use this custom endpoint to issue multiple different items (e.g., a shirt, a blazer, and books) to a single student or faculty at the same time. This is done atomically, meaning if one item fails, none are issued.
 

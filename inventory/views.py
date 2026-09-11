@@ -18,7 +18,13 @@ from faculty.models import FacultyProfile
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
-SALES_ROLES = {'sales_senior_executive', 'sales_executive'}
+SALES_ROLES = {
+    'sales_senior_executive',
+    'sales_executive',
+    'tele_caller',
+    'senior_tele_caller',
+    'associate_bdm',
+}
 
 def resolve_profile_id(model_class, id_val):
     if not id_val:
@@ -117,17 +123,37 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
     queryset = ItemAllocation.objects.select_related('item', 'student', 'faculty', 'sales_user', 'issued_by').all()
     serializer_class = ItemAllocationSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['item', 'status', 'student', 'faculty', 'item__category__branch']
-    search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name', 'sales_user__name']
+    filterset_fields = ['item', 'status', 'student', 'faculty', 'sales_user', 'item__category__branch']
+    search_fields = ['student__admission_number', 'student__first_name', 'faculty__user__name', 'sales_user__name', 'item__name']
 
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
+        if user.role in SALES_ROLES:
+            return qs.filter(sales_user=user)
         if user.role != 'super_admin':
             branch_ids = get_user_branch_ids(user)
             if branch_ids:
                 qs = qs.filter(item__category__branch_id__in=branch_ids)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='my')
+    def my_allocations(self, request):
+        """
+        Returns all items allocated to the currently authenticated user.
+        Supports status filter (?status=issued or ?status=returned).
+        """
+        user = request.user
+        qs = ItemAllocation.objects.select_related('item', 'issued_by').filter(sales_user=user)
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy() if hasattr(request.data, 'copy') else request.data
@@ -269,9 +295,9 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
         return 'Unknown'
 
     def _notify_allocation(self, allocation):
-        """Send system notification to super_admins when inventory is allocated."""
+        """Send system notification to super_admins and recipient sales user when inventory is allocated."""
         try:
-            from core.utils import notify_users_by_role
+            from core.utils import notify_users_by_role, send_system_notification
             recipient_name = self._allocation_recipient(allocation)
             notify_users_by_role(
                 roles=['super_admin'],
@@ -279,6 +305,19 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
                 body=f"{allocation.quantity}x {allocation.item.name} allocated to {recipient_name} by {self.request.user.name}.",
                 metadata={'allocation_id': str(allocation.id), 'item_id': str(allocation.item.id)},
             )
+            if allocation.sales_user:
+                send_system_notification(
+                    user=allocation.sales_user,
+                    title='Inventory Allocated',
+                    body=f"You have been allocated {allocation.quantity}x {allocation.item.name}.",
+                    data={
+                        'allocation_id': str(allocation.id),
+                        'item_id': str(allocation.item.id),
+                        'type': 'inventory_allocated',
+                        'route': f"/inventory/allocations/{allocation.id}"
+                    },
+                    notification_type='inventory',
+                )
         except Exception:
             import logging
             logging.getLogger(__name__).error(f"Failed to send allocation notification for {allocation.id}", exc_info=True)

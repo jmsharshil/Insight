@@ -78,17 +78,17 @@ ROLE_PERMISSIONS = {
         'canExport': False,
     },
     'tele_caller': {
-        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements', 'inventory'],
         'canDelete': False,
         'canExport': False,
     },
     'sales_senior_executive': {
-        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements', 'inventory'],
         'canDelete': False,
         'canExport': True,
     },
     'sales_executive': {
-        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements', 'inventory'],
         'canDelete': False,
         'canExport': False,
     },
@@ -102,7 +102,7 @@ ROLE_PERMISSIONS = {
         'canExport': True,
     },
     'senior_tele_caller': {
-        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements', 'inventory'],
         'canDelete': False,
         'canExport': True,
     },
@@ -116,7 +116,7 @@ ROLE_PERMISSIONS = {
         'canExport': True,
     },
     'associate_bdm': {
-        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements'],
+        'default_modules': ['support', 'crm', 'payroll', 'settings', 'attendance', 'notifications', 'leave', 'reimbursements', 'inventory'],
         'canDelete': False,
         'canExport': True,
     },

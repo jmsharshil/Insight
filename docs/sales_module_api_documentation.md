@@ -746,7 +746,75 @@ Allocates multiple stock items in a single atomic transaction to a sales user.
 
 ---
 
-### 11. Filtered Notifications for Sales Users
+### 11. View Allocated Inventory Items (Sales User Self-Service)
+
+**`GET /api/v1/inventory/allocations/`** or **`GET /api/v1/inventory/allocations/my/`**
+
+Allows sales representatives to view all marketing collateral, brochures, exhibition kits, and roll-up standees allocated to them.
+
+#### Automatic Scoping & Security
+- When called by a sales representative (`sales_executive`, `sales_senior_executive`, `tele_caller`, `senior_tele_caller`, `associate_bdm`), `GET /api/v1/inventory/allocations/` automatically restricts the queryset to **only items allocated to the calling user** (`sales_user=request.user`).
+- **Dedicated Self-Service Endpoint**: `GET /api/v1/inventory/allocations/my/` is also available as an explicit route.
+
+#### Query Parameters
+| Parameter | Type | Required | Description |
+|---|---|:---:|---|
+| `status` | `string` | No | Filter by allocation status: `issued` (currently holding) or `returned` (returned to branch). |
+| `page` | `integer` | No | Pagination page number. |
+| `page_size` | `integer` | No | Number of records per page. |
+
+#### Request Example
+```http
+GET /api/v1/inventory/allocations/?status=issued
+Authorization: Bearer <sales_access_token>
+```
+
+#### Response Example (`200 OK`)
+```json
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": "801e8400-e29b-41d4-a716-446655440030",
+      "item": "501e8400-e29b-41d4-a716-446655440010",
+      "item_name": "CS Executive Information Brochure 2026-27",
+      "sales_user": "550e8400-e29b-41d4-a716-446655440000",
+      "sales_user_name": "Aakash Mehta",
+      "quantity": 100,
+      "status": "issued",
+      "status_display": "Issued",
+      "issued_at": "2026-09-10T10:00:00Z",
+      "issued_by": "770e8400-e29b-41d4-a716-446655440002",
+      "issued_by_name": "Kavita Desai",
+      "returned_at": null,
+      "return_notes": "",
+      "notes": "Prospectus brochures for school seminars"
+    },
+    {
+      "id": "802e8400-e29b-41d4-a716-446655440031",
+      "item": "602e8400-e29b-41d4-a716-446655440011",
+      "item_name": "Insight Roll-up Standee 6x3",
+      "sales_user": "550e8400-e29b-41d4-a716-446655440000",
+      "sales_user_name": "Aakash Mehta",
+      "quantity": 2,
+      "status": "issued",
+      "status_display": "Issued",
+      "issued_at": "2026-09-10T10:00:00Z",
+      "issued_by": "770e8400-e29b-41d4-a716-446655440002",
+      "issued_by_name": "Kavita Desai",
+      "returned_at": null,
+      "return_notes": "",
+      "notes": "School exhibition standees"
+    }
+  ]
+}
+```
+
+---
+
+### 12. Filtered Notifications for Sales Users
 
 **`GET /api/auth/notifications/`**
 
