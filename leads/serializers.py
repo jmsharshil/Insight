@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyActivity, SalesActivityPhoto, OdometerReading, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -152,8 +152,30 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SalesDailyActivity
-        fields = ['id', 'user', 'user_name', 'activity_date', 'notes', 'photos', 'odometer_reading', 'created_at', 'updated_at']
+        fields = [
+            'id', 'user', 'user_name', 'plan',
+            'activity_date', 'notes', 'photos', 'odometer_reading',
+            'created_at', 'updated_at',
+        ]
         read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'created_at', 'updated_at']
+
+
+class SalesDailyPlanSerializer(serializers.ModelSerializer):
+    """
+    Parent serializer — the plan is the top-level object.
+    All activities for the day are nested inside.
+    """
+    user_name = serializers.CharField(source='user.name', read_only=True)
+    activities = SalesDailyActivitySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SalesDailyPlan
+        fields = [
+            'id', 'user', 'user_name', 'plan_date', 'description',
+            'activities', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'user', 'user_name', 'activities', 'created_at', 'updated_at']
+
 
 # ── Contact Serializer ────────────────────────────────────────────────────────
 

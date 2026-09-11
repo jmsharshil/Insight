@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     LeadStatusUpdateView, LeadListView, LeadDetailView, LeadReassignView, LeadAssignView,
     LeadTransferRequestListCreateView, LeadTransferRequestReviewView,
-    SalesDailyActivityView, SalesActivityPhotoView,
+    SalesDailyPlanView, SalesDailyActivityView, SalesActivityPhotoView,
     OdometerReadingListView, OdometerReadingDetailView,
     OdometerReadingApproveView, OdometerReadingRejectView,
 )
@@ -15,6 +15,7 @@ urlpatterns = [
     path("leads/<int:lead_id>/reassign/", LeadReassignView.as_view(), name="lead-reassign"),
     path("leads/transfer-requests/", LeadTransferRequestListCreateView.as_view(), name="lead-transfer-requests"),
     path("leads/transfer-requests/<int:pk>/review/", LeadTransferRequestReviewView.as_view(), name="lead-transfer-request-review"),
+    path("sales/plans/", SalesDailyPlanView.as_view(), name="sales-daily-plans"),
     path("sales/activities/", SalesDailyActivityView.as_view(), name="sales-daily-activities"),
     path("sales/activities/<uuid:activity_id>/photos/", SalesActivityPhotoView.as_view(), name="sales-activity-photos"),
     path("sales/odometer-readings/", OdometerReadingListView.as_view(), name="sales-odometer-readings-list"),

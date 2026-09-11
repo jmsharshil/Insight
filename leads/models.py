@@ -252,9 +252,50 @@ class LeadTransferRequest(models.Model):
     def __str__(self):
         return f"Transfer Request for {self.lead} by {self.requested_by}"
 
+class SalesDailyPlan(models.Model):
+    """
+    Top-level daily plan record created by a salesperson at the start of each day.
+    Holds the high-level description of what the salesperson intends to accomplish.
+    All field activities (photos, odometer) for the day are linked to this plan.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sales_daily_plans',
+    )
+    plan_date = models.DateField(default=timezone.localdate, help_text="The date this plan is for.")
+    description = models.TextField(
+        help_text="Describe what the salesperson plans to do today — schools to visit, targets, events, etc."
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_daily_plans'
+        ordering = ['-plan_date', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'plan_date'],
+                name='unique_sales_plan_per_user_day',
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user.name} - Plan for {self.plan_date}"
+
+
 class SalesDailyActivity(models.Model):
     """One field-activity container per sales user and calendar day."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    plan = models.ForeignKey(
+        SalesDailyPlan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='activities',
+        help_text="The daily plan this activity belongs to.",
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

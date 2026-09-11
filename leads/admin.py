@@ -1,5 +1,5 @@
 from django.contrib import admin
-from leads.models import Lead, LeadStage, LeadAssignmentLog
+from leads.models import Lead, LeadStage, LeadAssignmentLog, SalesDailyPlan, SalesDailyActivity
 
 @admin.register(Lead)
 class LeadAdmin(admin.ModelAdmin):
@@ -17,3 +17,16 @@ class LeadAssignmentLogAdmin(admin.ModelAdmin):
     list_display = ('id', 'lead', 'assigned_from', 'assigned_to', 'changed_by', 'note', 'changed_at',)
     list_filter = ('assigned_to', 'changed_by', 'changed_at',)
     readonly_fields = ('lead', 'assigned_from', 'assigned_to', 'changed_by', 'changed_at',)
+
+@admin.register(SalesDailyPlan)
+class SalesDailyPlanAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'plan_date', 'description', 'created_at',)
+    list_filter = ('plan_date', 'user',)
+    search_fields = ('user__name', 'user__email', 'description',)
+
+@admin.register(SalesDailyActivity)
+class SalesDailyActivityAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'plan', 'activity_date', 'notes', 'created_at',)
+    list_filter = ('activity_date', 'user',)
+    search_fields = ('user__name', 'user__email', 'notes',)
+

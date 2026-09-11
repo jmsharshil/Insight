@@ -20,12 +20,12 @@ from django.conf import settings
 from .serializers import (
     get_lead_serializer, LeadStageUpdateSerializer, LeadListSerializer,
     LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
-    SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
+    SalesDailyPlanSerializer, SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
     OdometerReadingSerializer, OdometerApproveSerializer, OdometerRejectSerializer,
 )
 from .utils import LeadService
 from .models import (
-    Lead, LeadStage, LeadAssignmentLog, SalesDailyActivity, SalesActivityPhoto,
+    Lead, LeadStage, LeadAssignmentLog, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto,
     OdometerReading, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES,
     GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES,
 )
@@ -134,19 +134,136 @@ class SalesDailyActivityView(APIView):
         serializer = SalesDailyActivitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         activity_date = serializer.validated_data.get('activity_date') or timezone.localdate()
+
+        # Auto-link to the day's plan if one exists
+        plan = SalesDailyPlan.objects.filter(user=request.user, plan_date=activity_date).first()
+
         activity, _ = SalesDailyActivity.objects.get_or_create(
             user=request.user,
             activity_date=activity_date,
-            defaults={'notes': serializer.validated_data.get('notes', '')},
+            defaults={
+                'notes': serializer.validated_data.get('notes', ''),
+                'plan': plan,
+            },
         )
         if 'notes' in serializer.validated_data:
             activity.notes = serializer.validated_data['notes']
             activity.save(update_fields=['notes', 'updated_at'])
 
+        # If plan was created after activity, link it now
+        if plan and activity.plan_id != plan.id:
+            activity.plan = plan
+            activity.save(update_fields=['plan', 'updated_at'])
+
         return Response(
             SalesDailyActivitySerializer(activity, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class SalesDailyPlanView(APIView):
+    """
+    GET  /api/v1/sales/plans/        — List daily plans (with nested activities).
+    POST /api/v1/sales/plans/        — Create or update today's plan (description).
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser]
+
+    def get(self, request):
+        if not _sales_activity_access(request.user):
+            return Response({'detail': 'Only sales staff and managers can access sales plans.'}, status=status.HTTP_403_FORBIDDEN)
+
+        queryset = SalesDailyPlan.objects.prefetch_related(
+            'activities', 'activities__photos', 'activities__odometer_reading',
+        ).select_related('user')
+
+        if request.user.role not in ODOMETER_APPROVER_ROLES:
+            queryset = queryset.filter(user=request.user)
+        elif request.user.role == 'branch_manager':
+            branch_ids = get_user_branch_ids(request.user)
+            if branch_ids:
+                queryset = queryset.filter(user__branch_id__in=branch_ids)
+
+        # ── Filters ──
+        search = request.query_params.get('search') or request.query_params.get('name')
+        if search:
+            queryset = queryset.filter(
+                Q(user__name__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(user__phone__icontains=search)
+            )
+
+        date_param = request.query_params.get('date')
+        if date_param:
+            if date_param.lower() == 'today':
+                queryset = queryset.filter(plan_date=timezone.localdate())
+            else:
+                try:
+                    parsed_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+                    queryset = queryset.filter(plan_date=parsed_date)
+                except ValueError:
+                    return Response({'detail': 'Invalid date format. Use YYYY-MM-DD or "today".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from_date = request.query_params.get('from_date')
+        if from_date:
+            try:
+                parsed_from = datetime.strptime(from_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(plan_date__gte=parsed_from)
+            except ValueError:
+                return Response({'detail': 'Invalid from_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        to_date = request.query_params.get('to_date')
+        if to_date:
+            try:
+                parsed_to = datetime.strptime(to_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(plan_date__lte=parsed_to)
+            except ValueError:
+                return Response({'detail': 'Invalid to_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user_id = request.query_params.get('user_id')
+        if user_id:
+            if request.user.role in ODOMETER_APPROVER_ROLES or str(request.user.id) == str(user_id):
+                queryset = queryset.filter(user_id=user_id)
+            else:
+                return Response({'detail': 'You can only view your own sales plans.'}, status=status.HTTP_403_FORBIDDEN)
+
+        queryset = queryset.order_by('-plan_date', '-created_at')
+        serializer = SalesDailyPlanSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    def post(self, request):
+        if not _sales_activity_access(request.user):
+            return Response({'detail': 'Only sales staff can create sales plans.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = SalesDailyPlanSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        plan_date = serializer.validated_data.get('plan_date') or timezone.localdate()
+        description = serializer.validated_data.get('description', '')
+
+        plan, created = SalesDailyPlan.objects.get_or_create(
+            user=request.user,
+            plan_date=plan_date,
+            defaults={'description': description},
+        )
+        if not created:
+            plan.description = description
+            plan.save(update_fields=['description', 'updated_at'])
+
+        # Auto-create the day's activity container and link it to the plan
+        activity, act_created = SalesDailyActivity.objects.get_or_create(
+            user=request.user,
+            activity_date=plan_date,
+            defaults={'plan': plan, 'notes': ''},
+        )
+        if not act_created and activity.plan_id != plan.id:
+            activity.plan = plan
+            activity.save(update_fields=['plan', 'updated_at'])
+
+        return Response(
+            SalesDailyPlanSerializer(plan, context={'request': request}).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
 
 class SalesActivityPhotoView(APIView):
     permission_classes = [IsAuthenticated]

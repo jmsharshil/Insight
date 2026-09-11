@@ -13,37 +13,57 @@
 
 This guide documents the **Sales User APIs** introduced starting from the Notification Types architectural update (`b759ee1`) through the Additional Roles & Field Tracking release (`4d7e89a`).
 
-The sales suite covers five core operational capabilities:
-1. **Sales Daily Field Activity & GPS/Odometer Tracking**: Daily activity logging for on-ground sales reps with geo-tagged and timestamped verification photos (start/end selfies, odometer readings, school visits, and exhibition evidence).
-2. **Odometer Reading Approval & Travel Reimbursement**: Automated odometer calculation (`total_kms = end_kms - start_kms`) with managerial approval workflow (custom editable `expense_per_km`), monthly payslip credit (`reimbursements_amount`), and automatic settlement on payroll disbursement.
-3. **Sales Inventory Allocation**: Material issue and tracking (brochures, promotional kits, standees, marketing collateral) assigned directly to sales personnel.
-4. **Notification Types & Filter Integration**: Categorized push notifications and notification history filtering (`notification_type='sales'`, `notification_type='leads'`, and `notification_type='inventory'`) with auto-routing.
-5. **Lead Transfer Requests**: Workflow for field reps to request transferring assigned leads to colleagues with senior managerial review.
+The sales suite covers six core operational capabilities:
+1. **Sales Daily Plan (Parent Model)**: High-level daily plan and itinerary created by sales staff at the start of each day (`description` detailing planned school visits, seminars, and targets). Serves as the parent object (`SalesDailyPlan`) nesting all child activities for that day.
+2. **Sales Daily Field Activity & GPS/Odometer Tracking**: Daily activity logging (`SalesDailyActivity`) for on-ground sales reps with geo-tagged and timestamped verification photos (start/end selfies, odometer readings, school visits, and exhibition evidence), linked directly to the parent daily plan.
+3. **Odometer Reading Approval & Travel Reimbursement**: Automated odometer calculation (`total_kms = end_kms - start_kms`) with managerial approval workflow (custom editable `expense_per_km`), monthly payslip credit (`reimbursements_amount`), and automatic settlement on payroll disbursement.
+4. **Sales Inventory Allocation**: Material issue and tracking (brochures, promotional kits, standees, marketing collateral) assigned directly to sales personnel.
+5. **Notification Types & Filter Integration**: Categorized push notifications and notification history filtering (`notification_type='sales'`, `notification_type='leads'`, and `notification_type='inventory'`) with auto-routing.
+6. **Lead Transfer Requests**: Workflow for field reps to request transferring assigned leads to colleagues with senior managerial review.
 
 ---
 
 ## Data Models & Field Reference
 
-### 1. `SalesDailyActivity` (`leads/models.py`)
+### 1. `SalesDailyPlan` (Parent Model) (`leads/models.py`)
 
-Represents a single field-work container for a sales user on a specific calendar day.
+Top-level daily plan record created by a salesperson at the start of each day. Holds the high-level description of what the salesperson intends to accomplish. All field activities (photos, odometer) for the day are linked under this parent plan.
 
 | Field | Type | Description |
 |---|---|---|
 | `id` | `UUID` (PK) | Auto-generated UUIDv4 |
+| `user` | `ForeignKey(User)` | Sales employee creating the daily plan |
+| `plan_date` | `DateField` | Date of the plan (default: today). Unique per user per day |
+| `description` | `TextField` | Narrative of planned activities (e.g. schools to visit, student targets, events) |
+| `activities` | `Reverse(SalesDailyActivity)` | Related daily activity containers nested under this plan (`related_name='activities'`) |
+| `created_at` | `DateTimeField` | Record creation timestamp |
+| `updated_at` | `DateTimeField` | Last update timestamp |
+
+**Constraint:** Unique constraint on `['user', 'plan_date']` ensures only one plan record exists per sales representative per day. Submitting for the same date updates the existing plan description.
+
+---
+
+### 2. `SalesDailyActivity` (Child Container) (`leads/models.py`)
+
+Represents a single field-work activity container for a sales user on a specific calendar day, linked to the parent `SalesDailyPlan`.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `UUID` (PK) | Auto-generated UUIDv4 |
+| `plan` | `ForeignKey(SalesDailyPlan)` | **Parent daily plan** this activity belongs to (nullable, `on_delete=SET_NULL`, `related_name='activities'`) |
 | `user` | `ForeignKey(User)` | Sales employee performing field activities |
 | `activity_date` | `DateField` | Date of field activity (default: today). Unique per user per day |
-| `notes` | `TextField` | Daily summary, school visit targets, or remarks |
+| `notes` | `TextField` | Daily summary, school visit remarks, or execution notes |
 | `photos` | `Reverse(SalesActivityPhoto)` | Related verification photos captured during the day |
 | `odometer_reading` | `Reverse(OdometerReading)` | Linked travel kilometer calculation and approval record |
 | `created_at` | `DateTimeField` | Record creation timestamp |
 | `updated_at` | `DateTimeField` | Last update timestamp |
 
-**Constraint:** Unique constraint on `['user', 'activity_date']` ensures only one activity record exists per sales representative per day. Submitting for the same day updates the existing record.
+**Constraint:** Unique constraint on `['user', 'activity_date']` ensures only one activity record exists per sales representative per day. Submitting for the same day updates the existing record. When created, it automatically links to the user's `SalesDailyPlan` for that date.
 
 ---
 
-### 2. `SalesActivityPhoto` (`leads/models.py`)
+### 3. `SalesActivityPhoto` (`leads/models.py`)
 
 Stores timestamped, geo-tagged photo evidence attached to a daily activity.
 
@@ -73,7 +93,7 @@ Stores timestamped, geo-tagged photo evidence attached to a daily activity.
 
 ---
 
-### 3. `OdometerReading` (`leads/models.py`)
+### 4. `OdometerReading` (`leads/models.py`)
 
 Represents the daily odometer travel expense claim generated for a sales employee.
 
@@ -100,7 +120,7 @@ Represents the daily odometer travel expense claim generated for a sales employe
 
 ---
 
-### 4. `ItemAllocation` for Sales Users (`inventory/models.py`)
+### 5. `ItemAllocation` for Sales Users (`inventory/models.py`)
 
 Material issued to sales staff from branch inventory.
 
@@ -121,7 +141,7 @@ Material issued to sales staff from branch inventory.
 
 ---
 
-### 5. `NotificationHistory` & Categories (`auth_user/models.py`)
+### 6. `NotificationHistory` & Categories (`auth_user/models.py`)
 
 System notifications stamped with `notification_type` choices:
 `system`, `authentication`, `admission`, `attendance`, `timetable`, `chat`, `exam`, `fees`, `inventory`, `leads`, `leave`, `payroll`, `results`, `sales`, `support`.
@@ -136,31 +156,37 @@ System notifications stamped with `notification_type` choices:
 
 ### Daily Field Work Lifecycle
 
-```tex[ SALES REP MORNING ROUTINE ]
+```text
+[ SALES REP MORNING ROUTINE: PLAN & FIELD INITIALIZATION ]
   │
-  ├── 1. POST /api/v1/sales/activities/ ────────────────────────► Creates/initializes daily activity
-  │      {"activity_date": "2026-09-10", "notes": "Visiting 3 schools"}
+  ├── 1. POST /api/v1/sales/plans/ ─────────────────────────────► Creates daily plan with targets & itinerary
+  │      {"plan_date": "2026-09-10", "description": "Visiting Malad & Kandivali schools"}
+  │      └─► Automatically creates & links SalesDailyActivity container
   │
-  ├── 2. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_selfie' (with GPS)
+  ├── 2. POST /api/v1/sales/activities/ ────────────────────────► (Optional) Updates daily execution notes
+  │      {"activity_date": "2026-09-10", "notes": "Meeting school principals and career counselors"}
+  │      └─► Automatically links to today's SalesDailyPlan if one exists
   │
-  ├── 3. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_odometer' (with GPS + odometer_kms)
+  ├── 3. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_selfie' (with GPS)
+  │
+  ├── 4. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_odometer' (with GPS + odometer_kms)
   │      └─► Automatically creates OdometerReading (start_kms=14250.50, status='pending')
   │
 [ FIELD VISITS DURING THE DAY ]
   │
-  ├── 4. POST /api/v1/sales/activities/<id>/photos/ ─────────────► School 1: 'school_exterior' + 'school_interior'
+  ├── 5. POST /api/v1/sales/activities/<id>/photos/ ─────────────► School 1: 'school_exterior' + 'school_interior'
   │
-  ├── 5. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Exhibition: 'exhibition' photos (up to 6)
+  ├── 6. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Exhibition: 'exhibition' photos (up to 6)
   │
 [ EVENING CHECKOUT & REIMBURSEMENT APPROVAL ]
   │
-  ├── 6. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_odometer' (with final kms)
+  ├── 7. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_odometer' (with final kms)
   │      ├─► Automatically updates OdometerReading (end_kms=14298.20, total_kms=47.70)
   │      └─► Dispatches push notification (type='sales') to Branch Managers / Super Admins
   │
-  ├── 7. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_selfie' (end of day)
+  ├── 8. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_selfie' (end of day)
   │
-  └── 8. POST /api/v1/sales/odometer-readings/<id>/approve/ ──────► Manager approves reading + enters expense_per_km
+  └── 9. POST /api/v1/sales/odometer-readings/<id>/approve/ ──────► Manager approves reading + enters expense_per_km
          ├─► Computes total_expense = total_kms * expense_per_km
          ├─► Sends in-app notification (type='sales') to Sales Representative
          ├─► Automatically included under 'reimbursements_amount' in monthly PaySlip
@@ -171,11 +197,191 @@ System notifications stamped with `notification_type` choices:
 
 ## Complete API Reference
 
-### 1. List Sales Daily Activities
+### 1. List Sales Daily Plans (Parent Object)
+
+**`GET /api/v1/sales/plans/`**
+
+Retrieves daily plans created by sales personnel. As the **parent model**, each plan nests the day's high-level `description`, employee information, and all related child `activities` (including attached `photos` and `odometer_reading`).
+- **Sales Staff** (`sales_executive`, `sales_senior_executive`, `tele_caller`): Sees only their own plans.
+- **Branch Managers**: View plans across sales personnel in their authorized branches.
+- **Super Admins & Accountants**: View plans across the entire organization.
+
+#### Query Parameters
+| Parameter | Type | Example | Description |
+|---|---|---|---|
+| `search` or `name` | `string` | `?search=Aakash` | Case-insensitive search on sales staff name, email, or phone. |
+| `date` | `string` | `?date=today` or `?date=2026-09-10` | Filter by exact plan date. Pass `'today'` for current date. |
+| `from_date` | `string` | `?from_date=2026-09-01` | Filter plans from this date onwards (`YYYY-MM-DD`). |
+| `to_date` | `string` | `?to_date=2026-09-30` | Filter plans up to this date (`YYYY-MM-DD`). |
+| `user_id` | `uuid` | `?user_id=550e8400...` | Filter by specific sales rep (managers and admins only). |
+
+#### 💡 Daily Plan Form Behavior (Mobile / Frontend Guidance)
+- On app launch, query:
+  ```http
+  GET /api/v1/sales/plans/?date=today
+  ```
+- **If the sales representative has not submitted a plan for today yet**, the API returns an **empty array (`[]`)**.
+- When the frontend receives `[]`, it should prompt the sales representative to enter their plan `description` for the day.
+- Once submitted via `POST /api/v1/sales/plans/`, the record is saved, the day's `SalesDailyActivity` container is automatically initialized, and subsequent queries return the complete plan with nested activities.
+
+#### Request Headers
+```http
+Authorization: Bearer <access_token>
+```
+
+#### Response Example (`200 OK`)
+```json
+[
+  {
+    "id": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
+    "user": "550e8400-e29b-41d4-a716-446655440000",
+    "user_name": "Aakash Mehta",
+    "plan_date": "2026-09-10",
+    "description": "Visiting Ryan International School and Podar International in Malad. Meeting 45 parents at the afternoon career fair.",
+    "activities": [
+      {
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "user": "550e8400-e29b-41d4-a716-446655440000",
+        "user_name": "Aakash Mehta",
+        "plan": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
+        "activity_date": "2026-09-10",
+        "notes": "Met counselor Mrs. Sharma at Ryan International; positive interest for CS Executive batch.",
+        "photos": [
+          {
+            "id": "e4b2d1c0-789a-4bc1-9012-3456789abcde",
+            "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "photo_type": "start_selfie",
+            "photo_type_display": "Start of Day Selfie",
+            "photo": "http://api.example.com/media/sales/activity_photos/start_selfie_100926.jpg",
+            "latitude": "19.113645",
+            "longitude": "72.869734",
+            "odometer_kms": null,
+            "captured_at": "2026-09-10T09:05:00Z",
+            "created_at": "2026-09-10T09:05:12Z"
+          },
+          {
+            "id": "f5c3e2d1-890b-5cd2-0123-456789abcdef",
+            "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "photo_type": "start_odometer",
+            "photo_type_display": "Start of Day Odometer",
+            "photo": "http://api.example.com/media/sales/activity_photos/start_odo_100926.jpg",
+            "latitude": "19.113650",
+            "longitude": "72.869740",
+            "odometer_kms": "14250.50",
+            "captured_at": "2026-09-10T09:07:00Z",
+            "created_at": "2026-09-10T09:07:15Z"
+          },
+          {
+            "id": "b7e5a4f3-012d-7ef4-2345-6789abcdef01",
+            "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "photo_type": "end_odometer",
+            "photo_type_display": "End of Day Odometer",
+            "photo": "http://api.example.com/media/sales/activity_photos/end_odo_100926.jpg",
+            "latitude": "19.113700",
+            "longitude": "72.869800",
+            "odometer_kms": "14298.20",
+            "captured_at": "2026-09-10T18:15:00Z",
+            "created_at": "2026-09-10T18:15:30Z"
+          }
+        ],
+        "odometer_reading": {
+          "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+          "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "activity_date": "2026-09-10",
+          "user": "550e8400-e29b-41d4-a716-446655440000",
+          "user_name": "Aakash Mehta",
+          "user_email": "aakash@example.com",
+          "start_kms": "14250.50",
+          "end_kms": "14298.20",
+          "total_kms": "47.70",
+          "expense_per_km": "6.00",
+          "total_expense": "286.20",
+          "status": "approved",
+          "approved_by": "110e8400-e29b-41d4-a716-446655440001",
+          "approved_by_name": "Kavita Desai",
+          "approved_at": "2026-09-10T19:00:00Z",
+          "rejected_by": null,
+          "rejected_by_name": null,
+          "rejected_at": null,
+          "rejection_reason": "",
+          "payroll_run": "220e8400-e29b-41d4-a716-446655440002",
+          "payslip": "330e8400-e29b-41d4-a716-446655440003",
+          "is_paid": false,
+          "start_odometer_photo": "http://api.example.com/media/sales/activity_photos/start_odo_100926.jpg",
+          "end_odometer_photo": "http://api.example.com/media/sales/activity_photos/end_odo_100926.jpg",
+          "created_at": "2026-09-10T09:07:15Z",
+          "updated_at": "2026-09-10T19:00:00Z"
+        },
+        "created_at": "2026-09-10T09:04:00Z",
+        "updated_at": "2026-09-10T18:16:00Z"
+      }
+    ],
+    "created_at": "2026-09-10T08:30:00Z",
+    "updated_at": "2026-09-10T08:30:00Z"
+  }
+]
+```
+
+---
+
+### 2. Create or Update Sales Daily Plan
+
+**`POST /api/v1/sales/plans/`**
+
+Creates the morning plan and targets for the day, or updates the description if already created.
+- **Auto-Container Creation**: Automatically creates or links the day's `SalesDailyActivity` container to this plan so field photos and odometer claims can be logged seamlessly.
+- **Idempotency**: Submitting again with the same date updates the `description` without creating duplicate records.
+
+#### Request Headers
+```http
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "plan_date": "2026-09-10",
+  "description": "Visiting Ryan International School and Podar International in Malad. Conducting counseling seminars for Class 12 commerce students."
+}
+```
+
+*Note: `plan_date` defaults to current local date if omitted.*
+
+#### Response Example (`201 Created` / `200 OK`)
+```json
+{
+  "id": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
+  "user": "550e8400-e29b-41d4-a716-446655440000",
+  "user_name": "Aakash Mehta",
+  "plan_date": "2026-09-10",
+  "description": "Visiting Ryan International School and Podar International in Malad. Conducting counseling seminars for Class 12 commerce students.",
+  "activities": [
+    {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "user": "550e8400-e29b-41d4-a716-446655440000",
+      "user_name": "Aakash Mehta",
+      "plan": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
+      "activity_date": "2026-09-10",
+      "notes": "",
+      "photos": [],
+      "odometer_reading": null,
+      "created_at": "2026-09-10T08:30:00Z",
+      "updated_at": "2026-09-10T08:30:00Z"
+    }
+  ],
+  "created_at": "2026-09-10T08:30:00Z",
+  "updated_at": "2026-09-10T08:30:00Z"
+}
+```
+
+---
+
+### 3. List Sales Daily Activities
 
 **`GET /api/v1/sales/activities/`**
 
-Retrieves daily activity logs including all attached photos, linked odometer reading, and user details.
+Retrieves daily activity logs including attached photos, linked odometer reading, user details, and parent `plan` link.
 - **Sales Staff** (`sales_executive`, `sales_senior_executive`, `tele_caller`): Sees only their own activities.
 - **Branch Managers**: View activities across sales personnel in their authorized branches.
 - **Super Admins & Accountants**: View activities across the entire organization.
@@ -189,16 +395,6 @@ Retrieves daily activity logs including all attached photos, linked odometer rea
 | `to_date` | `string` | `?to_date=2026-09-30` | Filter activities up to this date (`YYYY-MM-DD`). |
 | `user_id` | `uuid` | `?user_id=550e8400...` | Filter by specific sales rep (managers and admins only). |
 
-#### 💡 New Day Empty Fields Behavior (Mobile / Frontend Guidance)
-To prevent the mobile app from displaying yesterday's filled fields on a new day:
-- On app launch, query:
-  ```http
-  GET /api/v1/sales/activities/?date=today
-  ```
-- **If the sales representative has not created an activity for today yet**, the API returns an **empty array (`[]`)**.
-- When the frontend receives `[]`, it must render **blank, fresh upload inputs** (Start Selfie, Start Odometer, etc.).
-- When the sales representative uploads photos or saves notes, the today record is created and will be returned on subsequent queries.
-
 #### Request Headers
 ```http
 Authorization: Bearer <access_token>
@@ -211,6 +407,7 @@ Authorization: Bearer <access_token>
     "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "user": "550e8400-e29b-41d4-a716-446655440000",
     "user_name": "Aakash Mehta",
+    "plan": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
     "activity_date": "2026-09-10",
     "notes": "Visited Ryan International School and Podar International. Met 45 parents at career fair.",
     "photos": [
@@ -287,11 +484,11 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 2. Create or Initialize Daily Activity Container
+### 4. Create or Initialize Daily Activity Container
 
 **`POST /api/v1/sales/activities/`**
 
-Initializes the day's field container or updates notes for the specified date.
+Initializes the day's field container or updates notes for the specified date. Automatically links to the user's `SalesDailyPlan` for that date if one exists.
 
 #### Request Headers
 ```http
@@ -315,9 +512,11 @@ Content-Type: application/json
   "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "user": "550e8400-e29b-41d4-a716-446655440000",
   "user_name": "Aakash Mehta",
+  "plan": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
   "activity_date": "2026-09-10",
   "notes": "Targeting Malad and Kandivali schools for CS Executive counseling.",
   "photos": [],
+  "odometer_reading": null,
   "created_at": "2026-09-10T09:04:00Z",
   "updated_at": "2026-09-10T09:04:00Z"
 }
@@ -332,7 +531,7 @@ Content-Type: application/json
 
 ---
 
-### 3. Upload Sales Activity Photo Evidence
+### 5. Upload Sales Activity Photo Evidence
 
 **`POST /api/v1/sales/activities/<uuid:activity_id>/photos/`**
 
@@ -427,7 +626,7 @@ Content-Type: image/jpeg
 
 ---
 
-### 4. List Odometer Readings
+### 6. List Odometer Readings
 
 **`GET /api/v1/sales/odometer-readings/`**
 
@@ -483,7 +682,7 @@ Retrieves the list of odometer readings, their calculated kilometers, per-km rei
 
 ---
 
-### 5. Retrieve Single Odometer Reading
+### 7. Retrieve Single Odometer Reading
 
 **`GET /api/v1/sales/odometer-readings/<uuid:pk>/`**
 
@@ -523,7 +722,7 @@ Retrieves detailed information for a single odometer reading.
 
 ---
 
-### 6. Approve Odometer Reading
+### 8. Approve Odometer Reading
 
 **`POST /api/v1/sales/odometer-readings/<uuid:pk>/approve/`**
 
@@ -588,7 +787,7 @@ Content-Type: application/json
 
 ---
 
-### 7. Reject Odometer Reading
+### 9. Reject Odometer Reading
 
 **`POST /api/v1/sales/odometer-readings/<uuid:pk>/reject/`**
 
@@ -621,7 +820,7 @@ Rejects an odometer reading claim with an optional/mandatory reason.
 
 ---
 
-### 8. Monthly Payslip Integration & Settlement Workflow
+### 10. Monthly Payslip Integration & Settlement Workflow
 
 Approved odometer readings follow an automated lifecycle aligned with standard expense reimbursements:
 
@@ -651,7 +850,7 @@ Approved odometer readings follow an automated lifecycle aligned with standard e
 
 ---
 
-### 9. Allocate Inventory to Sales Users
+### 11. Allocate Inventory to Sales Users
 
 **`POST /api/v1/inventory/allocations/`**
 
@@ -699,7 +898,7 @@ Content-Type: application/json
 
 ---
 
-### 10. Bulk Issue Inventory to Sales User
+### 12. Bulk Issue Inventory to Sales User
 
 **`POST /api/v1/inventory/allocations/bulk_issue/`**
 
@@ -746,7 +945,7 @@ Allocates multiple stock items in a single atomic transaction to a sales user.
 
 ---
 
-### 11. View Allocated Inventory Items (Sales User Self-Service)
+### 13. View Allocated Inventory Items (Sales User Self-Service)
 
 **`GET /api/v1/inventory/allocations/`** or **`GET /api/v1/inventory/allocations/my/`**
 
@@ -814,7 +1013,7 @@ Authorization: Bearer <sales_access_token>
 
 ---
 
-### 12. Filtered Notifications for Sales Users
+### 14. Filtered Notifications for Sales Users
 
 **`GET /api/auth/notifications/`**
 
@@ -862,7 +1061,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 12. Mark All Notifications as Read
+### 15. Mark All Notifications as Read
 
 **`PATCH /api/auth/notifications/`**
 
@@ -878,7 +1077,7 @@ Marks all unread notifications as read for the authenticated user.
 
 ---
 
-### 13. Lead Transfer Request & Review
+### 16. Lead Transfer Request & Review
 
 #### Request Transfer (Sales Rep)
 **`POST /api/v1/leads/transfer-requests/`**
@@ -935,6 +1134,8 @@ Approves or rejects the transfer. Upon approval, updates `lead.assigned_to`, cre
 
 | Endpoint | Sales Executive / Tele Caller | Sales Senior Exec | Branch Manager | Super Admin / Accountant |
 |---|:---:|:---:|:---:|:---:|
+| `GET /sales/plans/` | Own plans | Own plans | Branch sales team | All sales team |
+| `POST /sales/plans/` | ✅ | ✅ | ✅ | ✅ |
 | `GET /sales/activities/` | Own activities | Own activities | Branch sales team | All sales team |
 | `POST /sales/activities/` | ✅ | ✅ | ✅ | ✅ |
 | `POST /sales/activities/<id>/photos/` | ✅ (own activity) | ✅ (own activity) | ✅ | ✅ |
@@ -951,8 +1152,9 @@ Approves or rejects the transfer. Upon approval, updates `lead.assigned_to`, cre
 
 ## Integration Summary
 
-- **Leads & Sales Activities (`leads/`):** Links sales activity logs directly into CRM field presence, tracks daily GPS/odometer readings, provides manager approve/reject endpoints with editable per-km rates, and enables peer lead transfer workflows.
+- **Leads, Daily Plans & Sales Activities (`leads/`):** Links top-level daily plans (`SalesDailyPlan`) and field activity logs (`SalesDailyActivity`) directly into CRM field presence, tracks daily GPS/odometer readings, provides manager approve/reject endpoints with editable per-km rates, and enables peer lead transfer workflows.
 - **Monthly Payroll (`payroll/`):** Approved, unpaid odometer readings are automatically queried via `_get_odometer_expenses_for_user()`, credited on the employee's monthly `PaySlip` under `reimbursements_amount`, linked to `PayrollRun`, and marked `is_paid=True` upon disbursement.
 - **Inventory Module (`inventory/`):** Dedicated tracking of marketing assets, brochures, and seminar standees assigned to sales reps with `ItemAllocation.sales_user`.
 - **Chat & Notifications (`chat.notifications`, `auth_user`):** Real-time alerts stamped with `notification_type='sales'` for odometer reading approvals and submissions, allowing granular client-side filtering via `GET /api/auth/notifications/?type=sales`.
+
 
