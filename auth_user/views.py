@@ -358,6 +358,7 @@ class AddUserAPIView(APIView):
                             employee_id=emp_id,
                             qualification=user.qualification or 'N/A',
                             specialization=user.specialization or 'N/A',
+                            level=user.level or 'cseet',
                             joining_date=user.joining_date or timezone.now().date(),
                             employment_type=user.employment_type,
                             hourly_rate=user.hourly_rate,
@@ -367,6 +368,8 @@ class AddUserAPIView(APIView):
                         )
                         if qr_file:
                             fp.qr_code.save(qr_file.name, qr_file, save=True)
+                        if user.levels.exists():
+                            fp.levels.set(user.levels.all())
                 except Exception:
                     # If faculty profile fails to create, log it but don't break the user creation
                     pass

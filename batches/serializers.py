@@ -8,6 +8,7 @@ from .models import (
     SESSION_TYPE_CHOICES, SLOT_CODE_CHOICES,
 )
 from django.conf import settings
+from faculty.models import FacultyProfile
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -103,11 +104,71 @@ class CourseCreateUpdateSerializer(serializers.ModelSerializer):
 # E2 — forward declare so SubjectListSerializer can reference it
 class ChapterSerializer(serializers.ModelSerializer):
     """Read/write serializer for Chapter (E2)."""
+    faculties = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=FacultyProfile.objects.all(), required=False
+    )
+    faculties_details = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Chapter
-        fields = ['id', 'subject', 'name', 'order', 'description', 'is_active','duration_hours']
+        fields = [
+            'id', 'subject', 'name', 'order', 'description', 'is_active',
+            'duration_hours', 'faculties', 'faculties_details'
+        ]
         read_only_fields = ['id', 'subject']
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'faculties' in data:
+            facs = data.get('faculties')
+            if facs is None:
+                facs = []
+            elif isinstance(facs, str):
+                import json
+                try:
+                    facs = json.loads(facs)
+                except Exception:
+                    facs = [f.strip() for f in facs.split(',') if f.strip()]
+            if not isinstance(facs, list):
+                facs = [facs] if facs else []
+
+            cleaned_facs = []
+            for item in facs:
+                if not item:
+                    continue
+                if hasattr(item, 'id'):
+                    cleaned_facs.append(str(item.id))
+                    continue
+                item_str = str(item).strip()
+                if FacultyProfile.objects.filter(id=item_str).exists():
+                    cleaned_facs.append(item_str)
+                else:
+                    fp = FacultyProfile.objects.filter(user_id=item_str).first()
+                    if fp:
+                        cleaned_facs.append(str(fp.id))
+                    else:
+                        cleaned_facs.append(item_str)
+            data['faculties'] = cleaned_facs
+        return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if 'faculties' in ret and isinstance(ret['faculties'], list):
+            ret['faculties'] = [str(f) for f in ret['faculties']]
+        return ret
+
+    def get_faculties_details(self, obj):
+        return [
+            {
+                'id': str(fp.id),
+                'user_id': str(fp.user_id) if fp.user_id else None,
+                'employee_id': fp.employee_id,
+                'name': fp.user.name if fp.user else '',
+                'email': fp.user.email if fp.user else '',
+                'specialization': fp.specialization,
+            }
+            for fp in obj.faculties.select_related('user').all()
+        ]
 
     def validate(self, data):
         subject = self.context.get('subject')
@@ -121,6 +182,20 @@ class ChapterSerializer(serializers.ModelSerializer):
                     {'order': f'A chapter with order {order} already exists for this subject.'}
                 )
         return data
+
+    def create(self, validated_data):
+        faculties = validated_data.pop('faculties', None)
+        chapter = super().create(validated_data)
+        if faculties is not None:
+            chapter.faculties.set(faculties)
+        return chapter
+
+    def update(self, instance, validated_data):
+        faculties = validated_data.pop('faculties', None)
+        chapter = super().update(instance, validated_data)
+        if faculties is not None:
+            chapter.faculties.set(faculties)
+        return chapter
 
 
 class SubjectListSerializer(serializers.ModelSerializer):

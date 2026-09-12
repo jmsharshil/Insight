@@ -5,7 +5,7 @@ from django.conf import settings
 
 
 EMPLOYEE_FIELDS = [
-    'employee_id', 'qualification', 'specialization', 'subject_expertise', 'level', 
+    'employee_id', 'qualification', 'specialization', 'subject_expertise', 'level', 'levels',
     'employment_type', 'joining_date', 'hourly_rate', 'session_hours', 'salary', 
     'bank_account', 'ifsc_code', 'pan_number', 'aadhar_number', 'work_start_time', 'work_end_time', 
     'salary_retention_percentage', 'per_paper_rate'
@@ -70,8 +70,20 @@ class EmployeeFieldsMixin:
             return ret
             
         if role != 'faculty':
-            for f in ['specialization', 'subject_expertise', 'employment_type', 'session_hours']:
+            for f in ['specialization', 'subject_expertise', 'employment_type', 'session_hours', 'levels']:
                 ret.pop(f, None)
+        elif hasattr(instance, 'levels'):
+            ret['levels'] = [str(lvl.id) for lvl in instance.levels.all()]
+            ret['levels_details'] = [
+                {
+                    'id': str(lvl.id),
+                    'name': lvl.name,
+                    'course_id': str(lvl.course_id) if lvl.course_id else None,
+                    'course_name': lvl.course.name if getattr(lvl, 'course', None) else '',
+                    'course_type': lvl.course_type,
+                }
+                for lvl in instance.levels.select_related('course').all()
+            ]
                 
         if not (role == 'faculty' and emp_type in ['part_time', 'visiting']):
             ret.pop('hourly_rate', None)
@@ -95,6 +107,18 @@ class EmployeeFieldsMixin:
                 mutable_data[k] = lst if len(lst) > 1 else lst[0]
         else:
             mutable_data = dict(data)
+
+        if 'levels' in mutable_data:
+            levels_val = mutable_data.get('levels')
+            if isinstance(levels_val, str):
+                import json
+                try:
+                    levels_val = json.loads(levels_val)
+                except Exception:
+                    levels_val = [s.strip() for s in levels_val.split(',') if s.strip()]
+            if not isinstance(levels_val, list):
+                levels_val = [levels_val] if levels_val else []
+            mutable_data['levels'] = levels_val
 
         # Normalize 'branches' to list (user wants explicit list ['id1', 'id2'])
         # Single string is wrapped; comma-separated strings will fail validation (enforces proper array from frontend)
@@ -318,6 +342,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
     additional_roles = serializers.ListField(
         child=serializers.CharField(max_length=50),
         required=False,
@@ -372,6 +397,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         linked_students = validated_data.pop('linked_students', None)
         extra_branches = validated_data.pop('branches', None)
         additional_roles = validated_data.pop('additional_roles', None) or []
+        levels_data = validated_data.pop('levels', None)
         
         request = self.context.get('request')
         if ('organization' not in validated_data or validated_data['organization'] is None) and request is not None:
@@ -413,6 +439,17 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         validated_data['username'] = username
 
         user = User.objects.create_user(password=None, is_active=False, **validated_data)
+
+        if levels_data:
+            from faculty.serializers import resolve_course_levels
+            resolved = resolve_course_levels(levels_data)
+            user.levels.set(resolved)
+            first_lvl = resolved.first()
+            if first_lvl:
+                name_lower = first_lvl.name.lower()
+                lvl_str = 'professional' if 'professional' in name_lower else 'executive'
+                user.level = lvl_str
+                user.save(update_fields=['level'])
 
         if branch_set:
             user.branches.set(branch_set)
@@ -550,6 +587,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
     additional_roles = serializers.ListField(
         child=serializers.CharField(max_length=50),
         required=False,
@@ -601,6 +639,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     def update(self, instance, validated_data):
         extra_branches = validated_data.pop('branches', None)
         linked_students = validated_data.pop('linked_students', None)
+        levels_data = validated_data.pop('levels', None)
 
         # Check whether additional_roles was explicitly sent in request
         additional_roles_sent = 'additional_roles' in self.initial_data
@@ -695,6 +734,17 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             else:
                 ParentLink.objects.filter(parent=instance).delete()
 
+        if levels_data is not None:
+            from faculty.serializers import resolve_course_levels
+            resolved_levels = resolve_course_levels(levels_data)
+            instance.levels.set(resolved_levels)
+            first_lvl = resolved_levels.first()
+            if first_lvl:
+                name_lower = first_lvl.name.lower()
+                lvl_str = 'professional' if 'professional' in name_lower else 'executive'
+                instance.level = lvl_str
+                instance.save(update_fields=['level'])
+
         # Sync all employee fields to FacultyProfile if it exists
         if instance.role == 'faculty':
             try:
@@ -721,8 +771,9 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
                     'salary', 'salary_retention_percentage', 'bank_account',
                     'ifsc_code', 'pan_number', 'work_start_time', 'work_end_time',
                 ])
-            except:
-                print("Exception:",e)
+                if levels_data is not None:
+                    fp.levels.set(instance.levels.all())
+            except Exception as e:
                 pass
                 
         return instance

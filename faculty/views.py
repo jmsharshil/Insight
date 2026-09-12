@@ -73,7 +73,9 @@ class FacultyListCreateView(APIView):
         if role not in FACULTY_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related('batch_assignments__batch').annotate(
+        qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related(
+            'batch_assignments__batch', 'levels', 'levels__course'
+        ).annotate(
             batch_count=Count('batch_assignments', distinct=True)
         )
         if getattr(request.user, 'organization', None):
@@ -83,13 +85,22 @@ class FacultyListCreateView(APIView):
             if branch_ids:
                 qs = qs.filter(branch_id__in=branch_ids)
 
-        for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type'), ('level', 'level')]:
+        for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type')]:
             val = request.GET.get(param)
             if val:
                 if param == 'is_active':
                     qs = qs.filter(is_active=val.lower() == 'true')
                 else:
                     qs = qs.filter(**{field: val})
+
+        level_val = request.GET.get('level_id') or request.GET.get('level')
+        if level_val:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(level=level_val) |
+                Q(levels__id=level_val) |
+                Q(levels__name__icontains=level_val)
+            ).distinct()
 
         qs = apply_filters(self, request, qs)
 
@@ -165,6 +176,21 @@ class FacultyListCreateView(APIView):
             if qr_file:
                 fp.qr_code.save(qr_file.name, qr_file, save=True)
 
+            from faculty.serializers import resolve_course_levels
+            levels_input = d.get('levels') or ([d.get('level')] if d.get('level') else [])
+            if levels_input:
+                resolved_levels = resolve_course_levels(levels_input)
+                fp.levels.set(resolved_levels)
+                user.levels.set(resolved_levels)
+                first_lvl = resolved_levels.first()
+                if first_lvl:
+                    name_lower = first_lvl.name.lower()
+                    lvl_choice = 'professional' if 'professional' in name_lower else 'executive'
+                    fp.level = lvl_choice
+                    fp.save(update_fields=['level'])
+                    user.level = lvl_choice
+                    user.save(update_fields=['level'])
+
         except Exception as e:
             logger.error(f"Faculty creation error: {e}")
             return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -191,7 +217,9 @@ class FacultyDetailView(APIView):
 
     def _get_faculty(self, request, faculty_id):
         try:
-            qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related('batch_assignments__batch').all()
+            qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related(
+                'batch_assignments__batch', 'levels', 'levels__course', 'chapters__subject'
+            ).all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             return qs.get(id=faculty_id)

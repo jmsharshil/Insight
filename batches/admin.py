@@ -70,6 +70,7 @@ class ChapterAdmin(admin.ModelAdmin):
     search_fields = ('name', 'description')
     list_filter = ('subject', 'is_active',)
     list_editable = ('duration_hours', 'is_active', 'order')
+    filter_horizontal = ('faculties',)
 
 
 @admin.register(TimetableSlot)

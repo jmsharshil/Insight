@@ -2,11 +2,75 @@ from rest_framework import serializers
 from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHourlyRate
 
 
+def resolve_course_levels(levels_input):
+    """
+    Resolves a list of CourseLevel UUIDs, names, or slugs ('executive', 'professional', 'cseet')
+    to a queryset of CourseLevel instances.
+    """
+    import uuid
+    from django.db.models import Q
+    from batches.models import CourseLevel
+
+    if not levels_input:
+        return CourseLevel.objects.none()
+
+    if isinstance(levels_input, (str, bytes)):
+        import json
+        stripped = levels_input.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            try:
+                levels_input = json.loads(stripped)
+            except Exception:
+                levels_input = [s.strip() for s in stripped[1:-1].split(',') if s.strip()]
+        else:
+            levels_input = [s.strip() for s in stripped.split(',') if s.strip()]
+
+    if not isinstance(levels_input, (list, tuple, set)):
+        levels_input = [levels_input]
+
+    resolved_ids = []
+    for item in levels_input:
+        if not item:
+            continue
+        if hasattr(item, 'id'):
+            resolved_ids.append(item.id)
+            continue
+        item_str = str(item).strip()
+        try:
+            val_uuid = uuid.UUID(item_str)
+            if CourseLevel.objects.filter(id=val_uuid).exists():
+                resolved_ids.append(val_uuid)
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        alias_map = {
+            'executive': 'Executive',
+            'cs_executive': 'Executive',
+            'cs executive': 'Executive',
+            'professional': 'Professional',
+            'cs_professional': 'Professional',
+            'cs professional': 'Professional',
+            'cseet': 'CSEET',
+        }
+        search_term = alias_map.get(item_str.lower(), item_str)
+        matched = list(CourseLevel.objects.filter(
+            Q(name__iexact=search_term) |
+            Q(name__icontains=search_term) |
+            Q(course_type__iexact=item_str)
+        ).values_list('id', flat=True))
+        resolved_ids.extend(matched)
+
+    return CourseLevel.objects.filter(id__in=set(resolved_ids))
+
+
 # ═══ Faculty Profile ══════════════════════════════════════════════════════════
 
 class FacultyListSerializer(serializers.ModelSerializer):
 
     level = serializers.CharField(source='user.level', read_only=True)
+    levels = serializers.SerializerMethodField()
+    levels_details = serializers.SerializerMethodField()
     employment_type = serializers.CharField(source='user.employment_type', read_only=True)
     specialization = serializers.CharField(source='user.specialization', read_only=True)
     subject_expertise = serializers.CharField(source='user.subject_expertise', read_only=True)
@@ -31,25 +95,31 @@ class FacultyListSerializer(serializers.ModelSerializer):
         model = FacultyProfile
         fields = [
             'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url', 'branch', 'branch_name',
-            'level', 'employment_type', 'specialization', 'subject_expertise',
+            'level', 'levels', 'levels_details', 'employment_type', 'specialization', 'subject_expertise',
             'joining_date', 'is_active', 'batch_count', 'created_at',
             'work_start_time', 'work_end_time', 'salary_retention_percentage',
             'level_display', 'employment_type_display', 'batch_name',
             'subjects', 'subject_name']
 
-    def get_full_name(self, obj):
-        return obj.user.name if obj.user else ''
+    def get_levels(self, obj):
+        return [str(lvl.id) for lvl in obj.levels.all()]
 
-    def get_email(self, obj):
-        return obj.user.email if obj.user else ''
-
-    def get_phone(self, obj):
-        return getattr(obj.user, 'phone', '') if obj.user else ''
-
-    def get_branch_name(self, obj):
-        return obj.branch.name if obj.branch else ''
+    def get_levels_details(self, obj):
+        return [
+            {
+                'id': str(lvl.id),
+                'name': lvl.name,
+                'course_id': str(lvl.course_id) if lvl.course_id else None,
+                'course_name': lvl.course.name if getattr(lvl, 'course', None) else '',
+                'course_type': lvl.course_type,
+            }
+            for lvl in obj.levels.select_related('course').all()
+        ]
 
     def get_level_display(self, obj):
+        names = [lvl.name for lvl in obj.levels.all()]
+        if names:
+            return ", ".join(names)
         return obj.user.get_level_display() if obj.user else obj.get_level_display()
         
     def get_employment_type_display(self, obj):
@@ -92,6 +162,9 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
     specialization = serializers.CharField(source='user.specialization', read_only=True)
     subject_expertise = serializers.CharField(source='user.subject_expertise', read_only=True)
     level = serializers.CharField(source='user.level', read_only=True)
+    levels = serializers.SerializerMethodField()
+    levels_details = serializers.SerializerMethodField()
+    chapters = serializers.SerializerMethodField()
     employment_type = serializers.CharField(source='user.employment_type', read_only=True)
     joining_date = serializers.DateField(source='user.joining_date', read_only=True)
     salary = serializers.DecimalField(source='user.salary', max_digits=10, decimal_places=2, read_only=True)
@@ -120,7 +193,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee_id', 'full_name', 'email', 'phone', 'photo_url',
             'branch', 'qualification', 'specialization', 'subject_expertise',
-            'level', 'employment_type', 'joining_date',
+            'level', 'levels', 'levels_details', 'chapters', 'employment_type', 'joining_date',
             'salary', 'hourly_rate', 'salary_retention_percentage', 'bank_account', 'ifsc_code', 'pan_number',
             'qr_code', 'qr_code_url', 'is_active', 'created_at',
             'work_start_time', 'work_end_time',
@@ -139,7 +212,37 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
     def get_phone(self, obj):
         return getattr(obj.user, 'phone', '') if obj.user else ''
 
+    def get_levels(self, obj):
+        return [str(lvl.id) for lvl in obj.levels.all()]
+
+    def get_levels_details(self, obj):
+        return [
+            {
+                'id': str(lvl.id),
+                'name': lvl.name,
+                'course_id': str(lvl.course_id) if lvl.course_id else None,
+                'course_name': lvl.course.name if getattr(lvl, 'course', None) else '',
+                'course_type': lvl.course_type,
+            }
+            for lvl in obj.levels.select_related('course').all()
+        ]
+
+    def get_chapters(self, obj):
+        return [
+            {
+                'id': str(c.id),
+                'name': c.name,
+                'order': c.order,
+                'subject_id': str(c.subject_id),
+                'subject_name': c.subject.name if c.subject else '',
+            }
+            for c in obj.chapters.select_related('subject').all()
+        ]
+
     def get_level_display(self, obj):
+        names = [lvl.name for lvl in obj.levels.all()]
+        if names:
+            return ", ".join(names)
         return obj.user.get_level_display() if obj.user else obj.get_level_display()
         
     def get_employment_type_display(self, obj):
@@ -208,7 +311,8 @@ class FacultyCreateSerializer(serializers.Serializer):
     qualification = serializers.CharField(max_length=200)
     specialization = serializers.CharField(max_length=200)
     subject_expertise = serializers.CharField(max_length=300, required=False, default='')
-    level = serializers.ChoiceField(choices=['executive', 'professional'], default='executive')
+    level = serializers.CharField(max_length=50, required=False, default='executive')
+    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True, default=list)
     employment_type = serializers.ChoiceField(choices=['full_time', 'part_time', 'visiting'], default='full_time')
     joining_date = serializers.DateField()
     salary = serializers.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -217,6 +321,24 @@ class FacultyCreateSerializer(serializers.Serializer):
     ifsc_code = serializers.CharField(max_length=15, required=False, default='')
     pan_number = serializers.CharField(max_length=15, required=False, default='')
     branch = serializers.UUIDField(required=False, allow_null=True)
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'levels' in data:
+            val = data['levels']
+            if isinstance(val, str):
+                import json
+                try:
+                    val = json.loads(val)
+                except Exception:
+                    val = [s.strip() for s in val.split(',') if s.strip()]
+            if not isinstance(val, list):
+                val = [val] if val else []
+            data['levels'] = val
+        elif 'level' in data and data['level']:
+            data['levels'] = [data['level']]
+
+        return super().to_internal_value(data)
 
 
 class FacultyUpdateSerializer(serializers.ModelSerializer):
@@ -229,13 +351,13 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
     branch = serializers.UUIDField(required=False, write_only=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
-    
+    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
 
     class Meta:
         model = FacultyProfile
         fields = [
             'qualification', 'specialization', 'subject_expertise',
-            'level', 'employment_type', 'salary', 'hourly_rate', 'session_hours',
+            'level', 'levels', 'employment_type', 'salary', 'hourly_rate', 'session_hours',
             'bank_account', 'ifsc_code', 'pan_number', 'is_active', 'photo',
             'full_name', 'name', 'email', 'phone', 'branch_id', 'branch',
             'work_start_time', 'work_end_time', 'salary_retention_percentage',
@@ -246,6 +368,17 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
         for f in ['work_start_time', 'work_end_time']:
             if f in data and data[f] in ['', 'null', 'undefined', None]:
                 data[f] = None
+        if 'levels' in data:
+            val = data['levels']
+            if isinstance(val, str):
+                import json
+                try:
+                    val = json.loads(val)
+                except Exception:
+                    val = [s.strip() for s in val.split(',') if s.strip()]
+            if not isinstance(val, list):
+                val = [val] if val else []
+            data['levels'] = val
         return super().to_internal_value(data)
 
     def update(self, instance, validated_data):
@@ -270,13 +403,29 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
             if full_name_val:
                 user.name = full_name_val
             if 'email' in user_updates:
-                # Need to update username if email changes? Optional, let's just update email
                 user.email = user_updates['email']
             if 'phone' in user_updates:
                 user.phone = user_updates['phone']
             user.save()
 
+        levels_data = validated_data.pop('levels', None)
+
         instance = super().update(instance, validated_data)
+
+        if levels_data is not None:
+            resolved_levels = resolve_course_levels(levels_data)
+            instance.levels.set(resolved_levels)
+            if instance.user:
+                instance.user.levels.set(resolved_levels)
+            first_lvl = resolved_levels.first()
+            if first_lvl:
+                first_name_lower = first_lvl.name.lower()
+                lvl_str = 'professional' if 'professional' in first_name_lower else 'executive'
+                instance.level = lvl_str
+                instance.save(update_fields=['level'])
+                if instance.user:
+                    instance.user.level = lvl_str
+                    instance.user.save(update_fields=['level'])
 
         # Update ALL payslips (including disbursed ones per user's requirement) to reflect the new salary/hourly rate
         from payroll.models import PayrollRun, PaySlip

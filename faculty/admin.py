@@ -6,6 +6,7 @@ class FacultyProfileAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'branch', 'employee_id', 'photo', 'qualification', 'specialization', 'subject_expertise', 'level', 'employment_type',)
     list_filter = ('is_active', 'employment_type', 'branch', 'created_at', 'level', 'user', 'joining_date',)
     search_fields = ['employee_id', 'user__name', 'specialization']
+    filter_horizontal = ('levels',)
 
 
 @admin.register(SubjectHourlyRate)

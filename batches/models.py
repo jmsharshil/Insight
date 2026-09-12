@@ -413,6 +413,7 @@ class Chapter(models.Model):
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
     duration_hours = models.PositiveIntegerField(default=0)
+    faculties   = models.ManyToManyField('faculty.FacultyProfile', blank=True, related_name='chapters')
 
     class Meta:
         db_table = 'subject_chapters'

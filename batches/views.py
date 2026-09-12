@@ -260,10 +260,13 @@ class SubjectDetailView(APIView):
 
 class ChapterListView(APIView):
     def get(self, request, subject_id):
-        chapters = Chapter.objects.filter(subject_id=subject_id).order_by('order')
+        chapters = Chapter.objects.filter(subject_id=subject_id).prefetch_related('faculties__user').order_by('order')
         if getattr(request.user, 'organization', None):
             chapters = chapters.filter(subject__organization=request.user.organization)
-        return Response({'success': True, 'data': ChapterSerializer(chapters, many=True).data})
+        faculty_id = request.GET.get('faculty_id') or request.GET.get('faculty')
+        if faculty_id:
+            chapters = chapters.filter(faculties__id=faculty_id)
+        return Response({'success': True, 'data': ChapterSerializer(chapters, many=True, context={'request': request}).data})
 
     def post(self, request, subject_id):
         try:
@@ -274,18 +277,18 @@ class ChapterListView(APIView):
         except Subject.DoesNotExist:
             return Response({'success': False, 'message': 'Subject not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ChapterSerializer(data=request.data, context={'subject': subject})
+        serializer = ChapterSerializer(data=request.data, context={'subject': subject, 'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         
         chapter = serializer.save(subject=subject)
-        return Response({'success': True, 'message': 'Chapter created.', 'data': ChapterSerializer(chapter).data}, status=status.HTTP_201_CREATED)
+        return Response({'success': True, 'message': 'Chapter created.', 'data': ChapterSerializer(chapter, context={'request': request}).data}, status=status.HTTP_201_CREATED)
 
 
 class ChapterDetailView(APIView):
     def _get_chapter(self, subject_id, chapter_id):
         try:
-            qs = Chapter.objects.filter(subject_id=subject_id)
+            qs = Chapter.objects.filter(subject_id=subject_id).prefetch_related('faculties__user')
             if getattr(self.request.user, 'organization', None):
                 qs = qs.filter(subject__organization=self.request.user.organization)
             return qs.get(pk=chapter_id)
@@ -296,17 +299,17 @@ class ChapterDetailView(APIView):
         chapter = self._get_chapter(subject_id, chapter_id)
         if not chapter:
             return Response({'success': False, 'message': 'Chapter not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({'success': True, 'data': ChapterSerializer(chapter).data})
+        return Response({'success': True, 'data': ChapterSerializer(chapter, context={'request': request}).data})
 
     def patch(self, request, subject_id, chapter_id):
         chapter = self._get_chapter(subject_id, chapter_id)
         if not chapter:
             return Response({'success': False, 'message': 'Chapter not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ChapterSerializer(chapter, data=request.data, partial=True, context={'subject': chapter.subject})
+        serializer = ChapterSerializer(chapter, data=request.data, partial=True, context={'subject': chapter.subject, 'request': request})
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
-        return Response({'success': True, 'message': 'Chapter updated.', 'data': ChapterSerializer(chapter).data})
+        return Response({'success': True, 'message': 'Chapter updated.', 'data': ChapterSerializer(chapter, context={'request': request}).data})
 
     def delete(self, request, subject_id, chapter_id):
         chapter = self._get_chapter(subject_id, chapter_id)
@@ -1562,20 +1565,19 @@ class AcademicDropdownsView(APIView):
             branches_qs = branches_qs.filter(id=branch_id)
  
         subjects = list(subjects_qs.values('id', 'name', 'level_id'))
-        chapters = list(chapters_qs.values('id', 'name', 'subject_id', 'order'))
-        papers = list(papers_qs.values('id', 'set_name', 'subject_id', 'file', 'answer_key'))
-
         chapters_by_subject = {}
-        for chapter in chapters:
-            subj_id = chapter['subject_id']
+        for chapter in chapters_qs.prefetch_related('faculties'):
+            subj_id = chapter.subject_id
             if subj_id not in chapters_by_subject:
                 chapters_by_subject[subj_id] = []
             chapters_by_subject[subj_id].append({
-                'id': chapter['id'],
-                'name': chapter['name'],
-                'order': chapter['order']
+                'id': chapter.id,
+                'name': chapter.name,
+                'order': chapter.order,
+                'faculty_ids': [str(fid) for fid in chapter.faculties.values_list('id', flat=True)],
             })
             
+        papers = list(papers_qs.values('id', 'set_name', 'subject_id', 'file', 'answer_key'))
         papers_by_subject = {}
         for paper in papers:
             subj_id = paper['subject_id']
