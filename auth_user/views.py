@@ -656,14 +656,15 @@ class UserListAPIView(APIView):
     pagination_class = None
 
     def get(self, request):
+        _prefetch = ('branches', 'levels', 'levels__course', 'faculty_chapters__subject')
         if request.user.is_superuser:
-            users = User.objects.select_related('branch').prefetch_related('branches').all().order_by('-created_at')
+            users = User.objects.select_related('branch').prefetch_related(*_prefetch).all().order_by('-created_at')
         elif request.user.role == 'super_admin':
-            users = User.objects.select_related('branch').prefetch_related('branches').filter(
+            users = User.objects.select_related('branch').prefetch_related(*_prefetch).filter(
                 Q(organization=request.user.organization) | Q(is_superuser=True)
             ).order_by('-created_at')
         else:
-            users = User.objects.select_related('branch').prefetch_related('branches').filter(organization=request.user.organization).order_by('-created_at')
+            users = User.objects.select_related('branch').prefetch_related(*_prefetch).filter(organization=request.user.organization).order_by('-created_at')
         roles = self.request.query_params.getlist('role') or self.request.query_params.getlist('roles')
         is_active = self.request.query_params.get('is_active')
         branch = self.request.query_params.get('branch')  # explicit support for branch param
@@ -681,6 +682,17 @@ class UserListAPIView(APIView):
             # Match users whose primary branch OR any assigned multi-branch matches
             users = users.filter(
                 Q(branch_id=branch) | Q(branches=branch)
+            ).distinct()
+
+        level_id = self.request.query_params.get('level_id')
+        level_param = self.request.query_params.get('level')
+        if level_id:
+            users = users.filter(levels__id=level_id).distinct()
+        elif level_param:
+            users = users.filter(
+                Q(level__iexact=level_param) |
+                Q(levels__name__icontains=level_param) |
+                Q(levels__course__course_type__iexact=level_param)
             ).distinct()
 
         users = apply_filters(self, request, users)

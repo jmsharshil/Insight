@@ -72,18 +72,30 @@ class EmployeeFieldsMixin:
         if role != 'faculty':
             for f in ['specialization', 'subject_expertise', 'employment_type', 'session_hours', 'levels']:
                 ret.pop(f, None)
-        elif hasattr(instance, 'levels'):
-            ret['levels'] = [str(lvl.id) for lvl in instance.levels.all()]
-            ret['levels_details'] = [
+        else:
+            if hasattr(instance, 'levels'):
+                ret['levels'] = [str(lvl.id) for lvl in instance.levels.all()]
+                ret['levels_details'] = [
+                    {
+                        'id': str(lvl.id),
+                        'name': lvl.name,
+                        'course_id': str(lvl.course_id) if lvl.course_id else None,
+                        'course_name': lvl.course.name if getattr(lvl, 'course', None) else '',
+                        'course_type': lvl.course_type,
+                    }
+                    for lvl in instance.levels.select_related('course').all()
+                ]
+            # chapters: direct from User (Chapter.faculties M2M → User, related_name='faculty_chapters')
+            ret['chapters'] = [
                 {
-                    'id': str(lvl.id),
-                    'name': lvl.name,
-                    'course_id': str(lvl.course_id) if lvl.course_id else None,
-                    'course_name': lvl.course.name if getattr(lvl, 'course', None) else '',
-                    'course_type': lvl.course_type,
+                    'id': str(ch.id),
+                    'name': ch.name,
+                    'order': ch.order,
+                    'subject_id': str(ch.subject_id),
+                    'subject_name': ch.subject.name if ch.subject else '',
                 }
-                for lvl in instance.levels.select_related('course').all()
-            ]
+                for ch in instance.faculty_chapters.select_related('subject').all()
+            ] if hasattr(instance, 'faculty_chapters') else []
                 
         if not (role == 'faculty' and emp_type in ['part_time', 'visiting']):
             ret.pop('hourly_rate', None)
@@ -749,7 +761,21 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         if instance.role == 'faculty':
             try:
                 from faculty.models import FacultyProfile
-                fp = FacultyProfile.objects.get(user=instance)
+                from faculty.utils import generate_employee_id
+                from django.utils import timezone
+                fp = FacultyProfile.objects.filter(user=instance).first()
+                if not fp:
+                    emp_id = generate_employee_id(instance.branch)
+                    fp = FacultyProfile.objects.create(
+                        user=instance,
+                        branch=instance.branch,
+                        employee_id=emp_id,
+                        qualification=instance.qualification or 'N/A',
+                        specialization=instance.specialization or 'N/A',
+                        level=instance.level or 'cseet',
+                        joining_date=instance.joining_date or timezone.now().date(),
+                        employment_type=instance.employment_type or 'full_time',
+                    )
                 fp.qualification = instance.qualification
                 fp.specialization = instance.specialization
                 fp.subject_expertise = instance.subject_expertise

@@ -217,13 +217,14 @@ class FacultyDetailView(APIView):
 
     def _get_faculty(self, request, faculty_id):
         try:
+            from django.db.models import Q
             qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related(
                 'batch_assignments__batch', 'levels', 'levels__course', 'chapters__subject'
             ).all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
-            return qs.get(id=faculty_id)
-        except FacultyProfile.DoesNotExist:
+            return qs.filter(Q(id=faculty_id) | Q(user_id=faculty_id)).first()
+        except Exception:
             return None
 
     def get(self, request, faculty_id):

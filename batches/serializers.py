@@ -8,7 +8,10 @@ from .models import (
     SESSION_TYPE_CHOICES, SLOT_CODE_CHOICES,
 )
 from django.conf import settings
-from faculty.models import FacultyProfile
+from django.contrib.auth import get_user_model
+from faculty.models import FacultyProfile  # still needed by BatchFaculty serializers
+
+User = get_user_model()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -103,9 +106,11 @@ class CourseCreateUpdateSerializer(serializers.ModelSerializer):
 
 # E2 — forward declare so SubjectListSerializer can reference it
 class ChapterSerializer(serializers.ModelSerializer):
-    """Read/write serializer for Chapter (E2)."""
+    """Read/write serializer for Chapter (E2). faculties = User IDs (role='faculty')."""
     faculties = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=FacultyProfile.objects.all(), required=False
+        many=True,
+        queryset=User.objects.filter(role='faculty'),
+        required=False,
     )
     faculties_details = serializers.SerializerMethodField(read_only=True)
 
@@ -131,28 +136,13 @@ class ChapterSerializer(serializers.ModelSerializer):
                     facs = [f.strip() for f in facs.split(',') if f.strip()]
             if not isinstance(facs, list):
                 facs = [facs] if facs else []
-
-            cleaned_facs = []
-            for item in facs:
-                if not item:
-                    continue
-                if hasattr(item, 'id'):
-                    cleaned_facs.append(str(item.id))
-                    continue
-                item_str = str(item).strip()
-                if FacultyProfile.objects.filter(id=item_str).exists():
-                    cleaned_facs.append(item_str)
-                else:
-                    fp = FacultyProfile.objects.filter(user_id=item_str).first()
-                    if fp:
-                        cleaned_facs.append(str(fp.id))
-                    else:
-                        cleaned_facs.append(item_str)
-            data['faculties'] = cleaned_facs
+            # Ensure all items are strings (User UUIDs)
+            data['faculties'] = [str(f).strip() for f in facs if f]
         return super().to_internal_value(data)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        # faculties are User IDs now — ensure they are string UUIDs
         if 'faculties' in ret and isinstance(ret['faculties'], list):
             ret['faculties'] = [str(f) for f in ret['faculties']]
         return ret
@@ -160,14 +150,15 @@ class ChapterSerializer(serializers.ModelSerializer):
     def get_faculties_details(self, obj):
         return [
             {
-                'id': str(fp.id),
-                'user_id': str(fp.user_id) if fp.user_id else None,
-                'employee_id': fp.employee_id,
-                'name': fp.user.name if fp.user else '',
-                'email': fp.user.email if fp.user else '',
-                'specialization': fp.specialization,
+                'id': str(user.id),
+                'user_id': str(user.id),
+                'name': user.name or '',
+                'email': user.email or '',
+                'phone': user.phone or '',
+                'level': user.level or '',
+                'levels': [str(lvl.id) for lvl in user.levels.all()] if hasattr(user, 'levels') else [],
             }
-            for fp in obj.faculties.select_related('user').all()
+            for user in obj.faculties.all()
         ]
 
     def validate(self, data):

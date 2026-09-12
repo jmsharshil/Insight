@@ -260,12 +260,12 @@ class SubjectDetailView(APIView):
 
 class ChapterListView(APIView):
     def get(self, request, subject_id):
-        chapters = Chapter.objects.filter(subject_id=subject_id).prefetch_related('faculties__user').order_by('order')
+        chapters = Chapter.objects.filter(subject_id=subject_id).prefetch_related('faculties').order_by('order')
         if getattr(request.user, 'organization', None):
             chapters = chapters.filter(subject__organization=request.user.organization)
         faculty_id = request.GET.get('faculty_id') or request.GET.get('faculty')
         if faculty_id:
-            chapters = chapters.filter(faculties__id=faculty_id)
+            chapters = chapters.filter(faculties__id=faculty_id).distinct()
         return Response({'success': True, 'data': ChapterSerializer(chapters, many=True, context={'request': request}).data})
 
     def post(self, request, subject_id):
@@ -288,7 +288,7 @@ class ChapterListView(APIView):
 class ChapterDetailView(APIView):
     def _get_chapter(self, subject_id, chapter_id):
         try:
-            qs = Chapter.objects.filter(subject_id=subject_id).prefetch_related('faculties__user')
+            qs = Chapter.objects.filter(subject_id=subject_id).prefetch_related('faculties')
             if getattr(self.request.user, 'organization', None):
                 qs = qs.filter(subject__organization=self.request.user.organization)
             return qs.get(pk=chapter_id)
@@ -1570,11 +1570,14 @@ class AcademicDropdownsView(APIView):
             subj_id = chapter.subject_id
             if subj_id not in chapters_by_subject:
                 chapters_by_subject[subj_id] = []
+            # faculties is M2M to User — values_list('id') gives User IDs directly
+            faculty_user_ids = [str(uid) for uid in chapter.faculties.values_list('id', flat=True)]
             chapters_by_subject[subj_id].append({
                 'id': chapter.id,
                 'name': chapter.name,
                 'order': chapter.order,
-                'faculty_ids': [str(fid) for fid in chapter.faculties.values_list('id', flat=True)],
+                'faculty_ids': faculty_user_ids,   # User IDs (for backward compat key name)
+                'faculty_user_ids': faculty_user_ids,
             })
             
         papers = list(papers_qs.values('id', 'set_name', 'subject_id', 'file', 'answer_key'))
