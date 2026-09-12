@@ -11,8 +11,9 @@
 
 - **Stage updates** create immutable `LeadStage` entries.
 - **Assignment** creates `LeadAssignmentLog`.
-- **Conversion** (`converted` stage): Auto-creates linked `onboarding.Admission` record (with `fee_structure` if provided), triggers onboarding flow (bank assignment via `fees.utils.select_bank_accounts_for_payment()`, email, etc.).
-- Round-robin counsellor assignment in related onboarding.
+- **Assignment**: Pure round-robin via `leads.signals.auto_assign_lead` (pre_save signal). Uses `form_type` (`contact` → `tele_caller` role, `inquiry` → `counsellor` role) with `get_role_filter_q`. Does **not** override existing `assigned_to`. Calls `notify_new_lead_assignment`.
+- **Conversion** (`converted` stage): **Auto-conversion signal to `onboarding.Admission` is now commented out** (manual CRM → Admission onboarding flow preferred via new `Admission` model in `admissions/models.py`).
+- New sales models integrated: `SalesDailyPlan`, `SalesDailyActivity`, `SalesActivityPhoto`, `OdometerReading` (payroll linkage, approval workflow, vehicle rates).
 
 **Integration:** `converted` lead → `onboarding_admissions_api_documentation.md` (form submission → fees/student creation). Ties to updated fees installment rules on enrollment.
 
@@ -43,28 +44,33 @@
 ## Architecture & Workflow Diagram
 
 ```text
-WEB FORM (Contact/Inquiry) ──► Lead (new)
+WEB FORM (Contact/Inquiry) ──► Lead (new) 
           │
           ▼
-Counsellor assignment (POST /assign/) + logs
+**auto_assign_lead** (pre_save signal, pure round-robin by `form_type` via `get_role_filter_q` → tele_caller/counsellor)
           │
           ▼
-Stage progression (POST /status/) → LeadStage history
+Counsellor/Telecaller assignment + `notify_new_lead_assignment` (system notif)
           │
           ▼
-converted stage ──► Auto create Admission (onboarding)
+Stage progression (POST /status/) → immutable `LeadStage` history + `LeadAssignmentLog`
           │
           ▼
-onboarding flow (form, payment_pending via fees bank select, enrollment → Student + StudentFee)
+`converted` stage (manual) ──► **Admission pipeline** (new `admissions.Admission` model, status workflow, bank round-robin, Razorpay)
           │
-          └─► fees.utils.get_installment_plan_status() + update_student_fee_status()
+          ▼
+Onboarding flow (form submission → fees bank select via `fees.utils`, payment, approval → Student + StudentFee)
+          │
+          └─► `get_installment_plan_status()` based on `CourseLevel.course_type`
 ```
 
 **Key Points:**
+- Round-robin is automatic on Lead creation/update (no override of existing assignee).
+- Conversion signal to Admission **disabled** (use manual Admission creation or dedicated CRM flow).
+- New sales activity models (`SalesDailyPlan`, `SalesDailyActivity` etc.) link to payroll for field team (odometer claims, daily plans, photo proofs, manager approval).
 - All stage/assignment changes immutable for audit.
-- Conversion links `Lead.admission` (OneToOne).
-- Role-based filtering in list view.
-- Feeds into updated onboarding/students/fees chain (pending_approval installments, QR fee checks).
+- Role-based filtering in list view (counsellor sees only assigned).
+- Feeds into updated `admissions`, `fees`, `students`, `payroll` modules.
 
 ---
 
@@ -74,16 +80,16 @@ onboarding flow (form, payment_pending via fees bank select, enrollment → Stud
 Public or admin POST to create Lead (`new` stage, form_type=contact/inquiry).
 
 ### Step 2: Assignment
-Admin/BM assigns to counsellor (round-robin possible via services). Logs change.
+Automatic round-robin via signal on Lead save (`auto_assign_lead`). Uses `form_type` to select role (`tele_caller` for contact forms, `counsellor` for inquiries). `notify_new_lead_assignment` fires. Manual re-assignment via `/assign/` still supported (logs to `LeadAssignmentLog`).
 
 ### Step 3: Pipeline Management
-Counsellor updates stage progressively with notes. Each change logged in `LeadStage`.
+Counsellor/Telecaller updates stage progressively with notes. Immutable `LeadStage` + assignment logs for full audit trail.
 
 ### Step 4: Conversion
-Set stage=`converted` + optional `admission_data`. Auto-creates `Admission` record (status=`form_pending`), links back to Lead.
+`converted` stage no longer auto-creates Admission (signal commented). Use dedicated **Admission onboarding pipeline** (see `onboarding_admissions_api_documentation.md` and new `admissions/models.py` with `AdmissionStatusHistory`, bank round-robin, Razorpay integration, full student data fields).
 
 ### Step 5: Onward Flow
-See `onboarding_admissions_api_documentation.md`: student fills form → bank assigned (fees.utils) → payment → approval → enrollment → Student + fees (with level-based installment status from `get_installment_plan_status()`).
+Manual creation of `Admission` (status workflow: `form_pending` → `payment_pending` → `approved` etc.). Links to `fees.utils.select_bank_accounts_for_payment()`, installment rules via `CourseLevel.course_type`, enrollment to Student/StudentFee.
 
 **Example:** Converted CSEET lead with fee_structure creates StudentFee with default 1-installment (approved) or multi (pending_approval if >2).
 

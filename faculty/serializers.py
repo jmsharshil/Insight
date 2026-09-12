@@ -35,6 +35,17 @@ def resolve_course_levels(levels_input):
         if hasattr(item, 'id'):
             resolved_ids.append(item.id)
             continue
+        if isinstance(item, dict):
+            lvl_id = item.get('id')
+            if lvl_id:
+                try:
+                    val_uuid = uuid.UUID(str(lvl_id))
+                    if CourseLevel.objects.filter(id=val_uuid).exists():
+                        resolved_ids.append(val_uuid)
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            item = item.get('name') or str(lvl_id or '')
         item_str = str(item).strip()
         try:
             val_uuid = uuid.UUID(item_str)
@@ -101,8 +112,20 @@ class FacultyListSerializer(serializers.ModelSerializer):
             'level_display', 'employment_type_display', 'batch_name',
             'subjects', 'subject_name']
 
+    def get_full_name(self, obj):
+        return obj.user.name if obj.user else ''
+
+    def get_email(self, obj):
+        return obj.user.email if obj.user else ''
+
+    def get_phone(self, obj):
+        return getattr(obj.user, 'phone', '') if obj.user else ''
+
+    def get_branch_name(self, obj):
+        return obj.branch.name if obj.branch else ''
+
     def get_levels(self, obj):
-        return [str(lvl.id) for lvl in obj.levels.all()]
+        return [{'id': str(lvl.id), 'name': lvl.name} for lvl in obj.levels.all()]
 
     def get_levels_details(self, obj):
         return [
@@ -213,7 +236,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
         return getattr(obj.user, 'phone', '') if obj.user else ''
 
     def get_levels(self, obj):
-        return [str(lvl.id) for lvl in obj.levels.all()]
+        return [{'id': str(lvl.id), 'name': lvl.name} for lvl in obj.levels.all()]
 
     def get_levels_details(self, obj):
         return [
@@ -228,6 +251,12 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_chapters(self, obj):
+        if obj.user and hasattr(obj.user, 'faculty_chapters'):
+            chapters_qs = obj.user.faculty_chapters.select_related('subject').all()
+        elif hasattr(obj, 'chapters'):
+            chapters_qs = obj.chapters.select_related('subject').all()
+        else:
+            return []
         return [
             {
                 'id': str(c.id),
@@ -236,7 +265,7 @@ class FacultyDetailSerializer(serializers.ModelSerializer):
                 'subject_id': str(c.subject_id),
                 'subject_name': c.subject.name if c.subject else '',
             }
-            for c in obj.chapters.select_related('subject').all()
+            for c in chapters_qs
         ]
 
     def get_level_display(self, obj):
@@ -334,6 +363,10 @@ class FacultyCreateSerializer(serializers.Serializer):
                     val = [s.strip() for s in val.split(',') if s.strip()]
             if not isinstance(val, list):
                 val = [val] if val else []
+            val = [
+                str(item.get('id') or item.get('name')) if isinstance(item, dict) else str(item)
+                for item in val if item
+            ]
             data['levels'] = val
         elif 'level' in data and data['level']:
             data['levels'] = [data['level']]
@@ -378,6 +411,10 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
                     val = [s.strip() for s in val.split(',') if s.strip()]
             if not isinstance(val, list):
                 val = [val] if val else []
+            val = [
+                str(item.get('id') or item.get('name')) if isinstance(item, dict) else str(item)
+                for item in val if item
+            ]
             data['levels'] = val
         return super().to_internal_value(data)
 

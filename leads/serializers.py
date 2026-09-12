@@ -98,6 +98,7 @@ class OdometerReadingSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.name', read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
     activity_date = serializers.DateField(source='activity.activity_date', read_only=True)
+    vehicle_type_display = serializers.CharField(source='get_vehicle_type_display', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.name', read_only=True, default=None)
     rejected_by_name = serializers.CharField(source='rejected_by.name', read_only=True, default=None)
     start_odometer_photo = serializers.SerializerMethodField()
@@ -107,6 +108,7 @@ class OdometerReadingSerializer(serializers.ModelSerializer):
         model = OdometerReading
         fields = [
             'id', 'activity', 'activity_date', 'user', 'user_name', 'user_email',
+            'vehicle_type', 'vehicle_type_display',
             'start_kms', 'end_kms', 'total_kms', 'expense_per_km', 'total_expense',
             'status', 'approved_by', 'approved_by_name', 'approved_at',
             'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
@@ -133,8 +135,8 @@ class OdometerReadingSerializer(serializers.ModelSerializer):
 
 class OdometerApproveSerializer(serializers.Serializer):
     expense_per_km = serializers.DecimalField(
-        max_digits=8, decimal_places=2, min_value=Decimal('0.00'), required=True,
-        help_text="Reimbursement rate per kilometer."
+        max_digits=8, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
+        help_text="Optional reimbursement rate override per kilometer (defaults to vehicle_type rate: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler)."
     )
 
 
@@ -162,19 +164,32 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
 
 class SalesDailyPlanSerializer(serializers.ModelSerializer):
     """
-    Parent serializer — the plan is the top-level object.
-    All activities for the day are nested inside.
+    Parent serializer — daily plan / scheduled event.
+    Activities for the day are nested inside.
     """
     user_name = serializers.CharField(source='user.name', read_only=True)
     activities = SalesDailyActivitySerializer(many=True, read_only=True)
+    date = serializers.DateField(source='plan_date', required=False)
 
     class Meta:
         model = SalesDailyPlan
         fields = [
-            'id', 'user', 'user_name', 'plan_date', 'description',
+            'id', 'user', 'user_name', 'plan_date', 'date', 'type',
+            'start_time', 'end_time', 'place', 'description',
+            'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'activities', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'user', 'user_name', 'activities', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'user', 'user_name', 'activities',
+            'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
+            'created_at', 'updated_at'
+        ]
+
+    def to_internal_value(self, data):
+        mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'date' in mutable_data and 'plan_date' not in mutable_data:
+            mutable_data['plan_date'] = mutable_data['date']
+        return super().to_internal_value(mutable_data)
 
 
 # ── Contact Serializer ────────────────────────────────────────────────────────

@@ -51,7 +51,11 @@ RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}
 
 # Roles that can see all leads and reassign them
 SENIOR_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
-SALES_ROLES = {'sales_senior_executive', 'sales_executive', 'tele_caller'}
+SALES_ROLES = {
+    'sales_senior_executive', 'sales_executive', 'counsellor',
+    'tele_caller', 'senior_tele_caller', 'telecaller',
+    'associate_bdm', 'cmo', 'front_desk', 'receptionist', 'sales',
+}
 
 ODOMETER_APPROVER_ROLES = {'super_admin', 'admin_senior_executive', 'accountant', 'branch_manager'}
 
@@ -239,23 +243,44 @@ class SalesDailyPlanView(APIView):
         serializer.is_valid(raise_exception=True)
         plan_date = serializer.validated_data.get('plan_date') or timezone.localdate()
         description = serializer.validated_data.get('description', '')
+        event_type = serializer.validated_data.get('type', '')
+        start_time = serializer.validated_data.get('start_time')
+        end_time = serializer.validated_data.get('end_time')
+        place = serializer.validated_data.get('place', '')
 
-        plan, created = SalesDailyPlan.objects.get_or_create(
-            user=request.user,
-            plan_date=plan_date,
-            defaults={'description': description},
-        )
-        if not created:
-            plan.description = description
-            plan.save(update_fields=['description', 'updated_at'])
+        plan_id = request.data.get('id') or request.data.get('plan_id')
+        if plan_id:
+            try:
+                plan = SalesDailyPlan.objects.get(id=plan_id, user=request.user)
+                plan.plan_date = plan_date
+                plan.description = description
+                plan.type = event_type
+                plan.start_time = start_time
+                plan.end_time = end_time
+                plan.place = place
+                plan.save()
+                created = False
+            except SalesDailyPlan.DoesNotExist:
+                return Response({'detail': 'Plan with specified ID not found.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            plan = SalesDailyPlan.objects.create(
+                user=request.user,
+                plan_date=plan_date,
+                description=description,
+                type=event_type,
+                start_time=start_time,
+                end_time=end_time,
+                place=place,
+            )
+            created = True
 
-        # Auto-create the day's activity container and link it to the plan
+        # Link day's activity container to the plan
         activity, act_created = SalesDailyActivity.objects.get_or_create(
             user=request.user,
             activity_date=plan_date,
             defaults={'plan': plan, 'notes': ''},
         )
-        if not act_created and activity.plan_id != plan.id:
+        if not act_created and not activity.plan:
             activity.plan = plan
             activity.save(update_fields=['plan', 'updated_at'])
 
@@ -263,6 +288,55 @@ class SalesDailyPlanView(APIView):
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+class SalesDailyPlanDetailView(APIView):
+    """
+    GET    /api/v1/sales/plans/<uuid:pk>/ — View a specific sales plan / scheduled event.
+    PUT    /api/v1/sales/plans/<uuid:pk>/ — Update a specific sales plan / scheduled event.
+    PATCH  /api/v1/sales/plans/<uuid:pk>/ — Partial update of a sales plan / scheduled event.
+    DELETE /api/v1/sales/plans/<uuid:pk>/ — Delete a sales plan / scheduled event.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk, user):
+        try:
+            plan = SalesDailyPlan.objects.select_related('user').prefetch_related(
+                'activities', 'activities__photos', 'activities__odometer_reading',
+            ).get(pk=pk)
+        except SalesDailyPlan.DoesNotExist:
+            return None
+
+        if user.role not in ODOMETER_APPROVER_ROLES and plan.user_id != user.id:
+            return None
+        return plan
+
+    def get(self, request, pk):
+        plan = self.get_object(pk, request.user)
+        if not plan:
+            return Response({'detail': 'Sales plan not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = SalesDailyPlanSerializer(plan, context={'request': request})
+        return Response(serializer.data)
+
+    def patch(self, request, pk):
+        plan = self.get_object(pk, request.user)
+        if not plan:
+            return Response({'detail': 'Sales plan not found or permission denied.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SalesDailyPlanSerializer(plan, data=request.data, partial=True, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        updated_plan = serializer.save()
+        return Response(SalesDailyPlanSerializer(updated_plan, context={'request': request}).data)
+
+    def put(self, request, pk):
+        return self.patch(request, pk)
+
+    def delete(self, request, pk):
+        plan = self.get_object(pk, request.user)
+        if not plan:
+            return Response({'detail': 'Sales plan not found or permission denied.'}, status=status.HTTP_404_NOT_FOUND)
+        plan.delete()
+        return Response({'success': True, 'message': 'Sales plan deleted successfully.'}, status=status.HTTP_200_OK)
 
 
 class SalesActivityPhotoView(APIView):
@@ -293,6 +367,130 @@ class SalesActivityPhotoView(APIView):
         serializer.is_valid(raise_exception=True)
         photo = serializer.save(activity=activity)
 
+        # ── Attendance Check-in / Check-out on Start and End Selfies ──
+        attendance_info = None
+        if photo_type == 'start_selfie':
+            try:
+                from attendance.models import EmployeeAttendanceRecord
+                from core.utils import get_user_branch_id
+                today = activity.activity_date
+
+                # Check if user already checked in today (e.g. via QR or selfie)
+                already_checked_in = EmployeeAttendanceRecord.objects.filter(
+                    user=activity.user,
+                    date=today,
+                    checked_in_at__isnull=False,
+                ).exists()
+
+                if not already_checked_in:
+                    bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
+                    if not bid:
+                        from branch.models import Branch
+                        first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
+                        bid = first_branch.id if first_branch else None
+
+                    if bid:
+                        # Clear stale absent record
+                        EmployeeAttendanceRecord.objects.filter(
+                            user=activity.user, date=today, status='absent'
+                        ).delete()
+
+                        checkin_time = photo.captured_at or timezone.now()
+                        rec = EmployeeAttendanceRecord.objects.create(
+                            user=activity.user,
+                            branch_id=bid,
+                            date=today,
+                            status='checkout_pending',
+                            checked_in_at=checkin_time,
+                            latitude=photo.latitude,
+                            longitude=photo.longitude,
+                            location_verified=False,
+                            marked_by=activity.user,
+                        )
+                        attendance_info = {
+                            'action': 'check_in',
+                            'record_id': str(rec.id),
+                            'status': 'checkout_pending',
+                            'checked_in_at': rec.checked_in_at.isoformat(),
+                        }
+                    else:
+                        logger.warning(f"Could not auto check-in user {activity.user.id}: no branch found")
+                else:
+                    attendance_info = {'action': 'none', 'message': 'Already checked in for today'}
+            except Exception as e:
+                logger.error(f"Auto check-in on start_selfie failed: {e}", exc_info=True)
+
+        elif photo_type == 'end_selfie':
+            try:
+                from attendance.models import EmployeeAttendanceRecord
+                from core.utils import get_user_branch_id
+                today = activity.activity_date
+
+                # Check if user already checked out today (e.g. via QR or selfie)
+                already_checked_out = EmployeeAttendanceRecord.objects.filter(
+                    user=activity.user,
+                    date=today,
+                    checked_out_at__isnull=False,
+                ).exists()
+
+                if not already_checked_out:
+                    checkout_time = photo.captured_at or timezone.now()
+                    open_rec = EmployeeAttendanceRecord.objects.filter(
+                        user=activity.user,
+                        date=today,
+                        checked_in_at__isnull=False,
+                        checked_out_at__isnull=True,
+                    ).order_by('-checked_in_at').first()
+
+                    if open_rec:
+                        open_rec.checked_out_at = checkout_time
+                        open_rec.status = 'present'
+                        role = getattr(activity.user, 'role', '')
+                        if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
+                            duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
+                            shortfall = max(0, 540 - duration_mins)
+                            open_rec.shortfall_minutes = shortfall
+                        open_rec.save()
+                        attendance_info = {
+                            'action': 'check_out',
+                            'record_id': str(open_rec.id),
+                            'status': open_rec.status,
+                            'checked_out_at': open_rec.checked_out_at.isoformat(),
+                        }
+                    else:
+                        bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
+                        if not bid:
+                            from branch.models import Branch
+                            first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
+                            bid = first_branch.id if first_branch else None
+
+                        if bid:
+                            EmployeeAttendanceRecord.objects.filter(
+                                user=activity.user, date=today, status='absent'
+                            ).delete()
+                            rec = EmployeeAttendanceRecord.objects.create(
+                                user=activity.user,
+                                branch_id=bid,
+                                date=today,
+                                status='present',
+                                checked_in_at=checkout_time,
+                                checked_out_at=checkout_time,
+                                latitude=photo.latitude,
+                                longitude=photo.longitude,
+                                location_verified=False,
+                                marked_by=activity.user,
+                            )
+                            attendance_info = {
+                                'action': 'check_out',
+                                'record_id': str(rec.id),
+                                'status': 'present',
+                                'checked_out_at': rec.checked_out_at.isoformat(),
+                            }
+                else:
+                    attendance_info = {'action': 'none', 'message': 'Already checked out for today'}
+            except Exception as e:
+                logger.error(f"Auto check-out on end_selfie failed: {e}", exc_info=True)
+
         # ── Auto-sync Odometer Reading ──
         if photo_type in {'start_odometer', 'end_odometer'}:
             start_photo = activity.photos.filter(photo_type='start_odometer').first()
@@ -300,16 +498,23 @@ class SalesActivityPhotoView(APIView):
 
             start_kms = start_photo.odometer_kms if start_photo else None
             end_kms = end_photo.odometer_kms if end_photo else None
+            vehicle_type = request.data.get('vehicle_type')
+
+            reading_defaults = {
+                'user': activity.user,
+                'start_kms': start_kms,
+                'end_kms': end_kms,
+            }
+            if vehicle_type:
+                reading_defaults['vehicle_type'] = vehicle_type
 
             reading, created = OdometerReading.objects.get_or_create(
                 activity=activity,
-                defaults={
-                    'user': activity.user,
-                    'start_kms': start_kms,
-                    'end_kms': end_kms,
-                }
+                defaults=reading_defaults
             )
             if not created:
+                if vehicle_type:
+                    reading.vehicle_type = vehicle_type
                 if start_kms is not None:
                     reading.start_kms = start_kms
                 if end_kms is not None:
@@ -322,10 +527,11 @@ class SalesActivityPhotoView(APIView):
             if start_photo and end_photo and start_photo.odometer_kms is not None and end_photo.odometer_kms is not None:
                 try:
                     staff_name = activity.user.name or activity.user.email
+                    vtype_label = reading.get_vehicle_type_display()
                     notify_users_by_role(
                         roles=['super_admin', 'admin_senior_executive', 'accountant'],
                         title='New Odometer Reading for Approval',
-                        body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km).",
+                        body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km, {vtype_label} @ ₹{reading.expense_per_km}/km = ₹{reading.total_expense}).",
                         metadata={
                             'odometer_reading_id': str(reading.id),
                             'sales_activity_id': str(activity.id),
@@ -338,7 +544,7 @@ class SalesActivityPhotoView(APIView):
                             roles=['branch_manager'],
                             branch=activity.user.branch,
                             title='New Odometer Reading for Approval',
-                            body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km).",
+                            body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km, {vtype_label} @ ₹{reading.expense_per_km}/km = ₹{reading.total_expense}).",
                             metadata={
                                 'odometer_reading_id': str(reading.id),
                                 'sales_activity_id': str(activity.id),
@@ -349,7 +555,10 @@ class SalesActivityPhotoView(APIView):
                 except Exception as e:
                     logger.error(f"Failed to notify approvers for odometer reading {reading.id}: {e}")
 
-        return Response(SalesActivityPhotoSerializer(photo).data, status=status.HTTP_201_CREATED)
+        resp_data = SalesActivityPhotoSerializer(photo, context={'request': request}).data
+        if attendance_info:
+            resp_data['attendance'] = attendance_info
+        return Response(resp_data, status=status.HTTP_201_CREATED)
 
 
 class OdometerReadingListView(APIView):
@@ -448,6 +657,8 @@ class OdometerReadingDetailView(APIView):
     """
     GET /api/sales/odometer-readings/<uuid:pk>/
     Fetch a single odometer reading.
+    PATCH /api/sales/odometer-readings/<uuid:pk>/
+    Update vehicle_type or details on a pending odometer reading.
     """
     permission_classes = [IsAuthenticated]
 
@@ -468,12 +679,39 @@ class OdometerReadingDetailView(APIView):
         serializer = OdometerReadingSerializer(reading, context={'request': request})
         return Response(serializer.data)
 
+    def patch(self, request, pk):
+        try:
+            reading = OdometerReading.objects.select_related('activity', 'user').get(pk=pk)
+        except OdometerReading.DoesNotExist:
+            return Response({'detail': 'Odometer reading not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        role = getattr(request.user, 'role', None)
+        is_approver = role in ODOMETER_APPROVER_ROLES
+
+        if not is_approver and reading.user_id != request.user.id:
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if reading.is_paid:
+            return Response({'detail': 'Cannot modify an odometer reading that has already been paid.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reading.status != 'pending' and not is_approver:
+            return Response({'detail': 'Cannot modify an approved or rejected odometer reading.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        vehicle_type = request.data.get('vehicle_type')
+        if vehicle_type:
+            reading.vehicle_type = vehicle_type
+            reading.calculate_totals()
+            reading.save()
+
+        serializer = OdometerReadingSerializer(reading, context={'request': request})
+        return Response(serializer.data)
+
 
 class OdometerReadingApproveView(APIView):
     """
     POST /api/sales/odometer-readings/<uuid:pk>/approve/
-    Body: {"expense_per_km": 5.00}
-    Approves the reading, calculates total_expense, and sends a 'sales' notification.
+    Body: {"expense_per_km": 5.00} (Optional)
+    Approves the reading, calculates total_expense using vehicle_type rate if omitted, and sends a 'sales' notification.
     """
     permission_classes = [IsAuthenticated]
 
@@ -500,8 +738,15 @@ class OdometerReadingApproveView(APIView):
         serializer = OdometerApproveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        expense_per_km = serializer.validated_data['expense_per_km']
-        reading.expense_per_km = expense_per_km
+        expense_per_km = serializer.validated_data.get('expense_per_km')
+        from decimal import Decimal
+        if expense_per_km is not None:
+            reading.expense_per_km = expense_per_km
+            reading.total_expense = (reading.total_kms * Decimal(str(expense_per_km))).quantize(Decimal('0.01'))
+        else:
+            # Pre-calculated automatically based on vehicle_type: 5/km for 2-wheeler, 12/km for 4-wheeler
+            reading.calculate_totals()
+
         reading.status = 'approved'
         reading.approved_by = request.user
         reading.approved_at = timezone.now()
@@ -592,6 +837,26 @@ class OdometerReadingRejectView(APIView):
             'success': True,
             'message': 'Odometer reading rejected.',
             'data': OdometerReadingSerializer(reading, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
+
+
+class TriggerSalesRemindersView(APIView):
+    """
+    POST /api/v1/sales/plans/send-reminders/
+    Manually evaluate and trigger sales event reminders (1 day before and day of event).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not _sales_activity_access(request.user):
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        from .tasks import send_sales_plan_reminders
+        stats = send_sales_plan_reminders()
+        return Response({
+            'success': True,
+            'message': 'Sales plan reminders evaluated and sent successfully.',
+            'data': stats,
         }, status=status.HTTP_200_OK)
 
 

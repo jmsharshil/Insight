@@ -1,5 +1,6 @@
 from django.contrib import admin
 from faculty.models import *
+from batches.models import CourseLevel
 
 @admin.register(FacultyProfile)
 class FacultyProfileAdmin(admin.ModelAdmin):
@@ -7,6 +8,30 @@ class FacultyProfileAdmin(admin.ModelAdmin):
     list_filter = ('is_active', 'employment_type', 'branch', 'created_at', 'level', 'user', 'joining_date',)
     search_fields = ['employee_id', 'user__name', 'specialization']
     filter_horizontal = ('levels',)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == "levels":
+            # Ensure only levels from the same organization as the faculty's branch are selectable
+            if request.user.is_superuser:
+                kwargs["queryset"] = CourseLevel.objects.all()
+            else:
+                obj_id = request.resolver_match.kwargs.get("object_id") if hasattr(request, "resolver_match") else None
+                if obj_id:
+                    try:
+                        faculty = FacultyProfile.objects.select_related("branch__organization").get(id=obj_id)
+                        if faculty.branch and faculty.branch.organization:
+                            kwargs["queryset"] = CourseLevel.objects.filter(
+                                organization=faculty.branch.organization
+                            )
+                        else:
+                            kwargs["queryset"] = CourseLevel.objects.none()
+                    except FacultyProfile.DoesNotExist:
+                        kwargs["queryset"] = CourseLevel.objects.none()
+                else:
+                    # For new faculty, default to current user's organization (if linked)
+                    # Fallback to all for superusers or if no context
+                    kwargs["queryset"] = CourseLevel.objects.all()
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
 
 @admin.register(SubjectHourlyRate)

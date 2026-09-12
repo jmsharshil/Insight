@@ -74,7 +74,10 @@ class EmployeeFieldsMixin:
                 ret.pop(f, None)
         else:
             if hasattr(instance, 'levels'):
-                ret['levels'] = [str(lvl.id) for lvl in instance.levels.all()]
+                ret['levels'] = [
+                    {'id': str(lvl.id), 'name': lvl.name}
+                    for lvl in instance.levels.all()
+                ]
                 ret['levels_details'] = [
                     {
                         'id': str(lvl.id),
@@ -130,7 +133,16 @@ class EmployeeFieldsMixin:
                     levels_val = [s.strip() for s in levels_val.split(',') if s.strip()]
             if not isinstance(levels_val, list):
                 levels_val = [levels_val] if levels_val else []
-            mutable_data['levels'] = levels_val
+            # Extract id if items are dicts: {'id': '...'}
+            normalized_levels = []
+            for item in levels_val:
+                if isinstance(item, dict):
+                    lvl_id = item.get('id') or item.get('name')
+                    if lvl_id:
+                        normalized_levels.append(str(lvl_id))
+                elif item:
+                    normalized_levels.append(str(item))
+            mutable_data['levels'] = normalized_levels
 
         # Normalize 'branches' to list (user wants explicit list ['id1', 'id2'])
         # Single string is wrapped; comma-separated strings will fail validation (enforces proper array from frontend)
@@ -354,7 +366,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
-    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True, write_only=True)
     additional_roles = serializers.ListField(
         child=serializers.CharField(max_length=50),
         required=False,
@@ -599,7 +611,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
-    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True, write_only=True)
     additional_roles = serializers.ListField(
         child=serializers.CharField(max_length=50),
         required=False,

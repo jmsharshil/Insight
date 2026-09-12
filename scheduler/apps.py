@@ -101,6 +101,8 @@ class SchedulerConfig(AppConfig):
         TaskScheduler.register("cleanup_old_notifications", cleanup_old_notifications)
         TaskScheduler.register("detect_missing_scans_all_branches", detect_missing_scans_all_branches)
         TaskScheduler.register("auto_mark_student_absentees", auto_mark_student_absentees)
+        from leads.tasks import send_sales_plan_reminders
+        TaskScheduler.register("send_sales_plan_reminders", send_sales_plan_reminders)
         print("[SCHEDULER APP] All task types registered.")
 
     @staticmethod
@@ -224,6 +226,12 @@ class SchedulerConfig(AppConfig):
                 "task_type": "auto_mark_student_absentees",
                 "interval_seconds": 600,         # every 10 minutes
                 "delay_seconds": 120,            # 2 min after startup (let DB settle first)
+                "max_retries": 3,
+            },
+            {
+                "task_type": "send_sales_plan_reminders",
+                "interval_seconds": 86400,       # daily (every 24h)
+                "delay_seconds": self._seconds_until_target_ist(8, 0),  # next 8:00 AM IST
                 "max_retries": 3,
             },
         ]

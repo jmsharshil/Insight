@@ -156,7 +156,7 @@ class ChapterSerializer(serializers.ModelSerializer):
                 'email': user.email or '',
                 'phone': user.phone or '',
                 'level': user.level or '',
-                'levels': [str(lvl.id) for lvl in user.levels.all()] if hasattr(user, 'levels') else [],
+                'levels': [{'id': str(lvl.id), 'name': lvl.name} for lvl in user.levels.all()] if hasattr(user, 'levels') else [],
             }
             for user in obj.faculties.all()
         ]

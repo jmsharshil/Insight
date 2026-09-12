@@ -11,15 +11,19 @@
 
 Core business logic (views delegate to these):
 
-### `AdmissionService.get_next_counsellor()`
-Round-robin assignment from active `counsellor` users (uses last assigned from recent admissions to cycle fairly).
+### New `admissions.Admission` Model (in `admissions/models.py`)
+Full student onboarding record with:
+- Personal, family, qualification, address, category, reference fields.
+- Bank account round-robin (`assigned_bank` via new `fees.utils` or admission service).
+- Razorpay fields (`razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature` for seamless integration).
+- Status workflow + `AdmissionStatusHistory` (immutable log).
+- Links to Lead, FeeStructure, Batch (on enrollment).
 
-### `AdmissionService.create_admission(validated_data, user=None)`
-- Creates `Admission` (status=`form_pending`).
-- Auto-assigns counsellor.
-- Handles document fields.
-- Logs initial `AdmissionStatusHistory`.
-- **Post-creation (in view):** Calls `fees.utils.select_bank_accounts_for_payment()` to set `assigned_bank_id`, transitions to `payment_pending`, sends payment email with shuffled eligible banks + frontend upload link.
+### Updated `AdmissionService` (now in `admissions/services.py` or views)
+- `create_admission(...)`: Creates with `form_pending`, logs history, triggers bank round-robin (not counsellor RR — moved to leads).
+- `update_status(...)`: Atomic + history entry. On `enrolled`: creates Users, Student, fees.
+- Bank selection now uses enhanced `fees.utils.select_bank_accounts_for_payment()` (respects org/branch, max limits, round-robin).
+- Razorpay webhook/verify support added for payment confirmation.
 
 ### `AdmissionService.update_status(admission, new_status, note='', user=None)`
 - Atomic update + `AdmissionStatusHistory` entry.
@@ -37,20 +41,23 @@ Round-robin assignment from active `counsellor` users (uses last assigned from r
 
 ## Data Models & Statuses
 
-### Core Models
+### Core Models (New in `admissions/models.py`)
 | Model | Purpose |
 |-------|---------|
-| `Admission` | Complete application record (personal, docs, payment proof, status, linked lead/fee_structure/bank) |
-| `AdmissionStatusHistory` | Immutable log of all status changes, notes, changed_by |
+| `Admission` | Complete onboarding record (all student fields: personal/family/qualification/address/bank details, docs, Razorpay fields, linked Lead/FeeStructure/Batch). Full status workflow. |
+| `AdmissionStatusHistory` | Immutable audit trail of every status change, note, `changed_by` user, timestamp. |
 
-### Admission Statuses
-- `form_pending` (initial)
-- `payment_pending` (bank assigned, email sent)
-- `payment_submitted` (proof uploaded)
+### Admission Statuses (Workflow)
+- `form_pending` (initial after creation from Lead/CRM)
+- `payment_pending` (bank round-robin assigned, email/QR payment link sent)
+- `payment_submitted` / `payment_verified` (screenshot or Razorpay callback)
 - `approval_pending`
 - `approved`
-- `enrolled` (triggers full chain)
-- `rejected` (terminal, cannot approve directly)
+- `enrolled` (triggers User/Student/fee creation)
+- `rejected` (terminal)
+- Additional states for document verification, interview if needed.
+
+**New Fields:** `razorpay_*` fields, full bank details, `admission_number`, `assigned_to` (counsellor from lead), `organization`/`branch` scoping.
 
 **Key Fields:**
 - `fee_structure` (FK to `fees.FeeStructure` — used for auto StudentFee)
@@ -63,61 +70,63 @@ Round-robin assignment from active `counsellor` users (uses last assigned from r
 ## Architecture & Workflow Diagram
 
 ```text
-LEAD ──convert──► Admission (form_pending)
+LEAD (converted via CRM) ──► Admission (form_pending, full fields)
           │
           ▼
-Student submits detailed form (POST /admissions/<id>/)
+**Bank round-robin** (`select_bank_accounts_for_payment()`) + Razorpay order creation + email with payment link/QR
           │
           ▼
-select_bank_accounts_for_payment() + email with bank details + payment link
+Student submits full form/docs (POST /admissions/<id>/ or /form/) + payment (screenshot or Razorpay callback)
           │
           ▼
-payment_pending ──(POST /payment/)──► payment_submitted (screenshot + txn_id)
+`payment_pending` → `payment_verified` (Razorpay signature verify or manual)
           │
           ▼
-Admin review: PATCH /status/ or POST /approve/
+Admin review: PATCH /status/ (logs to `AdmissionStatusHistory`) or POST /approve/
           │
           ▼
-enrolled
-    ├── AdmissionService.update_status() → _create_user_accounts() (student/parent Users + credential emails)
-    ├── StudentService.create_from_admission() → Student profile, DigitalIDCard (QR), BatchHistory
-    └── create_student_fee() → StudentFee + InstallmentPlan (pending_approval rules per level) + verified Payment if admission fee present
-          │
-          ▼
-Fees status updated (update_student_fee_status()) ──► Attendance QR blocked if has_overdue_installment()
+`enrolled`
+    ├── `_create_user_accounts()` (student + parents via `auth_user.utils`)
+    ├── `StudentService.create_from_admission()` → Student, DigitalIDCard (QR), BatchHistory
+    ├── `create_student_fee()` (level-based installment rules via `CourseLevel.course_type`)
+    └── Payroll/Attendance ready (no overdue block)
 ```
 
-**Key Integrations (updated in recent changes):**
-- Fees utils for bank selection and installment status.
-- Students utils for profile + fee creation (replaces commented code in approve view).
-- No direct signals.py for enrollment anymore; handled in service methods.
-- Guards: Payment verification blocked for `pending_approval` plans (in fees PaymentVerifyView).
+**Key Integrations (from recent updates):**
+- **Leads signal disabled** — manual Admission creation preferred.
+- Enhanced bank round-robin in `fees.utils` (org-scoped, respects `max_payment_amount`).
+- Razorpay integration (order_id, payment_id, signature verification in views/webhooks).
+- Full `Admission` model now lives in dedicated `admissions` app (moved from onboarding).
+- `AdmissionStatusHistory` for complete audit.
+- Ties to new faculty QR/session reports, sales odometer for field counsellors.
+- Fees: `get_installment_plan_status()` now uses `CourseLevel` directly.
+- No more commented conversion signal; explicit pipeline.
 
 ---
 
 ## FULL WALKTHROUGH: End-to-End Admission-to-Student Lifecycle
 
-### Step 1: Admission Creation (from Lead)
-Admin converts lead or POST to create `Admission` with basic info (`form_pending`).
+### Step 1: Admission Creation
+From Lead (manual now) or POST `/admissions/` with full student data (`form_pending`, auto bank round-robin if amount known, Razorpay order if applicable). Logs initial history.
 
-### Step 2: Student Form Completion
-Student (or counsellor) PATCHes full details + documents. Backend auto-assigns bank using `select_bank_accounts_for_payment(total_amount)`, sets `payment_pending`, sends detailed email.
+### Step 2: Form & Document Completion
+Student/counsellor uses PATCH or dedicated form endpoint to fill all fields (qualification, bank details, docs). Triggers Razorpay if chosen.
 
-### Step 3: Document Uploads
-Use `/documents/` for photo, signature, marksheets (updates Admission fields).
+### Step 3: Payment
+- Screenshot upload or Razorpay payment (webhook verifies signature).
+- Transitions status + history entry.
 
-### Step 4: Payment Proof Submission (Student)
-Public POST to `/payment/` with screenshot and `transaction_id`. Transitions to `approval_pending`. History logged.
+### Step 4: Admin Review
+PATCH `/status/` for any state (with note). Full audit in `AdmissionStatusHistory`.
 
-### Step 5: Admin Verification & Status Updates
-Use `/status/` PATCH for incremental changes or `/approve/` for final step.
-
-### Step 6: Approve → Enroll
-POST `/approve/` (when ready):
+### Step 5: Approve & Enroll
+POST `/approve/`:
 - Sets `enrolled`.
-- Creates User accounts + emails credentials.
-- `create_from_admission()`: copies data to Student, generates QR ID card (using PIL/qrcode if photo present), auto batch/fee creation.
-- Fee creation uses updated `get_installment_plan_status()` (replaced course_type with level.name).
+- Creates `User` (student/parents), credentials emails.
+- `create_from_admission()`: Student profile, QR DigitalIDCard, Batch allocation, StudentFee with level-aware installments.
+- Triggers payroll readiness, faculty assignment eligibility.
+
+**Note:** New `Admission` model supports all fields in one go; Razorpay fields enable seamless UPI/card flows.
 
 ### Step 7: Post-Enrollment Flows
 - Student can regenerate ID card, upload more docs, get inventory issued.

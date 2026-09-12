@@ -43,6 +43,20 @@
 8. Schedule **TimetableSlots** (see timetable guide for per-`session_type` payloads + `exam_data` for Exam v2 creation with proctoring/geo/screen config, `selected_papers`, auto `total_marks`, clash detection, early M2M sync for paper_checkers).
 
 ### Dropdowns for Forms
+
+**Organization Constraint for Faculty Levels & Subjects (API + Admin)**: 
+- Only `CourseLevel`s belonging to the **same `Organization`** as the faculty's `branch.organization` can be assigned.
+- **Enforced in API**: `resolve_course_levels(levels_input, organization=branch.organization)` in `faculty/serializers.py`, `FacultyCreateSerializer`, `FacultyUpdateSerializer`, `FacultyListCreateView.post()`, and `FacultyDetailView.patch()`. Non-matching levels (by UUID/name/slug) are filtered out.
+- **Enforced in Admin**: `formfield_for_manytomany` override in `FacultyProfileAdmin` (uses `object_id` lookup for edit forms or falls back to `request.user.organization`; superuser bypass). Similar scoping in `BatchFacultyAdmin.formfield_for_foreignkey` for `subject`.
+- This is a core multi-tenant rule. See `API_DOCUMENTATION_FACULTY_LEVELS_CHAPTER_FACULTIES.md` for full examples.
+
+**Leads / Sales Module Integration (@leads/)**:
+- Round-robin auto-assignment via `leads/signals.auto_assign_lead` (based on `form_type`: contact→tele_caller, inquiry→counsellor using `get_role_filter_q`; does not override existing `assigned_to`).
+- New models: `SalesDailyPlan`, `SalesDailyActivity`, `SalesActivityPhoto`, `OdometerReading` (payroll integration for field sales, vehicle rate claims, photo proof, approval workflow).
+- `notify_new_lead_assignment` uses system notifications.
+- Lead-to-Admission auto-conversion signal is now **commented out** (manual CRM → onboarding flow preferred).
+- Update sales-facing dashboards/UI to log daily plans, activities, and odometer readings for accurate payroll.
+
 Use `/batches/dropdowns/` for frontend selects (courses, levels, attempt types, days, session_types, slot_codes, etc.).
 
 **Integration Notes:**
@@ -194,6 +208,6 @@ Auto-updates subject's `total_hours`.
 - All list views support search, pagination, role/branch filtering.
 - Timetable creation detailed in dedicated guide (includes 5 session types + `exam_data` for full Exam v2 with proctoring, auto-marks, delayed assignment, legacy removal).
 
-**Migrations:** Run `python manage.py migrate batches exams results` after updates (sequence counter, QR fields, session enhancements, Exam v2 fields/M2Ms/signals).
+**Migrations:** Run `python manage.py makemigrations admissions batches faculty leads payroll && python manage.py migrate` after updates (new `Admission` + history, org FKs on Course/Subject/CourseLevel/Classroom/TimetableSlot/Chapter.faculties M2M to User, `FacultyProfile.levels`, `SubjectHourlyRate`, `FacultyQRScanLog`, `SessionReport`, sales models `SalesDailyPlan`/`SalesDailyActivity`/`OdometerReading`, `BatchSequenceCounter`, timetable-aware QR logic, payslip recalc signals).
 
-This guide now matches the comprehensive style of other modules. For timetable-specific flows (Exam v2 integration, session-type matrix, proctoring), refer to `timetable_procedure_guide.md`. Updated to reflect auto-naming, QR generation, `total_hours` signals, and cross-module ties to fees/students/faculty/exams/results.
+This guide now matches the comprehensive style of other modules. For timetable-specific flows (Exam v2, session matrix, proctoring), see `timetable_procedure_guide.md`. Updated for organization-scoped `CourseLevel` filtering (admin + API via `resolve_course_levels`), pure round-robin lead assignment, new Admission pipeline (Razorpay + bank RR), faculty QR/timetable-aware session reports, chapter faculties as direct User UUIDs, and full production docs across leads/sales/admissions/faculty/payroll.

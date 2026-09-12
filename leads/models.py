@@ -254,9 +254,10 @@ class LeadTransferRequest(models.Model):
 
 class SalesDailyPlan(models.Model):
     """
-    Top-level daily plan record created by a salesperson at the start of each day.
-    Holds the high-level description of what the salesperson intends to accomplish.
-    All field activities (photos, odometer) for the day are linked to this plan.
+    Daily plan / scheduled event record created by a salesperson.
+    Holds the high-level description, event type, time, and location.
+    Multiple events can be scheduled across dates or on the same date.
+    All field activities (photos, odometer) for the day can be linked to this plan.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -265,24 +266,46 @@ class SalesDailyPlan(models.Model):
         related_name='sales_daily_plans',
     )
     plan_date = models.DateField(default=timezone.localdate, help_text="The date this plan is for.")
+    type = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Type of event/plan, e.g. School Visit, Seminar, Exhibition, Meeting, Demo"
+    )
+    start_time = models.TimeField(null=True, blank=True, help_text="Start time of the scheduled event/plan")
+    end_time = models.TimeField(null=True, blank=True, help_text="End time of the scheduled event/plan")
+    place = models.CharField(max_length=255, blank=True, default='', help_text="Location/venue of the plan or event")
     description = models.TextField(
-        help_text="Describe what the salesperson plans to do today — schools to visit, targets, events, etc."
+        blank=True,
+        default='',
+        help_text="Describe what the salesperson plans to do — schools to visit, targets, agenda, etc."
+    )
+    reminder_one_day_before_sent = models.BooleanField(
+        default=False,
+        help_text="True once the 8:00 AM 1-day-before reminder has been sent."
+    )
+    reminder_day_of_event_sent = models.BooleanField(
+        default=False,
+        help_text="True once the 8:00 AM day-of-event reminder has been sent."
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @property
+    def date(self):
+        return self.plan_date
+
+    @date.setter
+    def date(self, value):
+        self.plan_date = value
+
     class Meta:
         db_table = 'sales_daily_plans'
-        ordering = ['-plan_date', '-created_at']
-        constraints = [
-            models.UniqueConstraint(
-                fields=['user', 'plan_date'],
-                name='unique_sales_plan_per_user_day',
-            )
-        ]
+        ordering = ['-plan_date', 'start_time', '-created_at']
 
     def __str__(self):
-        return f"{self.user.name} - Plan for {self.plan_date}"
+        event_str = f" [{self.type}]" if self.type else ""
+        return f"{self.user.name} - Plan for {self.plan_date}{event_str}"
 
 
 class SalesDailyActivity(models.Model):
@@ -358,6 +381,16 @@ ODOMETER_STATUS_CHOICES = [
     ('rejected', 'Rejected'),
 ]
 
+VEHICLE_TYPE_CHOICES = [
+    ('2_wheeler', '2 Wheeler'),
+    ('4_wheeler', '4 Wheeler'),
+]
+
+VEHICLE_RATES = {
+    '2_wheeler': Decimal('5.00'),
+    '4_wheeler': Decimal('12.00'),
+}
+
 
 class OdometerReading(models.Model):
     """
@@ -375,14 +408,20 @@ class OdometerReading(models.Model):
         on_delete=models.CASCADE,
         related_name='odometer_readings',
     )
+    vehicle_type = models.CharField(
+        max_length=20,
+        choices=VEHICLE_TYPE_CHOICES,
+        default='2_wheeler',
+        help_text="Type of vehicle used: 2 wheeler (₹5/km) or 4 wheeler (₹12/km)"
+    )
     start_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     end_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     total_kms = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     expense_per_km = models.DecimalField(
         max_digits=8,
         decimal_places=2,
-        default=Decimal('0.00'),
-        help_text="Reimbursement rate per kilometer (editable by approver)"
+        default=Decimal('5.00'),
+        help_text="Reimbursement rate per kilometer (auto-set based on vehicle_type: ₹5 for 2-wheeler, ₹12 for 4-wheeler)"
     )
     total_expense = models.DecimalField(
         max_digits=12,
@@ -447,8 +486,13 @@ class OdometerReading(models.Model):
         else:
             self.total_kms = Decimal('0.00')
 
-        if self.expense_per_km and self.total_kms:
-            self.total_expense = (self.total_kms * Decimal(str(self.expense_per_km))).quantize(Decimal('0.01'))
+        # Auto calculate expense rate based on vehicle_type: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler
+        vtype = '4_wheeler' if str(self.vehicle_type).lower().replace(' ', '_') in ('4_wheeler', 'four_wheeler') else '2_wheeler'
+        rate = VEHICLE_RATES.get(vtype, Decimal('5.00'))
+        self.expense_per_km = rate
+
+        if self.total_kms:
+            self.total_expense = (self.total_kms * self.expense_per_km).quantize(Decimal('0.01'))
         else:
             self.total_expense = Decimal('0.00')
 
@@ -457,4 +501,4 @@ class OdometerReading(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Odometer {self.activity.activity_date} - {self.user.name or self.user.email} ({self.total_kms} km, ₹{self.total_expense}) [{self.status}]"
+        return f"Odometer {self.activity.activity_date} - {self.user.name or self.user.email} ({self.total_kms} km @ ₹{self.expense_per_km}/km = ₹{self.total_expense}) [{self.status}]"

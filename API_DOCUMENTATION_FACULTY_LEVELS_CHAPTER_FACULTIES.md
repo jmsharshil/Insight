@@ -34,7 +34,11 @@ This document provides complete, production-ready documentation for all modified
 
 ### A. Academic Levels for Faculty
 - **Models**: Both `FacultyProfile.levels` and `User.levels` are `ManyToManyField('batches.CourseLevel')`.
-- **Backward Compatibility**: The legacy `level` CharField (`'executive'`, `'professional'`, `'cseet'`) is preserved and auto-populated based on the primary level chosen.
+- **Organization Constraint (Multi-Tenant Rule)**: Levels must belong to the **same `Organization`** as the faculty's `branch.organization`. 
+  - **API Enforcement**: `resolve_course_levels(..., organization=...)` filters the queryset using the branch's org (see `FacultyListCreateView`, `FacultyUpdateSerializer.update`). Non-matching inputs are silently excluded.
+  - **Admin Enforcement**: `formfield_for_manytomany` in `FacultyProfileAdmin` (object_id lookup for edits; superuser sees all).
+  - Matches scoping in `Subject` and `BatchFacultyAdmin`.
+- **Backward Compatibility**: The legacy `level` CharField (`'executive'`, `'professional'`, `'cseet'`) is preserved and auto-populated based on the primary level chosen (derived from first resolved `CourseLevel`).
 - **Input Flexibility**: The APIs accept `levels` as:
   - An array of `CourseLevel` UUIDs: `["333c44a8-24ba-41e1-89a9-92c565cf4fda", ...]`
   - An array of level names or legacy slugs: `["executive", "professional"]` or `["CS Executive", "CS Professional"]`
@@ -182,7 +186,10 @@ Updates an existing faculty profile, including modifying their academic level as
     "level": "professional",
     "level_display": "CS Professional",
     "levels": [
-      "333c44a8-24ba-41e1-89a9-92c565cf4fda"
+      {
+        "id": "333c44a8-24ba-41e1-89a9-92c565cf4fda",
+        "name": "CS Professional"
+      }
     ],
     "levels_details": [
       {
@@ -228,8 +235,14 @@ Retrieves complete faculty profile details, including assigned academic levels, 
     "level": "executive",
     "level_display": "CS Executive, CS Professional",
     "levels": [
-      "4a221d6b-0f58-4b0b-8680-f28b36f8102d",
-      "333c44a8-24ba-41e1-89a9-92c565cf4fda"
+      {
+        "id": "4a221d6b-0f58-4b0b-8680-f28b36f8102d",
+        "name": "CS Executive"
+      },
+      {
+        "id": "333c44a8-24ba-41e1-89a9-92c565cf4fda",
+        "name": "CS Professional"
+      }
     ],
     "levels_details": [
       {
@@ -426,7 +439,12 @@ Creates a new chapter under a subject and assigns one or multiple faculties to i
         "email": "rohit.sharma@example.com",
         "phone": "9876543210",
         "level": "professional",
-        "levels": ["333c44a8-24ba-41e1-89a9-92c565cf4fda"]
+        "levels": [
+          {
+            "id": "333c44a8-24ba-41e1-89a9-92c565cf4fda",
+            "name": "CS Professional"
+          }
+        ]
       },
       {
         "id": "7882c1e0-8a99-433a-8cc0-3cbcd1464d94",
@@ -435,7 +453,12 @@ Creates a new chapter under a subject and assigns one or multiple faculties to i
         "email": "anita.desai@example.com",
         "phone": "9876543211",
         "level": "executive",
-        "levels": ["444d55b9-35cb-52f2-90ba-03d676dg5geb"]
+        "levels": [
+          {
+            "id": "444d55b9-35cb-52f2-90ba-03d676dg5geb",
+            "name": "CS Executive"
+          }
+        ]
       }
     ]
   }
@@ -530,7 +553,12 @@ Retrieves chapter details with assigned faculties and faculty details.
         "email": "rohit.sharma@example.com",
         "phone": "9876543210",
         "level": "professional",
-        "levels": ["333c44a8-24ba-41e1-89a9-92c565cf4fda"]
+        "levels": [
+          {
+            "id": "333c44a8-24ba-41e1-89a9-92c565cf4fda",
+            "name": "CS Professional"
+          }
+        ]
       }
     ]
   }
@@ -696,8 +724,14 @@ Allows administrators to add users. When `role='faculty'`, multiple `levels` can
     "email": "deepak.gupta@example.com",
     "role": "faculty",
     "levels": [
-      "4a221d6b-0f58-4b0b-8680-f28b36f8102d",
-      "333c44a8-24ba-41e1-89a9-92c565cf4fda"
+      {
+        "id": "4a221d6b-0f58-4b0b-8680-f28b36f8102d",
+        "name": "CS Executive"
+      },
+      {
+        "id": "333c44a8-24ba-41e1-89a9-92c565cf4fda",
+        "name": "CS Professional"
+      }
     ],
     "levels_details": [
       {
@@ -750,7 +784,10 @@ Updates user record and automatically synchronizes changed `levels` to the user'
     "email": "deepak.gupta@example.com",
     "role": "faculty",
     "levels": [
-      "e39e7690-38f7-4fb3-a0cb-496ac6fdbd00"
+      {
+        "id": "e39e7690-38f7-4fb3-a0cb-496ac6fdbd00",
+        "name": "CSEET"
+      }
     ],
     "levels_details": [
       {
@@ -768,7 +805,7 @@ Updates user record and automatically synchronizes changed `levels` to the user'
 
 ### 4.3 User List & Profile Representation
 
-When querying `/api/auth/users/` or `/api/auth/me/`, users with `role='faculty'` include `levels` (list of UUIDs) and `levels_details` in their response object.
+When querying `/api/auth/users/` or `/api/auth/me/`, users with `role='faculty'` include `levels` (list of `{"id": "...", "name": "..."}` objects) and `levels_details` (with full course metadata) in their response object.
 
 ---
 

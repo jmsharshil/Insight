@@ -48,7 +48,25 @@ class BatchFacultyAdmin(admin.ModelAdmin):
     search_fields = ('batch__batch_code', 'subject__name',)
     ordering = ['-assigned_at']
     date_hierarchy = 'assigned_at'
-    # removed autocomplete_fields due to FacultyProfileAdmin not having search_fields
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "subject":
+            # Filter subjects to only those belonging to the same organization as the selected faculty's branch
+            if "faculty" in request.GET:
+                faculty_id = request.GET.get("faculty")
+                try:
+                    from faculty.models import FacultyProfile
+                    faculty = FacultyProfile.objects.select_related("branch__organization").get(id=faculty_id)
+                    if faculty.branch and faculty.branch.organization:
+                        kwargs["queryset"] = Subject.objects.filter(
+                            organization=faculty.branch.organization
+                        )
+                    else:
+                        kwargs["queryset"] = Subject.objects.none()
+                except (FacultyProfile.DoesNotExist, Exception):
+                    kwargs["queryset"] = Subject.objects.all()
+            else:
+                kwargs["queryset"] = Subject.objects.all()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 @admin.register(Classroom)
 class ClassroomAdmin(admin.ModelAdmin):
