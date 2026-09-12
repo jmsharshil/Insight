@@ -2,17 +2,21 @@ from rest_framework import serializers
 from .models import FacultyProfile, FacultyQRScanLog, SessionReport, SubjectHourlyRate
 
 
-def resolve_course_levels(levels_input):
+def resolve_course_levels(levels_input, organization=None):
     """
     Resolves a list of CourseLevel UUIDs, names, or slugs ('executive', 'professional', 'cseet')
-    to a queryset of CourseLevel instances.
+    to a queryset of CourseLevel instances. Strictly filters by organization (if provided)
+    to enforce RBAC scoping and prevent cross-org leaks (per summary).
     """
     import uuid
     from django.db.models import Q
     from batches.models import CourseLevel
 
     if not levels_input:
-        return CourseLevel.objects.none()
+        qs = CourseLevel.objects.none()
+        if organization:
+            qs = qs.filter(organization=organization)
+        return qs
 
     if isinstance(levels_input, (str, bytes)):
         import json
@@ -29,6 +33,7 @@ def resolve_course_levels(levels_input):
         levels_input = [levels_input]
 
     resolved_ids = []
+    org_filter = Q(organization=organization) if organization else Q()
     for item in levels_input:
         if not item:
             continue
@@ -40,7 +45,7 @@ def resolve_course_levels(levels_input):
             if lvl_id:
                 try:
                     val_uuid = uuid.UUID(str(lvl_id))
-                    if CourseLevel.objects.filter(id=val_uuid).exists():
+                    if CourseLevel.objects.filter(id=val_uuid, **({'organization': organization} if organization else {})).exists():
                         resolved_ids.append(val_uuid)
                         continue
                 except (ValueError, TypeError):
@@ -49,7 +54,7 @@ def resolve_course_levels(levels_input):
         item_str = str(item).strip()
         try:
             val_uuid = uuid.UUID(item_str)
-            if CourseLevel.objects.filter(id=val_uuid).exists():
+            if CourseLevel.objects.filter(id=val_uuid, **({'organization': organization} if organization else {})).exists():
                 resolved_ids.append(val_uuid)
                 continue
         except (ValueError, TypeError):
@@ -66,13 +71,17 @@ def resolve_course_levels(levels_input):
         }
         search_term = alias_map.get(item_str.lower(), item_str)
         matched = list(CourseLevel.objects.filter(
-            Q(name__iexact=search_term) |
-            Q(name__icontains=search_term) |
-            Q(course_type__iexact=item_str)
+            org_filter &
+            (Q(name__iexact=search_term) |
+             Q(name__icontains=search_term) |
+             Q(course_type__iexact=item_str))
         ).values_list('id', flat=True))
         resolved_ids.extend(matched)
 
-    return CourseLevel.objects.filter(id__in=set(resolved_ids))
+    qs = CourseLevel.objects.filter(id__in=set(resolved_ids))
+    if organization:
+        qs = qs.filter(organization=organization)
+    return qs
 
 
 # ═══ Faculty Profile ══════════════════════════════════════════════════════════
@@ -450,7 +459,8 @@ class FacultyUpdateSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
 
         if levels_data is not None:
-            resolved_levels = resolve_course_levels(levels_data)
+            org = getattr(getattr(instance, 'branch', None), 'organization', None)
+            resolved_levels = resolve_course_levels(levels_data, organization=org)
             instance.levels.set(resolved_levels)
             if instance.user:
                 instance.user.levels.set(resolved_levels)
@@ -541,11 +551,10 @@ class FacultyQRScanLogSerializer(serializers.ModelSerializer):
 # ═══ Session Report ═══════════════════════════════════════════════════════════
 
 class SessionReportSerializer(serializers.ModelSerializer):
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
     faculty_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     subject_name = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = SessionReport
@@ -555,7 +564,7 @@ class SessionReportSerializer(serializers.ModelSerializer):
             'chapter_covered', 'topics_covered', 'completion_percentage',
             'status', 'status_display', 'start_time', 'end_time', 'duration_minutes', 'notes',
             'created_at', 'updated_at',
-         'status_display']
+        ]
 
     def get_faculty_name(self, obj):
         return obj.faculty.user.name if obj.faculty and obj.faculty.user else ''

@@ -179,7 +179,7 @@ class FacultyListCreateView(APIView):
             from faculty.serializers import resolve_course_levels
             levels_input = d.get('levels') or ([d.get('level')] if d.get('level') else [])
             if levels_input:
-                resolved_levels = resolve_course_levels(levels_input)
+                resolved_levels = resolve_course_levels(levels_input, organization=branch.organization)
                 fp.levels.set(resolved_levels)
                 user.levels.set(resolved_levels)
                 first_lvl = resolved_levels.first()
@@ -219,7 +219,7 @@ class FacultyDetailView(APIView):
         try:
             from django.db.models import Q
             qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related(
-                'batch_assignments__batch', 'levels', 'levels__course', 'chapters__subject'
+                'batch_assignments__batch', 'levels', 'levels__course', 'user__faculty_chapters__subject'
             ).all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
