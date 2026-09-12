@@ -309,8 +309,20 @@ class SalesDailyPlan(models.Model):
 
 
 class SalesDailyActivity(models.Model):
-    """One field-activity container per sales user and calendar day."""
+    """
+    Field activity container. Multiple activities per user per day are now supported
+    (unique constraint on (user, activity_date) has been removed). The optional
+    `name` field helps distinguish multiple activities on the same date.
+    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Optional name/title for this activity (e.g. 'Morning School Visit', "
+                  "'Seminar at XYZ College', 'Lead Follow-up'). Useful when multiple "
+                  "activities occur on the same day."
+    )
     plan = models.ForeignKey(
         SalesDailyPlan,
         on_delete=models.SET_NULL,
@@ -331,16 +343,13 @@ class SalesDailyActivity(models.Model):
 
     class Meta:
         db_table = 'sales_daily_activities'
-        ordering = ['-activity_date', '-created_at']
-        constraints = [
-            models.UniqueConstraint(
-                fields=['user', 'activity_date'],
-                name='unique_sales_activity_per_user_day',
-            )
-        ]
+        ordering = ['-activity_date', '-created_at', 'name']
+        # Note: UniqueConstraint on (user, activity_date) removed to allow multiple
+        # activities per user per calendar day.
 
     def __str__(self):
-        return f"{self.user.name} - {self.activity_date}"
+        name_str = f" - {self.name}" if self.name else ""
+        return f"{self.user.name} - {self.activity_date}{name_str}"
 
 SALES_ACTIVITY_PHOTO_TYPES = [
     ('start_selfie', 'Start of Day Selfie'),
@@ -480,16 +489,19 @@ class OdometerReading(models.Model):
         db_table = 'sales_odometer_readings'
         ordering = ['-activity__activity_date', '-created_at']
 
-    def calculate_totals(self):
+    def calculate_totals(self, override_expense_per_km=None):
         if self.start_kms is not None and self.end_kms is not None:
             self.total_kms = max(Decimal('0.00'), Decimal(str(self.end_kms)) - Decimal(str(self.start_kms)))
         else:
             self.total_kms = Decimal('0.00')
 
-        # Auto calculate expense rate based on vehicle_type: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler
-        vtype = '4_wheeler' if str(self.vehicle_type).lower().replace(' ', '_') in ('4_wheeler', 'four_wheeler') else '2_wheeler'
-        rate = VEHICLE_RATES.get(vtype, Decimal('5.00'))
-        self.expense_per_km = rate
+        if override_expense_per_km is not None:
+            self.expense_per_km = override_expense_per_km
+        else:
+            # Auto calculate expense rate based on vehicle_type: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler
+            vtype = '4_wheeler' if str(self.vehicle_type).lower().replace(' ', '_') in ('4_wheeler', 'four_wheeler') else '2_wheeler'
+            rate = VEHICLE_RATES.get(vtype, Decimal('5.00'))
+            self.expense_per_km = rate
 
         if self.total_kms:
             self.total_expense = (self.total_kms * self.expense_per_km).quantize(Decimal('0.01'))
@@ -497,7 +509,8 @@ class OdometerReading(models.Model):
             self.total_expense = Decimal('0.00')
 
     def save(self, *args, **kwargs):
-        self.calculate_totals()
+        override = kwargs.pop('override_expense_per_km', None)
+        self.calculate_totals(override_expense_per_km=override)
         super().save(*args, **kwargs)
 
     def __str__(self):

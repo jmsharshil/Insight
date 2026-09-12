@@ -22,6 +22,7 @@ from .serializers import (
     LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
     SalesDailyPlanSerializer, SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
     OdometerReadingSerializer, OdometerApproveSerializer, OdometerRejectSerializer,
+    MonthlyOdometerApproveSerializer, MonthlyOdometerRejectSerializer,
 )
 from .utils import LeadService
 from .models import (
@@ -138,26 +139,19 @@ class SalesDailyActivityView(APIView):
         serializer = SalesDailyActivitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         activity_date = serializer.validated_data.get('activity_date') or timezone.localdate()
+        name = serializer.validated_data.get('name', '')
 
-        # Auto-link to the day's plan if one exists
+        # Auto-link to the day's plan if one exists (first matching plan for the date)
         plan = SalesDailyPlan.objects.filter(user=request.user, plan_date=activity_date).first()
 
-        activity, _ = SalesDailyActivity.objects.get_or_create(
+        # Always create NEW activity to support multiple per user per day (name helps distinguish them)
+        activity = SalesDailyActivity.objects.create(
             user=request.user,
             activity_date=activity_date,
-            defaults={
-                'notes': serializer.validated_data.get('notes', ''),
-                'plan': plan,
-            },
+            name=name,
+            notes=serializer.validated_data.get('notes', ''),
+            plan=plan,
         )
-        if 'notes' in serializer.validated_data:
-            activity.notes = serializer.validated_data['notes']
-            activity.save(update_fields=['notes', 'updated_at'])
-
-        # If plan was created after activity, link it now
-        if plan and activity.plan_id != plan.id:
-            activity.plan = plan
-            activity.save(update_fields=['plan', 'updated_at'])
 
         return Response(
             SalesDailyActivitySerializer(activity, context={'request': request}).data,
@@ -274,15 +268,17 @@ class SalesDailyPlanView(APIView):
             )
             created = True
 
-        # Link day's activity container to the plan
-        activity, act_created = SalesDailyActivity.objects.get_or_create(
-            user=request.user,
-            activity_date=plan_date,
-            defaults={'plan': plan, 'notes': ''},
-        )
-        if not act_created and not activity.plan:
-            activity.plan = plan
-            activity.save(update_fields=['plan', 'updated_at'])
+        # Link day's activity container to the plan (create default activity only for new plans
+        # or if none exists for this plan; supports multiple activities per day via name)
+        if created or not plan.activities.exists():
+            name = request.data.get('activity_name', '') or request.data.get('name', '')
+            SalesDailyActivity.objects.create(
+                user=request.user,
+                activity_date=plan_date,
+                name=name or f"Activity for {plan.type or 'Plan'}",
+                notes='',
+                plan=plan,
+            )
 
         return Response(
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
@@ -700,8 +696,7 @@ class OdometerReadingDetailView(APIView):
         vehicle_type = request.data.get('vehicle_type')
         if vehicle_type:
             reading.vehicle_type = vehicle_type
-            reading.calculate_totals()
-            reading.save()
+            reading.save()  # triggers calculate_totals() using new vehicle_type rate
 
         serializer = OdometerReadingSerializer(reading, context={'request': request})
         return Response(serializer.data)
@@ -739,13 +734,6 @@ class OdometerReadingApproveView(APIView):
         serializer.is_valid(raise_exception=True)
 
         expense_per_km = serializer.validated_data.get('expense_per_km')
-        from decimal import Decimal
-        if expense_per_km is not None:
-            reading.expense_per_km = expense_per_km
-            reading.total_expense = (reading.total_kms * Decimal(str(expense_per_km))).quantize(Decimal('0.01'))
-        else:
-            # Pre-calculated automatically based on vehicle_type: 5/km for 2-wheeler, 12/km for 4-wheeler
-            reading.calculate_totals()
 
         reading.status = 'approved'
         reading.approved_by = request.user
@@ -753,7 +741,8 @@ class OdometerReadingApproveView(APIView):
         reading.rejected_by = None
         reading.rejected_at = None
         reading.rejection_reason = ''
-        reading.save()
+        # save with optional rate override (uses vehicle rate if None); updates totals via calculate_totals
+        reading.save(override_expense_per_km=expense_per_km)
 
         # Send in-app notification to employee
         try:
@@ -837,6 +826,197 @@ class OdometerReadingRejectView(APIView):
             'success': True,
             'message': 'Odometer reading rejected.',
             'data': OdometerReadingSerializer(reading, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
+
+
+class MonthlyOdometerApproveView(APIView):
+    """
+    POST /api/sales/odometer/monthly/approve/
+    Body: {
+        "user_id": "uuid",
+        "month": 10,
+        "year": 2024,
+        "expense_per_km": 6.00 (optional override for the month)
+    }
+    Approves ALL pending odometer readings for the user in that month at once.
+    Sends a single monthly notification. Minimal change - daily records and payroll unchanged.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        role = getattr(request.user, 'role', None)
+        if role not in ODOMETER_APPROVER_ROLES:
+            return Response({'detail': 'Permission denied. Only managers/admins can approve odometer readings.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = MonthlyOdometerApproveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user_id = serializer.validated_data['user_id']
+        month = serializer.validated_data['month']
+        year = serializer.validated_data['year']
+        expense_per_km = serializer.validated_data.get('expense_per_km')
+
+        try:
+            from auth_user.models import User
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role == 'branch_manager' and getattr(target_user, 'branch_id', None):
+            if not has_user_branch_access(request.user, target_user.branch_id):
+                return Response({'detail': 'Permission denied. Branch managers can only approve for their branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get all pending readings for the month
+        readings = OdometerReading.objects.filter(
+            user=target_user,
+            activity__activity_date__year=year,
+            activity__activity_date__month=month,
+            status='pending',
+        ).select_related('activity', 'user')
+
+        if not readings.exists():
+            return Response({'detail': 'No pending odometer readings found for this user/month.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from decimal import Decimal
+        total_kms = Decimal('0')
+        total_expense = Decimal('0')
+        updated_count = 0
+
+        for reading in readings:
+            reading.status = 'approved'
+            reading.approved_by = request.user
+            reading.approved_at = timezone.now()
+            reading.rejected_by = None
+            reading.rejected_at = None
+            reading.rejection_reason = ''
+            # save with optional monthly rate override (uses vehicle rate if None)
+            reading.save(override_expense_per_km=expense_per_km)
+            total_kms += reading.total_kms
+            total_expense += reading.total_expense
+            updated_count += 1
+
+        # Single notification for the monthly approval (minimal disruption to existing per-daily notifications)
+        try:
+            staff_name = target_user.name or target_user.email
+            send_system_notification(
+                user_id=str(target_user.id),
+                title='Monthly Odometer Approved',
+                body=f"Your odometer readings for {month}/{year} (total {total_kms} km, ₹{total_expense}) have been approved and will be included in payroll.",
+                metadata={
+                    'user_id': str(target_user.id),
+                    'month': month,
+                    'year': year,
+                    'total_kms': float(total_kms),
+                    'total_expense': float(total_expense),
+                    'type': 'monthly_odometer_approved',
+                },
+                notification_type='sales',
+            )
+        except Exception as e:
+            logger.error(f"Failed to send monthly odometer approval notification: {e}")
+
+        return Response({
+            'success': True,
+            'message': f"Monthly odometer approved for {staff_name} ({month}/{year}). Updated {updated_count} daily records. Total: {total_kms} km = ₹{total_expense}.",
+            'data': {
+                'user_id': str(target_user.id),
+                'user_name': staff_name,
+                'month': month,
+                'year': year,
+                'records_approved': updated_count,
+                'total_kms': float(total_kms),
+                'total_expense': float(total_expense),
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class MonthlyOdometerRejectView(APIView):
+    """
+    POST /api/sales/odometer/monthly/reject/
+    Body: {
+        "user_id": "uuid",
+        "month": 10,
+        "year": 2024,
+        "rejection_reason": "Invalid claims"
+    }
+    Rejects ALL pending odometer readings for the user in that month at once.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        role = getattr(request.user, 'role', None)
+        if role not in ODOMETER_APPROVER_ROLES:
+            return Response({'detail': 'Permission denied. Only managers/admins can reject odometer readings.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = MonthlyOdometerRejectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user_id = serializer.validated_data['user_id']
+        month = serializer.validated_data['month']
+        year = serializer.validated_data['year']
+        reason = serializer.validated_data.get('rejection_reason', '')
+
+        try:
+            from auth_user.models import User
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role == 'branch_manager' and getattr(target_user, 'branch_id', None):
+            if not has_user_branch_access(request.user, target_user.branch_id):
+                return Response({'detail': 'Permission denied. Branch managers can only reject for their branch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        readings = OdometerReading.objects.filter(
+            user=target_user,
+            activity__activity_date__year=year,
+            activity__activity_date__month=month,
+            status='pending',
+        ).select_related('activity', 'user')
+
+        if not readings.exists():
+            return Response({'detail': 'No pending odometer readings found for this user/month.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = 0
+        for reading in readings:
+            reading.status = 'rejected'
+            reading.rejected_by = request.user
+            reading.rejected_at = timezone.now()
+            reading.rejection_reason = reason
+            reading.approved_by = None
+            reading.approved_at = None
+            reading.save()
+            updated_count += 1
+
+        # Single notification for monthly rejection
+        try:
+            staff_name = target_user.name or target_user.email
+            send_system_notification(
+                user_id=str(target_user.id),
+                title='Monthly Odometer Rejected',
+                body=f"Your odometer readings for {month}/{year} have been rejected." + (f" Reason: {reason}" if reason else ""),
+                metadata={
+                    'user_id': str(target_user.id),
+                    'month': month,
+                    'year': year,
+                    'type': 'monthly_odometer_rejected',
+                    'rejection_reason': reason,
+                },
+                notification_type='sales',
+            )
+        except Exception as e:
+            logger.error(f"Failed to send monthly odometer rejection notification: {e}")
+
+        return Response({
+            'success': True,
+            'message': f"Monthly odometer rejected for {staff_name} ({month}/{year}). Updated {updated_count} daily records.",
+            'data': {
+                'user_id': str(target_user.id),
+                'user_name': staff_name,
+                'month': month,
+                'year': year,
+                'records_rejected': updated_count,
+                'rejection_reason': reason,
+            }
         }, status=status.HTTP_200_OK)
 
 

@@ -6,6 +6,7 @@ from .views import (
     SalesDailyActivityView, SalesActivityPhotoView,
     OdometerReadingListView, OdometerReadingDetailView,
     OdometerReadingApproveView, OdometerReadingRejectView,
+    MonthlyOdometerApproveView, MonthlyOdometerRejectView,
 )
 
 urlpatterns = [
@@ -25,4 +26,7 @@ urlpatterns = [
     path("sales/odometer-readings/<uuid:pk>/", OdometerReadingDetailView.as_view(), name="sales-odometer-readings-detail"),
     path("sales/odometer-readings/<uuid:pk>/approve/", OdometerReadingApproveView.as_view(), name="sales-odometer-readings-approve"),
     path("sales/odometer-readings/<uuid:pk>/reject/", OdometerReadingRejectView.as_view(), name="sales-odometer-readings-reject"),
+    # Monthly approval endpoints (new - aggregates daily readings per user/month)
+    path("sales/odometer/monthly/approve/", MonthlyOdometerApproveView.as_view(), name="sales-odometer-monthly-approve"),
+    path("sales/odometer/monthly/reject/", MonthlyOdometerRejectView.as_view(), name="sales-odometer-monthly-reject"),
 ]

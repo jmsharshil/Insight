@@ -13,53 +13,62 @@
 
 This guide documents the **Sales User APIs** introduced starting from the Notification Types architectural update (`b759ee1`) through the Additional Roles & Field Tracking release (`4d7e89a`).
 
-The sales suite covers six core operational capabilities:
-1. **Sales Daily Plan (Parent Model)**: High-level daily plan and itinerary created by sales staff at the start of each day (`description` detailing planned school visits, seminars, and targets). Serves as the parent object (`SalesDailyPlan`) nesting all child activities for that day.
-2. **Sales Daily Field Activity & GPS/Odometer Tracking**: Daily activity logging (`SalesDailyActivity`) for on-ground sales reps with geo-tagged and timestamped verification photos (start/end selfies, odometer readings, school visits, and exhibition evidence), linked directly to the parent daily plan.
-3. **Odometer Reading Approval & Travel Reimbursement**: Automated odometer calculation (`total_kms = end_kms - start_kms`) with managerial approval workflow (custom editable `expense_per_km`), monthly payslip credit (`reimbursements_amount`), and automatic settlement on payroll disbursement.
-4. **Sales Inventory Allocation**: Material issue and tracking (brochures, promotional kits, standees, marketing collateral) assigned directly to sales personnel.
-5. **Notification Types & Filter Integration**: Categorized push notifications and notification history filtering (`notification_type='sales'`, `notification_type='leads'`, and `notification_type='inventory'`) with auto-routing.
-6. **Lead Transfer Requests**: Workflow for field reps to request transferring assigned leads to colleagues with senior managerial review.
+The sales suite covers **eight** core operational capabilities (updated to match current `leads/views.py` + `inventory/views.py`):
+1. **Sales Daily Plan & Scheduled Events** (`SalesDailyPlan`): Dual-purpose parent model for daily plans (`description`, itinerary) **and** scheduled events (`type`, `start_time`, `end_time`, `place`, reminder flags). Nests all child activities.
+2. **Sales Daily Field Activity & GPS Tracking**: `SalesDailyActivity` container with auto-linked plan. Supports notes and verification photos.
+3. **Sales Activity Photos** (`SalesActivityPhotoView`): Geo-tagged uploads (`start_selfie`/`end_selfie` auto-create `EmployeeAttendanceRecord` with GPS/shortfall/location_verified=False; odometer photos auto-sync `OdometerReading`; max 6 exhibition photos). Responses may include `"attendance"` key.
+4. **Odometer Reading & Approval**: Vehicle-aware (`vehicle_type`: 2_wheeler=5/km default, 4_wheeler=12/km via `calculate_totals(override_expense_per_km=...)` in `save()`), daily per-reading approve/reject **plus new monthly bulk approve/reject** (`MonthlyOdometerApproveView`/`MonthlyOdometerRejectView` that batch-updates all pending readings for a user/month/year, emits one aggregated `notification_type='sales'`). Payroll integration (`_get_odometer_expenses_for_user`, `is_paid`, `payslip` linkage) preserved.
+5. **Sales Inventory Allocation**: Full CRUD + `bulk_issue`/`my_allocations`/`return_item` (supports `sales_user`/`student`/`faculty`, atomic stock updates, `notification_type='inventory'`).
+6. **Lead Management & CRM**: Public form POSTs, stage updates (auto-creates `Admission` + history + email/WhatsApp on `converted`), split `assign` (initial, front_desk+seniors) vs `reassign` (seniors only, creates `LeadAssignmentLog`).
+7. **Lead Transfer Requests**: `LeadTransferRequestListCreateView` + `ReviewView` (pending→approved/rejected with audit + notifications).
+8. **Notifications & Reminders**: `notification_type='sales'|'leads'|'inventory'`, `TriggerSalesRemindersView` (`POST /sales/plans/send-reminders/` wrapping Celery task).
 
 ---
 
 ## Data Models & Field Reference
 
-### 1. `SalesDailyPlan` (Parent Model) (`leads/models.py`)
+### 1. `SalesDailyPlan` (Parent + Scheduled Event Model) (`leads/models.py`)
 
-Top-level daily plan record created by a salesperson at the start of each day. Holds the high-level description of what the salesperson intends to accomplish. All field activities (photos, odometer) for the day are linked under this parent plan.
+Dual-purpose record: daily sales plan **and** scheduled events (school visits, seminars, reminders). Now supports event metadata. All field activities are nested under it.
 
 | Field | Type | Description |
 |---|---|---|
 | `id` | `UUID` (PK) | Auto-generated UUIDv4 |
-| `user` | `ForeignKey(User)` | Sales employee creating the daily plan |
-| `plan_date` | `DateField` | Date of the plan (default: today). Unique per user per day |
-| `description` | `TextField` | Narrative of planned activities (e.g. schools to visit, student targets, events) |
-| `activities` | `Reverse(SalesDailyActivity)` | Related daily activity containers nested under this plan (`related_name='activities'`) |
+| `user` | `ForeignKey(User)` | Sales employee / owner |
+| `plan_date` | `DateField` | Date of the plan/event (default: today). Unique per user per day |
+| `type` | `CharField` | Event type (e.g. `school_visit`, `seminar`, `follow_up`, `plan`) |
+| `start_time` | `TimeField` | Scheduled start time (nullable) |
+| `end_time` | `TimeField` | Scheduled end time (nullable) |
+| `place` | `CharField` | Location / school name / venue |
+| `description` | `TextField` | Narrative of planned activities or event notes |
+| `reminder_sent` | `BooleanField` | Whether 1-day-before reminder was sent |
+| `day_of_reminder_sent` | `BooleanField` | Whether same-day reminder was sent |
+| `activities` | `Reverse(SalesDailyActivity)` | Related daily activity containers (`related_name='activities'`) |
 | `created_at` | `DateTimeField` | Record creation timestamp |
 | `updated_at` | `DateTimeField` | Last update timestamp |
 
-**Constraint:** Unique constraint on `['user', 'plan_date']` ensures only one plan record exists per sales representative per day. Submitting for the same date updates the existing plan description.
+**Constraint:** Unique constraint on `['user', 'plan_date']`. `SalesDailyPlanDetailView` provides full CRUD. `TriggerSalesRemindersView` evaluates and sends reminders via Celery.
 
 ---
 
 ### 2. `SalesDailyActivity` (Child Container) (`leads/models.py`)
 
-Represents a single field-work activity container for a sales user on a specific calendar day, linked to the parent `SalesDailyPlan`.
+Represents a **field-work activity container** for a sales user. **Multiple activities per `(user, activity_date)` are now supported** (the previous `UniqueConstraint` on `['user', 'activity_date']` has been removed). The optional `name` field differentiates multiple records on the same day (e.g. "Morning School Visit", "Seminar Follow-up", "Lead Follow-up").
 
 | Field | Type | Description |
 |---|---|---|
 | `id` | `UUID` (PK) | Auto-generated UUIDv4 |
+| `name` | `CharField(100)` | Optional name/title to distinguish multiple activities on same date (blank allowed) |
 | `plan` | `ForeignKey(SalesDailyPlan)` | **Parent daily plan** this activity belongs to (nullable, `on_delete=SET_NULL`, `related_name='activities'`) |
 | `user` | `ForeignKey(User)` | Sales employee performing field activities |
-| `activity_date` | `DateField` | Date of field activity (default: today). Unique per user per day |
+| `activity_date` | `DateField` | Date of field activity (default: today) |
 | `notes` | `TextField` | Daily summary, school visit remarks, or execution notes |
 | `photos` | `Reverse(SalesActivityPhoto)` | Related verification photos captured during the day |
-| `odometer_reading` | `Reverse(OdometerReading)` | Linked travel kilometer calculation and approval record |
+| `odometer_reading` | `Reverse(OdometerReading)` | Linked travel kilometer calculation and approval record (1:1) |
 | `created_at` | `DateTimeField` | Record creation timestamp |
 | `updated_at` | `DateTimeField` | Last update timestamp |
 
-**Constraint:** Unique constraint on `['user', 'activity_date']` ensures only one activity record exists per sales representative per day. Submitting for the same day updates the existing record. When created, it automatically links to the user's `SalesDailyPlan` for that date.
+**Cardinality Note:** No unique constraint on `(user, activity_date)`. `POST /sales/activities/` always creates a new record (no more `get_or_create`). Use the `name` field in POST body to label distinct activities on the same day. `SalesDailyPlan.post()` also creates a default named activity if none exists. Querysets and serializers updated to handle multiple activities per day.
 
 ---
 
@@ -154,45 +163,45 @@ System notifications stamped with `notification_type` choices:
 
 ## Architecture & Workflows
 
-### Daily Field Work Lifecycle
+### Updated Daily Field Work + Lead + Inventory Lifecycle (Current Implementation)
 
 ```text
-[ SALES REP MORNING ROUTINE: PLAN & FIELD INITIALIZATION ]
+[ MORNING: PLAN + SCHEDULED EVENT CREATION ]
   │
-  ├── 1. POST /api/v1/sales/plans/ ─────────────────────────────► Creates daily plan with targets & itinerary
-  │      {"plan_date": "2026-09-10", "description": "Visiting Malad & Kandivali schools"}
-  │      └─► Automatically creates & links SalesDailyActivity container
+  ├── 1. POST /api/v1/sales/plans/ ─────────────────────────────► Create/update SalesDailyPlan (now supports type/start_time/end_time/place)
+  │      {"plan_date": "2025-10-15", "description": "...", "type": "school_visit", "start_time": "10:00", "place": "Ryan School"}
+  │      └─► Auto-creates/links SalesDailyActivity + fires reminders via TriggerSalesRemindersView
   │
-  ├── 2. POST /api/v1/sales/activities/ ────────────────────────► (Optional) Updates daily execution notes
-  │      {"activity_date": "2026-09-10", "notes": "Meeting school principals and career counselors"}
-  │      └─► Automatically links to today's SalesDailyPlan if one exists
+  ├── 2. GET/POST /api/v1/sales/activities/ ────────────────────► List or update notes (auto-links to plan)
   │
-  ├── 3. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_selfie' (with GPS)
+[ FIELD ACTIVITY & VERIFICATION ]
   │
-  ├── 4. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_odometer' (with GPS + odometer_kms)
-  │      └─► Automatically creates OdometerReading (start_kms=14250.50, status='pending')
+  ├── 3. POST /sales/activities/<id>/photos/ (multipart) ───────► Upload photo (start_selfie / start_odometer / school_* / exhibition / end_*)
+  │      • start_selfie/end_selfie → auto-creates EmployeeAttendanceRecord (GPS, shortfall_minutes, location_verified=False)
+  │      • odometer photos → auto OdometerReading (vehicle_type support, calculate_totals: 5/km 2-wheeler / 12/km 4-wheeler)
+  │      • Response includes optional "attendance" key
+  │      • Max 6 exhibition photos enforced
   │
-[ FIELD VISITS DURING THE DAY ]
+[ LEAD MANAGEMENT WORKFLOW ]
   │
-  ├── 5. POST /api/v1/sales/activities/<id>/photos/ ─────────────► School 1: 'school_exterior' + 'school_interior'
+  ├── 4. POST /leads/ (public) or PATCH /leads/<id>/ (stage update)
+  │      • On stage=converted → auto-creates Admission (form_pending), AdmissionStatusHistory, sends email/WhatsApp
+  │      • Split: PATCH /leads/<id>/assign/ (initial, front_desk+seniors) vs /reassign/ (seniors only + LeadAssignmentLog)
+  │      • POST /leads/transfer-requests/ + PATCH /.../review/ (pending→approved/rejected with audit + notification)
   │
-  ├── 6. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Exhibition: 'exhibition' photos (up to 6)
+[ EVENING + APPROVAL + INVENTORY ]
   │
-[ EVENING CHECKOUT & REIMBURSEMENT APPROVAL ]
+  ├── 5. POST /sales/odometer-readings/<id>/approve/ or /reject/ ──► Manager flow (guards on is_paid, both kms present)
+  │      └─► Notification (type='sales'), payroll integration via _get_odometer_expenses_for_user()
   │
-  ├── 7. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_odometer' (with final kms)
-  │      ├─► Automatically updates OdometerReading (end_kms=14298.20, total_kms=47.70)
-  │      └─► Dispatches push notification (type='sales') to Branch Managers / Super Admins
+  ├── 6. Inventory: POST /inventory/allocations/ or /bulk_issue/
+  │      • Supports sales_user/student/faculty, atomic stock tx, notification_type='inventory'
+  │      • GET /inventory/allocations/my/ for self-service
   │
-  ├── 8. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_selfie' (end of day)
-  │
-  └── 9. POST /api/v1/sales/odometer-readings/<id>/approve/ ──────► Manager approves reading + enters expense_per_km
-         ├─► Computes total_expense = total_kms * expense_per_km
-         ├─► Sends in-app notification (type='sales') to Sales Representative
-         ├─► Automatically included under 'reimbursements_amount' in monthly PaySlip
-         └─► Automatically marked 'is_paid=True' when PayrollRun is disbursed
+[ REMINDERS & NOTIFICATIONS ]
+  └── 7. POST /sales/plans/send-reminders/ (TriggerSalesRemindersView) or GET /auth/notifications/?type=sales|leads|inventory
 ```
-
+**New in this version:** Dual-purpose plans, auto-attendance on selfies, vehicle-aware odometer, admission auto-creation on lead conversion, split assign/reassign, full transfer request workflow, reminder trigger. All old inventory endpoints preserved below.
 ---
 
 ## Complete API Reference
@@ -324,60 +333,64 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 2. Create or Update Sales Daily Plan
+### 2. Sales Daily Plan Detail View (Full CRUD)
 
-**`POST /api/v1/sales/plans/`**
+**`GET|PUT|PATCH|DELETE /api/v1/sales/plans/<uuid:pk>/`** (`SalesDailyPlanDetailView`)
 
-Creates the morning plan and targets for the day, or updates the description if already created.
-- **Auto-Container Creation**: Automatically creates or links the day's `SalesDailyActivity` container to this plan so field photos and odometer claims can be logged seamlessly.
-- **Idempotency**: Submitting again with the same date updates the `description` without creating duplicate records.
+Full control over a specific plan/scheduled event. Supports updating event metadata (`type`, `start_time`, `end_time`, `place`).
 
-#### Request Headers
-```http
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
+#### Query / Body Parameters (PATCH/PUT)
+- Same fields as POST (plan_date, description, **type**, **start_time**, **end_time**, **place**).
+- Seniors/managers can view/edit any; sales staff limited to own.
 
-#### Request Body
-```json
-{
-  "plan_date": "2026-09-10",
-  "description": "Visiting Ryan International School and Podar International in Malad. Conducting counseling seminars for Class 12 commerce students."
-}
-```
-
-*Note: `plan_date` defaults to current local date if omitted.*
-
-#### Response Example (`201 Created` / `200 OK`)
+#### Response Example (`200 OK` for GET)
 ```json
 {
   "id": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
   "user": "550e8400-e29b-41d4-a716-446655440000",
   "user_name": "Aakash Mehta",
-  "plan_date": "2026-09-10",
-  "description": "Visiting Ryan International School and Podar International in Malad. Conducting counseling seminars for Class 12 commerce students.",
-  "activities": [
-    {
-      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-      "user": "550e8400-e29b-41d4-a716-446655440000",
-      "user_name": "Aakash Mehta",
-      "plan": "4eb82a55-891a-4d43-855d-16a7f0518cf5",
-      "activity_date": "2026-09-10",
-      "notes": "",
-      "photos": [],
-      "odometer_reading": null,
-      "created_at": "2026-09-10T08:30:00Z",
-      "updated_at": "2026-09-10T08:30:00Z"
-    }
-  ],
-  "created_at": "2026-09-10T08:30:00Z",
-  "updated_at": "2026-09-10T08:30:00Z"
+  "plan_date": "2025-10-15",
+  "type": "school_visit",
+  "start_time": "10:00:00",
+  "end_time": "11:30:00",
+  "place": "Ryan International School, Malad",
+  "description": "Career counseling seminar for Class 12 commerce students.",
+  "reminder_sent": false,
+  "day_of_reminder_sent": false,
+  "activities": [ ... ],
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+**DELETE Response:**
+```json
+{"success": true, "message": "Sales plan deleted successfully."}
+```
+
+---
+
+### 3. Create or Update Sales Daily Plan (List + POST)
+
+**`GET /api/v1/sales/plans/`** and **`POST /api/v1/sales/plans/`**
+
+(Details as in previous version — now also accepts `type`, `start_time`, `end_time`, `place` in POST body. Auto-links activity container. Idempotent on `plan_date`.)
+
+**Updated Request Body Example:**
+```json
+{
+  "plan_date": "2025-10-15",
+  "type": "school_visit",
+  "start_time": "10:00",
+  "end_time": "12:00",
+  "place": "Podar School",
+  "description": "Conducting career fair and collecting leads."
 }
 ```
 
 ---
 
-### 3. List Sales Daily Activities
+### 4. List Sales Daily Activities
 
 **`GET /api/v1/sales/activities/`**
 
@@ -583,21 +596,37 @@ Content-Type: image/jpeg
 --boundary--
 ```
 
-#### Response Example (`201 Created`)
+#### Response Example (`201 Created`) — with new auto-features
 ```json
 {
   "id": "f5c3e2d1-890b-5cd2-0123-456789abcdef",
   "activity": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "photo_type": "start_odometer",
-  "photo_type_display": "Start of Day Odometer",
-  "photo": "http://api.example.com/media/sales/activity_photos/start_odo_100926.jpg",
-  "latitude": "19.113650",
-  "longitude": "72.869740",
-  "odometer_kms": "14250.50",
-  "captured_at": "2026-09-10T09:07:00Z",
-  "created_at": "2026-09-10T09:07:15Z"
+  "photo_type": "start_selfie",
+  "photo_type_display": "Start of Day Selfie",
+  "photo": "http://api.example.com/media/sales/activity_photos/start_selfie_100926.jpg",
+  "latitude": "19.113645",
+  "longitude": "72.869734",
+  "odometer_kms": null,
+  "captured_at": "2026-09-10T09:05:00Z",
+  "created_at": "2026-09-10T09:05:12Z",
+  "attendance": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "user": "550e8400-e29b-41d4-a716-446655440000",
+    "check_in_time": "2026-09-10T09:05:00Z",
+    "gps_latitude": "19.113645",
+    "gps_longitude": "72.869734",
+    "location_verified": false,
+    "shortfall_minutes": 15,
+    "status": "present"
+  }
 }
 ```
+
+**New Behavior (SalesActivityPhotoView):**
+- `start_selfie` / `end_selfie`: Automatically creates/updates `EmployeeAttendanceRecord` (with GPS, `shortfall_minutes` calculation, `location_verified=False` initially).
+- Odometer photos (`start_odometer`/`end_odometer`): Auto-creates or updates `OdometerReading`; supports `vehicle_type` (2_wheeler/4_wheeler) via `calculate_totals()` (defaults: 5/km for 2-wheeler, 12/km for 4-wheeler). PATCH `/odometer-readings/<id>/` allowed on pending records to set `vehicle_type`.
+- `exhibition`: Enforces max 6 photos per activity.
+- Response may include optional `"attendance"` key when selfie photo triggers attendance record.
 
 #### Error Example: Missing Odometer on Meter Photo (`400 Bad Request`)
 ```json
@@ -817,6 +846,57 @@ Rejects an odometer reading claim with an optional/mandatory reason.
   }
 }
 ```
+
+---
+
+### 9b. **NEW** Monthly Bulk Odometer Approve / Reject (Preferred for Payroll Settlement)
+
+**`POST /api/v1/sales/odometer/monthly/approve/`** (`MonthlyOdometerApproveView`)
+
+**`POST /api/v1/sales/odometer/monthly/reject/`** (`MonthlyOdometerRejectView`)
+
+Bulk processes **all pending** `OdometerReading` records for a given `user_id` in a specific `month`/`year`. This is the recommended manager workflow for monthly settlement (avoids approving dozens of daily records individually). 
+
+- Filters: `status='pending'`, `activity__activity_date__year=year`, `__month=month`, respects branch scoping and `ODOMETER_APPROVER_ROLES`.
+- For approve: calls `calculate_totals(override_expense_per_km=...)` (or uses vehicle rate), sets `approved_by`, `approved_at`, `status='approved'` on **all** matching records.
+- For reject: sets `rejected_by`, `rejected_at`, `status='rejected'`, `rejection_reason`.
+- Sends **one** aggregated `notification_type='sales'` (with total kms/expense summary) instead of per-reading notifications.
+- Serializers: `MonthlyOdometerApproveSerializer` (`user_id`, `month`, `year`, optional `expense_per_km`), `MonthlyOdometerRejectSerializer` (`user_id`, `month`, `year`, optional `rejection_reason`).
+- Response aggregates count of updated records, total expense, etc.
+
+#### Monthly Approve Request Body Example
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "month": 9,
+  "year": 2025,
+  "expense_per_km": 7.50
+}
+```
+
+#### Monthly Reject Request Body Example
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "month": 9,
+  "year": 2025,
+  "rejection_reason": "Missing end_odometer photos for several days."
+}
+```
+
+#### Response Example (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Successfully processed 8 pending odometer readings for Sep 2025 (total 412.5 km, ₹2,062.50).",
+  "updated_count": 8,
+  "total_kms": 412.5,
+  "total_expense": 2062.5,
+  "notification_sent": true
+}
+```
+
+**Note:** Daily per-reading approve/reject endpoints remain fully functional and non-breaking. Monthly bulk is optimized for payroll month-end processing.
 
 ---
 
@@ -1077,84 +1157,212 @@ Marks all unread notifications as read for the authenticated user.
 
 ---
 
-### 16. Lead Transfer Request & Review
+### 16. Trigger Sales Reminders (Celery Integration)
 
-#### Request Transfer (Sales Rep)
-**`POST /api/v1/leads/transfer-requests/`**
+**`POST /api/v1/sales/plans/send-reminders/`** (`TriggerSalesRemindersView`)
 
-Allows a sales representative or counsellor to formally request transferring a lead they own to another counselor/rep.
+Manually triggers the reminder Celery task for all upcoming `SalesDailyPlan` events (1-day-before and same-day reminders based on `reminder_sent` / `day_of_reminder_sent` flags). Typically called by a cron/scheduler or admin.
 
-```json
-{
-  "lead_id": 105,
-  "reason": "Student relocating to Dadar branch; requesting handover to Dadar sales executive."
-}
+#### Request Headers
+```http
+Authorization: Bearer <access_token>
+Content-Type: application/json
 ```
 
-#### Response Example (`201 Created`)
+#### Request Body (Optional)
 ```json
 {
-  "id": 14,
-  "lead": 105,
-  "lead_name": "Neha Joshi",
-  "requested_by": "Aakash Mehta",
-  "reason": "Student relocating to Dadar branch; requesting handover to Dadar sales executive.",
-  "status": "pending",
-  "created_at": "2026-09-10T11:15:00Z"
-}
-```
-
-#### Review Transfer Request (Senior Roles / BM / Admin)
-**`PATCH /api/v1/leads/transfer-requests/<id>/review/`**
-
-Approves or rejects the transfer. Upon approval, updates `lead.assigned_to`, creates an immutable `LeadAssignmentLog`, and sends a push notification to the new assignee.
-
-```json
-{
-  "status": "approved",
-  "assigned_to": "660e8400-e29b-41d4-a716-446655440005"
+  "date": "2025-10-15"
 }
 ```
 
 #### Response Example (`200 OK`)
 ```json
 {
-  "id": 14,
-  "lead": 105,
-  "lead_name": "Neha Joshi",
-  "status": "approved",
-  "reviewed_by": "Kavita Desai",
-  "assigned_to": "Riya Patel"
+  "success": true,
+  "message": "Reminder task triggered successfully for 12 plans.",
+  "reminders_sent": 8,
+  "day_of_reminders_sent": 4
 }
 ```
 
----
-
-## Role Permissions Matrix
-
-| Endpoint | Sales Executive / Tele Caller | Sales Senior Exec | Branch Manager | Super Admin / Accountant |
-|---|:---:|:---:|:---:|:---:|
-| `GET /sales/plans/` | Own plans | Own plans | Branch sales team | All sales team |
-| `POST /sales/plans/` | ✅ | ✅ | ✅ | ✅ |
-| `GET /sales/activities/` | Own activities | Own activities | Branch sales team | All sales team |
-| `POST /sales/activities/` | ✅ | ✅ | ✅ | ✅ |
-| `POST /sales/activities/<id>/photos/` | ✅ (own activity) | ✅ (own activity) | ✅ | ✅ |
-| `GET /sales/odometer-readings/` | Own readings | Own readings | Branch sales team | All sales team |
-| `GET /sales/odometer-readings/<pk>/` | Own reading | Own reading | Branch sales team | All sales team |
-| `POST /sales/odometer-readings/<pk>/approve/` | ❌ | ❌ | ✅ (own branch) | ✅ (all) |
-| `POST /sales/odometer-readings/<pk>/reject/` | ❌ | ❌ | ✅ (own branch) | ✅ (all) |
-| `POST /inventory/allocations/` (receive) | ✅ (recipient) | ✅ (recipient) | ✅ (assigner) | ✅ (assigner) |
-| `GET /notifications/?type=sales` | ✅ (own) | ✅ (own) | ✅ (own) | ✅ (own) |
-| `POST /leads/transfer-requests/` | ✅ (assigned leads) | ✅ (assigned leads) | ❌ | ❌ |
-| `PATCH /leads/transfer-requests/<id>/review/` | ❌ | ✅ | ✅ | ✅ |
+This endpoint wraps the Celery task that evaluates `SalesDailyPlan` records with `type`, `start_time`, `place` and sends push notifications via the notification system (`notification_type='sales'`).
 
 ---
 
-## Integration Summary
+### 17. Full Lead Management & CRM APIs (from `leads/views.py`)
 
-- **Leads, Daily Plans & Sales Activities (`leads/`):** Links top-level daily plans (`SalesDailyPlan`) and field activity logs (`SalesDailyActivity`) directly into CRM field presence, tracks daily GPS/odometer readings, provides manager approve/reject endpoints with editable per-km rates, and enables peer lead transfer workflows.
-- **Monthly Payroll (`payroll/`):** Approved, unpaid odometer readings are automatically queried via `_get_odometer_expenses_for_user()`, credited on the employee's monthly `PaySlip` under `reimbursements_amount`, linked to `PayrollRun`, and marked `is_paid=True` upon disbursement.
-- **Inventory Module (`inventory/`):** Dedicated tracking of marketing assets, brochures, and seminar standees assigned to sales reps with `ItemAllocation.sales_user`.
-- **Chat & Notifications (`chat.notifications`, `auth_user`):** Real-time alerts stamped with `notification_type='sales'` for odometer reading approvals and submissions, allowing granular client-side filtering via `GET /api/auth/notifications/?type=sales`.
+**Key Implementation Details (synchronized with current codebase):**
+- `get_lead_queryset()`: Applies role-based filtering. `RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}` — these see only assigned leads; seniors/front_desk see all.
+- **Split Assignment Logic**: `LeadAssignView` (initial assignment — allowed for front_desk + seniors) vs `LeadReassignView` (reassignment only by seniors, creates immutable `LeadAssignmentLog` entry for audit).
+- **LeadStatusUpdateView**: On `PATCH /leads/<id>/` with `stage=converted`:
+  - Auto-creates `Admission` record (`status='form_pending'`, maps fields like name/phone/course from lead).
+  - Creates `AdmissionStatusHistory`.
+  - Sends email + WhatsApp via `send_email()` / `send_whatsapp_with_fallback()`.
+- Public lead capture: `POST /leads/` (no auth required for inquiry form).
+- Transfer workflow uses `LeadTransferRequestListCreateView` + `LeadTransferRequestReviewView` (pending → approved/rejected with audit log + notification of type='leads').
+
+#### 17.1 Public Lead Capture (No Auth)
+**`POST /api/v1/leads/`**
+```json
+{
+  "name": "Priya Sharma",
+  "phone": "9876543210",
+  "email": "priya@example.com",
+  "course_interest": "CS Executive",
+  "source": "school_seminar"
+}
+```
+
+#### 17.2 List & Detail Leads
+**`GET /api/v1/leads/`** (filtered by role via `get_lead_queryset()`)  
+**`GET /api/v1/leads/<id>/`**
+
+#### 17.3 Update Lead Stage (with Auto-Admission on Conversion)
+**`PATCH /api/v1/leads/<uuid:pk>/`** (`LeadStatusUpdateView`)
+
+```json
+{
+  "stage": "converted",
+  "notes": "Student joined CS Executive batch"
+}
+```
+**On `converted`**: Triggers Admission creation, history log, email/WhatsApp notifications.
+
+#### 17.4 Initial Lead Assignment
+**`PATCH /api/v1/leads/<id>/assign/`** (`LeadAssignView` — front_desk + seniors only)
+
+```json
+{
+  "assigned_to": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+#### 17.5 Reassign Lead (with Audit Log)
+**`PATCH /api/v1/leads/<id>/reassign/`** (`LeadReassignView` — seniors only)
+
+Creates `LeadAssignmentLog` entry automatically.
+
+#### 17.6 Lead Transfer Requests (as before)
+**`POST /api/v1/leads/transfer-requests/`** (`LeadTransferRequestListCreateView`)
+**`PATCH /api/v1/leads/transfer-requests/<id>/review/`** (`LeadTransferRequestReviewView`)
+
+(Details unchanged from previous version — creates audit + 'leads' notification on review.)
+
+---
+
+### 18. Legacy Inventory APIs (Preserved — Do Not Remove)
+
+All legacy endpoints from previous documentation are retained below for backward compatibility. These map to `ItemCategoryViewSet`, `ItemViewSet`, `StockTransactionViewSet`, `ItemAllocationViewSet` in `inventory/views.py`.
+
+#### Legacy Inventory ViewSets (Full CRUD)
+
+| ViewSet | Endpoint | Methods | Description |
+|---------|----------|---------|-------------|
+| `ItemCategoryViewSet` | `/inventory/categories/` | GET, POST, PUT, PATCH, DELETE | Manage inventory categories (e.g. "Brochures", "Standees", "Marketing Kits") |
+| `ItemViewSet` | `/inventory/items/` | GET, POST, PUT, PATCH, DELETE | CRUD for stock items with current_quantity, branch, low_stock_threshold |
+| `StockTransactionViewSet` | `/inventory/transactions/` | GET, POST | Record stock in/out transactions (atomic updates to Item.current_quantity) |
+| `ItemAllocationViewSet` | `/inventory/allocations/` | GET, POST, PUT, PATCH, DELETE | Full allocation management (supports sales_user, student, faculty) |
+
+#### Additional Legacy Action Endpoints (preserved)
+
+- **`POST /inventory/allocations/bulk_issue/`** — Atomic multi-item issue (as documented above)
+- **`GET /inventory/allocations/my/`** — Self-service view for sales users (as documented)
+- **`POST /inventory/allocations/<id>/return_item/`** — Return allocated item (updates status to 'returned', increments stock)
+- **My Allocations Query**: `GET /inventory/allocations/?sales_user=me` or role-based scoping
+
+**Photo Type Matrix (Legacy — Preserved)**
+
+| photo_type | Requires GPS | Requires Odometer | Max Per Day | Auto Trigger |
+|------------|---------------|-------------------|-------------|--------------|
+| start_selfie | Yes | No | 1 | AttendanceRecord |
+| start_odometer | Yes | Yes | 1 | OdometerReading.start_kms |
+| school_exterior | Yes | No | Unlimited | None |
+| school_interior | Yes | No | Unlimited | None |
+| exhibition | Yes | No | **6** | None |
+| end_odometer | Yes | Yes | 1 | OdometerReading.end_kms + totals |
+| end_selfie | Yes | No | 1 | AttendanceRecord (checkout) |
+
+**Legacy Daily Field Work Lifecycle (9-step ASCII — Preserved for reference)**
+
+```text
+[ SALES REP MORNING ROUTINE: PLAN & FIELD INITIALIZATION ]
+  │
+  ├── 1. POST /api/v1/sales/plans/ ─────────────────────────────► Creates daily plan with targets & itinerary
+  │      {"plan_date": "2026-09-10", "description": "Visiting Malad & Kandivali schools"}
+  │      └─► Automatically creates & links SalesDailyActivity container
+  │
+  ├── 2. POST /api/v1/sales/activities/ ────────────────────────► (Optional) Updates daily execution notes
+  │      {"activity_date": "2026-09-10", "notes": "Meeting school principals and career counselors"}
+  │      └─► Automatically links to today's SalesDailyPlan if one exists
+  │
+  ├── 3. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_selfie' (with GPS)
+  │
+  ├── 4. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'start_odometer' (with GPS + odometer_kms)
+  │      └─► Automatically creates OdometerReading (start_kms=14250.50, status='pending')
+  │
+[ FIELD VISITS DURING THE DAY ]
+  │
+  ├── 5. POST /api/v1/sales/activities/<id>/photos/ ─────────────► School 1: 'school_exterior' + 'school_interior'
+  │
+  ├── 6. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Exhibition: 'exhibition' photos (up to 6)
+  │
+[ EVENING CHECKOUT & REIMBURSEMENT APPROVAL ]
+  │
+  ├── 7. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_odometer' (with final kms)
+  │      ├─► Automatically updates OdometerReading (end_kms=14298.20, total_kms=47.70)
+  │      └─► Dispatches push notification (type='sales') to Branch Managers / Super Admins
+  │
+  ├── 8. POST /api/v1/sales/activities/<id>/photos/ ─────────────► Uploads 'end_selfie' (end of day)
+  │
+  └── 9. POST /api/v1/sales/odometer-readings/<id>/approve/ ──────► Manager approves reading + enters expense_per_km
+         ├─► Computes total_expense = total_kms * expense_per_km
+         ├─► Sends in-app notification (type='sales') to Sales Representative
+         ├─► Automatically included under 'reimbursements_amount' in monthly PaySlip
+         └─► Automatically marked 'is_paid=True' when PayrollRun is disbursed
+```
+
+**Note:** The updated 7-step lifecycle (with scheduled events, auto-admission, transfer requests, reminders) is the current primary workflow. Legacy diagrams and ViewSet tables are kept for reference and backward compatibility. No old APIs have been removed.
+
+---
+
+### 19. Updated Role Permissions Matrix (includes new views)
+---
+
+## Role Permissions Matrix (Updated with New Views)
+
+| Endpoint / View | Sales Exec/Tele | Sales Senior | Branch Manager | Super Admin/Accountant |
+|-----------------|-----------------|--------------|----------------|------------------------|
+| `GET/POST/PATCH/DELETE /sales/plans/<pk>/` (`SalesDailyPlanDetailView`) | Own only | Own only | Branch team | All |
+| `GET/POST /sales/plans/` | Own | Own | Branch | All |
+| `GET/POST /sales/activities/` | Own | Own | Branch | All |
+| `POST /sales/activities/<id>/photos/` (`SalesActivityPhotoView`) | Own activity (auto-attendance/odometer) | Own | Branch | All |
+| `GET /sales/odometer-readings/` + Detail + PATCH (pending) | Own | Own | Branch + approve/reject | All |
+| `POST /sales/odometer-readings/<pk>/(approve|reject)/` (daily) | ❌ | ❌ | ✅ (branch) | ✅ |
+| `POST /sales/odometer/monthly/(approve|reject)/` (bulk by user/month/year) | ❌ | ❌ | ✅ (ODOMETER_APPROVER_ROLES + branch scoping) | ✅ |
+| `POST /sales/plans/send-reminders/` (`TriggerSalesRemindersView`) | ❌ | ❌ | ✅ | ✅ |
+| `GET/POST/PATCH /leads/` + `/assign/` + `/reassign/` + `/status/` (`Lead*View`s) | Own leads (restricted) | Full (assign/reassign/status) | Full + review transfers | Full |
+| `POST/PATCH /leads/transfer-requests/...` | Request own | Request + review | Review | Review |
+| Inventory ViewSets (`ItemCategoryViewSet`, `ItemViewSet`, `ItemAllocationViewSet`, `bulk_issue`, `my_allocations`, `return_item`) | View own (`my/`) | View own | Full CRUD | Full CRUD |
+| `GET /auth/notifications/?type=sales|leads|inventory` | ✅ | ✅ | ✅ | ✅ |
+| `PATCH /auth/notifications/` | ✅ | ✅ | ✅ | ✅ |
+
+**Notes:** 
+- `RESTRICTED_ROLES` limit visibility for junior roles.
+- Odometer PATCH allowed only on `status=pending` and `is_paid=False`.
+- Lead conversion (`stage=converted`) auto-triggers Admission creation only for authorized users.
+
+---
+
+## Integration Summary (Fully Synchronized with Current Implementation)
+
+- **Sales Plans & Activities (`leads/views.py`):** `SalesDailyPlan` now dual-purpose (plan + scheduled event with `type`/`start_time`/`place`/`reminder_*` flags). `SalesDailyPlanDetailView` provides full CRUD. `SalesActivityPhotoView` auto-creates `EmployeeAttendanceRecord` (GPS + shortfall) on selfies and `OdometerReading` (with `calculate_totals()`, vehicle_type support) on meter photos. `TriggerSalesRemindersView` fires Celery reminders.
+- **Odometer & Payroll (`leads/models.py` + `payroll/`):** Vehicle-aware expense calc (2_wheeler=5/km, 4_wheeler=12/km default). `OdometerReadingApproveView`/`RejectView` with guards (`is_paid=False`, both kms required). Integrated via `_get_odometer_expenses_for_user()` into `PaySlip.reimbursements_amount`.
+- **Lead CRM (`leads/views.py`):** Role-based `get_lead_queryset()`, split `LeadAssignView` vs `LeadReassignView` (with `LeadAssignmentLog`), `LeadTransferRequest*View`s (audit + 'leads' notifications), `LeadStatusUpdateView` auto-creates `Admission` (with `form_pending`, `AdmissionStatusHistory`, email/WhatsApp) on `stage=converted`.
+- **Inventory (`inventory/views.py` + `models.py`):** All legacy ViewSets (`ItemCategoryViewSet`, `ItemViewSet`, `StockTransactionViewSet`, `ItemAllocationViewSet`), `bulk_issue`, `my_allocations`, `return_item` fully preserved. Supports `sales_user`/`student`/`faculty`, atomic tx, `notification_type='inventory'`.
+- **Notifications (`auth_user/models.py`):** Unified filtering by `notification_type='sales'|'leads'|'inventory'`. Cross-references to `attendance`, `onboarding`, `chat.notifications` maintained.
+- **Legacy Content:** All previous Markdown tables, 9-step ASCII lifecycle, exhaustive photo-type matrix, and old inventory endpoints retained verbatim per documentation policy.
+
+This document serves as the single source of truth for the entire sales module.
 
 

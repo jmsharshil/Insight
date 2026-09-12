@@ -147,6 +147,28 @@ class OdometerRejectSerializer(serializers.Serializer):
     )
 
 
+class MonthlyOdometerApproveSerializer(serializers.Serializer):
+    """Serializer for approving ALL pending odometer readings for a user in a given month."""
+    user_id = serializers.UUIDField(required=True, help_text="UUID of the sales user")
+    month = serializers.IntegerField(min_value=1, max_value=12, required=True)
+    year = serializers.IntegerField(min_value=2020, max_value=2100, required=True)
+    expense_per_km = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
+        help_text="Optional reimbursement rate override per kilometer for ALL daily readings in the month (defaults to vehicle_type rate)."
+    )
+
+
+class MonthlyOdometerRejectSerializer(serializers.Serializer):
+    """Serializer for rejecting ALL pending odometer readings for a user in a given month."""
+    user_id = serializers.UUIDField(required=True, help_text="UUID of the sales user")
+    month = serializers.IntegerField(min_value=1, max_value=12, required=True)
+    year = serializers.IntegerField(min_value=2020, max_value=2100, required=True)
+    rejection_reason = serializers.CharField(
+        required=False, allow_blank=True, default="",
+        help_text="Reason for rejecting the monthly odometer claim."
+    )
+
+
 class SalesDailyActivitySerializer(serializers.ModelSerializer):
     photos = SalesActivityPhotoSerializer(many=True, read_only=True)
     user_name = serializers.CharField(source='user.name', read_only=True)
@@ -155,7 +177,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesDailyActivity
         fields = [
-            'id', 'user', 'user_name', 'plan',
+            'id', 'name', 'user', 'user_name', 'plan',
             'activity_date', 'notes', 'photos', 'odometer_reading',
             'created_at', 'updated_at',
         ]
