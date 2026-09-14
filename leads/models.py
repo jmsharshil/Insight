@@ -311,13 +311,17 @@ class SalesDailyPlan(models.Model):
         Only checked when both start_time and end_time are provided.
         """
         from django.core.exceptions import ValidationError
+        
+        if not getattr(self, 'user_id', None):
+            return  # Cannot check conflicts without a user
+
         if self.start_time and self.end_time:
             if self.end_time <= self.start_time:
                 raise ValidationError(
                     "end_time must be after start_time."
                 )
             conflicting_qs = SalesDailyPlan.objects.filter(
-                user=self.user,
+                user_id=self.user_id,
                 plan_date=self.plan_date,
                 start_time__isnull=False,
                 end_time__isnull=False,

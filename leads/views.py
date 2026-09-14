@@ -233,7 +233,7 @@ class SalesDailyPlanView(APIView):
         if not _sales_activity_access(request.user):
             return Response({'detail': 'Only sales staff can create sales plans.'}, status=status.HTTP_403_FORBIDDEN)
 
-        serializer = SalesDailyPlanSerializer(data=request.data)
+        serializer = SalesDailyPlanSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         plan_date = serializer.validated_data.get('plan_date') or timezone.localdate()
         description = serializer.validated_data.get('description', '')

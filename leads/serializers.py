@@ -235,7 +235,7 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
             end_time = attrs.get('end_time', instance.end_time)
             scratch_pk = instance.pk
         else:
-            user = request.user if request else None
+            user = request.user if request else getattr(instance, 'user', None)
             plan_date = attrs.get('plan_date')
             start_time = attrs.get('start_time')
             end_time = attrs.get('end_time')
