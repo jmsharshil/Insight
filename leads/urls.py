@@ -21,6 +21,7 @@ urlpatterns = [
     path("sales/plans/send-reminders/", TriggerSalesRemindersView.as_view(), name="sales-plans-send-reminders"),
     path("sales/plans/<uuid:pk>/", SalesDailyPlanDetailView.as_view(), name="sales-daily-plans-detail"),
     path("sales/activities/", SalesDailyActivityView.as_view(), name="sales-daily-activities"),
+    path("sales/photos/", SalesActivityPhotoView.as_view(), name="sales-general-photos"),
     path("sales/activities/<uuid:activity_id>/photos/", SalesActivityPhotoView.as_view(), name="sales-activity-photos"),
     path("sales/odometer-readings/", OdometerReadingListView.as_view(), name="sales-odometer-readings-list"),
     path("sales/odometer-readings/<uuid:pk>/", OdometerReadingDetailView.as_view(), name="sales-odometer-readings-detail"),

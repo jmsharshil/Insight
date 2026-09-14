@@ -386,17 +386,6 @@ class SalesDailyActivity(models.Model):
     def __str__(self):
         name_str = f" - {self.name}" if self.name else ""
         return f"{self.user.name} - {self.activity_date}{name_str}"
-
-SALES_ACTIVITY_PHOTO_TYPES = [
-    ('start_selfie', 'Start of Day Selfie'),
-    ('start_odometer', 'Start of Day Odometer'),
-    ('end_selfie', 'End of Day Selfie'),
-    ('end_odometer', 'End of Day Odometer'),
-    ('school_interior', 'School Interior'),
-    ('school_exterior', 'School Exterior'),
-    ('exhibition', 'Exhibition'),
-]
-
 class SalesActivityPhoto(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     activity = models.ForeignKey(
@@ -404,7 +393,7 @@ class SalesActivityPhoto(models.Model):
         on_delete=models.CASCADE,
         related_name='photos',
     )
-    photo_type = models.CharField(max_length=30, choices=SALES_ACTIVITY_PHOTO_TYPES)
+    photo_type = models.CharField(max_length=50, help_text="Type/category of the photo (e.g. 'start_selfie', 'venue', 'meeting')")
     photo = models.ImageField(upload_to='sales/activity_photos/')
     name = models.CharField(
         max_length=200,

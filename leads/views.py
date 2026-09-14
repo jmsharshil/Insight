@@ -339,14 +339,24 @@ class SalesActivityPhotoView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
-    def post(self, request, activity_id):
-        try:
-            activity = SalesDailyActivity.objects.select_related('user').get(id=activity_id)
-        except SalesDailyActivity.DoesNotExist:
-            return Response({'detail': 'Sales activity not found.'}, status=status.HTTP_404_NOT_FOUND)
+    def post(self, request, activity_id=None):
+        if activity_id:
+            try:
+                activity = SalesDailyActivity.objects.select_related('user').get(id=activity_id)
+            except SalesDailyActivity.DoesNotExist:
+                return Response({'detail': 'Sales activity not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if not _sales_activity_access(request.user, activity):
-            return Response({'detail': 'You cannot upload photos for this activity.'}, status=status.HTTP_403_FORBIDDEN)
+            if not _sales_activity_access(request.user, activity):
+                return Response({'detail': 'You cannot upload photos for this activity.'}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            # Auto-create or fetch a general daily container for today
+            today = timezone.localdate()
+            activity, created = SalesDailyActivity.objects.get_or_create(
+                user=request.user,
+                activity_date=today,
+                name="Daily Field Operations",
+                defaults={'notes': 'Auto-created container for general daily check-ins and check-outs.'}
+            )
 
         photo_type = request.data.get('photo_type')
         if photo_type == 'exhibition' and activity.photos.filter(photo_type='exhibition').count() >= 6:

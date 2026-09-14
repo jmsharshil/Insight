@@ -75,12 +75,10 @@ class FlexibleDateTimeField(serializers.DateTimeField):
             )
 
 class SalesActivityPhotoSerializer(serializers.ModelSerializer):
-    photo_type_display = serializers.CharField(source='get_photo_type_display', read_only=True)
-
     class Meta:
         model = SalesActivityPhoto
         fields = [
-            'id', 'activity', 'photo_type', 'photo_type_display', 'name', 'photo',
+            'id', 'activity', 'photo_type', 'name', 'photo',
             'latitude', 'longitude', 'odometer_kms', 'captured_at', 'created_at',
         ]
         read_only_fields = ['id', 'activity', 'created_at']
