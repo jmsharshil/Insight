@@ -280,6 +280,10 @@ class SalesDailyPlan(models.Model):
         default='',
         help_text="Describe what the salesperson plans to do — schools to visit, targets, agenda, etc."
     )
+    reminder_two_days_before_sent = models.BooleanField(
+        default=False,
+        help_text="True once the 8:00 AM 2-days-before reminder has been sent."
+    )
     reminder_one_day_before_sent = models.BooleanField(
         default=False,
         help_text="True once the 8:00 AM 1-day-before reminder has been sent."
@@ -298,6 +302,38 @@ class SalesDailyPlan(models.Model):
     @date.setter
     def date(self, value):
         self.plan_date = value
+
+    def clean(self):
+        """
+        Validate that this event's time slot does not overlap with any other
+        event for the same user on the same date.
+        Overlap condition: existing.start_time < self.end_time AND existing.end_time > self.start_time
+        Only checked when both start_time and end_time are provided.
+        """
+        from django.core.exceptions import ValidationError
+        if self.start_time and self.end_time:
+            if self.end_time <= self.start_time:
+                raise ValidationError(
+                    "end_time must be after start_time."
+                )
+            conflicting_qs = SalesDailyPlan.objects.filter(
+                user=self.user,
+                plan_date=self.plan_date,
+                start_time__isnull=False,
+                end_time__isnull=False,
+                start_time__lt=self.end_time,
+                end_time__gt=self.start_time,
+            )
+            if self.pk:
+                conflicting_qs = conflicting_qs.exclude(pk=self.pk)
+            if conflicting_qs.exists():
+                conflict = conflicting_qs.first()
+                raise ValidationError(
+                    f"This event conflicts with an existing event "
+                    f"'{conflict.type or 'Unnamed'}' on {self.plan_date} "
+                    f"({conflict.start_time.strftime('%H:%M')} – {conflict.end_time.strftime('%H:%M')}). "
+                    f"Please choose a different time slot."
+                )
 
     class Meta:
         db_table = 'sales_daily_plans'
@@ -370,6 +406,13 @@ class SalesActivityPhoto(models.Model):
     )
     photo_type = models.CharField(max_length=30, choices=SALES_ACTIVITY_PHOTO_TYPES)
     photo = models.ImageField(upload_to='sales/activity_photos/')
+    name = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text="Optional label/name for this photo (e.g. 'Ryan International Visit', "
+                  "'Exhibition Day 1 — Stall Setup'). Useful for per-event photo identification."
+    )
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
     odometer_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)

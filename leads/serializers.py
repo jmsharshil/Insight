@@ -80,7 +80,7 @@ class SalesActivityPhotoSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesActivityPhoto
         fields = [
-            'id', 'activity', 'photo_type', 'photo_type_display', 'photo',
+            'id', 'activity', 'photo_type', 'photo_type_display', 'name', 'photo',
             'latitude', 'longitude', 'odometer_kms', 'captured_at', 'created_at',
         ]
         read_only_fields = ['id', 'activity', 'created_at']
@@ -188,6 +188,8 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
     """
     Parent serializer — daily plan / scheduled event.
     Activities for the day are nested inside.
+    Validates that new/updated events do not time-conflict with existing events
+    for the same user on the same date.
     """
     user_name = serializers.CharField(source='user.name', read_only=True)
     activities = SalesDailyActivitySerializer(many=True, read_only=True)
@@ -198,11 +200,13 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'user_name', 'plan_date', 'date', 'type',
             'start_time', 'end_time', 'place', 'description',
+            'reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'activities', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'user', 'user_name', 'activities',
+            'reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'created_at', 'updated_at'
         ]
@@ -212,6 +216,46 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         if 'date' in mutable_data and 'plan_date' not in mutable_data:
             mutable_data['plan_date'] = mutable_data['date']
         return super().to_internal_value(mutable_data)
+
+    def validate(self, attrs):
+        """
+        Run model-level time-conflict validation via model.clean().
+        Builds a temporary (unsaved) model instance populated with the
+        validated data merged over any existing instance fields.
+        """
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        instance = self.instance  # None on create, existing plan on update
+        request = self.context.get('request')
+
+        # Build a scratch instance to run clean() against
+        if instance:
+            # Merge incoming attrs over existing fields
+            user = instance.user
+            plan_date = attrs.get('plan_date', instance.plan_date)
+            start_time = attrs.get('start_time', instance.start_time)
+            end_time = attrs.get('end_time', instance.end_time)
+            scratch_pk = instance.pk
+        else:
+            user = request.user if request else None
+            plan_date = attrs.get('plan_date')
+            start_time = attrs.get('start_time')
+            end_time = attrs.get('end_time')
+            scratch_pk = None
+
+        scratch = SalesDailyPlan(
+            pk=scratch_pk,
+            user=user,
+            plan_date=plan_date,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        try:
+            scratch.clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({'non_field_errors': exc.messages})
+
+        return attrs
 
 
 # ── Contact Serializer ────────────────────────────────────────────────────────

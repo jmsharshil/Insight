@@ -355,6 +355,7 @@ class SalesActivityPhotoView(APIView):
         serializer = SalesActivityPhotoSerializer(data={
             'photo_type': photo_type,
             'photo': request.FILES.get('photo'),
+            'name': request.data.get('name', ''),
             'latitude': request.data.get('latitude'),
             'longitude': request.data.get('longitude'),
             'odometer_kms': request.data.get('odometer_kms') or None,
@@ -836,10 +837,19 @@ class MonthlyOdometerApproveView(APIView):
         "user_id": "uuid",
         "month": 10,
         "year": 2024,
-        "expense_per_km": 6.00 (optional override for the month)
+        "expense_per_km": 6.00  (optional override for all readings this month)
     }
+
     Approves ALL pending odometer readings for the user in that month at once.
-    Sends a single monthly notification. Minimal change - daily records and payroll unchanged.
+
+    Payroll Integration (new):
+    - If a PaySlip already exists for this user/month (draft or pending_approval),
+      the total approved travel expense is IMMEDIATELY added to payslip.reimbursements_amount
+      and net_salary, and each OdometerReading is linked (payslip + payroll_run).
+    - If no payslip exists yet, the readings remain approved (is_paid=False) and are
+      automatically picked up when the monthly payroll run is generated.
+
+    Sends a single aggregated notification to the employee.
     """
     permission_classes = [IsAuthenticated]
 
@@ -882,6 +892,7 @@ class MonthlyOdometerApproveView(APIView):
         total_expense = Decimal('0')
         updated_count = 0
 
+        # ── Step 1: Approve all pending readings ─────────────────────────────
         for reading in readings:
             reading.status = 'approved'
             reading.approved_by = request.user
@@ -889,25 +900,92 @@ class MonthlyOdometerApproveView(APIView):
             reading.rejected_by = None
             reading.rejected_at = None
             reading.rejection_reason = ''
-            # save with optional monthly rate override (uses vehicle rate if None)
             reading.save(override_expense_per_km=expense_per_km)
             total_kms += reading.total_kms
             total_expense += reading.total_expense
             updated_count += 1
 
-        # Single notification for the monthly approval (minimal disruption to existing per-daily notifications)
+        # ── Step 2: Link expense to existing PaySlip if one exists ────────────
+        payslip_linked = False
+        payslip_id = None
+        payroll_run_id = None
+
         try:
-            staff_name = target_user.name or target_user.email
+            from payroll.models import PaySlip
+
+            # Find an existing draft/pending_approval payslip for this user/month
+            existing_payslip = PaySlip.objects.filter(
+                user=target_user,
+                payroll_run__month=month,
+                payroll_run__year=year,
+                payroll_run__status__in=['draft', 'pending_approval'],
+            ).select_related('payroll_run').first()
+
+            if existing_payslip:
+                payroll_run = existing_payslip.payroll_run
+
+                # Add newly approved expense to existing payslip totals
+                existing_payslip.reimbursements_amount = (
+                    existing_payslip.reimbursements_amount + total_expense
+                )
+                existing_payslip.net_salary = (
+                    existing_payslip.net_salary + total_expense
+                )
+                existing_payslip.save(update_fields=['reimbursements_amount', 'net_salary'])
+
+                # Link each newly approved reading (unlinked ones only) to this payslip
+                OdometerReading.objects.filter(
+                    user=target_user,
+                    activity__activity_date__year=year,
+                    activity__activity_date__month=month,
+                    status='approved',
+                    payslip__isnull=True,
+                ).update(
+                    payslip=existing_payslip,
+                    payroll_run=payroll_run,
+                )
+
+                payslip_linked = True
+                payslip_id = str(existing_payslip.id)
+                payroll_run_id = str(payroll_run.id)
+                logger.info(
+                    f"[ODOMETER MONTHLY] Linked ₹{total_expense} travel expense to "
+                    f"payslip {existing_payslip.id} for user {target_user.id} ({month}/{year})."
+                )
+            else:
+                logger.info(
+                    f"[ODOMETER MONTHLY] No active payslip found for user {target_user.id} "
+                    f"({month}/{year}). Expense will be included at payroll generation."
+                )
+        except Exception as e:
+            logger.error(
+                f"[ODOMETER MONTHLY] Payslip link failed for user {target_user.id} "
+                f"({month}/{year}): {e}",
+                exc_info=True,
+            )
+
+        # ── Step 3: Notify employee ───────────────────────────────────────────
+        staff_name = target_user.name or target_user.email
+        payroll_note = (
+            "Amount added to your current payslip." if payslip_linked
+            else "Will be included in your upcoming payroll."
+        )
+        try:
             send_system_notification(
                 user_id=str(target_user.id),
-                title='Monthly Odometer Approved',
-                body=f"Your odometer readings for {month}/{year} (total {total_kms} km, ₹{total_expense}) have been approved and will be included in payroll.",
+                title='Monthly Travel Expense Approved',
+                body=(
+                    f"Your travel expense for {month}/{year} has been approved — "
+                    f"{total_kms} km = \u20b9{total_expense}. {payroll_note}"
+                ),
                 metadata={
                     'user_id': str(target_user.id),
                     'month': month,
                     'year': year,
                     'total_kms': float(total_kms),
                     'total_expense': float(total_expense),
+                    'payslip_id': payslip_id,
+                    'payroll_run_id': payroll_run_id,
                     'type': 'monthly_odometer_approved',
                 },
                 notification_type='sales',
@@ -917,7 +995,11 @@ class MonthlyOdometerApproveView(APIView):
 
         return Response({
             'success': True,
-            'message': f"Monthly odometer approved for {staff_name} ({month}/{year}). Updated {updated_count} daily records. Total: {total_kms} km = ₹{total_expense}.",
+            'message': (
+                f"Monthly travel expense approved for {staff_name} ({month}/{year}). "
+                f"Approved {updated_count} daily records — {total_kms} km = \u20b9{total_expense}. "
+                f"{payroll_note}"
+            ),
             'data': {
                 'user_id': str(target_user.id),
                 'user_name': staff_name,
@@ -926,8 +1008,13 @@ class MonthlyOdometerApproveView(APIView):
                 'records_approved': updated_count,
                 'total_kms': float(total_kms),
                 'total_expense': float(total_expense),
+                'payslip_linked': payslip_linked,
+                'payslip_id': payslip_id,
+                'payroll_run_id': payroll_run_id,
             }
         }, status=status.HTTP_200_OK)
+
+
 
 
 class MonthlyOdometerRejectView(APIView):

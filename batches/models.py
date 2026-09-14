@@ -391,17 +391,16 @@ class CourseLevel(models.Model):
     course_type  = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES, default='standard')
     duration_months  = models.PositiveIntegerField(default=0)
     fee_amount       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    order        = models.PositiveSmallIntegerField()
+    order        = models.PositiveSmallIntegerField(null=True, blank=True)
     description  = models.TextField(blank=True)
     is_active    = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'course_levels'
-        unique_together = ('course', 'order')
-        ordering = ['order']
+        ordering = ['name']
 
     def __str__(self):
-        return f"{self.course.code} | Level {self.order}: {self.name}"
+        return f"{self.course.code} | Level: {self.name}"
 
 
 # E2 ─ Subject Chapters
@@ -409,7 +408,7 @@ class Chapter(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     subject     = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters')
     name        = models.CharField(max_length=200)
-    order       = models.PositiveSmallIntegerField()
+    order       = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
     duration_hours = models.PositiveIntegerField(default=0)
@@ -417,11 +416,10 @@ class Chapter(models.Model):
 
     class Meta:
         db_table = 'subject_chapters'
-        unique_together = ('subject', 'order')
-        ordering = ['order']
+        ordering = ['name']
 
     def __str__(self):
-        return f"{self.subject.code} | Ch {self.order}: {self.name}"
+        return f"{self.subject.code} | Ch: {self.name}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

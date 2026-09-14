@@ -26,26 +26,12 @@ class CourseLevelSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CourseLevel
-        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'order', 'description', 'is_active', 'subjects']
+        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'description', 'is_active', 'subjects']
         read_only_fields = ['id', 'course']
 
     def get_subjects(self, obj):
         qs = Subject.objects.filter(level=obj, is_active=True)
         return SubjectListSerializer(qs, many=True, context=self.context).data
-
-    def validate(self, data):
-        # Duplicate order check (create only)
-        course = self.context.get('course')
-        order = data.get('order')
-        if course and order is not None:
-            qs = CourseLevel.objects.filter(course=course, order=order)
-            if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError(
-                    {'order': f'A level with order {order} already exists for this course.'}
-                )
-        return data
 
 
 class CourseListSerializer(serializers.ModelSerializer):
@@ -117,7 +103,7 @@ class ChapterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Chapter
         fields = [
-            'id', 'subject', 'name', 'order', 'description', 'is_active',
+            'id', 'subject', 'name', 'description', 'is_active',
             'duration_hours', 'faculties', 'faculties_details'
         ]
         read_only_fields = ['id', 'subject']
@@ -162,16 +148,7 @@ class ChapterSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, data):
-        subject = self.context.get('subject')
-        order = data.get('order')
-        if subject and order is not None:
-            qs = Chapter.objects.filter(subject=subject, order=order)
-            if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError(
-                    {'order': f'A chapter with order {order} already exists for this subject.'}
-                )
+        # order is now optional — no uniqueness check needed
         return data
 
     def create(self, validated_data):
