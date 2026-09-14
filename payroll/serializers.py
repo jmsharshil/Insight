@@ -38,6 +38,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
     employee_id = serializers.SerializerMethodField()
     user_id = serializers.SerializerMethodField()
     late_logs = SessionLatePenaltyLogSerializer(many=True, read_only=True)
+    reimbursement_notes = serializers.SerializerMethodField()
 
     class Meta:
         model = PaySlip
@@ -47,7 +48,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
-            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'net_salary', 'leaves_taken', 'working_days',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'reimbursement_notes', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
@@ -63,6 +64,20 @@ class PaySlipSerializer(serializers.ModelSerializer):
         if self.get_employment_type(obj) != 'full_time':
             return obj.working_days
         return 0
+
+    def get_reimbursement_notes(self, obj):
+        notes = []
+        if hasattr(obj, 'odometer_readings'):
+            for reading in obj.odometer_readings.all():
+                activity_date = reading.activity.activity_date if hasattr(reading, 'activity') and reading.activity else ''
+                event_name = reading.activity.name if hasattr(reading, 'activity') and reading.activity else 'General Travel'
+                notes.append({
+                    'date': str(activity_date),
+                    'event': event_name,
+                    'kms': float(reading.total_kms),
+                    'expense': float(reading.total_expense)
+                })
+        return notes
 
 
     def get_hourly_rate(self, obj):
