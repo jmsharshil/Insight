@@ -399,6 +399,32 @@ class SalesActivityPhotoView(APIView):
         if photo_type == 'exhibition' and activity.photos.filter(photo_type='exhibition').count() >= 6:
             return Response({'detail': 'A maximum of 6 exhibition photos is allowed.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ── Pre-check for start_selfie, end_selfie, and other photos ──
+        from attendance.models import EmployeeAttendanceRecord
+        today = activity.activity_date
+        
+        already_checked_in = EmployeeAttendanceRecord.objects.filter(
+            user=activity.user,
+            date=today,
+            checked_in_at__isnull=False,
+        ).exists()
+
+        if photo_type == 'start_selfie':
+            if already_checked_in:
+                return Response({'detail': 'You have already checked in for today.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            if not already_checked_in:
+                return Response({'detail': 'You must check in (upload a start selfie) before uploading activity photos.'}, status=status.HTTP_403_FORBIDDEN)
+                
+            if photo_type == 'end_selfie':
+                already_checked_out = EmployeeAttendanceRecord.objects.filter(
+                    user=activity.user,
+                    date=today,
+                    checked_out_at__isnull=False,
+                ).exists()
+                if already_checked_out:
+                    return Response({'detail': 'You have already checked out for today.'}, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = SalesActivityPhotoSerializer(data={
             'photo_type': photo_type,
             'photo': request.FILES.get('photo'),
@@ -419,48 +445,38 @@ class SalesActivityPhotoView(APIView):
                 from core.utils import get_user_branch_id
                 today = activity.activity_date
 
-                # Check if user already checked in today (e.g. via QR or selfie)
-                already_checked_in = EmployeeAttendanceRecord.objects.filter(
-                    user=activity.user,
-                    date=today,
-                    checked_in_at__isnull=False,
-                ).exists()
+                bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
+                if not bid:
+                    from branch.models import Branch
+                    first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
+                    bid = first_branch.id if first_branch else None
 
-                if not already_checked_in:
-                    bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
-                    if not bid:
-                        from branch.models import Branch
-                        first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
-                        bid = first_branch.id if first_branch else None
+                if bid:
+                    # Clear stale absent record
+                    EmployeeAttendanceRecord.objects.filter(
+                        user=activity.user, date=today, status='absent'
+                    ).delete()
 
-                    if bid:
-                        # Clear stale absent record
-                        EmployeeAttendanceRecord.objects.filter(
-                            user=activity.user, date=today, status='absent'
-                        ).delete()
-
-                        checkin_time = photo.captured_at or timezone.now()
-                        rec = EmployeeAttendanceRecord.objects.create(
-                            user=activity.user,
-                            branch_id=bid,
-                            date=today,
-                            status='checkout_pending',
-                            checked_in_at=checkin_time,
-                            latitude=photo.latitude,
-                            longitude=photo.longitude,
-                            location_verified=False,
-                            marked_by=activity.user,
-                        )
-                        attendance_info = {
-                            'action': 'check_in',
-                            'record_id': str(rec.id),
-                            'status': 'checkout_pending',
-                            'checked_in_at': rec.checked_in_at.isoformat(),
-                        }
-                    else:
-                        logger.warning(f"Could not auto check-in user {activity.user.id}: no branch found")
+                    checkin_time = photo.captured_at or timezone.now()
+                    rec = EmployeeAttendanceRecord.objects.create(
+                        user=activity.user,
+                        branch_id=bid,
+                        date=today,
+                        status='checkout_pending',
+                        checked_in_at=checkin_time,
+                        latitude=photo.latitude,
+                        longitude=photo.longitude,
+                        location_verified=False,
+                        marked_by=activity.user,
+                    )
+                    attendance_info = {
+                        'action': 'check_in',
+                        'record_id': str(rec.id),
+                        'status': 'checkout_pending',
+                        'checked_in_at': rec.checked_in_at.isoformat(),
+                    }
                 else:
-                    attendance_info = {'action': 'none', 'message': 'Already checked in for today'}
+                    logger.warning(f"Could not auto check-in user {activity.user.id}: no branch found")
             except Exception as e:
                 logger.error(f"Auto check-in on start_selfie failed: {e}", exc_info=True)
 
@@ -470,68 +486,58 @@ class SalesActivityPhotoView(APIView):
                 from core.utils import get_user_branch_id
                 today = activity.activity_date
 
-                # Check if user already checked out today (e.g. via QR or selfie)
-                already_checked_out = EmployeeAttendanceRecord.objects.filter(
+                checkout_time = photo.captured_at or timezone.now()
+                open_rec = EmployeeAttendanceRecord.objects.filter(
                     user=activity.user,
                     date=today,
-                    checked_out_at__isnull=False,
-                ).exists()
+                    checked_in_at__isnull=False,
+                    checked_out_at__isnull=True,
+                ).order_by('-checked_in_at').first()
 
-                if not already_checked_out:
-                    checkout_time = photo.captured_at or timezone.now()
-                    open_rec = EmployeeAttendanceRecord.objects.filter(
-                        user=activity.user,
-                        date=today,
-                        checked_in_at__isnull=False,
-                        checked_out_at__isnull=True,
-                    ).order_by('-checked_in_at').first()
+                if open_rec:
+                    open_rec.checked_out_at = checkout_time
+                    open_rec.status = 'present'
+                    role = getattr(activity.user, 'role', '')
+                    if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
+                        duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
+                        shortfall = max(0, 540 - duration_mins)
+                        open_rec.shortfall_minutes = shortfall
+                    open_rec.save()
+                    attendance_info = {
+                        'action': 'check_out',
+                        'record_id': str(open_rec.id),
+                        'status': open_rec.status,
+                        'checked_out_at': open_rec.checked_out_at.isoformat(),
+                    }
+                else:
+                    bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
+                    if not bid:
+                        from branch.models import Branch
+                        first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
+                        bid = first_branch.id if first_branch else None
 
-                    if open_rec:
-                        open_rec.checked_out_at = checkout_time
-                        open_rec.status = 'present'
-                        role = getattr(activity.user, 'role', '')
-                        if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
-                            duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
-                            shortfall = max(0, 540 - duration_mins)
-                            open_rec.shortfall_minutes = shortfall
-                        open_rec.save()
+                    if bid:
+                        EmployeeAttendanceRecord.objects.filter(
+                            user=activity.user, date=today, status='absent'
+                        ).delete()
+                        rec = EmployeeAttendanceRecord.objects.create(
+                            user=activity.user,
+                            branch_id=bid,
+                            date=today,
+                            status='present',
+                            checked_in_at=checkout_time,
+                            checked_out_at=checkout_time,
+                            latitude=photo.latitude,
+                            longitude=photo.longitude,
+                            location_verified=False,
+                            marked_by=activity.user,
+                        )
                         attendance_info = {
                             'action': 'check_out',
-                            'record_id': str(open_rec.id),
-                            'status': open_rec.status,
-                            'checked_out_at': open_rec.checked_out_at.isoformat(),
+                            'record_id': str(rec.id),
+                            'status': 'present',
+                            'checked_out_at': rec.checked_out_at.isoformat(),
                         }
-                    else:
-                        bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
-                        if not bid:
-                            from branch.models import Branch
-                            first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
-                            bid = first_branch.id if first_branch else None
-
-                        if bid:
-                            EmployeeAttendanceRecord.objects.filter(
-                                user=activity.user, date=today, status='absent'
-                            ).delete()
-                            rec = EmployeeAttendanceRecord.objects.create(
-                                user=activity.user,
-                                branch_id=bid,
-                                date=today,
-                                status='present',
-                                checked_in_at=checkout_time,
-                                checked_out_at=checkout_time,
-                                latitude=photo.latitude,
-                                longitude=photo.longitude,
-                                location_verified=False,
-                                marked_by=activity.user,
-                            )
-                            attendance_info = {
-                                'action': 'check_out',
-                                'record_id': str(rec.id),
-                                'status': 'present',
-                                'checked_out_at': rec.checked_out_at.isoformat(),
-                            }
-                else:
-                    attendance_info = {'action': 'none', 'message': 'Already checked out for today'}
             except Exception as e:
                 logger.error(f"Auto check-out on end_selfie failed: {e}", exc_info=True)
 
@@ -1025,13 +1031,13 @@ class MonthlyOdometerApproveView(APIView):
                 title='Monthly Travel Expense Approved',
                 body=(
                     f"Your travel expense for {month}/{year} has been approved — "
-                    f"{total_kms} km = \u20b9{total_expense}. {payroll_note}"
+                    f"{total_kms_sum} km = \u20b9{total_expense}. {payroll_note}"
                 ),
                 metadata={
                     'user_id': str(target_user.id),
                     'month': month,
                     'year': year,
-                    'total_kms': float(total_kms),
+                    'total_kms': float(total_kms_sum),
                     'total_expense': float(total_expense),
                     'payslip_id': payslip_id,
                     'payroll_run_id': payroll_run_id,
