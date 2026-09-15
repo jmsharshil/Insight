@@ -32,7 +32,7 @@ When a salesperson departs for or arrives at a scheduled visit, they capture pho
 *   **Action Flow for an Event:**
     1.  **Departing for Event:** Upload `start_odometer` (with `odometer_kms` and `vehicle_type`). The system creates a pending `OdometerReading` specifically linked to this event.
     2.  **At the Event:** Upload `venue`, `meeting`, or `school_exterior` photos.
-    3.  **Leaving the Event:** Upload `end_odometer` (with `odometer_kms`). The system updates the `OdometerReading` for this event, calculates total distance, and computes the travel expense (₹5/km for 2-wheelers, ₹12/km for 4-wheelers).
+    3.  **Leaving the Event:** Upload `odometer_kms` (with `odometer_kms`). The system updates the `OdometerReading` for this event, calculates total distance, and computes the travel expense (₹5/km for 2-wheelers, ₹12/km for 4-wheelers).
 
 ## 4. End of the Day (Attendance Check-Out)
 

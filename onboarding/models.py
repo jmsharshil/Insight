@@ -163,6 +163,7 @@ class Admission(models.Model):
     doc_twelfth_receipt   = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     doc_twelfth_marksheet = models.FileField(upload_to=admission_document_path, null=True, blank=True)
     doc_category_cert     = models.FileField(upload_to=admission_document_path, null=True, blank=True)
+    doc_pan_card          = models.FileField(upload_to=admission_document_path, null=True, blank=True)
 
     # ── Counsellor Assignment ─────────────────────────────────────────────────
     assigned_counsellor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL,related_name='assigned_admissions',limit_choices_to={'role': 'counsellor'},help_text="Counsellor assigned to review this admission.",)

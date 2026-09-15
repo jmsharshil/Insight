@@ -339,6 +339,43 @@ class SalesActivityPhotoView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
+    def get(self, request, activity_id=None):
+        queryset = SalesActivityPhoto.objects.select_related('activity', 'activity__user')
+
+        if activity_id:
+            queryset = queryset.filter(activity_id=activity_id)
+        else:
+            # If hit generally, only return photos from the auto-created general container
+            queryset = queryset.filter(activity__name="Daily Field Operations")
+
+        role = getattr(request.user, 'role', None)
+        if role not in ODOMETER_APPROVER_ROLES:
+            queryset = queryset.filter(activity__user=request.user)
+        elif role == 'branch_manager':
+            from core.utils import get_user_branch_ids
+            branch_ids = get_user_branch_ids(request.user)
+            if branch_ids:
+                queryset = queryset.filter(activity__user__branch_id__in=branch_ids)
+
+        photo_type = request.query_params.get('photo_type')
+        if photo_type:
+            queryset = queryset.filter(photo_type=photo_type)
+
+        date_param = request.query_params.get('date')
+        if date_param:
+            if date_param.lower() == 'today':
+                queryset = queryset.filter(activity__activity_date=timezone.localdate())
+            else:
+                try:
+                    parsed_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+                    queryset = queryset.filter(activity__activity_date=parsed_date)
+                except ValueError:
+                    return Response({'detail': 'Invalid date format. Use YYYY-MM-DD or "today".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = queryset.order_by('-captured_at', '-created_at')
+        serializer = SalesActivityPhotoSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
+
     def post(self, request, activity_id=None):
         if activity_id:
             try:

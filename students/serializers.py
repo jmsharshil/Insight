@@ -295,7 +295,7 @@ MAX_DOC_SIZE_MB   = 5
 DOCUMENT_FIELD_CHOICES = [
     'doc_signature', 'doc_dob_certificate', 'doc_id_proof',
     'doc_tenth_marksheet', 'doc_twelfth_marksheet',
-    'doc_category_cert', 'doc_graduation_cert', 'photo',
+    'doc_category_cert', 'doc_graduation_cert', 'doc_pan_card', 'photo',
 ]
 
 

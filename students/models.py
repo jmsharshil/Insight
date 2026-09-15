@@ -163,6 +163,7 @@ class Student(models.Model):
     doc_twelfth_marksheet = models.FileField(upload_to=student_document_path, null=True, blank=True)
     doc_category_cert   = models.FileField(upload_to=student_document_path, null=True, blank=True)
     doc_graduation_cert = models.FileField(upload_to=student_document_path, null=True, blank=True)
+    doc_pan_card        = models.FileField(upload_to=student_document_path, null=True, blank=True)
 
     # ── Counsellor ────────────────────────────────────────────────────────────
     assigned_counsellor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True, blank=True,on_delete=models.SET_NULL,related_name='counselled_students',limit_choices_to={'role': 'counsellor'},)
