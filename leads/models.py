@@ -427,13 +427,13 @@ ODOMETER_STATUS_CHOICES = [
 ]
 
 VEHICLE_TYPE_CHOICES = [
-    ('2_wheeler', '2 Wheeler'),
-    ('4_wheeler', '4 Wheeler'),
+    ('bike', 'Bike'),
+    ('car', 'Car'),
 ]
 
 VEHICLE_RATES = {
-    '2_wheeler': Decimal('5.00'),
-    '4_wheeler': Decimal('12.00'),
+    'bike': Decimal('5.00'),
+    'car': Decimal('12.00'),
 }
 
 
@@ -456,8 +456,8 @@ class OdometerReading(models.Model):
     vehicle_type = models.CharField(
         max_length=20,
         choices=VEHICLE_TYPE_CHOICES,
-        default='2_wheeler',
-        help_text="Type of vehicle used: 2 wheeler (₹5/km) or 4 wheeler (₹12/km)"
+        default='bike',
+        help_text="Type of vehicle used: bike (₹5/km) or car (₹12/km)"
     )
     start_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     end_kms = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -466,7 +466,7 @@ class OdometerReading(models.Model):
         max_digits=8,
         decimal_places=2,
         default=Decimal('5.00'),
-        help_text="Reimbursement rate per kilometer (auto-set based on vehicle_type: ₹5 for 2-wheeler, ₹12 for 4-wheeler)"
+        help_text="Reimbursement rate per kilometer (auto-set based on vehicle_type: ₹5 for bike, ₹12 for car)"
     )
     total_expense = models.DecimalField(
         max_digits=12,
@@ -525,18 +525,20 @@ class OdometerReading(models.Model):
         db_table = 'sales_odometer_readings'
         ordering = ['-activity__activity_date', '-created_at']
 
-    def calculate_totals(self, override_expense_per_km=None):
-        if self.start_kms is not None and self.end_kms is not None:
+    def calculate_totals(self, override_expense_per_km=None, override_total_kms=None):
+        if override_total_kms is not None:
+            self.total_kms = max(Decimal('0.00'), Decimal(str(override_total_kms)))
+        elif self.status != 'approved' and self.start_kms is not None and self.end_kms is not None:
             self.total_kms = max(Decimal('0.00'), Decimal(str(self.end_kms)) - Decimal(str(self.start_kms)))
-        else:
+        elif self.start_kms is None or self.end_kms is None:
             self.total_kms = Decimal('0.00')
 
         if override_expense_per_km is not None:
             self.expense_per_km = override_expense_per_km
         else:
-            # Auto calculate expense rate based on vehicle_type: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler
+            # Auto calculate expense rate based on vehicle_type: ₹5/km for bike, ₹12/km for car
             vtype_str = str(self.vehicle_type).lower()
-            vtype = '4_wheeler' if '4' in vtype_str or 'four' in vtype_str else '2_wheeler'
+            vtype = 'car' if 'car' in vtype_str or '4' in vtype_str or 'four' in vtype_str else 'bike'
             rate = VEHICLE_RATES.get(vtype, Decimal('5.00'))
             self.expense_per_km = rate
 
@@ -546,8 +548,9 @@ class OdometerReading(models.Model):
             self.total_expense = Decimal('0.00')
 
     def save(self, *args, **kwargs):
-        override = kwargs.pop('override_expense_per_km', None)
-        self.calculate_totals(override_expense_per_km=override)
+        override_rate = kwargs.pop('override_expense_per_km', None)
+        override_kms = kwargs.pop('override_total_kms', None)
+        self.calculate_totals(override_expense_per_km=override_rate, override_total_kms=override_kms)
         super().save(*args, **kwargs)
 
     def __str__(self):

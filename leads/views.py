@@ -782,6 +782,7 @@ class OdometerReadingApproveView(APIView):
         serializer.is_valid(raise_exception=True)
 
         expense_per_km = serializer.validated_data.get('expense_per_km')
+        total_kms = serializer.validated_data.get('total_kms')
 
         reading.status = 'approved'
         reading.approved_by = request.user
@@ -789,8 +790,8 @@ class OdometerReadingApproveView(APIView):
         reading.rejected_by = None
         reading.rejected_at = None
         reading.rejection_reason = ''
-        # save with optional rate override (uses vehicle rate if None); updates totals via calculate_totals
-        reading.save(override_expense_per_km=expense_per_km)
+        # save with optional overrides; updates totals via calculate_totals
+        reading.save(override_expense_per_km=expense_per_km, override_total_kms=total_kms)
 
         # Send in-app notification to employee
         try:
@@ -912,6 +913,7 @@ class MonthlyOdometerApproveView(APIView):
         month = serializer.validated_data['month']
         year = serializer.validated_data['year']
         expense_per_km = serializer.validated_data.get('expense_per_km')
+        override_total_kms = serializer.validated_data.get('total_kms')
 
         try:
             from auth_user.models import User
@@ -935,7 +937,7 @@ class MonthlyOdometerApproveView(APIView):
             return Response({'detail': 'No pending odometer readings found for this user/month.'}, status=status.HTTP_400_BAD_REQUEST)
 
         from decimal import Decimal
-        total_kms = Decimal('0')
+        total_kms_sum = Decimal('0')
         total_expense = Decimal('0')
         updated_count = 0
 
@@ -947,8 +949,8 @@ class MonthlyOdometerApproveView(APIView):
             reading.rejected_by = None
             reading.rejected_at = None
             reading.rejection_reason = ''
-            reading.save(override_expense_per_km=expense_per_km)
-            total_kms += reading.total_kms
+            reading.save(override_expense_per_km=expense_per_km, override_total_kms=override_total_kms)
+            total_kms_sum += reading.total_kms
             total_expense += reading.total_expense
             updated_count += 1
 

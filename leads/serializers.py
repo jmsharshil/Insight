@@ -134,7 +134,11 @@ class OdometerReadingSerializer(serializers.ModelSerializer):
 class OdometerApproveSerializer(serializers.Serializer):
     expense_per_km = serializers.DecimalField(
         max_digits=8, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
-        help_text="Optional reimbursement rate override per kilometer (defaults to vehicle_type rate: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler)."
+        help_text="Optional reimbursement rate override per kilometer (defaults to vehicle_type rate: ₹5/km for bike, ₹12/km for car)."
+    )
+    total_kms = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
+        help_text="Optional override for the total kilometers traveled."
     )
 
 
@@ -153,6 +157,10 @@ class MonthlyOdometerApproveSerializer(serializers.Serializer):
     expense_per_km = serializers.DecimalField(
         max_digits=8, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
         help_text="Optional reimbursement rate override per kilometer for ALL daily readings in the month (defaults to vehicle_type rate)."
+    )
+    total_kms = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
+        help_text="Optional override for the total kilometers traveled for ALL daily readings in the month."
     )
 
 
@@ -192,22 +200,36 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.name', read_only=True)
     activities = SalesDailyActivitySerializer(many=True, read_only=True)
     date = serializers.DateField(source='plan_date', required=False)
+    photos = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyPlan
         fields = [
             'id', 'user', 'user_name', 'plan_date', 'date', 'type',
             'start_time', 'end_time', 'place', 'description',
-            'reminder_two_days_before_sent',
+            'photos','reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'activities', 'created_at', 'updated_at',
         ]
         read_only_fields = [
-            'id', 'user', 'user_name', 'activities',
+            'id', 'user', 'user_name', 'photos', 'activities',
             'reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'created_at', 'updated_at'
         ]
+
+    def get_photos(self, obj):
+        try:
+            general_activity = SalesDailyActivity.objects.get(
+                user=obj.user,
+                activity_date=obj.plan_date,
+                name="Daily Field Operations"
+            )
+            # Filter for general check-in/out selfies
+            photos = general_activity.photos.filter(photo_type__in=['start_selfie', 'end_selfie'])
+            return SalesActivityPhotoSerializer(photos, many=True, context=self.context).data
+        except SalesDailyActivity.DoesNotExist:
+            return []
 
     def to_internal_value(self, data):
         mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
