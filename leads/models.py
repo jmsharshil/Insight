@@ -535,7 +535,8 @@ class OdometerReading(models.Model):
             self.expense_per_km = override_expense_per_km
         else:
             # Auto calculate expense rate based on vehicle_type: ₹5/km for 2-wheeler, ₹12/km for 4-wheeler
-            vtype = '4_wheeler' if str(self.vehicle_type).lower().replace(' ', '_') in ('4_wheeler', 'four_wheeler') else '2_wheeler'
+            vtype_str = str(self.vehicle_type).lower()
+            vtype = '4_wheeler' if '4' in vtype_str or 'four' in vtype_str else '2_wheeler'
             rate = VEHICLE_RATES.get(vtype, Decimal('5.00'))
             self.expense_per_km = rate
 
