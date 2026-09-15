@@ -58,7 +58,7 @@ SALES_ROLES = {
     'associate_bdm', 'cmo', 'front_desk', 'receptionist', 'sales',
 }
 
-ODOMETER_APPROVER_ROLES = {'super_admin', 'admin_senior_executive', 'accountant', 'branch_manager'}
+ODOMETER_APPROVER_ROLES = {'super_admin', 'accountant'}
 
 def _sales_activity_access(user, activity=None):
     user_role = getattr(user, 'role', None)
