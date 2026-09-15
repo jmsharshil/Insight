@@ -168,9 +168,6 @@ class SalesDailyPlanView(APIView):
     parser_classes = [JSONParser]
 
     def get(self, request):
-        if not _sales_activity_access(request.user):
-            return Response({'detail': 'Only sales staff and managers can access sales plans.'}, status=status.HTTP_403_FORBIDDEN)
-
         queryset = SalesDailyPlan.objects.prefetch_related(
             'activities', 'activities__photos', 'activities__odometer_reading',
         ).select_related('user')
@@ -230,9 +227,6 @@ class SalesDailyPlanView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        if not _sales_activity_access(request.user):
-            return Response({'detail': 'Only sales staff can create sales plans.'}, status=status.HTTP_403_FORBIDDEN)
-
         serializer = SalesDailyPlanSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         plan_date = serializer.validated_data.get('plan_date') or timezone.localdate()
