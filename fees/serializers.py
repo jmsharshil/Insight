@@ -26,7 +26,10 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
                   'level', 'level_name', 'total_amount', 'icsi_registration_fees',
-                  'icsi_exam_fees', 'token_amount', 'is_active', 'created_at']
+                  'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
+                  'icsi_registration_fees_direct', 'institute_fees_both_modules',
+                  'institute_fees_module_1', 'institute_fees_module_2',
+                  'is_active', 'created_at']
 
 
 class FeeStructureDetailSerializer(serializers.ModelSerializer):
@@ -43,7 +46,10 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
         fields = ['name', 'course', 'batch', 'level', 'total_amount', 'icsi_registration_fees',
-                  'icsi_exam_fees', 'token_amount', 'description', 'is_active']
+                  'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
+                  'icsi_registration_fees_direct', 'institute_fees_both_modules',
+                  'institute_fees_module_1', 'institute_fees_module_2',
+                  'description', 'is_active']
 
     def validate(self, data):
         """Ensure total_amount is consistent with fee breakdown components.
@@ -52,7 +58,13 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         reg = data.get('icsi_registration_fees') or 0
         exam = data.get('icsi_exam_fees') or 0
         token = data.get('token_amount') or 0
-        component_sum = reg + exam + token
+        reg_cseet = data.get('icsi_registration_fees_via_cseet') or 0
+        reg_direct = data.get('icsi_registration_fees_direct') or 0
+        inst_both = data.get('institute_fees_both_modules') or 0
+        inst_mod1 = data.get('institute_fees_module_1') or 0
+        inst_mod2 = data.get('institute_fees_module_2') or 0
+        
+        component_sum = reg + exam + token + reg_cseet + reg_direct + inst_both + inst_mod1 + inst_mod2
 
         provided_total = data.get('total_amount')
         # if provided_total is not None and provided_total != component_sum:

@@ -77,6 +77,26 @@ class FeeStructure(models.Model):
         max_digits=10, decimal_places=2, default=0,
         verbose_name='Token Amount'
     )
+    icsi_registration_fees_via_cseet = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='ICSI Registration Fees via CSEET'
+    )
+    icsi_registration_fees_direct = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='ICSI Registration Fees Direct'
+    )
+    institute_fees_both_modules = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Institute Fees for Both Modules'
+    )
+    institute_fees_module_1 = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Institute Fees for Module 1'
+    )
+    institute_fees_module_2 = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Institute Fees for Module 2'
+    )
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
     created_by  = models.ForeignKey(
