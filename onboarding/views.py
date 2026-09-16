@@ -172,7 +172,9 @@ def _setup_payment_bank_and_notify(admission):
 
     print("Amount to pay..........",amount_to_pay)
     razorpay_link_url = ""
-    if amount_to_pay > 0:
+    
+    # Only generate Razorpay link if student opted for full payment
+    if amount_to_pay > 0 and admission.payment_type == 'full_payment':
         try:
             # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
             import time
