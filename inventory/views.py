@@ -228,22 +228,46 @@ class ItemAllocationViewSet(viewsets.ModelViewSet):
         if allocation.status == 'returned':
             return Response({'detail': 'Item is already returned.'}, status=status.HTTP_400_BAD_REQUEST)
         
+        return_quantity = request.data.get('return_quantity')
+        if return_quantity is not None:
+            try:
+                return_quantity = int(return_quantity)
+            except ValueError:
+                return Response({'detail': 'Invalid return_quantity.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            if return_quantity <= 0:
+                return Response({'detail': 'return_quantity must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
+            if return_quantity > allocation.quantity:
+                return Response({'detail': 'Cannot return more than the allocated quantity.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return_quantity = allocation.quantity
+            
         return_notes = request.data.get('return_notes', '')
-        allocation.status = 'returned'
-        allocation.returned_at = timezone.now()
-        allocation.return_notes = return_notes
+        
+        allocation.quantity -= return_quantity
+        
+        if allocation.quantity == 0:
+            allocation.status = 'returned'
+            allocation.returned_at = timezone.now()
+            
+        if return_notes:
+            if allocation.return_notes:
+                allocation.return_notes += f"\n{return_notes}"
+            else:
+                allocation.return_notes = return_notes
+                
         allocation.save()
 
         # Add stock back
         StockTransaction.objects.create(
             item=allocation.item,
             transaction_type='return',
-            quantity=allocation.quantity,
+            quantity=return_quantity,
             reference=f"Return from allocation {allocation.id}",
             notes=return_notes,
             created_by=request.user
         )
-        return Response({'status': 'Item returned successfully.'})
+        return Response({'status': f'{return_quantity} items returned successfully.'})
 
     @action(detail=False, methods=['post'])
     def bulk_issue(self, request):
