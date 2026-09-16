@@ -26,6 +26,16 @@ ADMISSION_STATUS_CHOICES = [
     ('approved',          'Approved'),
 ]
 
+PAYMENT_TYPE_CHOICES = [
+    ('full_payment', 'Full Payment'),
+    ('finance', 'Finance'),
+]
+
+ICSI_FEES_PAYMENT_CHOICES = [
+    ('pay_yourself', 'Pay Yourself'),
+    ('pay_through_institute', 'Pay through Institute'),
+]
+
 # ── 5 Bank Accounts (round-robin assignment) ─────────────────────────────────
 BANK_ACCOUNTS = [
     {
@@ -176,6 +186,10 @@ class Admission(models.Model):
         null=True, blank=True,
         related_name='admissions',
     )
+    
+    # ── Payment Options ───────────────────────────────────────────────────────
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPE_CHOICES, blank=True, null=True)
+    icsi_fees_payment = models.CharField(max_length=30, choices=ICSI_FEES_PAYMENT_CHOICES, blank=True, null=True)
 
     # ── Status & Timestamps ───────────────────────────────────────────────────
     status       = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='form_pending')

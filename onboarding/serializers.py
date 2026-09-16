@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Admission, ADMISSION_STATUS_CHOICES
+from .models import Admission, ADMISSION_STATUS_CHOICES, PAYMENT_TYPE_CHOICES, ICSI_FEES_PAYMENT_CHOICES
 
 from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
 from leads.serializers import VALID_COMBINATIONS
@@ -77,6 +77,8 @@ class AdmissionSerializer(serializers.Serializer):
     attempt_year  = serializers.IntegerField(min_value=2000, max_value=2100)
     location      = serializers.CharField(max_length=100)
     fee_structure = serializers.ChoiceField(choices=[('lumpsum', 'Lumpsum'), ('installment', 'Installment')])
+    payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
+    icsi_fees_payment = serializers.ChoiceField(choices=ICSI_FEES_PAYMENT_CHOICES, required=False, allow_null=True)
 
     # ── Qualification & Reference ─────────────────────────────────────────────
     qualification = serializers.ChoiceField(choices=QUALIFICATION_TYPE_CHOICES)
@@ -266,14 +268,16 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
+    payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
+    icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
 
     class Meta:
         model = Admission
         fields = [
             'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
-            'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'status', 'status_display', 'location',
+            'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
-         'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display']
+         'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display']
 
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
@@ -291,6 +295,8 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
+    payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
+    icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
 
     class Meta:
         model = Admission

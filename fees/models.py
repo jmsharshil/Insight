@@ -1,7 +1,7 @@
 from django.db import models
 from django.conf import settings
 import uuid
-
+from leads.models import ATTEMPT_TYPE_CHOICES
 
 # ── Choice constants ────────────────────────────────────────────────────────────
 PAYMENT_MODE_CHOICES = [
@@ -60,6 +60,8 @@ class FeeStructure(models.Model):
         'batches.CourseLevel', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
     )
+    attempt     = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True)
+    year        = models.PositiveSmallIntegerField(null=True, blank=True)
     total_amount = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
         help_text='Auto-calculated as sum of components below'
