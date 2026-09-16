@@ -47,6 +47,11 @@ class FeeStructureListView(APIView):
     search_fields = ['name']
     ordering_fields = '__all__'
 
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return super().get_permissions()
+
     def get(self, request):
         queryset = FeeStructure.objects.select_related('course', 'batch').prefetch_related('student_fees').all()
         if getattr(request.user, 'organization', None):
@@ -88,6 +93,11 @@ class FeeStructureListView(APIView):
 
 
 class FeeStructureDetailView(APIView):
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return super().get_permissions()
 
     def _get(self, request, pk):
         try:
