@@ -97,6 +97,33 @@ def _not_found():
     )
 
 
+def _assign_fee_structure(admission):
+    """Dynamically assign FeeStructure based on course, attempt, and year."""
+    if not admission.course or not admission.batch_attempt or not admission.attempt_year:
+        return
+        
+    from fees.models import FeeStructure
+    
+    level_name_map = {
+        'cseet': 'cseet',
+        'cs_executive': 'executive',
+        'cs_professional': 'professional'
+    }
+    level_query = level_name_map.get(admission.course)
+    
+    if level_query:
+        fs = FeeStructure.objects.filter(
+            level__name__icontains=level_query,
+            attempt=admission.batch_attempt,
+            year=admission.attempt_year,
+            is_active=True
+        ).first()
+        
+        if fs:
+            admission.fee_structure = fs
+            admission.save(update_fields=['fee_structure'])
+
+
 def _setup_payment_bank_and_notify(admission):
     """Extracted common logic (removes duplication between ListView and DetailView).
     Assigns threshold-aware bank, creates status history, and sends payment email.
@@ -128,8 +155,11 @@ def _setup_payment_bank_and_notify(admission):
     )
     
     amount_to_pay = payment_amount
-    if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'token_amount', 0) > 0:
-        amount_to_pay = admission.fee_structure.token_amount
+    if getattr(admission, 'fee_structure', None):
+        fs = admission.fee_structure
+        # User requested: razorpay amount should be fee_structue.total_amount - token_amount, with token_amount=10000 for now
+        token_amount = 10000
+        amount_to_pay = fs.total_amount - token_amount
 
     # Fallback to default amounts for testing if amount is zero
     if amount_to_pay <= 0:
@@ -312,6 +342,7 @@ class AdmissionListView(APIView):
                 )
             serializer.save()
 
+            _assign_fee_structure(admission)
             # Cleaned: rely on shared helper (removes ~40 lines of duplication)
             _setup_payment_bank_and_notify(admission)
 
@@ -435,6 +466,7 @@ class AdmissionDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         serializer.save()
+        _assign_fee_structure(admission)
 
         # Auto-assign bank and send payment email directly if form is submitted
         if admission.status == 'form_pending' and admission.dob is not None:
