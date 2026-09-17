@@ -109,53 +109,53 @@ class Admission(models.Model):
 
     # ── Personal Info ─────────────────────────────────────────────────────────
     first_name      = models.CharField(max_length=100)
-    surname         = models.CharField(max_length=100)
-    father_name     = models.CharField(max_length=100)
-    mother_name     = models.CharField(max_length=100)
+    surname         = models.CharField(max_length=100, blank=True, null=True)
+    father_name     = models.CharField(max_length=100, blank=True, null=True)
+    mother_name     = models.CharField(max_length=100, blank=True, null=True)
     dob             = models.DateField(blank=True,null=True)
-    category        = models.CharField(max_length=10, choices=CATEGORY_TYPE_CHOICES)
+    category        = models.CharField(max_length=10, choices=CATEGORY_TYPE_CHOICES, blank=True, null=True)
 
     # ── Contact ───────────────────────────────────────────────────────────────
-    email           = models.EmailField()
-    email_parent    = models.EmailField()
+    email           = models.EmailField(blank=True, null=True)
+    email_parent    = models.EmailField(blank=True, null=True)
     phone_student   = models.CharField(max_length=15)
     phone_student_2 = models.CharField(max_length=15, blank=True)
-    phone_father    = models.CharField(max_length=15)
+    phone_father    = models.CharField(max_length=15, blank=True, null=True)
     phone_father_2  = models.CharField(max_length=15, blank=True)
 
     # ── Address ───────────────────────────────────────────────────────────────
-    street    = models.TextField()
+    street    = models.TextField(blank=True, null=True)
     apartment = models.CharField(max_length=100, blank=True)
-    city      = models.CharField(max_length=100)
-    state     = models.CharField(max_length=100)
-    pincode   = models.CharField(max_length=10)
-    country   = models.CharField(max_length=100, default='India')
+    city      = models.CharField(max_length=100, blank=True, null=True)
+    state     = models.CharField(max_length=100, blank=True, null=True)
+    pincode   = models.CharField(max_length=10, blank=True, null=True)
+    country   = models.CharField(max_length=100, default='India', blank=True, null=True)
 
     # ── Course Details ────────────────────────────────────────────────────────
-    course        = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES)
-    group_module  = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES)
-    batch_attempt = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES)
-    location      = models.CharField(max_length=100)
+    course        = models.CharField(max_length=20, choices=COURSE_TYPE_CHOICES, blank=True, null=True)
+    group_module  = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES, blank=True, null=True)
+    batch_attempt = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True, null=True)
+    location      = models.CharField(max_length=100, blank=True, null=True)
 
     # ── Qualification & Reference ─────────────────────────────────────────────
-    qualification = models.CharField(max_length=20, choices=QUALIFICATION_TYPE_CHOICES)
-    reference     = models.CharField(max_length=20, choices=REFERENCE_TYPE_CHOICES)
+    qualification = models.CharField(max_length=20, choices=QUALIFICATION_TYPE_CHOICES, blank=True, null=True)
+    reference     = models.CharField(max_length=20, choices=REFERENCE_TYPE_CHOICES, blank=True, null=True)
     consent       = models.BooleanField(default=False)
     reference_name = models.CharField(max_length=100,blank=True)
 
     # ── 10th Education ────────────────────────────────────────────────────────
-    tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES)
-    tenth_school     = models.CharField(max_length=200)
+    tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
+    tenth_school     = models.CharField(max_length=200, blank=True, null=True)
     tenth_coaching   = models.CharField(max_length=200, blank=True)
-    tenth_percentage = models.DecimalField(max_digits=5, decimal_places=2)
-    tenth_percentile = models.DecimalField(max_digits=5, decimal_places=2)
+    tenth_percentage = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
+    tenth_percentile = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
 
     # ── 12th Education ────────────────────────────────────────────────────────
-    twelfth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES)
-    twelfth_school     = models.CharField(max_length=200)
+    twelfth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
+    twelfth_school     = models.CharField(max_length=200, blank=True, null=True)
     twelfth_coaching   = models.CharField(max_length=200, blank=True)
-    twelfth_percentage = models.DecimalField(max_digits=5, decimal_places=2)
-    twelfth_percentile = models.DecimalField(max_digits=5, decimal_places=2)
+    twelfth_percentage = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
+    twelfth_percentile = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
 
     # ── Graduation ────────────────────────────────────────────────────────────
     grad_university = models.CharField(max_length=200, blank=True)
@@ -163,10 +163,10 @@ class Admission(models.Model):
     grad_last_sem   = models.CharField(max_length=200, blank=True)
 
     # ── Documents (Required) ──────────────────────────────────────────────────
-    doc_signature       = models.FileField(upload_to=admission_document_path)
-    doc_photo           = models.FileField(upload_to=admission_document_path)
-    doc_dob_certificate = models.FileField(upload_to=admission_document_path)
-    doc_id_card         = models.FileField(upload_to=admission_document_path)
+    doc_signature       = models.FileField(upload_to=admission_document_path, blank=True, null=True)
+    doc_photo           = models.FileField(upload_to=admission_document_path, blank=True, null=True)
+    doc_dob_certificate = models.FileField(upload_to=admission_document_path, blank=True, null=True)
+    doc_id_card         = models.FileField(upload_to=admission_document_path, blank=True, null=True)
 
     # ── Documents (Optional) ──────────────────────────────────────────────────
     doc_tenth_marksheet   = models.FileField(upload_to=admission_document_path, null=True, blank=True)

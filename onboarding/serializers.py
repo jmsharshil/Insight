@@ -48,57 +48,57 @@ class AdmissionSerializer(serializers.Serializer):
 
     # ── Personal Info ─────────────────────────────────────────────────────────
     first_name   = serializers.CharField(max_length=100)
-    surname      = serializers.CharField(max_length=100)
-    father_name  = serializers.CharField(max_length=100)
-    mother_name  = serializers.CharField(max_length=100)
-    dob          = serializers.DateField()
-    category     = serializers.ChoiceField(choices=CATEGORY_TYPE_CHOICES)
+    surname      = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    father_name  = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    mother_name  = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    dob          = serializers.DateField(required=False, allow_null=True)
+    category     = serializers.ChoiceField(choices=CATEGORY_TYPE_CHOICES, required=False, allow_null=True)
 
     # ── Contact ───────────────────────────────────────────────────────────────
-    email           = serializers.EmailField()
-    email_parent    = serializers.EmailField()
+    email           = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
+    email_parent    = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     phone_student   = serializers.CharField(max_length=15)
     phone_student_2 = serializers.CharField(max_length=15, required=False, allow_blank=True)
-    phone_father    = serializers.CharField(max_length=15)
+    phone_father    = serializers.CharField(max_length=15, required=False, allow_blank=True, allow_null=True)
     phone_father_2  = serializers.CharField(max_length=15, required=False, allow_blank=True)
 
     # ── Address ───────────────────────────────────────────────────────────────
-    street    = serializers.CharField()
+    street    = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     apartment = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    city      = serializers.CharField(max_length=100)
-    state     = serializers.CharField(max_length=100)
-    pincode   = serializers.CharField(max_length=10)
-    country   = serializers.CharField(max_length=100, default='India')
+    city      = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    state     = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    pincode   = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
+    country   = serializers.CharField(max_length=100, default='India', required=False, allow_blank=True, allow_null=True)
 
     # ── Course Details ────────────────────────────────────────────────────────
-    course        = serializers.ChoiceField(choices=COURSE_TYPE_CHOICES)
-    group_module  = serializers.ChoiceField(choices=GROUP_MODULE_CHOICES)
-    batch_attempt = serializers.ChoiceField(choices=ATTEMPT_TYPE_CHOICES)
-    attempt_year  = serializers.IntegerField(min_value=2000, max_value=2100)
-    location      = serializers.CharField(max_length=100)
-    fee_structure = serializers.ChoiceField(choices=[('lumpsum', 'Lumpsum'), ('installment', 'Installment')])
+    course        = serializers.ChoiceField(choices=COURSE_TYPE_CHOICES, required=False, allow_null=True)
+    group_module  = serializers.ChoiceField(choices=GROUP_MODULE_CHOICES, required=False, allow_null=True)
+    batch_attempt = serializers.ChoiceField(choices=ATTEMPT_TYPE_CHOICES, required=False, allow_null=True)
+    attempt_year  = serializers.IntegerField(min_value=2000, max_value=2100, required=False, allow_null=True)
+    location      = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    fee_structure = serializers.ChoiceField(choices=[('lumpsum', 'Lumpsum'), ('installment', 'Installment')], required=False, allow_null=True)
     payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
     icsi_fees_payment = serializers.ChoiceField(choices=ICSI_FEES_PAYMENT_CHOICES, required=False, allow_null=True)
 
     # ── Qualification & Reference ─────────────────────────────────────────────
-    qualification = serializers.ChoiceField(choices=QUALIFICATION_TYPE_CHOICES)
-    reference     = serializers.ChoiceField(choices=REFERENCE_TYPE_CHOICES)
-    consent       = serializers.BooleanField()
+    qualification = serializers.ChoiceField(choices=QUALIFICATION_TYPE_CHOICES, required=False, allow_null=True)
+    reference     = serializers.ChoiceField(choices=REFERENCE_TYPE_CHOICES, required=False, allow_null=True)
+    consent       = serializers.BooleanField(required=False, default=False)
     reference_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
     # ── 10th Education ────────────────────────────────────────────────────────
-    tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES)
-    tenth_school     = serializers.CharField(max_length=200)
+    tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_null=True)
+    tenth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     tenth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    tenth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
-    tenth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2)
+    tenth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    tenth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
 
     # ── 12th Education (always required for admission) ────────────────────────
-    twelfth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES)
-    twelfth_school     = serializers.CharField(max_length=200)
+    twelfth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_null=True)
+    twelfth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     twelfth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    twelfth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
-    twelfth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2)
+    twelfth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    twelfth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
 
     # ── Graduation ────────────────────────────────────────────────────────────
     grad_university = serializers.CharField(max_length=200, required=False, allow_blank=True)
@@ -106,10 +106,10 @@ class AdmissionSerializer(serializers.Serializer):
     grad_last_sem   = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
     # ── Documents (Required) ──────────────────────────────────────────────────
-    doc_signature       = serializers.FileField()
-    doc_photo           = serializers.FileField()
-    doc_dob_certificate = serializers.FileField()
-    doc_id_card         = serializers.FileField()
+    doc_signature       = serializers.FileField(required=False, allow_null=True)
+    doc_photo           = serializers.FileField(required=False, allow_null=True)
+    doc_dob_certificate = serializers.FileField(required=False, allow_null=True)
+    doc_id_card         = serializers.FileField(required=False, allow_null=True)
 
     # ── Documents (Optional) ──────────────────────────────────────────────────
     doc_tenth_marksheet   = serializers.FileField(required=False, allow_null=True)
