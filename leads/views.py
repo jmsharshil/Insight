@@ -264,6 +264,12 @@ class SalesDailyPlanView(APIView):
 
         # Link day's activity container to the plan (create default activity only for new plans
         # or if none exists for this plan; supports multiple activities per day via name)
+        
+        students_expected = request.data.get('students_expected')
+        students_attended = request.data.get('students_attended')
+        if students_expected == '': students_expected = None
+        if students_attended == '': students_attended = None
+
         if created or not plan.activities.exists():
             name = request.data.get('activity_name', '') or request.data.get('name', '')
             SalesDailyActivity.objects.create(
@@ -272,7 +278,18 @@ class SalesDailyPlanView(APIView):
                 name=name or f"Activity for {plan.type or 'Plan'}",
                 notes='',
                 plan=plan,
+                students_expected=students_expected,
+                students_attended=students_attended,
             )
+        else:
+            if students_expected is not None or students_attended is not None:
+                activity = plan.activities.first()
+                if activity:
+                    if students_expected is not None:
+                        activity.students_expected = students_expected
+                    if students_attended is not None:
+                        activity.students_attended = students_attended
+                    activity.save(update_fields=['students_expected', 'students_attended', 'updated_at'])
 
         return Response(
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
