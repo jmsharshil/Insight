@@ -381,6 +381,31 @@ class SalesDailyActivity(models.Model):
     notes = models.TextField(blank=True)
     students_expected = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students expected to attend")
     students_attended = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students actually attended")
+    
+    ACTIVITY_STANDARD_CHOICES = [
+        ('12th', '12th'),
+        ('11th_12th', '11th & 12th'),
+        ('11th', '11th'),
+        ('10th', '10th'),
+    ]
+    ACTIVITY_BOARD_CHOICES = [
+        ('cbse', 'CBSE'),
+        ('gseb', 'GSEB'),
+        ('cbic_ib', 'CBIC/IB'),
+    ]
+    ACTIVITY_MEDIUM_CHOICES = [
+        ('english', 'English'),
+        ('gujarati', 'Gujarati'),
+        ('hindi', 'Hindi'),
+    ]
+
+    standard = models.CharField(max_length=20, choices=ACTIVITY_STANDARD_CHOICES, default='12th', blank=True)
+    board = models.CharField(max_length=20, choices=ACTIVITY_BOARD_CHOICES, default='cbse', blank=True)
+    medium = models.CharField(max_length=20, choices=ACTIVITY_MEDIUM_CHOICES, default='english', blank=True)
+
+    seminar_reference_by = models.CharField(max_length=200, blank=True, help_text="Who gave the reference for the seminar")
+    seminar_given_by = models.CharField(max_length=200, blank=True, help_text="Who gave the seminar")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

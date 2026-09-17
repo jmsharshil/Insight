@@ -185,6 +185,8 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'user', 'user_name', 'plan',
             'activity_date', 'notes', 'students_expected', 'students_attended',
+            'standard', 'board', 'medium',
+            'seminar_reference_by', 'seminar_given_by',
             'photos', 'odometer_reading',
             'created_at', 'updated_at',
         ]

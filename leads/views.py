@@ -270,30 +270,65 @@ class SalesDailyPlanView(APIView):
             
             s_exp = request.data.get('students_expected')
             s_att = request.data.get('students_attended')
+            standard = request.data.get('standard')
+            board = request.data.get('board')
+            medium = request.data.get('medium')
+            seminar_reference_by = request.data.get('seminar_reference_by')
+            seminar_given_by = request.data.get('seminar_given_by')
             
-            SalesDailyActivity.objects.create(
-                user=request.user,
-                activity_date=plan_date,
-                name=name or f"Activity for {plan.type or 'Plan'}",
-                notes='',
-                plan=plan,
-                students_expected=None if s_exp == '' else s_exp,
-                students_attended=None if s_att == '' else s_att,
-            )
+            act_kwargs = {
+                'user': request.user,
+                'activity_date': plan_date,
+                'name': name or f"Activity for {plan.type or 'Plan'}",
+                'notes': '',
+                'plan': plan,
+                'students_expected': None if s_exp == '' else s_exp,
+                'students_attended': None if s_att == '' else s_att,
+            }
+            if standard: act_kwargs['standard'] = standard
+            if board: act_kwargs['board'] = board
+            if medium: act_kwargs['medium'] = medium
+            if seminar_reference_by: act_kwargs['seminar_reference_by'] = seminar_reference_by
+            if seminar_given_by: act_kwargs['seminar_given_by'] = seminar_given_by
+            
+            SalesDailyActivity.objects.create(**act_kwargs)
         else:
             activity = plan.activities.first()
             if activity:
                 updated = False
+                update_fields = ['updated_at']
                 if 'students_expected' in request.data:
                     val = request.data.get('students_expected')
                     activity.students_expected = None if val == '' else val
+                    update_fields.append('students_expected')
                     updated = True
                 if 'students_attended' in request.data:
                     val = request.data.get('students_attended')
                     activity.students_attended = None if val == '' else val
+                    update_fields.append('students_attended')
+                    updated = True
+                if 'standard' in request.data:
+                    activity.standard = request.data.get('standard')
+                    update_fields.append('standard')
+                    updated = True
+                if 'board' in request.data:
+                    activity.board = request.data.get('board')
+                    update_fields.append('board')
+                    updated = True
+                if 'medium' in request.data:
+                    activity.medium = request.data.get('medium')
+                    update_fields.append('medium')
+                    updated = True
+                if 'seminar_reference_by' in request.data:
+                    activity.seminar_reference_by = request.data.get('seminar_reference_by')
+                    update_fields.append('seminar_reference_by')
+                    updated = True
+                if 'seminar_given_by' in request.data:
+                    activity.seminar_given_by = request.data.get('seminar_given_by')
+                    update_fields.append('seminar_given_by')
                     updated = True
                 if updated:
-                    activity.save(update_fields=['students_expected', 'students_attended', 'updated_at'])
+                    activity.save(update_fields=update_fields)
 
         return Response(
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
@@ -341,16 +376,39 @@ class SalesDailyPlanDetailView(APIView):
         activity = updated_plan.activities.first()
         if activity:
             updated = False
+            update_fields = ['updated_at']
             if 'students_expected' in request.data:
                 val = request.data.get('students_expected')
                 activity.students_expected = None if val == '' else val
+                update_fields.append('students_expected')
                 updated = True
             if 'students_attended' in request.data:
                 val = request.data.get('students_attended')
                 activity.students_attended = None if val == '' else val
+                update_fields.append('students_attended')
+                updated = True
+            if 'standard' in request.data:
+                activity.standard = request.data.get('standard')
+                update_fields.append('standard')
+                updated = True
+            if 'board' in request.data:
+                activity.board = request.data.get('board')
+                update_fields.append('board')
+                updated = True
+            if 'medium' in request.data:
+                activity.medium = request.data.get('medium')
+                update_fields.append('medium')
+                updated = True
+            if 'seminar_reference_by' in request.data:
+                activity.seminar_reference_by = request.data.get('seminar_reference_by')
+                update_fields.append('seminar_reference_by')
+                updated = True
+            if 'seminar_given_by' in request.data:
+                activity.seminar_given_by = request.data.get('seminar_given_by')
+                update_fields.append('seminar_given_by')
                 updated = True
             if updated:
-                activity.save(update_fields=['students_expected', 'students_attended', 'updated_at'])
+                activity.save(update_fields=update_fields)
 
         return Response(SalesDailyPlanSerializer(updated_plan, context={'request': request}).data)
 
@@ -363,6 +421,77 @@ class SalesDailyPlanDetailView(APIView):
             return Response({'detail': 'Sales plan not found or permission denied.'}, status=status.HTTP_404_NOT_FOUND)
         plan.delete()
         return Response({'success': True, 'message': 'Sales plan deleted successfully.'}, status=status.HTTP_200_OK)
+
+
+class SalesUserActivityStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id):
+        # Basic permissions: only the user themselves or an admin/manager can view stats
+        role = getattr(request.user, 'role', None)
+        from .models import ODOMETER_APPROVER_ROLES
+        if str(request.user.id) != str(user_id) and role not in ODOMETER_APPROVER_ROLES:
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            
+        activities = SalesDailyActivity.objects.filter(user_id=user_id)
+        
+        from django.db.models import Sum, Q
+        
+        count_seminars = activities.filter(plan__type__icontains='seminar').count()
+        count_fair = activities.filter(Q(plan__type__icontains='fair') | Q(plan__type__icontains='exhibition')).count()
+        total_events = count_seminars + count_fair
+        
+        stats = activities.aggregate(
+            total_students_connected=Sum('students_attended'),
+            
+            students_seminars=Sum('students_attended', filter=Q(plan__type__icontains='seminar')),
+            students_fair=Sum('students_attended', filter=Q(plan__type__icontains='fair') | Q(plan__type__icontains='exhibition')),
+            
+            std_11=Sum('students_attended', filter=Q(standard='11th')),
+            std_12=Sum('students_attended', filter=Q(standard='12th')),
+            std_11_12=Sum('students_attended', filter=Q(standard='11th_12th')),
+            std_10=Sum('students_attended', filter=Q(standard='10th')),
+            std_not_mentioned=Sum('students_attended', filter=Q(standard__isnull=True) | Q(standard='')),
+            
+            cbse_board=Sum('students_attended', filter=Q(board='cbse')),
+            gseb_board=Sum('students_attended', filter=Q(board='gseb')),
+            
+            english_medium=Sum('students_attended', filter=Q(medium='english')),
+            gujarati_medium=Sum('students_attended', filter=Q(medium='gujarati')),
+            hindi_medium=Sum('students_attended', filter=Q(medium='hindi')),
+            blank_medium=Sum('students_attended', filter=Q(medium__isnull=True) | Q(medium='')),
+        )
+        
+        for key in stats:
+            if stats[key] is None:
+                stats[key] = 0
+                
+        # To avoid double counting 11th_12th for total students connected if standard counts are used,
+        # note that standard sum does not affect total_students_connected direct sum.
+        
+        response_data = {
+            "total_seminars": total_events,
+            "total_students_connected": stats['total_students_connected'],
+            "events_through_seminars": count_seminars,
+            "events_through_education_fair": count_fair,
+            "students_through_seminars": stats['students_seminars'],
+            "students_through_education_fair": stats['students_fair'],
+            "std": {
+                "total_11th_standard": stats['std_11'],
+                "total_12th_standard": stats['std_12'],
+                "total_11th_12th_standard": stats.get('std_11_12', 0),
+                "total_10th_standard": stats['std_10'],
+                "not_mentioned": stats['std_not_mentioned'],
+            },
+            "total_cbse_students": stats['cbse_board'],
+            "total_gseb_students": stats['gseb_board'],
+            "total_english_medium_students": stats['english_medium'],
+            "total_gujarati_medium_students": stats['gujarati_medium'],
+            "total_hindi_medium_students": stats['hindi_medium'],
+            "total_blank_medium": stats['blank_medium']
+        }
+        
+        return Response(response_data)
 
 
 class SalesActivityPhotoView(APIView):
