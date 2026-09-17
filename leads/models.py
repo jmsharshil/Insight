@@ -49,6 +49,7 @@ QUALIFICATION_TYPE_CHOICES = [
     ('appearing_12', 'Appearing 10+2'),
     ('pass_12', '10+2 Pass or Equivalent'),
     ('cseet_pass', 'CSEET Pass'),
+    ('cs_executive_pass','CS Executive Pass'),
     ('graduate', 'Graduate'),
     ('post_graduate', 'Post Graduate'),
 ]
