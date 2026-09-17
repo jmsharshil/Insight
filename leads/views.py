@@ -265,30 +265,34 @@ class SalesDailyPlanView(APIView):
         # Link day's activity container to the plan (create default activity only for new plans
         # or if none exists for this plan; supports multiple activities per day via name)
         
-        students_expected = request.data.get('students_expected')
-        students_attended = request.data.get('students_attended')
-        if students_expected == '': students_expected = None
-        if students_attended == '': students_attended = None
-
         if created or not plan.activities.exists():
             name = request.data.get('activity_name', '') or request.data.get('name', '')
+            
+            s_exp = request.data.get('students_expected')
+            s_att = request.data.get('students_attended')
+            
             SalesDailyActivity.objects.create(
                 user=request.user,
                 activity_date=plan_date,
                 name=name or f"Activity for {plan.type or 'Plan'}",
                 notes='',
                 plan=plan,
-                students_expected=students_expected,
-                students_attended=students_attended,
+                students_expected=None if s_exp == '' else s_exp,
+                students_attended=None if s_att == '' else s_att,
             )
         else:
-            if students_expected is not None or students_attended is not None:
-                activity = plan.activities.first()
-                if activity:
-                    if students_expected is not None:
-                        activity.students_expected = students_expected
-                    if students_attended is not None:
-                        activity.students_attended = students_attended
+            activity = plan.activities.first()
+            if activity:
+                updated = False
+                if 'students_expected' in request.data:
+                    val = request.data.get('students_expected')
+                    activity.students_expected = None if val == '' else val
+                    updated = True
+                if 'students_attended' in request.data:
+                    val = request.data.get('students_attended')
+                    activity.students_attended = None if val == '' else val
+                    updated = True
+                if updated:
                     activity.save(update_fields=['students_expected', 'students_attended', 'updated_at'])
 
         return Response(
@@ -333,6 +337,21 @@ class SalesDailyPlanDetailView(APIView):
         serializer = SalesDailyPlanSerializer(plan, data=request.data, partial=True, context={'request': request})
         serializer.is_valid(raise_exception=True)
         updated_plan = serializer.save()
+        
+        activity = updated_plan.activities.first()
+        if activity:
+            updated = False
+            if 'students_expected' in request.data:
+                val = request.data.get('students_expected')
+                activity.students_expected = None if val == '' else val
+                updated = True
+            if 'students_attended' in request.data:
+                val = request.data.get('students_attended')
+                activity.students_attended = None if val == '' else val
+                updated = True
+            if updated:
+                activity.save(update_fields=['students_expected', 'students_attended', 'updated_at'])
+
         return Response(SalesDailyPlanSerializer(updated_plan, context={'request': request}).data)
 
     def put(self, request, pk):
