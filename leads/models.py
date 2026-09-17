@@ -378,6 +378,8 @@ class SalesDailyActivity(models.Model):
     )
     activity_date = models.DateField(default=timezone.localdate)
     notes = models.TextField(blank=True)
+    students_expected = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students expected to attend")
+    students_attended = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students actually attended")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

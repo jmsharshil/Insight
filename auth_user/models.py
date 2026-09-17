@@ -70,6 +70,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('faculty', 'Faculty'),
         ('house_keeping', 'House Keeping'),
         ('security', 'Security'),
+        ('senior_bdm','Senior Business Development Manager'),
+        ('deputy_bdm','Deputy Business Development Manager'),
         
     ]
     id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)

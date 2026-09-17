@@ -184,7 +184,8 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         model = SalesDailyActivity
         fields = [
             'id', 'name', 'user', 'user_name', 'plan',
-            'activity_date', 'notes', 'photos', 'odometer_reading',
+            'activity_date', 'notes', 'students_expected', 'students_attended',
+            'photos', 'odometer_reading',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'created_at', 'updated_at']
