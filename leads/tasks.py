@@ -3,7 +3,7 @@
 import logging
 from datetime import timedelta
 from django.utils import timezone
-from .models import SalesDailyPlan
+from .models import SalesDailyPlan, SalesPlanReminder
 from chat.notifications import send_system_notification, send_whatsapp_with_fallback
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,15 @@ def send_sales_plan_reminders():
       1. 2 days before an event (for plans happening in 2 days).
       2. 1 day before an event (for tomorrow's plans).
       3. The day of the event (for today's plans).
+      
+    NOTE: As per user request, this has been disabled to prefer custom reminders.
     """
+    return {
+        'two_days_reminders': 0,
+        'tomorrow_reminders': 0,
+        'today_reminders': 0,
+    }
+    
     today = timezone.localdate()
     tomorrow = today + timedelta(days=1)
     day_after_tomorrow = today + timedelta(days=2)
@@ -202,6 +210,75 @@ def send_sales_plan_reminders():
         'tomorrow_reminders': tomorrow_count,
         'today_reminders': today_count,
     }
+
+
+def send_custom_sales_plan_reminders():
+    """
+    Background task to process custom sales plan reminders.
+    Runs every minute.
+    """
+    now = timezone.now()
+    reminders = SalesPlanReminder.objects.filter(is_sent=False, reminder_time__lte=now).select_related('plan', 'plan__user')
+    
+    sent_count = 0
+    for reminder in reminders:
+        plan = reminder.plan
+        if not plan or not plan.user:
+            continue
+            
+        place_str = f" at {plan.place}" if plan.place else ""
+        time_str = ""
+        if plan.start_time and plan.end_time:
+            time_str = f" from {plan.start_time.strftime('%I:%M %p')} to {plan.end_time.strftime('%I:%M %p')}"
+        elif plan.start_time:
+            time_str = f" at {plan.start_time.strftime('%I:%M %p')}"
+
+        desc_str = f"\nAgenda: {plan.description}" if plan.description else ""
+        event_name = plan.type or "Sales Event"
+
+        title = f"Sales Plan Reminder: {event_name}"
+        body = (
+            f"Reminder: You have a scheduled event ({plan.plan_date.strftime('%d %b %Y')}): "
+            f"{event_name}{place_str}{time_str}.{desc_str}"
+        )
+
+        # Send system notification
+        try:
+            send_system_notification(
+                user_id=str(plan.user.id),
+                title=title,
+                body=body,
+                metadata={
+                    'plan_id': str(plan.id),
+                    'reminder_id': str(reminder.id),
+                    'type': 'sales_plan_custom_reminder',
+                    'plan_date': str(plan.plan_date),
+                },
+                notification_type='sales',
+            )
+        except Exception as e:
+            logger.error(f"Failed to send system notification for custom reminder {reminder.id}: {e}")
+
+        # Send WhatsApp
+        if getattr(plan.user, 'phone', None):
+            try:
+                send_whatsapp_with_fallback(
+                    to=plan.user.phone,
+                    fallback_body=body,
+                    user_id=str(plan.user.id),
+                )
+            except Exception as e:
+                logger.error(f"Failed to send WhatsApp custom reminder for {reminder.id}: {e}")
+
+        # Mark as sent
+        reminder.is_sent = True
+        reminder.save(update_fields=['is_sent'])
+        sent_count += 1
+        
+    if sent_count > 0:
+        logger.info(f"[SALES REMINDERS] Sent {sent_count} custom reminders.")
+        
+    return {'sent_custom_reminders': sent_count}
 
 
 def auto_mark_sales_attendance(target_date=None):

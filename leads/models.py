@@ -583,3 +583,27 @@ class OdometerReading(models.Model):
 
     def __str__(self):
         return f"Odometer {self.activity.activity_date} - {self.user.name or self.user.email} ({self.total_kms} km @ ₹{self.expense_per_km}/km = ₹{self.total_expense}) [{self.status}]"
+
+
+class SalesPlanReminder(models.Model):
+    """
+    Custom reminder times for a SalesDailyPlan.
+    Users can add multiple specific dates and times for reminders.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    plan = models.ForeignKey(
+        SalesDailyPlan,
+        on_delete=models.CASCADE,
+        related_name='custom_reminders',
+        help_text="The sales plan this reminder is for."
+    )
+    reminder_time = models.DateTimeField(help_text="The exact time to send this reminder.")
+    is_sent = models.BooleanField(default=False, help_text="Whether this reminder has been sent.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sales_plan_reminders'
+        ordering = ['reminder_time']
+
+    def __str__(self):
+        return f"Reminder for {self.plan.id} at {self.reminder_time} (Sent: {self.is_sent})"

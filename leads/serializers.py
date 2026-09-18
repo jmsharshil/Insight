@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, SalesPlanReminder, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -193,6 +193,13 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'created_at', 'updated_at']
 
 
+class SalesPlanReminderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalesPlanReminder
+        fields = ['id', 'reminder_time', 'is_sent']
+        read_only_fields = ['id', 'is_sent']
+
+
 class SalesDailyPlanSerializer(serializers.ModelSerializer):
     """
     Parent serializer — daily plan / scheduled event.
@@ -204,6 +211,7 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
     activities = SalesDailyActivitySerializer(many=True, read_only=True)
     date = serializers.DateField(source='plan_date', required=False)
     photos = serializers.SerializerMethodField()
+    custom_reminders = SalesPlanReminderSerializer(many=True, required=False)
 
     class Meta:
         model = SalesDailyPlan
@@ -212,7 +220,7 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
             'start_time', 'end_time', 'place', 'description',
             'photos','reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
-            'activities', 'created_at', 'updated_at',
+            'activities', 'custom_reminders', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'user', 'user_name', 'photos', 'activities',
@@ -239,6 +247,25 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         if 'date' in mutable_data and 'plan_date' not in mutable_data:
             mutable_data['plan_date'] = mutable_data['date']
         return super().to_internal_value(mutable_data)
+
+    def create(self, validated_data):
+        reminders_data = validated_data.pop('custom_reminders', [])
+        plan = super().create(validated_data)
+        for reminder_data in reminders_data:
+            SalesPlanReminder.objects.create(plan=plan, reminder_time=reminder_data['reminder_time'])
+        return plan
+
+    def update(self, instance, validated_data):
+        reminders_data = validated_data.pop('custom_reminders', None)
+        plan = super().update(instance, validated_data)
+        
+        if reminders_data is not None:
+            # Delete existing unsent reminders and recreate them
+            instance.custom_reminders.filter(is_sent=False).delete()
+            for reminder_data in reminders_data:
+                SalesPlanReminder.objects.create(plan=plan, reminder_time=reminder_data['reminder_time'])
+                
+        return plan
 
     def validate(self, attrs):
         """
