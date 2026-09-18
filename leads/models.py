@@ -382,6 +382,9 @@ class SalesDailyActivity(models.Model):
     students_expected = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students expected to attend")
     students_attended = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students actually attended")
     
+    target_name = models.CharField(max_length=100, blank=True, help_text="Name of the person being targeted/visited")
+    target_number = models.CharField(max_length=20, blank=True, help_text="WhatsApp number of the target")
+    
     ACTIVITY_STANDARD_CHOICES = [
         ('12th', '12th'),
         ('11th_12th', '11th & 12th'),
@@ -418,6 +421,22 @@ class SalesDailyActivity(models.Model):
     def __str__(self):
         name_str = f" - {self.name}" if self.name else ""
         return f"{self.user.name} - {self.activity_date}{name_str}"
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        if self.target_number:
+            from chat.notifications import send_whatsapp_text
+            action = "scheduled" if is_new else "updated"
+            message = (
+                f"Hello {self.target_name or 'there'},\n"
+                f"An activity '{self.name}' has been {action} for {self.activity_date.strftime('%d %b %Y')} "
+                f"by {self.user.name or 'our team'}."
+            )
+            send_whatsapp_text(to=self.target_number, body=message)
+
+
 class SalesActivityPhoto(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     activity = models.ForeignKey(

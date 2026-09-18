@@ -187,6 +187,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'activity_date', 'notes', 'students_expected', 'students_attended',
             'standard', 'board', 'medium',
             'seminar_reference_by', 'seminar_given_by',
+            'target_name', 'target_number',
             'photos', 'odometer_reading',
             'created_at', 'updated_at',
         ]

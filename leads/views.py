@@ -151,6 +151,8 @@ class SalesDailyActivityView(APIView):
             name=name,
             notes=serializer.validated_data.get('notes', ''),
             plan=plan,
+            target_name=serializer.validated_data.get('target_name', ''),
+            target_number=serializer.validated_data.get('target_number', ''),
         )
 
         return Response(
@@ -275,6 +277,8 @@ class SalesDailyPlanView(APIView):
             medium = request.data.get('medium')
             seminar_reference_by = request.data.get('seminar_reference_by')
             seminar_given_by = request.data.get('seminar_given_by')
+            target_name = request.data.get('target_name')
+            target_number = request.data.get('target_number')
             
             act_kwargs = {
                 'user': request.user,
@@ -290,6 +294,8 @@ class SalesDailyPlanView(APIView):
             if medium: act_kwargs['medium'] = medium
             if seminar_reference_by: act_kwargs['seminar_reference_by'] = seminar_reference_by
             if seminar_given_by: act_kwargs['seminar_given_by'] = seminar_given_by
+            if target_name: act_kwargs['target_name'] = target_name
+            if target_number: act_kwargs['target_number'] = target_number
             
             SalesDailyActivity.objects.create(**act_kwargs)
         else:
@@ -326,6 +332,14 @@ class SalesDailyPlanView(APIView):
                 if 'seminar_given_by' in request.data:
                     activity.seminar_given_by = request.data.get('seminar_given_by')
                     update_fields.append('seminar_given_by')
+                    updated = True
+                if 'target_name' in request.data:
+                    activity.target_name = request.data.get('target_name')
+                    update_fields.append('target_name')
+                    updated = True
+                if 'target_number' in request.data:
+                    activity.target_number = request.data.get('target_number')
+                    update_fields.append('target_number')
                     updated = True
                 if updated:
                     activity.save(update_fields=update_fields)
@@ -406,6 +420,14 @@ class SalesDailyPlanDetailView(APIView):
             if 'seminar_given_by' in request.data:
                 activity.seminar_given_by = request.data.get('seminar_given_by')
                 update_fields.append('seminar_given_by')
+                updated = True
+            if 'target_name' in request.data:
+                activity.target_name = request.data.get('target_name')
+                update_fields.append('target_name')
+                updated = True
+            if 'target_number' in request.data:
+                activity.target_number = request.data.get('target_number')
+                update_fields.append('target_number')
                 updated = True
             if updated:
                 activity.save(update_fields=update_fields)
