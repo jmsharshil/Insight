@@ -775,6 +775,11 @@ def evaluate_daily_slots_attendance(
         )
 
         if not created:
+            # Protect already 'present' sessions from being overwritten to 'absent'
+            # by subsequent disjoint check-ins.
+            if record.status == 'present' and att_status == 'absent':
+                continue
+
             record.status = att_status
             record.checked_in_at = check_in_time
             record.checked_out_at = check_out_time

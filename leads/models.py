@@ -378,6 +378,19 @@ class SalesDailyActivity(models.Model):
         related_name='sales_daily_activities',
     )
     activity_date = models.DateField(default=timezone.localdate)
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('ongoing', 'Ongoing'),
+        ('completed', 'Completed'),
+    ]
+    status = models.CharField(
+        max_length=20, 
+        choices=STATUS_CHOICES, 
+        default='pending',
+        help_text="Current status of the activity"
+    )
+    
     notes = models.TextField(blank=True)
     students_expected = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students expected to attend")
     students_attended = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students actually attended")
@@ -617,6 +630,7 @@ class SalesPlanReminder(models.Model):
         help_text="The sales plan this reminder is for."
     )
     reminder_time = models.DateTimeField(help_text="The exact time to send this reminder.")
+    purpose = models.CharField(max_length=255, blank=True, help_text="What this reminder is for (e.g. call, follow-up meeting, etc.)")
     is_sent = models.BooleanField(default=False, help_text="Whether this reminder has been sent.")
     created_at = models.DateTimeField(auto_now_add=True)
 

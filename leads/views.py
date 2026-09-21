@@ -153,11 +153,55 @@ class SalesDailyActivityView(APIView):
             plan=plan,
             target_name=serializer.validated_data.get('target_name', ''),
             target_number=serializer.validated_data.get('target_number', ''),
+            students_expected=serializer.validated_data.get('students_expected'),
+            students_attended=serializer.validated_data.get('students_attended'),
+            standard=serializer.validated_data.get('standard', ''),
+            board=serializer.validated_data.get('board', ''),
+            medium=serializer.validated_data.get('medium', ''),
+            seminar_reference_by=serializer.validated_data.get('seminar_reference_by', ''),
+            seminar_given_by=serializer.validated_data.get('seminar_given_by', ''),
         )
 
         return Response(
             SalesDailyActivitySerializer(activity, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
+        )
+
+
+class SalesDailyActivityCompleteView(APIView):
+    """
+    POST /api/v1/sales/activities/<uuid>/complete/
+    Marks an activity as completed and updates its students_attended and notes.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def post(self, request, activity_id):
+        try:
+            activity = SalesDailyActivity.objects.select_related('user').get(id=activity_id)
+        except SalesDailyActivity.DoesNotExist:
+            return Response({'detail': 'Sales activity not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not _sales_activity_access(request.user, activity):
+            return Response({'detail': 'You cannot modify this activity.'}, status=status.HTTP_403_FORBIDDEN)
+
+        update_fields = ['status', 'updated_at']
+        activity.status = 'completed'
+
+        if 'students_attended' in request.data:
+            val = request.data.get('students_attended')
+            activity.students_attended = None if val in ('', 'null', 'undefined') else val
+            update_fields.append('students_attended')
+            
+        if 'notes' in request.data:
+            activity.notes = request.data.get('notes')
+            update_fields.append('notes')
+
+        activity.save(update_fields=update_fields)
+
+        return Response(
+            SalesDailyActivitySerializer(activity, context={'request': request}).data,
+            status=status.HTTP_200_OK,
         )
 
 
@@ -286,8 +330,8 @@ class SalesDailyPlanView(APIView):
                 'name': name or f"Activity for {plan.type or 'Plan'}",
                 'notes': '',
                 'plan': plan,
-                'students_expected': None if s_exp == '' else s_exp,
-                'students_attended': None if s_att == '' else s_att,
+                'students_expected': None if s_exp in ('', 'null', 'undefined') else s_exp,
+                'students_attended': None if s_att in ('', 'null', 'undefined') else s_att,
             }
             if standard: act_kwargs['standard'] = standard
             if board: act_kwargs['board'] = board
@@ -305,12 +349,12 @@ class SalesDailyPlanView(APIView):
                 update_fields = ['updated_at']
                 if 'students_expected' in request.data:
                     val = request.data.get('students_expected')
-                    activity.students_expected = None if val == '' else val
+                    activity.students_expected = None if val in ('', 'null', 'undefined') else val
                     update_fields.append('students_expected')
                     updated = True
                 if 'students_attended' in request.data:
                     val = request.data.get('students_attended')
-                    activity.students_attended = None if val == '' else val
+                    activity.students_attended = None if val in ('', 'null', 'undefined') else val
                     update_fields.append('students_attended')
                     updated = True
                 if 'standard' in request.data:
@@ -393,12 +437,12 @@ class SalesDailyPlanDetailView(APIView):
             update_fields = ['updated_at']
             if 'students_expected' in request.data:
                 val = request.data.get('students_expected')
-                activity.students_expected = None if val == '' else val
+                activity.students_expected = None if val in ('', 'null', 'undefined') else val
                 update_fields.append('students_expected')
                 updated = True
             if 'students_attended' in request.data:
                 val = request.data.get('students_attended')
-                activity.students_attended = None if val == '' else val
+                activity.students_attended = None if val in ('', 'null', 'undefined') else val
                 update_fields.append('students_attended')
                 updated = True
             if 'standard' in request.data:
@@ -617,6 +661,11 @@ class SalesActivityPhotoView(APIView):
         })
         serializer.is_valid(raise_exception=True)
         photo = serializer.save(activity=activity)
+        
+        # Change activity status to ongoing if it is currently pending
+        if activity.status == 'pending':
+            activity.status = 'ongoing'
+            activity.save(update_fields=['status'])
 
         # ── Attendance Check-in / Check-out on Start and End Selfies ──
         attendance_info = None

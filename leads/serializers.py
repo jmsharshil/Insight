@@ -184,7 +184,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         model = SalesDailyActivity
         fields = [
             'id', 'name', 'user', 'user_name', 'plan',
-            'activity_date', 'notes', 'students_expected', 'students_attended',
+            'activity_date', 'status', 'notes', 'students_expected', 'students_attended',
             'standard', 'board', 'medium',
             'seminar_reference_by', 'seminar_given_by',
             'target_name', 'target_number',
@@ -197,7 +197,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
 class SalesPlanReminderSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesPlanReminder
-        fields = ['id', 'reminder_time', 'is_sent']
+        fields = ['id', 'reminder_time', 'purpose', 'is_sent']
         read_only_fields = ['id', 'is_sent']
 
 
@@ -253,7 +253,11 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         reminders_data = validated_data.pop('custom_reminders', [])
         plan = super().create(validated_data)
         for reminder_data in reminders_data:
-            SalesPlanReminder.objects.create(plan=plan, reminder_time=reminder_data['reminder_time'])
+            SalesPlanReminder.objects.create(
+                plan=plan, 
+                reminder_time=reminder_data['reminder_time'],
+                purpose=reminder_data.get('purpose', '')
+            )
         return plan
 
     def update(self, instance, validated_data):
@@ -264,7 +268,11 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
             # Delete existing unsent reminders and recreate them
             instance.custom_reminders.filter(is_sent=False).delete()
             for reminder_data in reminders_data:
-                SalesPlanReminder.objects.create(plan=plan, reminder_time=reminder_data['reminder_time'])
+                SalesPlanReminder.objects.create(
+                    plan=plan, 
+                    reminder_time=reminder_data['reminder_time'],
+                    purpose=reminder_data.get('purpose', '')
+                )
                 
         return plan
 

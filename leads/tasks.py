@@ -19,11 +19,6 @@ def send_sales_plan_reminders():
       
     NOTE: As per user request, this has been disabled to prefer custom reminders.
     """
-    return {
-        'two_days_reminders': 0,
-        'tomorrow_reminders': 0,
-        'today_reminders': 0,
-    }
     
     today = timezone.localdate()
     tomorrow = today + timedelta(days=1)
@@ -212,6 +207,36 @@ def send_sales_plan_reminders():
     }
 
 
+def auto_start_sales_activities():
+    """
+    Background task to auto-start activities based on their plan's start time.
+    Runs every minute.
+    """
+    now = timezone.now()
+    today = timezone.localdate(now)
+    current_time = now.time()
+
+    from .models import SalesDailyActivity
+    
+    pending_activities = SalesDailyActivity.objects.filter(
+        activity_date=today,
+        status='pending',
+        plan__isnull=False,
+        plan__start_time__lte=current_time
+    )
+    
+    count = 0
+    for activity in pending_activities:
+        activity.status = 'ongoing'
+        activity.save(update_fields=['status', 'updated_at'])
+        count += 1
+        
+    if count > 0:
+        logger.info(f"[SALES AUTO-START] Auto-started {count} sales activities based on plan start time.")
+        
+    return {'auto_started_activities': count}
+
+
 def send_custom_sales_plan_reminders():
     """
     Background task to process custom sales plan reminders.
@@ -235,11 +260,15 @@ def send_custom_sales_plan_reminders():
 
         desc_str = f"\nAgenda: {plan.description}" if plan.description else ""
         event_name = plan.type or "Sales Event"
+        purpose_str = f"\nPurpose: {reminder.purpose}" if reminder.purpose else ""
 
         title = f"Sales Plan Reminder: {event_name}"
+        if reminder.purpose:
+            title += f" - {reminder.purpose}"
+            
         body = (
             f"Reminder: You have a scheduled event ({plan.plan_date.strftime('%d %b %Y')}): "
-            f"{event_name}{place_str}{time_str}.{desc_str}"
+            f"{event_name}{place_str}{time_str}.{desc_str}{purpose_str}"
         )
 
         # Send system notification

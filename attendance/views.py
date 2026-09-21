@@ -333,9 +333,12 @@ class QRScanView(APIView):
                     logger.error(f"Error resolving faculty slot: {e}")
 
             # Find an open session (checked in, not checked out)
-            open_record = EmployeeAttendanceRecord.objects.filter(
+            open_record_qs = EmployeeAttendanceRecord.objects.filter(
                 user=user, date=today, checked_in_at__isnull=False, checked_out_at__isnull=True
-            ).order_by('-checked_in_at').first()
+            ).exclude(status='absent')
+            if timetable_slot_obj:
+                open_record_qs = open_record_qs.filter(timetable_slot=timetable_slot_obj)
+            open_record = open_record_qs.order_by('-checked_in_at').first()
 
             # Faculty specific tracking for payroll late/early logic (updated to prefer timetable_slot_obj when provided)
             # This ensures late/early mins are recorded accurately so payroll deducts the amount (fixes the reported bug).
@@ -603,9 +606,12 @@ class QRScanView(APIView):
         now = timezone.now()
 
         # Check for multiple check-ins or missing check-ins before processing scan
-        open_record = AttendanceRecord.objects.filter(
+        open_record_qs = AttendanceRecord.objects.filter(
             student=student, date=now.date(), checked_in_at__isnull=False, checked_out_at__isnull=True
-        ).order_by('-checked_in_at').first()
+        ).exclude(status='absent')
+        if timetable_slot_obj:
+            open_record_qs = open_record_qs.filter(timetable_slot=timetable_slot_obj)
+        open_record = open_record_qs.order_by('-checked_in_at').first()
 
         has_prior_same_day_checkin = AttendanceRecord.objects.filter(
             student=student,
