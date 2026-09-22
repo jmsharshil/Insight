@@ -129,24 +129,36 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
             
         return None
 
+    def _get_expected_roles(self, obj):
+        applicant_role = getattr(obj.applied_by, 'role', '') if obj.applied_by else ''
+        if applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive']:
+            return 'cmo', 'super_admin'
+        if applicant_role == 'head_coordinator':
+            return 'branch_manager', 'super_admin'
+        return 'head_coordinator', 'branch_manager'
+
     def get_first_approver(self, obj):
         if obj.first_approver_id: return obj.first_approver_id
-        app = self._find_approver(obj, 'admin_senior_executive')
+        step1_role, _ = self._get_expected_roles(obj)
+        app = self._find_approver(obj, step1_role)
         return app.id if app else None
 
     def get_first_approver_name(self, obj):
         if obj.first_approver: return obj.first_approver.name
-        app = self._find_approver(obj, 'admin_senior_executive')
+        step1_role, _ = self._get_expected_roles(obj)
+        app = self._find_approver(obj, step1_role)
         return app.name if app else ''
 
     def get_second_approver(self, obj):
         if obj.second_approver_id: return obj.second_approver_id
-        app = self._find_approver(obj, 'branch_manager')
+        _, step2_role = self._get_expected_roles(obj)
+        app = self._find_approver(obj, step2_role)
         return app.id if app else None
 
     def get_second_approver_name(self, obj):
         if obj.second_approver: return obj.second_approver.name
-        app = self._find_approver(obj, 'branch_manager')
+        _, step2_role = self._get_expected_roles(obj)
+        app = self._find_approver(obj, step2_role)
         return app.name if app else ''
 
     def get_supporting_document_url(self, obj):
