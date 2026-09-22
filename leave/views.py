@@ -74,7 +74,7 @@ class LeaveListCreateView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role in ADMIN_ROLES:
+        if role in set(ADMIN_ROLES + LEAVE_APPROVE_ROLES):
             qs = LeaveApplication.objects.all()
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
