@@ -422,6 +422,8 @@ class SalesDailyActivity(models.Model):
     seminar_reference_by = models.CharField(max_length=200, blank=True, help_text="Who gave the reference for the seminar")
     seminar_given_by = models.CharField(max_length=200, blank=True, help_text="Who gave the seminar")
     location_link = models.URLField(blank=True,null=True,help_text="Google Map link for location/venue")
+    from_date = models.DateField(null=True, blank=True, help_text="Start date of the activity")
+    to_date = models.DateField(null=True, blank=True, help_text="End date of the activity")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
