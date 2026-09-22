@@ -106,6 +106,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     qr_code = models.ImageField(upload_to='qr/employee/', null=True, blank=True)
     work_start_time = models.TimeField(null=True, blank=True)
     work_end_time = models.TimeField(null=True, blank=True)
+    working_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Total working hours")
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     salary_retention_percentage = models.DecimalField(

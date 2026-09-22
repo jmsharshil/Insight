@@ -8,8 +8,9 @@ EMPLOYEE_FIELDS = [
     'employee_id', 'qualification', 'specialization', 'subject_expertise', 'level', 'levels',
     'employment_type', 'joining_date', 'hourly_rate', 'session_hours', 'salary', 
     'bank_account', 'ifsc_code', 'pan_number', 'aadhar_number', 'work_start_time', 'work_end_time', 
-    'salary_retention_percentage', 'per_paper_rate'
+    'working_hours', 'salary_retention_percentage', 'per_paper_rate'
 ]
+
 
 class EmployeeFieldsMixin:
     def __init__(self, *args, **kwargs):
@@ -190,7 +191,7 @@ class EmployeeFieldsMixin:
             if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
                 mutable_data[f] = None
                 
-        numeric_fields = ['hourly_rate', 'session_hours', 'salary', 'salary_retention_percentage', 'per_paper_rate']
+        numeric_fields = ['hourly_rate', 'session_hours', 'salary', 'working_hours', 'salary_retention_percentage', 'per_paper_rate']
         for f in numeric_fields:
             if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
                 mutable_data[f] = 0

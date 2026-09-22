@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = ['super_admin', 'branch_manager', 'admin_senior_executive']
 LEAVE_APPLY_EXCLUDE = ['super_admin', 'house_keeping', 'security']
-LEAVE_APPROVE_ROLES = ['branch_manager', 'admin_senior_executive']
+LEAVE_APPROVE_ROLES = ['branch_manager', 'cmo', 'head_coordinator', 'super_admin']
 POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
 LATE_ENTRY_ADMIN = ['branch_manager', 'admin_senior_executive']
 HOLIDAY_EDIT_ROLES = ['branch_manager', 'super_admin']
@@ -276,13 +276,23 @@ class LeaveListCreateView(APIView):
             'reason': d['reason'],
         }
 
-        if role == 'branch_manager':
+        if role in ['counsellor', 'sales_senior_executive', 'sales_executive']:
+            # Sales team → notify cmo and super_admin
+            cmo_q = User.objects.filter(get_role_filter_q('cmo'), is_active=True)
+            sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
+            if org:
+                cmo_q = cmo_q.filter(organization=org)
+                sa_q = sa_q.filter(organization=org)
+            if bid:
+                cmo_q = cmo_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+            approvers = (cmo_q | sa_q).distinct()
+        elif role == 'branch_manager':
             # BM's leave → notify only super_admin(s) in the same organization
             approvers = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
             if org:
                 approvers = approvers.filter(organization=org)
-        elif role == 'admin_senior_executive':
-            # ASE's leave → notify branch_manager(s) and super_admin(s)
+        elif role == 'head_coordinator':
+            # HC's leave → notify branch_manager and super_admin
             bm_q = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
             sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
             if org:
@@ -291,13 +301,18 @@ class LeaveListCreateView(APIView):
             if bid:
                 bm_q = bm_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
             approvers = (bm_q | sa_q).distinct()
+
         else:
-            # Regular staff → notify branch-scoped ASE(s) only
-            approvers = User.objects.filter(get_role_filter_q('admin_senior_executive'), is_active=True)
+            # Regular staff → notify head_coordinator and branch_manager
+            hc_q = User.objects.filter(get_role_filter_q('head_coordinator'), is_active=True)
+            bm_q = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
             if org:
-                approvers = approvers.filter(organization=org)
+                hc_q = hc_q.filter(organization=org)
+                bm_q = bm_q.filter(organization=org)
             if bid:
-                approvers = approvers.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+                hc_q = hc_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+                bm_q = bm_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
+            approvers = (hc_q | bm_q).distinct()
 
         for approver in approvers:
             notify(
@@ -485,27 +500,20 @@ class LeaveApproveView(APIView):
             self._finalise_approval(app, request.user, now)
             return Response({'success': True, 'message': 'Leave approved (branch manager leave — super_admin).'})
 
-        # ── One-step approval: leave applied by admin_senior_executive ──
-        # branch_manager or super_admin can approve in a single step.
-        if applicant_role == 'admin_senior_executive':
-            if role not in ('branch_manager', 'super_admin'):
-                return Response(
-                    {'success': False, 'message': 'Only branch_manager or super_admin can approve an ASE\'s leave.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            app.first_approver = request.user
-            app.first_approved_at = now
-            app.status = 'approved'
-            app.reviewed_by = request.user
-            app.reviewed_at = now
-            app.save()
-            self._finalise_approval(app, request.user, now)
-            return Response({'success': True, 'message': 'Leave approved (ASE leave — single step).'})
 
-        # ── Two-step approval: regular staff ────────────────────────────
+        # ── Two-step approval ────────────────────────────
+        is_sales = applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive']
+        is_head_coordinator = applicant_role == 'head_coordinator'
+        
+        if is_sales:
+            step1_role, step2_role = 'cmo', 'super_admin'
+        elif is_head_coordinator:
+            step1_role, step2_role = 'branch_manager', 'super_admin'
+        else:
+            step1_role, step2_role = 'head_coordinator', 'branch_manager'
 
-        # Step 1: admin_senior_executive first approval
-        if role == 'admin_senior_executive':
+        # Step 1 Approval
+        if role == step1_role:
             if app.first_approver:
                 return Response({'success': False, 'message': 'First approval already done.'}, status=status.HTTP_400_BAD_REQUEST)
             app.first_approver = request.user
@@ -513,27 +521,27 @@ class LeaveApproveView(APIView):
             
             app.save(update_fields=['first_approver', 'first_approved_at'])
 
-            # FRD §4.9.2: Push notification to branch_manager (Step 2)
+            # Push notification to Step 2 Approvers
             from django.contrib.auth import get_user_model
             User = get_user_model()
-            bm_users = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
-            if app.branch_id:
-                bm_users = bm_users.filter(models.Q(branch_id=app.branch_id) | models.Q(branch_id__isnull=True, organization_id=app.branch.organization_id))
+            step2_users = User.objects.filter(get_role_filter_q(step2_role), is_active=True)
+            if app.branch_id and step2_role != 'super_admin':
+                step2_users = step2_users.filter(models.Q(branch_id=app.branch_id) | models.Q(branch_id__isnull=True, organization_id=app.branch.organization_id))
 
-            if not bm_users.exists():
-                # If no branch manager exists, auto-approve the leave at step 1
+            if not step2_users.exists():
+                # Auto-approve if no step 2 user exists
                 app.status = 'approved'
                 app.reviewed_by = request.user
                 app.reviewed_at = now
                 app.save()
                 self._finalise_approval(app, request.user, now)
-                return Response({'success': True, 'message': 'Leave approved successfully (no branch manager found).'})
+                return Response({'success': True, 'message': f'Leave approved successfully (no {step2_role} found).'})
 
-            for bm in bm_users:
+            for u in step2_users:
                 notify(
-                    str(bm.id),
+                    str(u.id),
                     title="Leave awaiting your approval",
-                    body=f"{app.applied_by.name} leave approved by ASE. Your approval needed.",
+                    body=f"{app.applied_by.name} leave approved by {role}. Your approval needed.",
                     metadata={"leave_id": str(app.id), "approval_step": 2},
                     email_template='emails/leave_applied.html',
                     email_context={
@@ -545,12 +553,12 @@ class LeaveApproveView(APIView):
                     }
                 )
 
-            return Response({'success': True, 'message': 'First approval done. Awaiting branch manager.'})
+            return Response({'success': True, 'message': f'First approval done. Awaiting {step2_role}.'})
 
-        # Step 2: branch_manager second approval (regular staff)
-        if role == 'branch_manager':
+        # Step 2 Approval
+        if role == step2_role:
             if not app.first_approver:
-                return Response({'success': False, 'message': 'First approval by admin_senior_executive is required.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'success': False, 'message': f'First approval by {step1_role} is required.'}, status=status.HTTP_400_BAD_REQUEST)
             app.second_approver = request.user
             app.second_approved_at = now
             app.status = 'approved'
@@ -560,8 +568,8 @@ class LeaveApproveView(APIView):
             self._finalise_approval(app, request.user, now)
             return Response({'success': True, 'message': 'Leave approved.'})
 
-        # super_admin can do both steps at once (regular staff)
-        if role == 'super_admin':
+        # super_admin can do both steps at once (if not already Step 2 above)
+        if role == 'super_admin' and role != step2_role:
             app.first_approver = app.first_approver or request.user
             app.first_approved_at = app.first_approved_at or now
             app.second_approver = request.user

@@ -188,6 +188,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'standard', 'board', 'medium',
             'seminar_reference_by', 'seminar_given_by',
             'target_name', 'target_number',
+            'location_link',
             'photos', 'odometer_reading',
             'created_at', 'updated_at',
         ]
