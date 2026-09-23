@@ -358,31 +358,38 @@ class SalesDailyPlanView(APIView):
                     update_fields.append('students_attended')
                     updated = True
                 if 'standard' in request.data:
-                    activity.standard = request.data.get('standard')
+                    val = request.data.get('standard')
+                    activity.standard = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('standard')
                     updated = True
                 if 'board' in request.data:
-                    activity.board = request.data.get('board')
+                    val = request.data.get('board')
+                    activity.board = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('board')
                     updated = True
                 if 'medium' in request.data:
-                    activity.medium = request.data.get('medium')
+                    val = request.data.get('medium')
+                    activity.medium = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('medium')
                     updated = True
                 if 'seminar_reference_by' in request.data:
-                    activity.seminar_reference_by = request.data.get('seminar_reference_by')
+                    val = request.data.get('seminar_reference_by')
+                    activity.seminar_reference_by = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('seminar_reference_by')
                     updated = True
                 if 'seminar_given_by' in request.data:
-                    activity.seminar_given_by = request.data.get('seminar_given_by')
+                    val = request.data.get('seminar_given_by')
+                    activity.seminar_given_by = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('seminar_given_by')
                     updated = True
                 if 'target_name' in request.data:
-                    activity.target_name = request.data.get('target_name')
+                    val = request.data.get('target_name')
+                    activity.target_name = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('target_name')
                     updated = True
                 if 'target_number' in request.data:
-                    activity.target_number = request.data.get('target_number')
+                    val = request.data.get('target_number')
+                    activity.target_number = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('target_number')
                     updated = True
                 if updated:
@@ -446,31 +453,38 @@ class SalesDailyPlanDetailView(APIView):
                 update_fields.append('students_attended')
                 updated = True
             if 'standard' in request.data:
-                activity.standard = request.data.get('standard')
+                val = request.data.get('standard')
+                activity.standard = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('standard')
                 updated = True
             if 'board' in request.data:
-                activity.board = request.data.get('board')
+                val = request.data.get('board')
+                activity.board = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('board')
                 updated = True
             if 'medium' in request.data:
-                activity.medium = request.data.get('medium')
+                val = request.data.get('medium')
+                activity.medium = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('medium')
                 updated = True
             if 'seminar_reference_by' in request.data:
-                activity.seminar_reference_by = request.data.get('seminar_reference_by')
+                val = request.data.get('seminar_reference_by')
+                activity.seminar_reference_by = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('seminar_reference_by')
                 updated = True
             if 'seminar_given_by' in request.data:
-                activity.seminar_given_by = request.data.get('seminar_given_by')
+                val = request.data.get('seminar_given_by')
+                activity.seminar_given_by = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('seminar_given_by')
                 updated = True
             if 'target_name' in request.data:
-                activity.target_name = request.data.get('target_name')
+                val = request.data.get('target_name')
+                activity.target_name = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('target_name')
                 updated = True
             if 'target_number' in request.data:
-                activity.target_number = request.data.get('target_number')
+                val = request.data.get('target_number')
+                activity.target_number = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('target_number')
                 updated = True
             if updated:

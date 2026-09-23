@@ -82,6 +82,12 @@ class LeaveListCreateView(APIView):
                 branch_ids = get_user_branch_ids(request.user)
                 if branch_ids:
                     qs = qs.filter(branch_id__in=branch_ids)
+                
+                sales_roles = ['counsellor', 'sales_senior_executive', 'sales_executive']
+                if role == 'cmo':
+                    qs = qs.filter(applied_by__role__in=sales_roles)
+                elif role in ['head_coordinator', 'branch_manager']:
+                    qs = qs.exclude(applied_by__role__in=sales_roles)
         else:
             qs = LeaveApplication.objects.filter(applied_by=request.user)
 
@@ -452,7 +458,7 @@ class LeaveApproveView(APIView):
                             {"type": "text", "text": app.leave_type},
                             {"type": "text", "text": "approved"},
                             {"type": "text", "text": approver.name},
-                            {"type": "text", "text": ""},
+                            {"type": "text", "text": "-"},
                         ]
                     }],
                     fallback_body=f"Hello {app.applied_by.name}, your {app.leave_type} leave has been approved by {approver.name}.",

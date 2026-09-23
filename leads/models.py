@@ -415,9 +415,9 @@ class SalesDailyActivity(models.Model):
         ('hindi', 'Hindi'),
     ]
 
-    standard = models.CharField(max_length=20, choices=ACTIVITY_STANDARD_CHOICES, default='12th', blank=True)
-    board = models.CharField(max_length=20, choices=ACTIVITY_BOARD_CHOICES, default='cbse', blank=True)
-    medium = models.CharField(max_length=20, choices=ACTIVITY_MEDIUM_CHOICES, default='english', blank=True)
+    standard = models.CharField(max_length=20, choices=ACTIVITY_STANDARD_CHOICES, default='12th', blank=True, null=True)
+    board = models.CharField(max_length=20, choices=ACTIVITY_BOARD_CHOICES, default='cbse', blank=True, null=True)
+    medium = models.CharField(max_length=20, choices=ACTIVITY_MEDIUM_CHOICES, default='english', blank=True, null=True)
 
     seminar_reference_by = models.CharField(max_length=200, blank=True, help_text="Who gave the reference for the seminar")
     seminar_given_by = models.CharField(max_length=200, blank=True, help_text="Who gave the seminar")
