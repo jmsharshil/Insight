@@ -92,7 +92,10 @@ class SalesDailyActivityView(APIView):
             queryset = queryset.filter(
                 Q(user__name__icontains=search) |
                 Q(user__email__icontains=search) |
-                Q(user__phone__icontains=search)
+                Q(user__phone__icontains=search) |
+                Q(name__icontains=search) |
+                Q(notes__icontains=search) |
+                Q(target_name__icontains=search)
             )
 
         # 2. Filter by date (supports YYYY-MM-DD or 'today')
@@ -252,7 +255,10 @@ class SalesDailyPlanView(APIView):
             queryset = queryset.filter(
                 Q(user__name__icontains=search) |
                 Q(user__email__icontains=search) |
-                Q(user__phone__icontains=search)
+                Q(user__phone__icontains=search) |
+                Q(place__icontains=search) |
+                Q(description__icontains=search) |
+                Q(type__icontains=search)
             )
 
         date_param = request.query_params.get('date')
@@ -346,6 +352,8 @@ class SalesDailyPlanView(APIView):
             seminar_given_by = request.data.get('seminar_given_by')
             target_name = request.data.get('target_name')
             target_number = request.data.get('target_number')
+            from_date = request.data.get('from_date')
+            to_date = request.data.get('to_date')
             
             act_kwargs = {
                 'user': request.user,
@@ -363,8 +371,19 @@ class SalesDailyPlanView(APIView):
             if seminar_given_by: act_kwargs['seminar_given_by'] = seminar_given_by
             if target_name: act_kwargs['target_name'] = target_name
             if target_number: act_kwargs['target_number'] = target_number
+            if from_date: act_kwargs['from_date'] = from_date
+            if to_date: act_kwargs['to_date'] = to_date
             
-            SalesDailyActivity.objects.create(**act_kwargs)
+            activity = SalesDailyActivity.objects.create(**act_kwargs)
+            timings_data = request.data.get('timings', [])
+            if isinstance(timings_data, list):
+                for t in timings_data:
+                    SalesDailyActivityTiming.objects.create(
+                        activity=activity,
+                        date=t.get('date'),
+                        start_time=t.get('start_time'),
+                        end_time=t.get('end_time')
+                    )
         else:
             activity = plan.activities.first()
             if activity:
@@ -415,8 +434,30 @@ class SalesDailyPlanView(APIView):
                     activity.target_number = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('target_number')
                     updated = True
+                if 'from_date' in request.data:
+                    val = request.data.get('from_date')
+                    activity.from_date = None if val in ('', 'null', 'undefined') else val
+                    update_fields.append('from_date')
+                    updated = True
+                if 'to_date' in request.data:
+                    val = request.data.get('to_date')
+                    activity.to_date = None if val in ('', 'null', 'undefined') else val
+                    update_fields.append('to_date')
+                    updated = True
                 if updated:
                     activity.save(update_fields=update_fields)
+
+                if 'timings' in request.data:
+                    timings_data = request.data.get('timings')
+                    if isinstance(timings_data, list):
+                        activity.timings.all().delete()
+                        for t in timings_data:
+                            SalesDailyActivityTiming.objects.create(
+                                activity=activity,
+                                date=t.get('date'),
+                                start_time=t.get('start_time'),
+                                end_time=t.get('end_time')
+                            )
 
         return Response(
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
@@ -510,8 +551,30 @@ class SalesDailyPlanDetailView(APIView):
                 activity.target_number = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('target_number')
                 updated = True
+            if 'from_date' in request.data:
+                val = request.data.get('from_date')
+                activity.from_date = None if val in ('', 'null', 'undefined') else val
+                update_fields.append('from_date')
+                updated = True
+            if 'to_date' in request.data:
+                val = request.data.get('to_date')
+                activity.to_date = None if val in ('', 'null', 'undefined') else val
+                update_fields.append('to_date')
+                updated = True
             if updated:
                 activity.save(update_fields=update_fields)
+
+            if 'timings' in request.data:
+                timings_data = request.data.get('timings')
+                if isinstance(timings_data, list):
+                    activity.timings.all().delete()
+                    for t in timings_data:
+                        SalesDailyActivityTiming.objects.create(
+                            activity=activity,
+                            date=t.get('date'),
+                            start_time=t.get('start_time'),
+                            end_time=t.get('end_time')
+                        )
 
         return Response(SalesDailyPlanSerializer(updated_plan, context={'request': request}).data)
 
