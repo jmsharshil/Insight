@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, SalesPlanReminder, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, SalesPlanReminder, SalesDailyActivityTiming, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -73,6 +73,12 @@ class FlexibleDateTimeField(serializers.DateTimeField):
             raise serializers.ValidationError(
                 "Invalid datetime format."
             )
+
+class SalesDailyActivityTimingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalesDailyActivityTiming
+        fields = ['id', 'date', 'start_time', 'end_time']
+        read_only_fields = ['id']
 
 class SalesActivityPhotoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -179,6 +185,8 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
     photos = SalesActivityPhotoSerializer(many=True, read_only=True)
     user_name = serializers.CharField(source='user.name', read_only=True)
     odometer_reading = OdometerReadingSerializer(read_only=True)
+    timings = SalesDailyActivityTimingSerializer(many=True, required=False)
+    event_photo_slots = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyActivity
@@ -189,10 +197,59 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'seminar_reference_by', 'seminar_given_by',
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
-            'photos', 'odometer_reading',
+            'photos', 'odometer_reading', 'timings', 'event_photo_slots',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'created_at', 'updated_at']
+
+    def get_event_photo_slots(self, obj):
+        from datetime import datetime
+        from django.utils import timezone
+        
+        today_date = obj.activity_date or timezone.localdate()
+        duration_hours = 0
+        
+        timing = obj.timings.filter(date=today_date).first()
+        if timing and timing.start_time and timing.end_time:
+            start_dt = datetime.combine(today_date, timing.start_time)
+            end_dt = datetime.combine(today_date, timing.end_time)
+            duration_hours = (end_dt - start_dt).total_seconds() / 3600
+        elif obj.plan and hasattr(obj.plan, 'start_time') and obj.plan.start_time and obj.plan.end_time:
+            start_dt = datetime.combine(today_date, obj.plan.start_time)
+            end_dt = datetime.combine(today_date, obj.plan.end_time)
+            duration_hours = (end_dt - start_dt).total_seconds() / 3600
+            
+        total_slots = max(0, int(duration_hours)) if duration_hours > 0 else 8
+        
+        exhibition_photos = list(obj.photos.filter(photo_type='exhibition').order_by('captured_at'))
+        start_selfie = obj.photos.filter(photo_type='event_start_selfie').first()
+        end_selfie = obj.photos.filter(photo_type='event_end_selfie').first()
+        
+        slots = []
+        for i in range(total_slots):
+            if i == 0:
+                slot_type = "event_start_selfie"
+                photo = start_selfie
+            elif i == total_slots - 1 and total_slots > 1:
+                slot_type = "event_end_selfie"
+                photo = end_selfie
+            else:
+                slot_type = "exhibition"
+                photo = exhibition_photos.pop(0) if exhibition_photos else None
+                
+            slot_data = {
+                "slot": i + 1,
+                "type": slot_type,
+                "photo_id": photo.id if photo else None,
+                "photo_url": None,
+                "is_filled": bool(photo)
+            }
+            if photo and photo.photo:
+                request = self.context.get('request')
+                slot_data['photo_url'] = request.build_absolute_uri(photo.photo.url) if request else photo.photo.url
+            slots.append(slot_data)
+            
+        return slots
 
 
 class SalesPlanReminderSerializer(serializers.ModelSerializer):

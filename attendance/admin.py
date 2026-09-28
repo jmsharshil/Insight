@@ -25,3 +25,5 @@ class ViolationRecordAdmin(admin.ModelAdmin):
     list_filter = ('resolved_by', 'resolved_at', 'logged_by_admin', 'violation_type', 'created_by', 'date', 'created_at', 'is_resolved')
     search_fields = ('student__user__name', 'student__roll_number')
     readonly_fields = ('id', 'created_at')
+
+admin.site.register(EmployeeAttendanceRecord)

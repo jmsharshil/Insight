@@ -525,6 +525,15 @@ def auto_mark_staff_absentees_eod(target_date=None):
             EmployeeAttendanceRecord.objects.bulk_create(records, ignore_conflicts=True)
             logger.info(f"Auto-marked {len(records)} staff members absent for {today}.")
             
+        # Mark missing checkouts as half-day
+        updated_count = EmployeeAttendanceRecord.objects.filter(
+            date=today,
+            checked_in_at__isnull=False,
+            checked_out_at__isnull=True
+        ).update(status='half_day')
+        if updated_count > 0:
+            logger.info(f"Auto-marked {updated_count} staff members as half_day for missing checkout on {today}.")
+            
     except Exception as exc:
         logger.error(f"auto_mark_staff_absentees_eod error: {exc}")
 

@@ -635,6 +635,14 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     days_with_attendance = len(attended_weekdays)
     
     absent_dates = []
+    from attendance.models import EmployeeAttendanceRecord
+    half_day_dates = set(EmployeeAttendanceRecord.objects.filter(
+        user=faculty_profile.user,
+        date__year=year,
+        date__month=month,
+        status='half_day'
+    ).values_list('date', flat=True))
+    
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
         working_days_passed = working_days
@@ -655,8 +663,11 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 curr_date = date(year, month, d)
                 if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
                     absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+                elif curr_date in half_day_dates:
+                    absent_dates.append(curr_date.strftime('%Y-%m-%d') + " (Half Day - Missing Checkout)")
 
-        # Add late half days
+        # Add late half days and missing checkout half days
+        late_half_days += len({d for d in half_day_dates if d.weekday() < 5})
         absent_days += Decimal(late_half_days) * Decimal('0.5')
         
         absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
@@ -1619,14 +1630,23 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     days_attended_weekdays = len(attended_weekdays)
     
     absent_dates = []
+    half_day_dates = set(attendance_records.filter(status='half_day').values_list('date', flat=True))
+    
     for d in range(1, last_day + 1):
         if calendar.weekday(year, month, d) < 5:
             curr_date = date(year, month, d)
             if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
                 absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+            elif curr_date in half_day_dates:
+                absent_dates.append(curr_date.strftime('%Y-%m-%d') + " (Half Day - Missing Checkout)")
 
     if user.employment_type == 'full_time':
         absent_days = Decimal(max(0, working_days_passed - days_attended_weekdays - len(leave_dates_in_month)))
+        
+        # Add 0.5 days absence for every half day
+        half_days_count = len({d for d in half_day_dates if d.weekday() < 5})
+        absent_days += Decimal(half_days_count) * Decimal('0.5')
+        
         absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
         absence_deductions = absent_days * absence_deduction_rate
     else:

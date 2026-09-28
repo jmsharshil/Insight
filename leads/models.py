@@ -453,6 +453,27 @@ class SalesDailyActivity(models.Model):
             send_whatsapp_text(to=self.target_number, body=message)
 
 
+class SalesDailyActivityTiming(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        SalesDailyActivity,
+        on_delete=models.CASCADE,
+        related_name='timings',
+    )
+    date = models.DateField(help_text="The specific date for this timing")
+    start_time = models.TimeField(help_text="Start time for this day")
+    end_time = models.TimeField(help_text="End time for this day")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_activity_timings'
+        ordering = ['date', 'start_time']
+
+    def __str__(self):
+        return f"{self.activity_id} - {self.date} ({self.start_time} to {self.end_time})"
+
+
 class SalesActivityPhoto(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     activity = models.ForeignKey(

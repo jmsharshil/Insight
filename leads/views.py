@@ -26,7 +26,7 @@ from .serializers import (
 )
 from .utils import LeadService
 from .models import (
-    Lead, LeadStage, LeadAssignmentLog, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto,
+    Lead, LeadStage, LeadAssignmentLog, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, SalesDailyActivityTiming,
     OdometerReading, FORM_TYPE_CHOICES, STAGE_CHOICES, COURSE_TYPE_CHOICES,
     GROUP_MODULE_CHOICES, ATTEMPT_TYPE_CHOICES,
 )
@@ -69,6 +69,10 @@ def _sales_activity_access(user, activity=None):
 class SalesDailyActivityView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['activity_date', 'user', 'status', 'standard', 'board', 'medium']
+    search_fields = ['user__name', 'user__email', 'user__phone', 'name', 'notes', 'target_name']
+    ordering_fields = '__all__'
 
     def get(self, request):
         if not _sales_activity_access(request.user):
@@ -120,13 +124,14 @@ class SalesDailyActivityView(APIView):
             except ValueError:
                 return Response({'detail': 'Invalid to_date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 4. Filter by specific user_id
         user_id = request.query_params.get('user_id')
         if user_id:
             if request.user.role in ODOMETER_APPROVER_ROLES or str(request.user.id) == str(user_id):
                 queryset = queryset.filter(user_id=user_id)
             else:
                 return Response({'detail': 'You can only view your own sales activities.'}, status=status.HTTP_403_FORBIDDEN)
+
+        queryset = apply_filters(self, request, queryset)
 
         queryset = queryset.order_by('-activity_date', '-created_at')
         serializer = SalesDailyActivitySerializer(queryset, many=True, context={'request': request})
@@ -160,7 +165,19 @@ class SalesDailyActivityView(APIView):
             medium=serializer.validated_data.get('medium', ''),
             seminar_reference_by=serializer.validated_data.get('seminar_reference_by', ''),
             seminar_given_by=serializer.validated_data.get('seminar_given_by', ''),
+            location_link=serializer.validated_data.get('location_link', ''),
+            from_date=serializer.validated_data.get('from_date'),
+            to_date=serializer.validated_data.get('to_date'),
         )
+
+        timings_data = serializer.validated_data.get('timings', [])
+        for timing_data in timings_data:
+            SalesDailyActivityTiming.objects.create(
+                activity=activity,
+                date=timing_data.get('date'),
+                start_time=timing_data.get('start_time'),
+                end_time=timing_data.get('end_time')
+            )
 
         return Response(
             SalesDailyActivitySerializer(activity, context={'request': request}).data,
@@ -212,6 +229,10 @@ class SalesDailyPlanView(APIView):
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['plan_date', 'type', 'user', 'place']
+    search_fields = ['user__name', 'user__email', 'user__phone', 'place', 'description', 'type']
+    ordering_fields = '__all__'
 
     def get(self, request):
         queryset = SalesDailyPlan.objects.prefetch_related(
@@ -268,6 +289,8 @@ class SalesDailyPlanView(APIView):
             else:
                 return Response({'detail': 'You can only view your own sales plans.'}, status=status.HTTP_403_FORBIDDEN)
 
+        queryset = apply_filters(self, request, queryset)
+        
         queryset = queryset.order_by('-plan_date', '-created_at')
         serializer = SalesDailyPlanSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
@@ -635,8 +658,41 @@ class SalesActivityPhotoView(APIView):
             )
 
         photo_type = request.data.get('photo_type')
-        if photo_type == 'exhibition' and activity.photos.filter(photo_type='exhibition').count() >= 6:
-            return Response({'detail': 'A maximum of 6 exhibition photos is allowed.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # ── Dynamic limit for exhibition photos ──
+        if photo_type == 'exhibition':
+            from datetime import datetime
+            today_date = activity.activity_date or timezone.localdate()
+            duration_hours = 0
+            
+            # Get duration from today's timing or plan
+            timing = activity.timings.filter(date=today_date).first()
+            if timing and timing.start_time and timing.end_time:
+                start_dt = datetime.combine(today_date, timing.start_time)
+                end_dt = datetime.combine(today_date, timing.end_time)
+                duration_hours = (end_dt - start_dt).total_seconds() / 3600
+            elif activity.plan and hasattr(activity.plan, 'start_time') and activity.plan.start_time and activity.plan.end_time:
+                start_dt = datetime.combine(today_date, activity.plan.start_time)
+                end_dt = datetime.combine(today_date, activity.plan.end_time)
+                duration_hours = (end_dt - start_dt).total_seconds() / 3600
+                
+            # If duration is 3 hours, 3 slots total (1 start, 1 end, 1 exhibition). 
+            # So exhibition allowed = duration_hours - 2 (minimum 0).
+            # If no time is set, fallback to 6.
+            if duration_hours > 0:
+                max_photos = max(0, int(duration_hours) - 2)
+            else:
+                max_photos = 6
+                
+            if activity.photos.filter(photo_type='exhibition').count() >= max_photos:
+                return Response({'detail': f'A maximum of {max_photos} exhibition photos is allowed for this event duration.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── Pre-check for event_start_selfie and event_end_selfie ──
+        if photo_type == 'event_start_selfie' and activity.photos.filter(photo_type='event_start_selfie').exists():
+            return Response({'detail': 'Event start selfie already exists for this activity.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if photo_type == 'event_end_selfie' and activity.photos.filter(photo_type='event_end_selfie').exists():
+            return Response({'detail': 'Event end selfie already exists for this activity.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # ── Pre-check for start_selfie, end_selfie, and other photos ──
         from attendance.models import EmployeeAttendanceRecord
