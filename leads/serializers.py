@@ -207,7 +207,10 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         from django.utils import timezone
         
         today_date = obj.activity_date or timezone.localdate()
+        from datetime import timedelta
+        
         duration_hours = 0
+        start_dt = None
         
         timing = obj.timings.filter(date=today_date).first()
         if timing and timing.start_time and timing.end_time:
@@ -237,12 +240,19 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
                 slot_type = "exhibition"
                 photo = exhibition_photos.pop(0) if exhibition_photos else None
                 
+            slot_timing_str = None
+            if start_dt:
+                slot_start = start_dt + timedelta(hours=i)
+                slot_end = slot_start + timedelta(hours=1)
+                slot_timing_str = f"{slot_start.strftime('%I:%M %p').lstrip('0')} to {slot_end.strftime('%I:%M %p').lstrip('0')}"
+                
             slot_data = {
                 "slot": i + 1,
                 "type": slot_type,
                 "photo_id": photo.id if photo else None,
                 "photo_url": None,
-                "is_filled": bool(photo)
+                "is_filled": bool(photo),
+                "timing": slot_timing_str
             }
             if photo and photo.photo:
                 request = self.context.get('request')
