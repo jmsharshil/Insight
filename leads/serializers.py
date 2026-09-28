@@ -219,7 +219,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             end_dt = datetime.combine(today_date, obj.plan.end_time)
             duration_hours = (end_dt - start_dt).total_seconds() / 3600
             
-        total_slots = max(0, int(duration_hours)) if duration_hours > 0 else 8
+        total_slots = max(2, int(duration_hours)) if duration_hours > 0 else 8
         
         exhibition_photos = list(obj.photos.filter(photo_type='exhibition').order_by('captured_at'))
         start_selfie = obj.photos.filter(photo_type='event_start_selfie').first()
