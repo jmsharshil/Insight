@@ -413,6 +413,7 @@ class SalesDailyActivity(models.Model):
         ('english', 'English'),
         ('gujarati', 'Gujarati'),
         ('hindi', 'Hindi'),
+        ('gujarati_english','Gujarati+English'),
     ]
 
     standard = models.CharField(max_length=20, choices=ACTIVITY_STANDARD_CHOICES, default='12th', blank=True, null=True)

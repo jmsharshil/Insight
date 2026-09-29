@@ -211,6 +211,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         
         duration_hours = 0
         start_dt = None
+        end_dt = None
         
         timing = obj.timings.filter(date=today_date).first()
         if timing and timing.start_time and timing.end_time:
@@ -241,9 +242,14 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
                 photo = exhibition_photos.pop(0) if exhibition_photos else None
                 
             slot_timing_str = None
-            if start_dt:
-                slot_start = start_dt + timedelta(hours=i)
-                slot_end = slot_start + timedelta(hours=1)
+            if start_dt and end_dt:
+                if i == total_slots - 1 and total_slots > 1:
+                    slot_end = end_dt
+                    slot_start = max(start_dt, end_dt - timedelta(hours=1))
+                else:
+                    slot_start = start_dt + timedelta(hours=i)
+                    slot_end = min(slot_start + timedelta(hours=1), end_dt)
+                    
                 slot_timing_str = f"{slot_start.strftime('%I:%M %p').lstrip('0')} to {slot_end.strftime('%I:%M %p').lstrip('0')}"
                 
             slot_data = {
