@@ -747,15 +747,15 @@ class SalesActivityPhotoView(APIView):
             else:
                 max_photos = 6
                 
-            if activity.photos.filter(photo_type='exhibition').count() >= max_photos:
-                return Response({'detail': f'A maximum of {max_photos} exhibition photos is allowed for this event duration.'}, status=status.HTTP_400_BAD_REQUEST)
+            if activity.photos.filter(photo_type='exhibition', captured_at__date=timezone.localdate()).count() >= max_photos:
+                return Response({'detail': f'A maximum of {max_photos} exhibition photos is allowed for today based on this event duration.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # ── Pre-check for event_start_selfie and event_end_selfie ──
-        if photo_type == 'event_start_selfie' and activity.photos.filter(photo_type='event_start_selfie').exists():
-            return Response({'detail': 'Event start selfie already exists for this activity.'}, status=status.HTTP_400_BAD_REQUEST)
+        if photo_type == 'event_start_selfie' and activity.photos.filter(photo_type='event_start_selfie', captured_at__date=timezone.localdate()).exists():
+            return Response({'detail': 'Event start selfie already exists for today.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        if photo_type == 'event_end_selfie' and activity.photos.filter(photo_type='event_end_selfie').exists():
-            return Response({'detail': 'Event end selfie already exists for this activity.'}, status=status.HTTP_400_BAD_REQUEST)
+        if photo_type == 'event_end_selfie' and activity.photos.filter(photo_type='event_end_selfie', captured_at__date=timezone.localdate()).exists():
+            return Response({'detail': 'Event end selfie already exists for today.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # ── Pre-check for start_selfie, end_selfie, and other photos ──
         from attendance.models import EmployeeAttendanceRecord

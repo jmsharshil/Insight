@@ -206,66 +206,90 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         from datetime import datetime
         from django.utils import timezone
         
-        today_date = obj.activity_date or timezone.localdate()
         from datetime import timedelta
         
-        duration_hours = 0
-        start_dt = None
-        end_dt = None
+        start_date = obj.from_date or obj.activity_date or timezone.localdate()
+        end_date = obj.to_date or obj.activity_date or timezone.localdate()
         
-        timing = obj.timings.filter(date=today_date).first()
-        if timing and timing.start_time and timing.end_time:
-            start_dt = datetime.combine(today_date, timing.start_time)
-            end_dt = datetime.combine(today_date, timing.end_time)
-            duration_hours = (end_dt - start_dt).total_seconds() / 3600
-        elif obj.plan and hasattr(obj.plan, 'start_time') and obj.plan.start_time and obj.plan.end_time:
-            start_dt = datetime.combine(today_date, obj.plan.start_time)
-            end_dt = datetime.combine(today_date, obj.plan.end_time)
-            duration_hours = (end_dt - start_dt).total_seconds() / 3600
+        if end_date < start_date:
+            end_date = start_date
             
-        total_slots = max(2, int(duration_hours)) if duration_hours > 0 else 8
+        num_days = (end_date - start_date).days + 1
         
-        exhibition_photos = list(obj.photos.filter(photo_type='exhibition').order_by('captured_at'))
-        start_selfie = obj.photos.filter(photo_type='event_start_selfie').first()
-        end_selfie = obj.photos.filter(photo_type='event_end_selfie').first()
+        all_photos = list(obj.photos.all())
+        exhibition_photos = sorted([p for p in all_photos if p.photo_type == 'exhibition'], key=lambda x: x.captured_at)
         
-        slots = []
-        for i in range(total_slots):
-            if i == 0:
-                slot_type = "event_start_selfie"
-                photo = start_selfie
-            elif i == total_slots - 1 and total_slots > 1:
-                slot_type = "event_end_selfie"
-                photo = end_selfie
-            else:
-                slot_type = "exhibition"
-                photo = exhibition_photos.pop(0) if exhibition_photos else None
+        all_slots_by_date = []
+        request = self.context.get('request')
+        
+        for d in range(num_days):
+            current_date = start_date + timedelta(days=d)
+            
+            duration_hours = 0
+            start_dt = None
+            end_dt = None
+            
+            timing = obj.timings.filter(date=current_date).first()
+            if timing and timing.start_time and timing.end_time:
+                start_dt = datetime.combine(current_date, timing.start_time)
+                end_dt = datetime.combine(current_date, timing.end_time)
+                duration_hours = (end_dt - start_dt).total_seconds() / 3600
+            elif obj.plan and hasattr(obj.plan, 'start_time') and obj.plan.start_time and obj.plan.end_time:
+                start_dt = datetime.combine(current_date, obj.plan.start_time)
+                end_dt = datetime.combine(current_date, obj.plan.end_time)
+                duration_hours = (end_dt - start_dt).total_seconds() / 3600
                 
-            slot_timing_str = None
-            if start_dt and end_dt:
-                if i == total_slots - 1 and total_slots > 1:
-                    slot_end = end_dt
-                    slot_start = max(start_dt, end_dt - timedelta(hours=1))
+            total_slots = max(2, int(duration_hours)) if duration_hours > 0 else 8
+            
+            start_selfie = next((p for p in all_photos if p.photo_type == 'event_start_selfie' and timezone.localtime(p.captured_at).date() == current_date), None)
+            end_selfie = next((p for p in all_photos if p.photo_type == 'event_end_selfie' and timezone.localtime(p.captured_at).date() == current_date), None)
+            
+            slots = []
+            for i in range(total_slots):
+                if i == 0:
+                    slot_type = "event_start_selfie"
+                    photo = start_selfie
+                elif i == total_slots - 1 and total_slots > 1:
+                    slot_type = "event_end_selfie"
+                    photo = end_selfie
                 else:
-                    slot_start = start_dt + timedelta(hours=i)
-                    slot_end = min(slot_start + timedelta(hours=1), end_dt)
+                    slot_type = "exhibition"
+                    date_exhibition_photos = [p for p in exhibition_photos if timezone.localtime(p.captured_at).date() == current_date]
+                    if date_exhibition_photos:
+                        photo = date_exhibition_photos[0]
+                        exhibition_photos.remove(photo)
+                    else:
+                        photo = None
                     
-                slot_timing_str = f"{slot_start.strftime('%I:%M %p').lstrip('0')} to {slot_end.strftime('%I:%M %p').lstrip('0')}"
+                slot_timing_str = None
+                if start_dt and end_dt:
+                    if i == total_slots - 1 and total_slots > 1:
+                        slot_end = end_dt
+                        slot_start = max(start_dt, end_dt - timedelta(hours=1))
+                    else:
+                        slot_start = start_dt + timedelta(hours=i)
+                        slot_end = min(slot_start + timedelta(hours=1), end_dt)
+                        
+                    slot_timing_str = f"{slot_start.strftime('%I:%M %p').lstrip('0')} to {slot_end.strftime('%I:%M %p').lstrip('0')}"
+                    
+                slot_data = {
+                    "slot": i + 1,
+                    "type": slot_type,
+                    "photo_id": photo.id if photo else None,
+                    "photo_url": None,
+                    "is_filled": bool(photo),
+                    "timing": slot_timing_str
+                }
+                if photo and photo.photo:
+                    slot_data['photo_url'] = request.build_absolute_uri(photo.photo.url) if request else photo.photo.url
+                slots.append(slot_data)
                 
-            slot_data = {
-                "slot": i + 1,
-                "type": slot_type,
-                "photo_id": photo.id if photo else None,
-                "photo_url": None,
-                "is_filled": bool(photo),
-                "timing": slot_timing_str
-            }
-            if photo and photo.photo:
-                request = self.context.get('request')
-                slot_data['photo_url'] = request.build_absolute_uri(photo.photo.url) if request else photo.photo.url
-            slots.append(slot_data)
+            all_slots_by_date.append({
+                "date": current_date.strftime("%Y-%m-%d"),
+                "slots": slots
+            })
             
-        return slots
+        return all_slots_by_date
 
 
 class SalesPlanReminderSerializer(serializers.ModelSerializer):
