@@ -225,6 +225,37 @@ class SalesDailyActivityCompleteView(APIView):
         )
 
 
+def handle_inventory_allocations(activity, inventory_items_data):
+    if not inventory_items_data:
+        return
+    from inventory.models import Item, ItemAllocation, StockTransaction
+    from rest_framework.exceptions import ValidationError
+    for inv_data in inventory_items_data:
+        item_id = inv_data.get('item_id')
+        quantity = int(inv_data.get('quantity', 1))
+        try:
+            item = Item.objects.get(id=item_id)
+            allocation = ItemAllocation.objects.create(
+                item=item,
+                sales_user=activity.user,
+                quantity=quantity,
+                status='issued',
+                issued_by=activity.user
+            )
+            activity.inventory_allocations.add(allocation)
+            StockTransaction.objects.create(
+                item=item,
+                transaction_type='allocation',
+                quantity=-quantity,
+                reference=f"Allocated to {activity.user.name} for activity",
+                created_by=activity.user
+            )
+        except Item.DoesNotExist:
+            pass
+        except Exception as e:
+            raise ValidationError({"inventory_items": str(e)})
+
+
 class SalesDailyPlanView(APIView):
     """
     GET  /api/v1/sales/plans/        — List daily plans (with nested activities).
@@ -459,6 +490,10 @@ class SalesDailyPlanView(APIView):
                                 end_time=t.get('end_time')
                             )
 
+        # Handle inventory mapping
+        if 'inventory_items' in request.data:
+            handle_inventory_allocations(activity, request.data.get('inventory_items', []))
+
         return Response(
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -575,6 +610,10 @@ class SalesDailyPlanDetailView(APIView):
                             start_time=t.get('start_time'),
                             end_time=t.get('end_time')
                         )
+
+            # Handle inventory mapping
+            if 'inventory_items' in request.data:
+                handle_inventory_allocations(activity, request.data.get('inventory_items', []))
 
         return Response(SalesDailyPlanSerializer(updated_plan, context={'request': request}).data)
 
