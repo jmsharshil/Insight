@@ -211,6 +211,11 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         start_date = obj.from_date or obj.activity_date or timezone.localdate()
         end_date = obj.to_date or obj.activity_date or timezone.localdate()
         
+        if isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        if isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
         if end_date < start_date:
             end_date = start_date
             
