@@ -187,6 +187,13 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
     odometer_reading = OdometerReadingSerializer(read_only=True)
     timings = SalesDailyActivityTimingSerializer(many=True, required=False)
     event_photo_slots = serializers.SerializerMethodField()
+    inventory_items = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False,
+        help_text="List of items to allocate: [{'item_id': '<uuid>', 'quantity': 1}]"
+    )
+    allocations = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyActivity
@@ -197,10 +204,55 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'seminar_reference_by', 'seminar_given_by',
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
-            'photos', 'odometer_reading', 'timings', 'event_photo_slots',
+            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'created_at', 'updated_at']
+
+    def get_allocations(self, obj):
+        from inventory.serializers import ItemAllocationSerializer
+        return ItemAllocationSerializer(obj.inventory_allocations.all(), many=True).data
+
+    def create(self, validated_data):
+        inventory_items_data = validated_data.pop('inventory_items', [])
+        activity = super().create(validated_data)
+        self._handle_inventory_allocations(activity, inventory_items_data)
+        return activity
+        
+    def update(self, instance, validated_data):
+        inventory_items_data = validated_data.pop('inventory_items', None)
+        activity = super().update(instance, validated_data)
+        if inventory_items_data is not None:
+            self._handle_inventory_allocations(activity, inventory_items_data)
+        return activity
+        
+    def _handle_inventory_allocations(self, activity, inventory_items_data):
+        from inventory.models import Item, ItemAllocation, StockTransaction
+        from rest_framework.exceptions import ValidationError
+        for inv_data in inventory_items_data:
+            item_id = inv_data.get('item_id')
+            quantity = int(inv_data.get('quantity', 1))
+            try:
+                item = Item.objects.get(id=item_id)
+                allocation = ItemAllocation.objects.create(
+                    item=item,
+                    sales_user=activity.user,
+                    quantity=quantity,
+                    status='issued',
+                    issued_by=activity.user
+                )
+                activity.inventory_allocations.add(allocation)
+                StockTransaction.objects.create(
+                    item=item,
+                    transaction_type='allocation',
+                    quantity=-quantity,
+                    reference=f"Allocated to {activity.user.name} for activity",
+                    created_by=activity.user
+                )
+            except Item.DoesNotExist:
+                pass
+            except Exception as e:
+                raise ValidationError({"inventory_items": str(e)})
 
     def get_event_photo_slots(self, obj):
         from datetime import datetime
@@ -316,13 +368,6 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
     date = serializers.DateField(source='plan_date', required=False)
     photos = serializers.SerializerMethodField()
     custom_reminders = SalesPlanReminderSerializer(many=True, required=False)
-    inventory_items = serializers.ListField(
-        child=serializers.DictField(),
-        write_only=True,
-        required=False,
-        help_text="List of items to allocate: [{'item_id': '<uuid>', 'quantity': 1}]"
-    )
-    allocations = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyPlan
@@ -331,7 +376,7 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
             'start_time', 'end_time', 'place', 'description', 'status',
             'photos','reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
-            'activities', 'custom_reminders', 'inventory_items', 'allocations', 'created_at', 'updated_at',
+            'activities', 'custom_reminders', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'user', 'user_name', 'photos', 'activities',
@@ -359,13 +404,8 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
             mutable_data['plan_date'] = mutable_data['date']
         return super().to_internal_value(mutable_data)
 
-    def get_allocations(self, obj):
-        from inventory.serializers import ItemAllocationSerializer
-        return ItemAllocationSerializer(obj.inventory_allocations.all(), many=True).data
-
     def create(self, validated_data):
         reminders_data = validated_data.pop('custom_reminders', [])
-        inventory_items_data = validated_data.pop('inventory_items', [])
         plan = super().create(validated_data)
         for reminder_data in reminders_data:
             SalesPlanReminder.objects.create(
@@ -373,42 +413,10 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
                 reminder_time=reminder_data['reminder_time'],
                 purpose=reminder_data.get('purpose', '')
             )
-            
-        from inventory.models import Item, ItemAllocation, StockTransaction
-        for inv_data in inventory_items_data:
-            item_id = inv_data.get('item_id')
-            quantity = int(inv_data.get('quantity', 1))
-            try:
-                item = Item.objects.get(id=item_id)
-                # Create allocation
-                allocation = ItemAllocation.objects.create(
-                    item=item,
-                    sales_user=plan.user,
-                    quantity=quantity,
-                    status='issued',
-                    issued_by=plan.user
-                )
-                plan.inventory_allocations.add(allocation)
-                # Decrease stock
-                StockTransaction.objects.create(
-                    item=item,
-                    transaction_type='allocation',
-                    quantity=-quantity,
-                    reference=f"Allocated to {plan.user.name} for plan",
-                    created_by=plan.user
-                )
-            except Item.DoesNotExist:
-                pass
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error allocating inventory items: {str(e)}")
-                
         return plan
 
     def update(self, instance, validated_data):
         reminders_data = validated_data.pop('custom_reminders', None)
-        inventory_items_data = validated_data.pop('inventory_items', None)
         plan = super().update(instance, validated_data)
         
         if reminders_data is not None:
@@ -420,37 +428,6 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
                     reminder_time=reminder_data['reminder_time'],
                     purpose=reminder_data.get('purpose', '')
                 )
-                
-        if inventory_items_data is not None:
-            from inventory.models import Item, ItemAllocation, StockTransaction
-            for inv_data in inventory_items_data:
-                item_id = inv_data.get('item_id')
-                quantity = int(inv_data.get('quantity', 1))
-                try:
-                    item = Item.objects.get(id=item_id)
-                    # Create allocation
-                    allocation = ItemAllocation.objects.create(
-                        item=item,
-                        sales_user=plan.user,
-                        quantity=quantity,
-                        status='issued',
-                        issued_by=plan.user
-                    )
-                    plan.inventory_allocations.add(allocation)
-                    # Decrease stock
-                    StockTransaction.objects.create(
-                        item=item,
-                        transaction_type='allocation',
-                        quantity=-quantity,
-                        reference=f"Allocated to {plan.user.name} for plan update",
-                        created_by=plan.user
-                    )
-                except Item.DoesNotExist:
-                    pass
-                except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.error(f"Error allocating inventory items on update: {str(e)}")
                 
         return plan
 

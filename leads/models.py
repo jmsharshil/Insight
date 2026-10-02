@@ -281,7 +281,6 @@ class SalesDailyPlan(models.Model):
         default='',
         help_text="Describe what the salesperson plans to do — schools to visit, targets, agenda, etc."
     )
-    inventory_allocations = models.ManyToManyField('inventory.ItemAllocation', blank=True, related_name='sales_plans')
     status = models.CharField(
         max_length=20,
         choices=[('scheduled', 'Scheduled'), ('completed', 'Completed'), ('cancelled', 'Cancelled')],
@@ -390,6 +389,7 @@ class SalesDailyActivity(models.Model):
         ('pending', 'Pending'),
         ('ongoing', 'Ongoing'),
         ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
     ]
     status = models.CharField(
         max_length=20, 
@@ -401,6 +401,8 @@ class SalesDailyActivity(models.Model):
     notes = models.TextField(blank=True)
     students_expected = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students expected to attend")
     students_attended = models.PositiveIntegerField(null=True, blank=True, help_text="Number of students actually attended")
+    
+    inventory_allocations = models.ManyToManyField('inventory.ItemAllocation', blank=True, related_name='sales_activities')
     
     target_name = models.CharField(max_length=100, blank=True, help_text="Name of the person being targeted/visited")
     target_number = models.CharField(max_length=20, blank=True, help_text="WhatsApp number of the target")

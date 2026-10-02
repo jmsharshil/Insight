@@ -585,8 +585,10 @@ class SalesDailyPlanDetailView(APIView):
         plan = self.get_object(pk, request.user)
         if not plan:
             return Response({'detail': 'Sales plan not found or permission denied.'}, status=status.HTTP_404_NOT_FOUND)
-        plan.delete()
-        return Response({'success': True, 'message': 'Sales plan deleted successfully.'}, status=status.HTTP_200_OK)
+        plan.status = 'cancelled'
+        plan.save()
+        plan.activities.update(status='cancelled')
+        return Response({'success': True, 'message': 'Sales plan cancelled successfully.'}, status=status.HTTP_200_OK)
 
 
 class SalesUserActivityStatsView(APIView):
