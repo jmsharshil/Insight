@@ -39,6 +39,8 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 ROLES_REQUIRING_LOGIN_OTP_BYPASS = {'student', 'parents'}
 RESEND_OTP_COOLDOWN_SECONDS = 30
+MAX_OTPS_PER_WINDOW = 5
+OTP_WINDOW_MINUTES = 15
 
 
 def build_login_success_response(user, request):
@@ -180,6 +182,30 @@ class LoginAPIView(APIView):
                 return Response(build_login_success_response(user, request))
 
             # ── Everyone else: require a second OTP step ──
+            # Cooldown check
+            from django.utils import timezone
+            from datetime import timedelta
+            last_otp = EmailOTP.objects.filter(user=user).order_by('-created_at').first()
+            if last_otp:
+                seconds_since = (timezone.now() - last_otp.created_at).total_seconds()
+                if seconds_since < RESEND_OTP_COOLDOWN_SECONDS:
+                    wait = int(RESEND_OTP_COOLDOWN_SECONDS - seconds_since)
+                    return Response(
+                        {"error": f"Please wait {wait} seconds before requesting another code."},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+            
+            # Rate limit check
+            recent_otps_count = EmailOTP.objects.filter(
+                user=user,
+                created_at__gte=timezone.now() - timedelta(minutes=OTP_WINDOW_MINUTES)
+            ).count()
+            if recent_otps_count >= MAX_OTPS_PER_WINDOW:
+                return Response(
+                    {"error": f"Maximum OTP requests exceeded. Please try again after {OTP_WINDOW_MINUTES} minutes."},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+
             otp = EmailOTP.generate_otp()
             EmailOTP.objects.create(user=user, otp=otp)
             from .utils import send_login_otp
@@ -273,6 +299,8 @@ class ResendLoginOTPAPIView(APIView):
             )
  
         # ── Cooldown: block rapid repeat requests ──
+        from django.utils import timezone
+        from datetime import timedelta
         last_otp = EmailOTP.objects.filter(user=user).order_by('-created_at').first()
         if last_otp:
             seconds_since = (timezone.now() - last_otp.created_at).total_seconds()
@@ -283,6 +311,30 @@ class ResendLoginOTPAPIView(APIView):
                     status=status.HTTP_429_TOO_MANY_REQUESTS,
                 )
  
+        # Ensure there is a recent unverified OTP (meaning a recent login was attempted)
+        recent_login_otp = EmailOTP.objects.filter(
+            user=user, 
+            is_verified=False,
+            created_at__gte=timezone.now() - timedelta(minutes=10)
+        ).exists()
+        
+        if not recent_login_otp:
+            return Response(
+                {"error": "No active login session found. Please login again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Rate limit check
+        recent_otps_count = EmailOTP.objects.filter(
+            user=user,
+            created_at__gte=timezone.now() - timedelta(minutes=OTP_WINDOW_MINUTES)
+        ).count()
+        if recent_otps_count >= MAX_OTPS_PER_WINDOW:
+            return Response(
+                {"error": f"Maximum OTP requests exceeded. Please try again after {OTP_WINDOW_MINUTES} minutes."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         otp = EmailOTP.generate_otp()
         EmailOTP.objects.create(user=user, otp=otp)
         from .utils import send_login_otp_resend
@@ -433,6 +485,31 @@ class ForgotPasswordAPIView(APIView):
             if not user.is_active:
                 user.is_active = True
                 user.save(update_fields=['is_active'])
+            
+            from django.utils import timezone
+            from datetime import timedelta
+            
+            # Cooldown check
+            last_otp = EmailOTP.objects.filter(user=user).order_by('-created_at').first()
+            if last_otp:
+                seconds_since = (timezone.now() - last_otp.created_at).total_seconds()
+                if seconds_since < RESEND_OTP_COOLDOWN_SECONDS:
+                    wait = int(RESEND_OTP_COOLDOWN_SECONDS - seconds_since)
+                    return Response(
+                        {"error": f"Please wait {wait} seconds before requesting another code."},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+            
+            # Rate limit check
+            recent_otps_count = EmailOTP.objects.filter(
+                user=user,
+                created_at__gte=timezone.now() - timedelta(minutes=OTP_WINDOW_MINUTES)
+            ).count()
+            if recent_otps_count >= MAX_OTPS_PER_WINDOW:
+                return Response(
+                    {"error": f"Maximum OTP requests exceeded. Please try again after {OTP_WINDOW_MINUTES} minutes."},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
             
             otp = EmailOTP.generate_otp()
             EmailOTP.objects.create(user=user,otp=otp)
