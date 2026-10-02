@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     PaperView, PaperMarksView, PaperRecheckView,
-    CheckerStatusView, CheckerPortalSubmitView,
+    CheckerStatusView, CheckerCollectPapersView, CheckerPortalSubmitView,
     PublishResultView, ResultView, ResultDeleteView,
     StudentRecheckRequestView, RecheckRequestListView, RecheckRequestActionView,
     MarkAbsentView, MarkAllAbsentView, BulkRecheckRequestView, PaperCheckerQueryView,
@@ -19,6 +19,7 @@ urlpatterns = [
     path('exams/<uuid:exam_id>/papers/<uuid:marksheet_id>/mark-absent/', MarkAbsentView.as_view(), name='mark-absent'),
     path('exams/<uuid:exam_id>/mark-absent-all/', MarkAllAbsentView.as_view(), name='mark-absent-all'),
     path('exams/<uuid:exam_id>/checker-status/', CheckerStatusView.as_view(), name='checker-status'),
+    path('exams/<uuid:exam_id>/checker-collect/', CheckerCollectPapersView.as_view(), name='checker-collect'),
     path('exams/<uuid:exam_id>/results/publish/', PublishResultView.as_view(), name='publish-result'),
     path('exams/<uuid:exam_id>/results/', ResultView.as_view(), name='exam-results'),
     path('exams/<uuid:exam_id>/results/<uuid:result_id>/', ResultDeleteView.as_view(), name='result-delete'),

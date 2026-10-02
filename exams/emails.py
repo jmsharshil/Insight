@@ -109,6 +109,39 @@ def send_answer_key_email(checker, exam, signed_url):
     )
 
 
+def send_collection_reminder_email(marksheet):
+    """Remind paper_checker to collect physical papers for the exam."""
+    checker = marksheet.paper_checker
+    if not checker:
+        return
+        
+    subject = f"Reminder: Collect Papers for {marksheet.exam.title}"
+    text_content = (
+        f"Dear {checker.name},\n"
+        f"Reminder: You need to collect the physical answer sheets for {marksheet.exam.title}.\n"
+        f"Please collect them and mark them as collected in your dashboard.\n"
+    )
+
+    send_email(
+        to=checker.email,
+        subject=subject,
+        text=text_content,
+        template='emails/collection_reminder.html',
+        template_context={
+            'checker_name': checker.name,
+            'exam_title': marksheet.exam.title,
+        },
+        organization=marksheet.exam.organization if hasattr(marksheet.exam, 'organization') else checker.organization,
+    )
+
+    # FRD §4.6.2: in-app notification
+    _notify(
+        checker.id, title="Action Required: Collect Papers",
+        body=f"Please collect physical papers for {marksheet.exam.title}.",
+        metadata={"marksheet_id": str(marksheet.id), "exam_id": str(marksheet.exam_id)},
+    )
+
+
 def send_submission_reminder_email(marksheet):
     """Remind paper_checker about overdue marksheet."""
     checker = marksheet.paper_checker

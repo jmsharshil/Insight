@@ -281,6 +281,13 @@ class SalesDailyPlan(models.Model):
         default='',
         help_text="Describe what the salesperson plans to do — schools to visit, targets, agenda, etc."
     )
+    inventory_allocations = models.ManyToManyField('inventory.ItemAllocation', blank=True, related_name='sales_plans')
+    status = models.CharField(
+        max_length=20,
+        choices=[('scheduled', 'Scheduled'), ('completed', 'Completed'), ('cancelled', 'Cancelled')],
+        default='scheduled',
+        help_text="Status of the plan"
+    )
     reminder_two_days_before_sent = models.BooleanField(
         default=False,
         help_text="True once the 8:00 AM 2-days-before reminder has been sent."

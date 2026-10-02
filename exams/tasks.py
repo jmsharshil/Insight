@@ -151,18 +151,27 @@ def auto_mark_absent_after_exam(exam):
 def send_pending_submission_reminders():
     """Daily: remind checkers about overdue marksheets."""
     from results.models import MarkSheet, SubmissionReminderLog
-    from .emails import send_submission_reminder_email
+    from .emails import send_submission_reminder_email, send_collection_reminder_email
 
     cutoff = timezone.now().date() - timedelta(days=1)
-    pending = MarkSheet.objects.filter(is_submitted=False, exam__scheduled_date__lt=cutoff)
+    # Stop sending if results are already published
+    pending = MarkSheet.objects.exclude(exam__status='results_published').filter(
+        is_submitted=False, 
+        exam__scheduled_date__lt=cutoff
+    )
 
     count = 0
     for ms in pending:
         log, created = SubmissionReminderLog.objects.get_or_create(marksheet=ms)
         if not created:
+            if log.reminder_count >= 7:
+                continue  # Stop sending after 7 days to prevent endless spam
             log.reminder_count += 1
             log.save(update_fields=['reminder_count'])
-        send_submission_reminder_email(ms)
+        if not ms.is_collected:
+            send_collection_reminder_email(ms)
+        else:
+            send_submission_reminder_email(ms)
         count += 1
 
     logger.info(f"Sent {count} submission reminders")

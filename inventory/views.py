@@ -112,6 +112,11 @@ class ItemViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(category__branch_id__in=branch_ids)
         return qs
 
+    def paginate_queryset(self, queryset):
+        if self.request.query_params.get('no_pagination') == 'true':
+            return None
+        return super().paginate_queryset(queryset)
+
 
 class StockTransactionViewSet(viewsets.ModelViewSet):
     queryset = StockTransaction.objects.select_related('item', 'created_by').all()

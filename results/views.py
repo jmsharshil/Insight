@@ -383,6 +383,29 @@ class CheckerStatusView(APIView):
         })
 
 
+class CheckerCollectPapersView(APIView):
+    """
+    POST /api/v1/exams/{exam_id}/checker-collect/
+    Allows the paper checker to mark that they have collected the physical papers for the exam.
+    This sets is_collected=True on all their assigned marksheets for the exam, stopping the collection reminders.
+    """
+    # permission_classes = [IsAuthenticated]
+
+    def post(self, request, exam_id):
+        from .models import MarkSheet, SubmissionReminderLog
+        marksheets = MarkSheet.objects.filter(exam_id=exam_id, paper_checker=request.user)
+        if not marksheets.exists():
+            return Response({'detail': 'No papers assigned to you for this exam.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Mark all as collected
+        marksheets.update(is_collected=True)
+
+        # Reset reminder counts so they get a fresh 7 days for the submission reminder!
+        SubmissionReminderLog.objects.filter(marksheet__in=marksheets).update(reminder_count=0)
+
+        return Response({'detail': 'Papers marked as collected successfully.'}, status=status.HTTP_200_OK)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 5. POST  /api/v1/checker-portal/submit/  (EXEMPT from auth)
 # ═══════════════════════════════════════════════════════════════════════════════
