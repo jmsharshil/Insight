@@ -265,14 +265,32 @@ class BatchDetailSerializer(serializers.ModelSerializer):
 class BatchCreateUpdateSerializer(serializers.ModelSerializer):
     name = serializers.CharField(max_length=200, required=False, allow_blank=True)
     batch_code = serializers.CharField(max_length=30, required=False, allow_blank=True)
-
     class Meta:
         model = Batch
-        fields = ['course', 'name', 'batch_code', 'group_module',
+        fields = ['fee_structure', 'course', 'name', 'batch_code', 'group_module',
                   'batch_attempt', 'start_date', 'end_date',
                   'max_students', 'timing', 'is_active', 'organization', 'branch']
+        extra_kwargs = {
+            'course': {'required': False},
+        }
 
     def validate(self, data):
+        fs = data.get('fee_structure')
+        if fs is not None:
+            if not fs.course_id:
+                raise serializers.ValidationError(
+                    {'fee_structure': 'Selected fee structure has no course.'})
+            # Course, attempt and year always come from the fee structure
+            data['course'] = fs.course
+            if fs.attempt:
+                data['batch_attempt'] = fs.attempt
+            if fs.group_module:
+                data['group_module'] = fs.group_module
+            if fs.year:
+                data['attempt_year'] = fs.year
+        elif self.instance is None:
+            raise serializers.ValidationError({'fee_structure': 'This field is required.'})
+
         start = data.get('start_date')
         end = data.get('end_date')
         if start and end and start >= end:
@@ -289,6 +307,8 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         if 'organization' not in validated_data or validated_data['organization'] is None:
             validated_data['organization'] = self.context['request'].user.organization
+        # Name is always auto-generated (see Batch.save)
+        validated_data['name'] = ''
         return super().create(validated_data)
 
     def update(self, instance, validated_data):

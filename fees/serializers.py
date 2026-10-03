@@ -26,7 +26,7 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
-                  'level', 'level_name', 'attempt', 'attempt_display', 'year', 'total_amount', 'icsi_registration_fees',
+                  'level', 'level_name', 'attempt', 'attempt_display', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
                   'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
                   'icsi_registration_fees_direct', 'institute_fees_both_modules',
                   'institute_fees_module_1', 'institute_fees_module_2',
@@ -46,7 +46,7 @@ class FeeStructureDetailSerializer(serializers.ModelSerializer):
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FeeStructure
-        fields = ['name', 'course', 'batch', 'level', 'attempt', 'year', 'total_amount', 'icsi_registration_fees',
+        fields = ['name', 'course', 'batch', 'level', 'attempt', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
                   'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
                   'icsi_registration_fees_direct', 'institute_fees_both_modules',
                   'institute_fees_module_1', 'institute_fees_module_2',

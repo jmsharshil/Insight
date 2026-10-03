@@ -162,6 +162,8 @@ class Batch(models.Model):
     organization   = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='batches', null=True, blank=True)
     branch         = models.ForeignKey('branch.Branch', null=True, blank=True, on_delete=models.SET_NULL, related_name='batches')
     course         = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='batches')
+    # Deleting the fee structure deletes its batches
+    fee_structure  = models.ForeignKey('fees.FeeStructure', null=True, blank=True, on_delete=models.CASCADE, related_name='batches')
     name           = models.CharField(max_length=200)
     batch_code     = models.CharField(max_length=30, unique=True, blank=True)
     group_module   = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES, blank=True)
@@ -257,7 +259,11 @@ class Batch(models.Model):
             year = self.attempt_year or (self.start_date.year if self.start_date else timezone.now().year)
 
             # determine course_type: prefer explicit attribute, else fallback to first active level
-            course_type = getattr(self.course, 'course_type', None) if self.course else None
+            course_type = None
+            if self.fee_structure_id and self.fee_structure.level_id:
+                course_type = self.fee_structure.level.course_type
+            if not course_type and self.course:
+                course_type = getattr(self.course, 'course_type', None)
             if not course_type and self.course:
                 first_level = self.course.levels.filter(is_active=True).first()
                 if first_level:

@@ -35,8 +35,8 @@ from leads.models import LeadTransferRequest, SalesDailyActivityTiming, SalesAct
 
 @admin.register(LeadTransferRequest)
 class LeadTransferRequestAdmin(admin.ModelAdmin):
-    list_display = ('id', 'lead', 'requested_by', 'requested_to', 'status', 'created_at')
-    list_filter = ('status', 'requested_by', 'requested_to')
+    list_display = ('id', 'lead', 'requested_by', 'assigned_to', 'status', 'created_at')
+    list_filter = ('status', 'requested_by', 'assigned_to')
     search_fields = ('lead__first_name', 'lead__email', 'reason')
 
 @admin.register(SalesDailyActivityTiming)
@@ -58,5 +58,5 @@ class OdometerReadingAdmin(admin.ModelAdmin):
 
 @admin.register(SalesPlanReminder)
 class SalesPlanReminderAdmin(admin.ModelAdmin):
-    list_display = ('id', 'plan', 'reminder_type', 'reminder_time', 'sent')
-    list_filter = ('reminder_type', 'sent', 'reminder_time')
+    list_display = ('id', 'plan', 'purpose', 'reminder_time', 'is_sent')
+    list_filter = ('is_sent', 'reminder_time')
