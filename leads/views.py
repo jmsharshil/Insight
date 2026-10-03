@@ -800,7 +800,7 @@ class SalesActivityPhotoView(APIView):
 
         # ── Pre-check for start_selfie, end_selfie, and other photos ──
         from attendance.models import EmployeeAttendanceRecord
-        today = activity.activity_date
+        today = timezone.localdate()
         
         already_checked_in = EmployeeAttendanceRecord.objects.filter(
             user=activity.user,
@@ -817,6 +817,9 @@ class SalesActivityPhotoView(APIView):
             date=today,
             checked_out_at__isnull=False,
         ).exists()
+
+        if already_checked_out and photo_type != 'end_selfie':
+            return Response({'detail': 'You have already checked out for today. You cannot upload more photos.'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = SalesActivityPhotoSerializer(data={
             'photo_type': photo_type,
@@ -841,7 +844,7 @@ class SalesActivityPhotoView(APIView):
             try:
                 from attendance.models import EmployeeAttendanceRecord
                 from core.utils import get_user_branch_id
-                today = activity.activity_date
+                today = timezone.localdate()
 
                 bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
                 if not bid:
@@ -882,7 +885,7 @@ class SalesActivityPhotoView(APIView):
             try:
                 from attendance.models import EmployeeAttendanceRecord
                 from core.utils import get_user_branch_id
-                today = activity.activity_date
+                today = timezone.localdate()
 
                 checkout_time = photo.captured_at or timezone.now()
                 open_rec = EmployeeAttendanceRecord.objects.filter(
