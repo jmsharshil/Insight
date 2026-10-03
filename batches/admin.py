@@ -11,8 +11,8 @@ class CourseAdmin(admin.ModelAdmin):
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):
-    list_display = ('id', 'organization', 'level', 'name', 'code', 'total_hours', 'is_active', 'created_at',)
-    list_filter = ('created_at', 'organization', 'level', 'is_active',)
+    list_display = ('id', 'organization', 'level', 'syllabus', 'name', 'code', 'total_hours', 'is_active', 'created_at',)
+    list_filter = ('created_at', 'organization', 'level', 'syllabus', 'is_active',)
     list_editable = ['is_active']
     readonly_fields = ('total_hours', 'code', 'created_at')
     ordering = ['name']
@@ -20,8 +20,8 @@ class SubjectAdmin(admin.ModelAdmin):
 
 @admin.register(Batch)
 class BatchAdmin(admin.ModelAdmin):
-    list_display = ('id', 'organization', 'branch', 'course', 'name', 'batch_code', 'group_module', 'batch_attempt', 'start_date', 'is_active',)
-    list_filter = ('organization', 'branch', 'group_module', 'updated_at', 'start_date', 'end_date', 'created_at', 'course',)
+    list_display = ('id', 'organization', 'branch', 'course', 'syllabus', 'name', 'batch_code', 'group_module', 'batch_attempt', 'start_date', 'is_active',)
+    list_filter = ('organization', 'branch', 'syllabus', 'group_module', 'updated_at', 'start_date', 'end_date', 'created_at', 'course',)
     list_editable = ['is_active']
     date_hierarchy = 'start_date'
     ordering = ['name', '-created_at']
@@ -81,6 +81,13 @@ class CourseLevelAdmin(admin.ModelAdmin):
     list_display = ('id', 'organization', 'course', 'name', 'course_type', 'duration_months', 'fee_amount', 'order', 'description', 'is_active',)
     search_fields = ('name',)
     list_filter = ('course', 'course_type', 'organization', 'is_active',)
+
+@admin.register(Syllabus)
+class SyllabusAdmin(admin.ModelAdmin):
+    list_display = ('id', 'organization', 'level', 'name', 'year', 'is_active', 'created_at',)
+    search_fields = ('name',)
+    list_filter = ('level', 'year', 'organization', 'is_active',)
+    list_editable = ['is_active', 'year']
 
 @admin.register(Chapter)
 class ChapterAdmin(admin.ModelAdmin):

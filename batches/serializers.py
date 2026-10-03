@@ -279,8 +279,20 @@ class BatchDetailSerializer(serializers.ModelSerializer):
         return BatchStudentReadSerializer(qs, many=True).data
 
     def get_assigned_faculty(self, obj):
-        qs = obj.batch_faculty.select_related('faculty', 'subject').all()
-        return BatchFacultyReadSerializer(qs, many=True).data
+        faculty_list = []
+        if obj.syllabus:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            faculties = User.objects.filter(
+                faculty_chapters__subject__syllabus=obj.syllabus,
+                is_active=True
+            ).distinct()
+            for faculty in faculties:
+                faculty_list.append({
+                    'id': str(faculty.id),
+                    'name': faculty.name,
+                })
+        return faculty_list
 
 
 class BatchCreateUpdateSerializer(serializers.ModelSerializer):
