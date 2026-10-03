@@ -808,21 +808,15 @@ class SalesActivityPhotoView(APIView):
             checked_in_at__isnull=False,
         ).exists()
 
-        if photo_type == 'start_selfie':
-            if already_checked_in:
-                return Response({'detail': 'You have already checked in for today.'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
+        if photo_type != 'start_selfie':
             if not already_checked_in:
                 return Response({'detail': 'You must check in (upload a start selfie) before uploading activity photos.'}, status=status.HTTP_403_FORBIDDEN)
                 
-            if photo_type == 'end_selfie':
-                already_checked_out = EmployeeAttendanceRecord.objects.filter(
-                    user=activity.user,
-                    date=today,
-                    checked_out_at__isnull=False,
-                ).exists()
-                if already_checked_out:
-                    return Response({'detail': 'You have already checked out for today.'}, status=status.HTTP_400_BAD_REQUEST)
+        already_checked_out = EmployeeAttendanceRecord.objects.filter(
+            user=activity.user,
+            date=today,
+            checked_out_at__isnull=False,
+        ).exists()
 
         serializer = SalesActivityPhotoSerializer(data={
             'photo_type': photo_type,
@@ -843,7 +837,7 @@ class SalesActivityPhotoView(APIView):
 
         # ── Attendance Check-in / Check-out on Start and End Selfies ──
         attendance_info = None
-        if photo_type == 'start_selfie':
+        if photo_type == 'start_selfie' and not already_checked_in:
             try:
                 from attendance.models import EmployeeAttendanceRecord
                 from core.utils import get_user_branch_id
@@ -884,7 +878,7 @@ class SalesActivityPhotoView(APIView):
             except Exception as e:
                 logger.error(f"Auto check-in on start_selfie failed: {e}", exc_info=True)
 
-        elif photo_type == 'end_selfie':
+        elif photo_type == 'end_selfie' and not already_checked_out:
             try:
                 from attendance.models import EmployeeAttendanceRecord
                 from core.utils import get_user_branch_id
