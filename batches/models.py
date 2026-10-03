@@ -258,18 +258,39 @@ class Batch(models.Model):
             from django.utils import timezone
             year = self.attempt_year or (self.start_date.year if self.start_date else timezone.now().year)
 
-            # determine course_type: prefer explicit attribute, else fallback to first active level
+            # determine course_type. CourseLevel.course_type is deprecated and defaults to
+            # 'standard', so detect from names (level, fee structure, course) first.
+            def _detect_type(text):
+                t = (text or '').upper().replace(' ', '').replace('_', '')
+                if 'CSEET' in t:
+                    return 'cseet'
+                if 'EXECUTIVE' in t:
+                    return 'cs_executive'
+                if 'PROFESSIONAL' in t:
+                    return 'cs_professional'
+                return None
+
+            fs = self.fee_structure if self.fee_structure_id else None
             course_type = None
-            if self.fee_structure_id and self.fee_structure.level_id:
-                course_type = self.fee_structure.level.course_type
+            if fs is not None:
+                if fs.level_id:
+                    course_type = _detect_type(fs.level.name)
+                    if not course_type and fs.level.course_type != 'standard':
+                        course_type = fs.level.course_type
+                if not course_type:
+                    course_type = _detect_type(fs.name)
+            if not course_type and self.course:
+                course_type = _detect_type(self.course.name)
             if not course_type and self.course:
                 course_type = getattr(self.course, 'course_type', None)
             if not course_type and self.course:
                 first_level = self.course.levels.filter(is_active=True).first()
                 if first_level:
-                    course_type = first_level.course_type
+                    course_type = _detect_type(first_level.name) or first_level.course_type
             if not course_type:
                 course_type = 'standard'
+
+            group_module = (fs.group_module if fs is not None and fs.group_module else self.group_module) or ''
 
             attempt = self.batch_attempt or 'unknown'
 
@@ -309,13 +330,11 @@ class Batch(models.Model):
             ct_upper = str(course_type).upper() if course_type else ""
             attempt_upper = str(attempt).upper() if attempt and attempt != 'unknown' else ""
             year_str = str(year)[-2:] if year else ""
+            gm_upper = str(group_module).upper()
+            branch_prefix = branch_prefix.strip()
 
-            if branch_prefix:
-                self.name = f"{branch_prefix}_{ct_upper}_{attempt_upper}_{year_str}_{seq}"
-            elif attempt_upper:
-                self.name = f"{ct_upper}_{attempt_upper}_{year_str}_{seq}"
-            else:
-                self.name = f"{ct_upper}_{year_str}_{seq}"
+            parts = [branch_prefix, ct_upper, attempt_upper, year_str, gm_upper, str(seq)]
+            self.name = '_'.join(p for p in parts if p)
             self.is_auto_created = True
 
         # QR codes are now generated at the Branch level, not per Batch.
