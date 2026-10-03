@@ -14,7 +14,7 @@ from django.db import models
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot,
-    CourseLevel, Chapter,
+    CourseLevel, Chapter, Syllabus,
 )
 from .serializers import (
     CourseListSerializer, CourseDetailSerializer, CourseCreateUpdateSerializer,
@@ -25,7 +25,7 @@ from .serializers import (
     ClassroomListSerializer, ClassroomCreateUpdateSerializer,
     TimetableSlotListSerializer, TimetableSlotCreateUpdateSerializer,
     FacultyTimetableSerializer, StudentTimetableSerializer,
-    CourseLevelSerializer, ChapterSerializer,
+    CourseLevelSerializer, ChapterSerializer, SyllabusSerializer,
 )
 from .validators import check_faculty_clash, check_classroom_clash, check_batch_clash
 
@@ -175,26 +175,85 @@ class CourseLevelDetailView(APIView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Syllabus Views
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SyllabusListView(APIView):
+    def get(self, request, course_id, level_id):
+        syllabuses = Syllabus.objects.filter(level_id=level_id)
+        if getattr(request.user, 'organization', None):
+            syllabuses = syllabuses.filter(organization=request.user.organization)
+        return Response({'success': True, 'data': SyllabusSerializer(syllabuses, many=True).data})
+
+    def post(self, request, course_id, level_id):
+        data = request.data.copy()
+        data['level'] = level_id
+        if getattr(request.user, 'organization', None):
+            data['organization'] = request.user.organization.id
+        serializer = SyllabusSerializer(data=data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'success': True, 'message': 'Syllabus created.', 'data': serializer.data}, status=status.HTTP_201_CREATED)
+        return Response({'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+class SyllabusDetailView(APIView):
+    def _get_syllabus(self, level_id, pk):
+        try:
+            qs = Syllabus.objects.filter(level_id=level_id)
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=pk)
+        except Syllabus.DoesNotExist:
+            return None
+
+    def get(self, request, course_id, level_id, pk):
+        syllabus = self._get_syllabus(level_id, pk)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': True, 'data': SyllabusSerializer(syllabus).data})
+
+    def patch(self, request, course_id, level_id, pk):
+        syllabus = self._get_syllabus(level_id, pk)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = SyllabusSerializer(syllabus, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'success': True, 'message': 'Syllabus updated.', 'data': serializer.data})
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, course_id, level_id, pk):
+        syllabus = self._get_syllabus(level_id, pk)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        syllabus.delete()
+        return Response({'success': True, 'message': 'Syllabus deleted.'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Subject Views
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SubjectListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['level', 'level__course', 'is_active']
+    filterset_fields = ['level', 'level__course', 'syllabus', 'is_active']
     search_fields = ['name', 'code']
     ordering_fields = '__all__'
 
     def get(self, request):
-        queryset = Subject.objects.select_related('level', 'level__course').all()
+        queryset = Subject.objects.select_related('level', 'syllabus', 'level__course').all()
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(organization=request.user.organization)
 
         level_id = request.GET.get('level_id')
         course_id = request.GET.get('course_id')
+        syllabus_id = request.GET.get('syllabus_id')
         if level_id:
             queryset = queryset.filter(level_id=level_id)
         if course_id:
             queryset = queryset.filter(level__course_id=course_id)
+        if syllabus_id:
+            queryset = queryset.filter(syllabus_id=syllabus_id)
 
         is_active = request.GET.get('is_active')
         if is_active is not None:

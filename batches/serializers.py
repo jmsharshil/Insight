@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot, DAY_CHOICES, SESSION_CHOICES,
-    CourseLevel, Chapter,
+    CourseLevel, Chapter, Syllabus,
     SESSION_TYPE_CHOICES, SLOT_CODE_CHOICES,
 )
 from django.conf import settings
@@ -19,15 +19,31 @@ User = get_user_model()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # E2 — forward declare so CourseDetailSerializer can reference it
+class SyllabusSerializer(serializers.ModelSerializer):
+    subjects = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Syllabus
+        fields = ['id', 'level', 'name', 'year', 'description', 'is_active', 'created_at', 'subjects']
+
+    def get_subjects(self, obj):
+        qs = Subject.objects.filter(syllabus=obj, is_active=True)
+        return SubjectListSerializer(qs, many=True, context=self.context).data
+
 class CourseLevelSerializer(serializers.ModelSerializer):
     """Read/write serializer for CourseLevel (E2)."""
     course_type_display = serializers.CharField(source="get_course_type_display", read_only=True)
+    syllabuses = serializers.SerializerMethodField()
     subjects = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseLevel
-        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'description', 'is_active', 'subjects']
+        fields = ['id', 'course', 'name', 'course_type', 'course_type_display', 'duration_months', 'fee_amount', 'description', 'is_active', 'syllabuses', 'subjects']
         read_only_fields = ['id', 'course']
+
+    def get_syllabuses(self, obj):
+        qs = obj.syllabuses.filter(is_active=True)
+        return SyllabusSerializer(qs, many=True, context=self.context).data
 
     def get_subjects(self, obj):
         qs = Subject.objects.filter(level=obj, is_active=True)
@@ -168,6 +184,7 @@ class ChapterSerializer(serializers.ModelSerializer):
 
 class SubjectListSerializer(serializers.ModelSerializer):
     level_name = serializers.CharField(source='level.name', read_only=True)
+    syllabus_name = serializers.CharField(source='syllabus.name', read_only=True)
     course_name = serializers.CharField(source='level.course.name', read_only=True)
     chapters    = serializers.SerializerMethodField()
     papers = serializers.SerializerMethodField()
@@ -175,7 +192,7 @@ class SubjectListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Subject
-        fields = ['id', 'level', 'level_name', 'course_name', 'name', 'code',
+        fields = ['id', 'level', 'level_name', 'syllabus', 'syllabus_name', 'course_name', 'name', 'code',
                   'total_hours', 'is_active', 'chapters','papers', 'exams']
 
     def get_chapters(self, obj):
@@ -196,7 +213,7 @@ class SubjectListSerializer(serializers.ModelSerializer):
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
-        fields = ['level', 'name', 'is_active', 'organization']
+        fields = ['level', 'syllabus', 'name', 'is_active', 'organization']
         # total_hours is now auto-managed via Chapter.duration_hours signals
 
     # def validate_code(self, value):
@@ -226,6 +243,8 @@ class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
 
 class BatchListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
+    fee_structure_name = serializers.CharField(source='fee_structure.name', read_only=True)
+    syllabus_name = serializers.CharField(source='syllabus.name', read_only=True)
     enrolled_count = serializers.IntegerField(read_only=True, default=0)
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
@@ -234,7 +253,7 @@ class BatchListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Batch
-        fields = ['id', 'course', 'course_name', 'branch', 'branch_name', 'name', 'batch_code',
+        fields = ['id', 'fee_structure', 'fee_structure_name', 'course', 'course_name', 'branch', 'branch_name', 'syllabus', 'syllabus_name', 'name', 'batch_code',
                   'group_module', 'batch_attempt',
                   'start_date', 'end_date', 'max_students', 'enrolled_count',
                   'timing', 'is_active', 'created_at', 'group_module_display', 'batch_attempt_display', 'qr_image_url']
@@ -242,6 +261,8 @@ class BatchListSerializer(serializers.ModelSerializer):
 
 class BatchDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
+    fee_structure_name = serializers.CharField(source='fee_structure.name', read_only=True)
+    syllabus_name = serializers.CharField(source='syllabus.name', read_only=True)
     enrolled_students = serializers.SerializerMethodField()
     assigned_faculty = serializers.SerializerMethodField()
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
@@ -267,7 +288,7 @@ class BatchCreateUpdateSerializer(serializers.ModelSerializer):
     batch_code = serializers.CharField(max_length=30, required=False, allow_blank=True)
     class Meta:
         model = Batch
-        fields = ['fee_structure', 'course', 'name', 'batch_code', 'group_module',
+        fields = ['fee_structure', 'course', 'syllabus', 'name', 'batch_code', 'group_module',
                   'batch_attempt', 'start_date', 'end_date',
                   'max_students', 'timing', 'is_active', 'organization', 'branch']
         extra_kwargs = {

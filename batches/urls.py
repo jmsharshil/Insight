@@ -10,6 +10,7 @@ from .views import (
     TimetableConfirmView,
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
+    SyllabusListView, SyllabusDetailView,
     ChapterListView, ChapterDetailView,
     AcademicDropdownsView, TimetablePublishView, TimetableExportExcelView
 )
@@ -23,6 +24,8 @@ urlpatterns = [
     path('courses/<uuid:pk>/', CourseDetailView.as_view(), name='course-detail'),
     path('courses/<uuid:course_id>/levels/', CourseLevelListView.as_view(), name='course-level-list'),
     path('courses/<uuid:course_id>/levels/<uuid:level_id>/', CourseLevelDetailView.as_view(), name='course-level-detail'),
+    path('courses/<uuid:course_id>/levels/<uuid:level_id>/syllabuses/', SyllabusListView.as_view(), name='syllabus-list'),
+    path('courses/<uuid:course_id>/levels/<uuid:level_id>/syllabuses/<uuid:pk>/', SyllabusDetailView.as_view(), name='syllabus-detail'),
 
     # ── Subjects ────────────────────────────────────────────────────────────
     path('subjects/', SubjectListView.as_view(), name='subject-list'),

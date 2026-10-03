@@ -87,6 +87,7 @@ class Subject(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     level       = models.ForeignKey('batches.CourseLevel', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
+    syllabus    = models.ForeignKey('batches.Syllabus', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     name        = models.CharField(max_length=200)
     code        = models.CharField(max_length=30, blank=True)
     total_hours = models.PositiveIntegerField(default=0)
@@ -99,6 +100,7 @@ class Subject(models.Model):
         unique_together = ('level', 'code')
         indexes = [
             models.Index(fields=['level', 'is_active']),
+            models.Index(fields=['syllabus', 'is_active']),
             models.Index(fields=['-created_at']),
         ]
 
@@ -162,6 +164,7 @@ class Batch(models.Model):
     organization   = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='batches', null=True, blank=True)
     branch         = models.ForeignKey('branch.Branch', null=True, blank=True, on_delete=models.SET_NULL, related_name='batches')
     course         = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='batches')
+    syllabus       = models.ForeignKey('batches.Syllabus', null=True, blank=True, on_delete=models.SET_NULL, related_name='batches')
     # Deleting the fee structure deletes its batches
     fee_structure  = models.ForeignKey('fees.FeeStructure', null=True, blank=True, on_delete=models.CASCADE, related_name='batches')
     name           = models.CharField(max_length=200)
@@ -408,6 +411,24 @@ class CourseLevel(models.Model):
 
     def __str__(self):
         return f"{self.course.code} | Level: {self.name}"
+
+# E2 ─ Course Syllabus
+class Syllabus(models.Model):
+    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='syllabuses', null=True, blank=True)
+    level        = models.ForeignKey(CourseLevel, on_delete=models.CASCADE, related_name='syllabuses')
+    name         = models.CharField(max_length=200)
+    year         = models.PositiveIntegerField(null=True, blank=True)
+    description  = models.TextField(blank=True)
+    is_active    = models.BooleanField(default=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'syllabuses'
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.level.name} | Syllabus: {self.name}"
 
 
 # E2 ─ Subject Chapters
