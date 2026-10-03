@@ -30,3 +30,33 @@ class SalesDailyActivityAdmin(admin.ModelAdmin):
     list_filter = ('activity_date', 'user',)
     search_fields = ('user__name', 'user__email', 'notes',)
 
+
+from leads.models import LeadTransferRequest, SalesDailyActivityTiming, SalesActivityPhoto, OdometerReading, SalesPlanReminder
+
+@admin.register(LeadTransferRequest)
+class LeadTransferRequestAdmin(admin.ModelAdmin):
+    list_display = ('id', 'lead', 'requested_by', 'requested_to', 'status', 'created_at')
+    list_filter = ('status', 'requested_by', 'requested_to')
+    search_fields = ('lead__first_name', 'lead__email', 'reason')
+
+@admin.register(SalesDailyActivityTiming)
+class SalesDailyActivityTimingAdmin(admin.ModelAdmin):
+    list_display = ('id', 'activity', 'date', 'start_time', 'end_time')
+    list_filter = ('date', 'activity__user')
+
+@admin.register(SalesActivityPhoto)
+class SalesActivityPhotoAdmin(admin.ModelAdmin):
+    list_display = ('id', 'activity', 'photo_type', 'captured_at')
+    list_filter = ('photo_type', 'captured_at')
+    search_fields = ('activity__user__name', 'activity__user__email')
+
+@admin.register(OdometerReading)
+class OdometerReadingAdmin(admin.ModelAdmin):
+    list_display = ('id', 'activity', 'total_kms', 'status', 'approved_by', 'created_at')
+    list_filter = ('status', 'approved_by', 'created_at')
+    search_fields = ('activity__user__name', 'activity__user__email')
+
+@admin.register(SalesPlanReminder)
+class SalesPlanReminderAdmin(admin.ModelAdmin):
+    list_display = ('id', 'plan', 'reminder_type', 'reminder_time', 'sent')
+    list_filter = ('reminder_type', 'sent', 'reminder_time')
