@@ -763,6 +763,25 @@ class SalesActivityPhotoView(APIView):
 
             if not _sales_activity_access(request.user, activity):
                 return Response({'detail': 'You cannot upload photos for this activity.'}, status=status.HTTP_403_FORBIDDEN)
+
+            photo_type = request.data.get('photo_type')
+            
+            # ── Check if activity is ended (after end_time on last day) ──
+            if activity.plan and photo_type != 'end_selfie':
+                last_date = None
+                end_time = None
+                last_timing = activity.timings.order_by('-date').first()
+                if last_timing:
+                    last_date = last_timing.date
+                    end_time = last_timing.end_time
+                else:
+                    last_date = activity.to_date or activity.activity_date or activity.plan.plan_date
+                    end_time = activity.plan.end_time
+                
+                if last_date and end_time:
+                    now = timezone.localtime()
+                    if now.date() > last_date or (now.date() == last_date and now.time() > end_time):
+                        return Response({'detail': 'This activity has already ended.'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             # Auto-create or fetch a general daily container for today
             today = timezone.localdate()
