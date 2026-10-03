@@ -496,6 +496,9 @@ class SalesDailyPlanView(APIView):
         if 'inventory_items' in request.data:
             handle_inventory_allocations(activity, request.data.get('inventory_items', []))
 
+        # Refresh from DB to include newly created nested activity in response
+        plan = SalesDailyPlan.objects.prefetch_related('activities', 'activities__photos', 'activities__odometer_reading').get(pk=plan.pk)
+
         return Response(
             SalesDailyPlanSerializer(plan, context={'request': request}).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -622,6 +625,8 @@ class SalesDailyPlanDetailView(APIView):
             if 'inventory_items' in request.data:
                 handle_inventory_allocations(activity, request.data.get('inventory_items', []))
 
+        # Refresh to include updated nested activity in response
+        updated_plan = self.get_object(updated_plan.pk, request.user)
         return Response(SalesDailyPlanSerializer(updated_plan, context={'request': request}).data)
 
     def put(self, request, pk):
