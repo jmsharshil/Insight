@@ -757,8 +757,7 @@ class SalesActivityPhotoView(APIView):
             activity, created = SalesDailyActivity.objects.get_or_create(
                 user=request.user,
                 activity_date=today,
-                name="Daily Field Operations",
-                defaults={'notes': 'Auto-created container for general daily check-ins and check-outs.'}
+                name="Daily Field Operations"
             )
 
         photo_type = request.data.get('photo_type')
