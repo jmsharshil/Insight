@@ -383,6 +383,7 @@ class SalesDailyPlanView(APIView):
             seminar_given_by = request.data.get('seminar_given_by')
             target_name = request.data.get('target_name')
             target_number = request.data.get('target_number')
+            location_link = request.data.get('location_link')
             from_date = request.data.get('from_date')
             to_date = request.data.get('to_date')
             
@@ -402,6 +403,7 @@ class SalesDailyPlanView(APIView):
             if seminar_given_by: act_kwargs['seminar_given_by'] = seminar_given_by
             if target_name: act_kwargs['target_name'] = target_name
             if target_number: act_kwargs['target_number'] = target_number
+            if location_link: act_kwargs['location_link'] = location_link
             if from_date: act_kwargs['from_date'] = from_date
             if to_date: act_kwargs['to_date'] = to_date
             
@@ -585,6 +587,11 @@ class SalesDailyPlanDetailView(APIView):
                 val = request.data.get('target_number')
                 activity.target_number = '' if val in (None, 'null', 'undefined') else val
                 update_fields.append('target_number')
+                updated = True
+            if 'location_link' in request.data:
+                val = request.data.get('location_link')
+                activity.location_link = '' if val in (None, 'null', 'undefined') else val
+                update_fields.append('location_link')
                 updated = True
             if 'from_date' in request.data:
                 val = request.data.get('from_date')
