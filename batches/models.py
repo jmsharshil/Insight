@@ -258,35 +258,17 @@ class Batch(models.Model):
             from django.utils import timezone
             year = self.attempt_year or (self.start_date.year if self.start_date else timezone.now().year)
 
-            # determine course_type. CourseLevel.course_type is deprecated and defaults to
-            # 'standard', so detect from names (level, fee structure, course) first.
-            def _detect_type(text):
-                t = (text or '').upper().replace(' ', '').replace('_', '')
-                if 'CSEET' in t:
-                    return 'cseet'
-                if 'EXECUTIVE' in t:
-                    return 'cs_executive'
-                if 'PROFESSIONAL' in t:
-                    return 'cs_professional'
-                return None
-
+            # course_type part of the name = the fee structure's level name
             fs = self.fee_structure if self.fee_structure_id else None
             course_type = None
-            if fs is not None:
-                if fs.level_id:
-                    course_type = _detect_type(fs.level.name)
-                    if not course_type and fs.level.course_type != 'standard':
-                        course_type = fs.level.course_type
-                if not course_type:
-                    course_type = _detect_type(fs.name)
-            if not course_type and self.course:
-                course_type = _detect_type(self.course.name)
+            if fs is not None and fs.level_id and fs.level.name:
+                course_type = fs.level.name.strip().replace(' ', '_')
             if not course_type and self.course:
                 course_type = getattr(self.course, 'course_type', None)
             if not course_type and self.course:
                 first_level = self.course.levels.filter(is_active=True).first()
                 if first_level:
-                    course_type = _detect_type(first_level.name) or first_level.course_type
+                    course_type = first_level.name.strip().replace(' ', '_')
             if not course_type:
                 course_type = 'standard'
 

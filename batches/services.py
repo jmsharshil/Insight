@@ -5,7 +5,7 @@ Auto batch creation and assignment logic (E1).
 import logging
 from datetime import date
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -218,8 +218,15 @@ def auto_assign_batch(student):
     today = timezone.now().date()
 
     # ── Step 1: find an existing, non-expired batch with room (branch-scoped) ───
-    batch_qs = Batch.objects.filter(
-        course=course_obj,
+    from leads.models import COURSE_TYPE_CHOICES
+
+    def _norm(text):
+        return (text or '').upper().replace(' ', '').replace('_', '')
+
+    # Admission course (e.g. 'cseet') compared with the level name (e.g. "CSEET")
+    wanted = {_norm(course_type), _norm(dict(COURSE_TYPE_CHOICES).get(course_type))}
+
+    common = Batch.objects.filter(
         batch_attempt=batch_attempt,
         attempt_year=attempt_year,
         group_module=group_module,
@@ -227,12 +234,23 @@ def auto_assign_batch(student):
         end_date__gte=today,      # ← never reuse a batch whose coaching period ended
     )
     if branch:
-        batch_qs = batch_qs.filter(branch=branch)
+        common = common.filter(branch=branch)
     else:
-        batch_qs = batch_qs.filter(branch__isnull=True)
+        common = common.filter(branch__isnull=True)
+
+    # (a) Batches created from a Fee Structure: match by the fee structure's level
+    fs_batches = [
+        b for b in common.filter(fee_structure__isnull=False, fee_structure__level__isnull=False)
+        .select_related('fee_structure__level')
+        if _norm(b.fee_structure.level.name) in wanted
+    ]
+    fs_ids = [b.id for b in fs_batches]
+
+    # (b) Legacy / auto-created batches matched by course
+    legacy_qs = common.filter(course=course_obj, fee_structure__isnull=True)
 
     existing_batches = (
-        batch_qs
+        Batch.objects.filter(Q(id__in=fs_ids) | Q(id__in=legacy_qs.values('id')))
         .distinct()
         .annotate(enrolled_count=Count('batch_students'))
         .order_by('created_at')
