@@ -309,15 +309,14 @@ class AuditLogMiddleware:
         # Sanitised request body
         sanitised_body = _sanitise_body(request_body)
 
-        # Response summary (keep it small)
+        # Full response (truncated if excessively large)
         response_summary = ""
-        if hasattr(response, "data") and isinstance(response.data, dict):
+        if hasattr(response, "data"):
             try:
-                summary_keys = list(response.data.keys())[:10]
                 response_summary = json.dumps(
-                    {k: type(response.data[k]).__name__ for k in summary_keys},
+                    response.data,
                     default=str,
-                )[:1500]
+                )[:4000]
             except Exception:
                 pass
 

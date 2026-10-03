@@ -44,6 +44,7 @@ class AuditLogFilterSerializer(serializers.Serializer):
     """Query params for filtering audit logs."""
 
     user_id = serializers.UUIDField(required=False)
+    user_name = serializers.CharField(required=False)
     organization_id = serializers.UUIDField(required=False)
     action = serializers.ChoiceField(
         choices=AuditLog.ACTION_CHOICES, required=False
@@ -62,6 +63,7 @@ class AuditLogFilter(filters.FilterSet):
     date_from = filters.DateTimeFilter(field_name="timestamp", lookup_expr="gte")
     date_to = filters.DateTimeFilter(field_name="timestamp", lookup_expr="lte")
     user_id = filters.UUIDFilter(field_name="user_id")
+    user_name = filters.CharFilter(field_name="user__name", lookup_expr="icontains")
     organization_id = filters.UUIDFilter(field_name="organization_id")
     path = filters.CharFilter(field_name="path", lookup_expr="icontains")
     event = filters.CharFilter(field_name="event", lookup_expr="icontains")
