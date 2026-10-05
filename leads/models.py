@@ -441,7 +441,6 @@ class SalesDailyActivity(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
-    violations_checked = models.BooleanField(default=False, help_text="True if the background task has already checked this activity for violations.")
 
     class Meta:
         db_table = 'sales_daily_activities'
