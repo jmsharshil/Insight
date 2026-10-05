@@ -469,6 +469,16 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         reminders_data = validated_data.pop('custom_reminders', [])
         plan = super().create(validated_data)
+        
+        # Auto-create the linked SalesDailyActivity container
+        SalesDailyActivity.objects.create(
+            user=plan.user,
+            plan=plan,
+            activity_date=plan.plan_date,
+            status='pending',
+            name=plan.type if plan.type else 'Sales Activity'
+        )
+        
         for reminder_data in reminders_data:
             SalesPlanReminder.objects.create(
                 plan=plan, 
@@ -479,8 +489,20 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         reminders_data = validated_data.pop('custom_reminders', None)
+        
+        old_date = instance.plan_date
         plan = super().update(instance, validated_data)
         
+        # Sync updates to linked pending activities
+        if old_date != plan.plan_date or 'type' in validated_data:
+            pending_activities = plan.activities.filter(status='pending')
+            for act in pending_activities:
+                if old_date != plan.plan_date:
+                    act.activity_date = plan.plan_date
+                if 'type' in validated_data:
+                    act.name = plan.type if plan.type else 'Sales Activity'
+                act.save(update_fields=['activity_date', 'name'])
+                
         if reminders_data is not None:
             # Delete existing unsent reminders and recreate them
             instance.custom_reminders.filter(is_sent=False).delete()
