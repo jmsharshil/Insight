@@ -21,10 +21,13 @@ COURSE_TYPE_CHOICES = [
 
 GROUP_MODULE_CHOICES = [
     ('full', 'Full Syllabus'),
+    ('all', 'All Modules'),
     ('both', 'Both Modules'),
     ('module_1', '1st Module'),
     ('module_2', '2nd Module'),
     ('module_3', '3rd Module'),
+    ('module_4', '4th Module'),
+    ('module_5', '5th Module'),
 ]
 
 ATTEMPT_TYPE_CHOICES = [
@@ -437,6 +440,8 @@ class SalesDailyActivity(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    violations_checked = models.BooleanField(default=False, help_text="True if the background task has already checked this activity for violations.")
 
     class Meta:
         db_table = 'sales_daily_activities'

@@ -1445,18 +1445,6 @@ class ViolationsAPIView(SafeAPIView):
 
         from .models import AlertLog
         count = get_active_violations_count(d['student_id'])
-        if count >= 3:
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                SP.objects.filter(id=d['student_id']).update(qr_blocked=True)
-            except Exception:
-                pass
-            AlertLog.objects.create(
-                student_id=d['student_id'], alert_type='violation',
-                message=f'{count} active violations. QR access blocked.',
-                notified_admin=True,
-            )
 
         return Response({'success': True, 'message': 'Violation logged.', 'data': ViolationRecordSerializer(v).data}, status=status.HTTP_201_CREATED)
 
@@ -1529,13 +1517,6 @@ class ViolationDetailAPIView(SafeAPIView):
         v.resolved_at = timezone.now()
         v.save()
 
-        if not should_block_qr(v.student_id):
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                SP.objects.filter(id=v.student_id).update(qr_blocked=False)
-            except Exception:
-                pass
 
         return Response({'success': True, 'message': 'Violation resolved.', 'data': ViolationRecordSerializer(v).data})
 
@@ -1557,13 +1538,6 @@ class ViolationDetailAPIView(SafeAPIView):
         student_id = v.student_id
         v.delete()
 
-        if not should_block_qr(student_id):
-            try:
-                from django.apps import apps
-                SP = apps.get_model('students', 'Student')
-                SP.objects.filter(id=student_id).update(qr_blocked=False)
-            except Exception:
-                pass
 
         return Response({'success': True, 'message': 'Violation deleted.'}, status=status.HTTP_200_OK)
 

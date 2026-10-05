@@ -208,12 +208,9 @@ def should_block_qr(student_id):
 
 def get_qr_block_reason(student_id):
     """
-    Returns reason string ('violations' or 'overdue_fees') or None if not blocked.
+    Returns reason string ('overdue_fees') or None if not blocked.
     Used by QRScanView to give specific user messages.
     """
-    if get_active_violations_count(student_id) >= 3:
-        return 'violations'
-
     # Check for fee overdue (>15 days past installment due_date)
     try:
         from fees.utils import has_overdue_installment

@@ -43,6 +43,8 @@ VIOLATION_TYPE_CHOICES = [
     # v3: FRD §4.4.3 — manual admin types
     ('unauthorised_absence', 'Unauthorised Absence'),
     ('repeated_delay', 'Repeated Delay'),
+    ('sales_check_in_selfie', 'Checked in with start selfie'),
+    ('sales_missing_photo', 'Missing Sales Activity Photo'),
 ]
 
 
@@ -269,6 +271,16 @@ class ViolationRecord(models.Model):
         'students.Student',
         on_delete=models.CASCADE,
         related_name='violations',
+        null=True,
+        blank=True
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='employee_violations',
+        null=True,
+        blank=True
     )
 
     violation_type = models.CharField(max_length=40, choices=VIOLATION_TYPE_CHOICES)

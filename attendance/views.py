@@ -564,9 +564,9 @@ class QRScanView(APIView):
                 if batch_from_util:
                     batch = batch_from_util
 
-        # Check QR block (3+ violations)
+        # Check QR block (overdue fees)
         if should_block_qr(student.id):
-            return Response({'success': False, 'message': 'QR blocked due to unresolved violations. Contact admin.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'success': False, 'message': 'QR blocked due to overdue fees. Contact admin.'}, status=status.HTTP_403_FORBIDDEN)
 
         student_branch_id = getattr(student, 'branch_id', None) or getattr(batch, 'branch_id', None) or get_user_branch_id(user)
 

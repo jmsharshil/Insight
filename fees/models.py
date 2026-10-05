@@ -89,9 +89,9 @@ class FeeStructure(models.Model):
         max_digits=10, decimal_places=2, default=0,
         verbose_name='ICSI Registration Fees Direct'
     )
-    institute_fees_both_modules = models.DecimalField(
+    institute_fees_all_modules = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
-        verbose_name='Institute Fees for Both Modules'
+        verbose_name='Institute Fees for All Modules'
     )
     institute_fees_module_1 = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
@@ -100,6 +100,18 @@ class FeeStructure(models.Model):
     institute_fees_module_2 = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
         verbose_name='Institute Fees for Module 2'
+    )
+    institute_fees_module_3 = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Institute Fees for Module 3'
+    )
+    institute_fees_module_4 = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Institute Fees for Module 4'
+    )
+    institute_fees_module_5 = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        verbose_name='Institute Fees for Module 5'
     )
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)

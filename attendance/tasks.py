@@ -560,23 +560,9 @@ def check_violation_threshold(student_id):
         SP = None
 
     if should_block_qr(student_id):
-        # Block QR
+        # Block QR due to fees
         if SP:
             SP.objects.filter(id=student_id).update(qr_blocked=True)
-
-        # Avoid duplicate alert on same day
-        if not AlertLog.objects.filter(
-            student_id=student_id, alert_type='violation',
-            sent_at__date=timezone.now().date(),
-        ).exists():
-            AlertLog.objects.create(
-                student_id=student_id,
-                alert_type='violation',
-                message=f'{count} active violations. QR access has been blocked.',
-                notified_admin=True,
-            )
-
-        logger.info(f"QR blocked for student {student_id} ({count} violations)")
     else:
         # Re-enable QR if was blocked
         if SP:

@@ -194,6 +194,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
         help_text="List of items to allocate: [{'item_id': '<uuid>', 'quantity': 1}]"
     )
     allocations = serializers.SerializerMethodField()
+    violations = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyActivity
@@ -204,14 +205,75 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'seminar_reference_by', 'seminar_given_by',
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
-            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations',
+            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'created_at', 'updated_at']
 
     def get_allocations(self, obj):
         from inventory.serializers import ItemAllocationSerializer
         return ItemAllocationSerializer(obj.inventory_allocations.all(), many=True).data
+
+    def get_violations(self, obj):
+        from datetime import datetime, timedelta, time
+        from django.utils import timezone
+        
+        violations = []
+        
+        last_date = None
+        end_time = None
+        
+        if obj.plan:
+            last_timing = obj.timings.order_by('-date').first()
+            if last_timing:
+                last_date = last_timing.date
+                end_time = last_timing.end_time
+            else:
+                last_date = obj.to_date or obj.activity_date or obj.plan.plan_date
+                end_time = obj.plan.end_time
+        elif obj.name == "Daily Field Operations":
+            last_date = obj.activity_date
+            end_time = time(23, 59, 59)
+            
+        if not (last_date and end_time):
+            return violations
+            
+        end_datetime = datetime.combine(last_date, end_time)
+        if timezone.is_naive(end_datetime):
+            end_datetime = timezone.make_aware(end_datetime)
+            
+        grace_period_end = end_datetime + timedelta(minutes=30)
+        
+        if timezone.now() > grace_period_end:
+            photos = list(obj.photos.all())
+            photo_types = [p.photo_type for p in photos]
+            
+            if obj.name == "Daily Field Operations":
+                start_selfie_photo = next((p for p in photos if p.photo_type == 'start_selfie'), None)
+                if start_selfie_photo:
+                    from attendance.models import EmployeeAttendanceRecord
+                    # If they checked in via QR, the attendance record's checked_in_at will be BEFORE the selfie capture time
+                    is_qr_checkin = EmployeeAttendanceRecord.objects.filter(
+                        user=obj.user,
+                        date=last_date,
+                        checked_in_at__lt=start_selfie_photo.captured_at
+                    ).exists()
+                    
+                    if not is_qr_checkin:
+                        violations.append({'type': 'sales_check_in_selfie', 'description': 'Checked in with start selfie instead of QR code.'})
+                else:
+                    violations.append({'type': 'sales_missing_photo', 'description': 'Missing start_selfie photo.'})
+                    
+                if 'end_selfie' not in photo_types:
+                    violations.append({'type': 'sales_missing_photo', 'description': 'Missing end_selfie photo (did not check out).'})
+            elif obj.plan:
+                slots_by_date = self.get_event_photo_slots(obj)
+                for day_slots in slots_by_date:
+                    for slot in day_slots["slots"]:
+                        if not slot["is_filled"]:
+                            violations.append({'type': 'sales_missing_photo', 'description': f'Missing {slot["type"]} photo for slot {slot["slot"]} on {day_slots["date"]}.'})
+                    
+        return violations
 
     def create(self, validated_data):
         inventory_items_data = validated_data.pop('inventory_items', [])

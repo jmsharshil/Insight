@@ -767,7 +767,7 @@ class SalesActivityPhotoView(APIView):
             photo_type = request.data.get('photo_type')
             
             # ── Check if activity is ended (after end_time on last day) ──
-            if activity.plan and photo_type != 'end_selfie':
+            if activity.plan:
                 last_date = None
                 end_time = None
                 last_timing = activity.timings.order_by('-date').first()
@@ -779,9 +779,15 @@ class SalesActivityPhotoView(APIView):
                     end_time = activity.plan.end_time
                 
                 if last_date and end_time:
-                    now = timezone.localtime()
-                    if now.date() > last_date or (now.date() == last_date and now.time() > end_time):
-                        return Response({'detail': 'This activity has already ended.'}, status=status.HTTP_400_BAD_REQUEST)
+                    from datetime import datetime, timedelta
+                    end_datetime = datetime.combine(last_date, end_time)
+                    if timezone.is_naive(end_datetime):
+                        end_datetime = timezone.make_aware(end_datetime)
+                    
+                    now = timezone.now()
+                    grace_period_end = end_datetime + timedelta(minutes=30)
+                    if now > grace_period_end:
+                        return Response({'detail': 'This activity is already ended.'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             # Auto-create or fetch a general daily container for today
             today = timezone.localdate()

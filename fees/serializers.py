@@ -48,8 +48,10 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         model = FeeStructure
         fields = ['name', 'course', 'batch', 'level', 'attempt', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
                   'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
-                  'icsi_registration_fees_direct', 'institute_fees_both_modules',
+                  'icsi_registration_fees_direct', 'institute_fees_all_modules',
                   'institute_fees_module_1', 'institute_fees_module_2',
+                  'institute_fees_module_3', 'institute_fees_module_4',
+                  'institute_fees_module_5',
                   'description', 'is_active']
 
     def validate(self, data):
@@ -61,9 +63,12 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         token = data.get('token_amount') or 0
         reg_cseet = data.get('icsi_registration_fees_via_cseet') or 0
         reg_direct = data.get('icsi_registration_fees_direct') or 0
-        inst_both = data.get('institute_fees_both_modules') or 0
+        inst_all = data.get('institute_fees_all_modules') or 0
         inst_mod1 = data.get('institute_fees_module_1') or 0
         inst_mod2 = data.get('institute_fees_module_2') or 0
+        inst_mod3 = data.get('institute_fees_module_3') or 0
+        inst_mod4 = data.get('institute_fees_module_4') or 0
+        inst_mod5 = data.get('institute_fees_module_5') or 0
         
         level = data.get('level')
         if not level and self.instance:
@@ -75,16 +80,16 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
             # For CSEET, the user provides the total_amount directly, so we just ensure it exists
             # (or fallback to component sum if somehow they left it blank)
             if 'total_amount' not in data or data['total_amount'] is None:
-                data['total_amount'] = reg + exam + token + reg_cseet + reg_direct + inst_both + inst_mod1 + inst_mod2
+                data['total_amount'] = reg + exam + token + reg_cseet + reg_direct + inst_all + inst_mod1 + inst_mod2 + inst_mod3 + inst_mod4 + inst_mod5
         else:
             # For CS Executive and CS Professional, calculate based on modules
-            # If both_modules is not provided, calculate it as sum of module 1 and 2
-            if not inst_both and (inst_mod1 or inst_mod2):
-                inst_both = inst_mod1 + inst_mod2
-                data['institute_fees_both_modules'] = inst_both
+            # If all_modules is not provided, calculate it as sum of module 1 to 5
+            if not inst_all and (inst_mod1 or inst_mod2 or inst_mod3 or inst_mod4 or inst_mod5):
+                inst_all = inst_mod1 + inst_mod2 + inst_mod3 + inst_mod4 + inst_mod5
+                data['institute_fees_all_modules'] = inst_all
     
-            # total_amount is equal to both_modules
-            data['total_amount'] = inst_both
+            # total_amount is equal to all_modules
+            data['total_amount'] = inst_all
 
         return data
 
