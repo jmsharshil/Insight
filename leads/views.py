@@ -217,7 +217,39 @@ class SalesDailyActivityCompleteView(APIView):
             activity.notes = request.data.get('notes')
             update_fields.append('notes')
 
+        if 'target_name' in request.data:
+            activity.target_name = request.data.get('target_name')
+            update_fields.append('target_name')
+
+        if 'target_number' in request.data:
+            activity.target_number = request.data.get('target_number')
+            update_fields.append('target_number')
+            
+        for field in ['standard', 'board', 'medium', 'seminar_reference_by', 'seminar_given_by', 'location_link', 'from_date', 'to_date']:
+            if field in request.data:
+                val = request.data.get(field)
+                setattr(activity, field, None if val in ('', 'null', 'undefined') else val)
+                update_fields.append(field)
+
         activity.save(update_fields=update_fields)
+
+        if 'custom_reminders' in request.data and activity.plan:
+            import json
+            from .models import SalesPlanReminder
+            reminders_data = request.data.get('custom_reminders')
+            if isinstance(reminders_data, str):
+                try:
+                    reminders_data = json.loads(reminders_data)
+                except json.JSONDecodeError:
+                    reminders_data = []
+            if isinstance(reminders_data, list):
+                for r_data in reminders_data:
+                    if isinstance(r_data, dict) and 'reminder_time' in r_data:
+                        SalesPlanReminder.objects.create(
+                            plan=activity.plan,
+                            reminder_time=r_data['reminder_time'],
+                            purpose=r_data.get('purpose', '')
+                        )
 
         return Response(
             SalesDailyActivitySerializer(activity, context={'request': request}).data,
