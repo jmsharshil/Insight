@@ -233,23 +233,54 @@ class SalesDailyActivityCompleteView(APIView):
 
         activity.save(update_fields=update_fields)
 
-        if 'custom_reminders' in request.data and activity.plan:
+        if activity.plan:
             import json
+            import re
             from .models import SalesPlanReminder
+            
             reminders_data = request.data.get('custom_reminders')
             if isinstance(reminders_data, str):
                 try:
                     reminders_data = json.loads(reminders_data)
                 except json.JSONDecodeError:
                     reminders_data = []
+                    
             if isinstance(reminders_data, list):
                 for r_data in reminders_data:
-                    if isinstance(r_data, dict) and 'reminder_time' in r_data:
-                        SalesPlanReminder.objects.create(
-                            plan=activity.plan,
-                            reminder_time=r_data['reminder_time'],
-                            purpose=r_data.get('purpose', '')
-                        )
+                    if isinstance(r_data, dict) and r_data.get('reminder_time'):
+                        try:
+                            SalesPlanReminder.objects.create(
+                                plan=activity.plan,
+                                reminder_time=r_data['reminder_time'],
+                                purpose=r_data.get('purpose', '')
+                            )
+                        except Exception:
+                            pass
+            else:
+                # Handle FormData array like custom_reminders[0][reminder_time]
+                reminder_keys = [k for k in request.data.keys() if k.startswith('custom_reminders[')]
+                if reminder_keys:
+                    reminders_dict = {}
+                    for k in reminder_keys:
+                        # Extract index and field name
+                        match = re.search(r'custom_reminders\[(\d+)\]\[?([^\]]+)\]?', k)
+                        if match:
+                            idx = match.group(1)
+                            field = match.group(2).strip('."\'')
+                            if idx not in reminders_dict:
+                                reminders_dict[idx] = {}
+                            reminders_dict[idx][field] = request.data.get(k)
+                    
+                    for r_data in reminders_dict.values():
+                        if r_data.get('reminder_time'):
+                            try:
+                                SalesPlanReminder.objects.create(
+                                    plan=activity.plan,
+                                    reminder_time=r_data['reminder_time'],
+                                    purpose=r_data.get('purpose', '')
+                                )
+                            except Exception:
+                                pass
 
         return Response(
             SalesDailyActivitySerializer(activity, context={'request': request}).data,
