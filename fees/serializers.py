@@ -65,16 +65,27 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         inst_mod1 = data.get('institute_fees_module_1') or 0
         inst_mod2 = data.get('institute_fees_module_2') or 0
         
-        component_sum = reg + exam + token + reg_cseet + reg_direct + inst_both + inst_mod1 + inst_mod2
+        level = data.get('level')
+        if not level and self.instance:
+            level = self.instance.level
+            
+        level_name = level.name.upper().replace(' ', '').replace('_', '') if level and level.name else ''
+        
+        if 'CSEET' in level_name:
+            # For CSEET, the user provides the total_amount directly, so we just ensure it exists
+            # (or fallback to component sum if somehow they left it blank)
+            if 'total_amount' not in data or data['total_amount'] is None:
+                data['total_amount'] = reg + exam + token + reg_cseet + reg_direct + inst_both + inst_mod1 + inst_mod2
+        else:
+            # For CS Executive and CS Professional, calculate based on modules
+            # If both_modules is not provided, calculate it as sum of module 1 and 2
+            if not inst_both and (inst_mod1 or inst_mod2):
+                inst_both = inst_mod1 + inst_mod2
+                data['institute_fees_both_modules'] = inst_both
+    
+            # total_amount is equal to both_modules
+            data['total_amount'] = inst_both
 
-        provided_total = data.get('total_amount')
-        # if provided_total is not None and provided_total != component_sum:
-        #     raise serializers.ValidationError({
-        #         'total_amount': f'Total must equal sum of components ({component_sum}) or be omitted.'
-        #     })
-        # Always ensure total_amount in data for serializer (model will override anyway)
-        if 'total_amount' not in data or data['total_amount'] is None:
-            data['total_amount'] = component_sum
         return data
 
     def create(self, validated_data):
