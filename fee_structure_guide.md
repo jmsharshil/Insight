@@ -39,7 +39,6 @@ If you are setting up a Fee Structure for CS Executive or CS Professional, you d
 ## 4. Selecting the `group_module`
 
 When associating a student, lead, or batch, you can specify the `group_module` they are enrolling in. The available options have been expanded to include:
-- `full` (Full Syllabus)
 - `all` (All Modules)
 - `both` (Both Modules - kept for backward compatibility)
 - `module_1` (1st Module)

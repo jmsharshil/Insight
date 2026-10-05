@@ -28,8 +28,10 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
                   'level', 'level_name', 'attempt', 'attempt_display', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
                   'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
-                  'icsi_registration_fees_direct', 'institute_fees_both_modules',
+                  'icsi_registration_fees_direct', 'institute_fees_all_modules',
                   'institute_fees_module_1', 'institute_fees_module_2',
+                  'institute_fees_module_3', 'institute_fees_module_4',
+                  'institute_fees_module_5',
                   'is_active', 'created_at']
 
 
