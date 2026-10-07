@@ -1359,7 +1359,8 @@ class ViolationsAPIView(SafeAPIView):
 
         from students.models import Student
 
-        violation_qs = ViolationRecord.objects.all().select_related('student', 'student__user', 'resolved_by', 'created_by')
+        # Exclude employee/sales violations from this student-centric API
+        violation_qs = ViolationRecord.objects.filter(student__isnull=False).select_related('student', 'student__user', 'resolved_by', 'created_by')
 
         if getattr(user, 'organization', None):
             violation_qs = violation_qs.filter(student__branch__organization=user.organization)
@@ -2155,6 +2156,61 @@ class EmployeeViolationsAPIView(SafeAPIView):
                 'is_resolved': rec.status != 'checkout_pending',  # pending checkout is "active"
                 'created_at': rec.marked_at.isoformat() if hasattr(rec, 'marked_at') and rec.marked_at else None,
             })
+
+        # ── Append Sales Module Violations ──
+        if role in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'sales'] or getattr(user, 'department', '') == 'sales':
+            from leads.models import SalesDailyActivity
+            from leads.serializers import SalesDailyActivitySerializer
+            
+            sales_qs = SalesDailyActivity.objects.select_related('user', 'plan').prefetch_related('photos', 'timings')
+            
+            if role not in ['super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive']:
+                sales_qs = sales_qs.filter(user=user)
+            else:
+                user_id = request.GET.get('user_id')
+                if user_id:
+                    sales_qs = sales_qs.filter(user_id=user_id)
+                date_from = request.GET.get('date_from')
+                date_to = request.GET.get('date_to')
+                search = request.GET.get('search')
+                if date_from:
+                    sales_qs = sales_qs.filter(activity_date__gte=date_from)
+                if date_to:
+                    sales_qs = sales_qs.filter(activity_date__lte=date_to)
+                if search:
+                    sales_qs = sales_qs.filter(
+                        Q(user__name__icontains=search) |
+                        Q(user__username__icontains=search) |
+                        Q(user__email__icontains=search)
+                    )
+
+            # Fast evaluation without full serialization overhead
+            sales_serializer = SalesDailyActivitySerializer(context={'request': request})
+            for act in sales_qs:
+                act_violations = sales_serializer.get_violations(act)
+                for i, v in enumerate(act_violations):
+                    violation_list.append({
+                        'id': f"sales_viol_{act.id}_{i}",
+                        'violation_type': v['type'],
+                        'violation_type_display': v['type'].replace('_', ' ').title(),
+                        'date': act.activity_date.isoformat() if act.activity_date else None,
+                        'description': f"[{act.name}] {v['description']}",
+                        'status': 'sales_violation',
+                        'checked_in_at': None,
+                        'checked_out_at': None,
+                        'user': {
+                            'id': str(act.user.id),
+                            'name': getattr(act.user, 'name', str(act.user)),
+                            'role': getattr(act.user, 'role', 'employee'),
+                        },
+                        'branch_name': None,
+                        'timetable_slot': None,
+                        'is_resolved': False,
+                        'created_at': act.created_at.isoformat() if act.created_at else None,
+                    })
+
+        # Sort combined list by date (descending)
+        violation_list.sort(key=lambda x: x['date'] or '', reverse=True)
 
         # Use existing pagination helper if available, else return all (or paginate manually)
         page = request.GET.get('page', 1)

@@ -37,6 +37,7 @@ class AuditLogListView(generics.ListAPIView):
       - method: GET / POST / PUT / PATCH / DELETE
       - path: substring match on request path
       - date_from / date_to: timestamp range
+      - time_from / time_to: time of day range (HH:MM:SS)
       - flushed_to_blob: true / false
     """
 

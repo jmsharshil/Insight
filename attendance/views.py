@@ -449,9 +449,13 @@ class QRScanView(APIView):
             
             else:  # check_out
                 if not open_record:
+                    already_checked_out = EmployeeAttendanceRecord.objects.filter(
+                        user=user, date=today, checked_in_at__isnull=False, checked_out_at__isnull=False
+                    ).exists()
+                    msg = 'You have already checked out for today.' if already_checked_out else 'Must check in first before checking out.'
                     return Response({
                         'success': False,
-                        'message': 'Must check in first before checking out.',
+                        'message': msg,
                     }, status=status.HTTP_400_BAD_REQUEST)
                 if open_record.branch_id and str(open_record.branch_id) != str(branch.id):
                     return Response({
@@ -1681,9 +1685,13 @@ class EmployeeCheckInOutView(APIView):
         
         else:  # check_out
             if not open_record:
+                already_checked_out = EmployeeAttendanceRecord.objects.filter(
+                    user=user, date=today, checked_in_at__isnull=False, checked_out_at__isnull=False
+                ).exists()
+                msg = 'You have already checked out for today.' if already_checked_out else 'Must check in first before checking out.'
                 return Response({
                     'success': False,
-                    'message': 'Must check in first before checking out.',
+                    'message': msg,
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             record = open_record
