@@ -254,11 +254,20 @@ class AuditLogMiddleware:
         # For login requests, try to resolve user from response or email in body
         if user is None and "/login/" in path and status_code == 200:
             try:
-                body_data = json.loads(request_body) if request_body else {}
-                login_email = body_data.get("email", "")
-                if login_email:
-                    from auth_user.models import User
-                    user = User.objects.filter(email=login_email).first()
+                # Try to get user_id from response first (to handle multiple accounts with same email)
+                if hasattr(response, 'data') and isinstance(response.data, dict) and 'user' in response.data:
+                    user_id = response.data['user'].get('id')
+                    if user_id:
+                        from auth_user.models import User
+                        user = User.objects.filter(id=user_id).first()
+                
+                # Fallback to email from request body
+                if user is None:
+                    body_data = json.loads(request_body) if request_body else {}
+                    login_email = body_data.get("email", "")
+                    if login_email:
+                        from auth_user.models import User
+                        user = User.objects.filter(email=login_email).first()
             except Exception:
                 pass
 
