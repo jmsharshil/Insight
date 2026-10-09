@@ -4,8 +4,9 @@ from django.conf import settings
 
 
 LEAVE_TYPE_CHOICES = [
-    ('paid', 'Paid Leave'), ('sick', 'Sick Leave'), ('casual', 'Casual Leave'),
-    ('club', 'Club Leave'), ('unpaid', 'Unpaid Leave'),
+    ('paid', 'Paid Leave'), 
+    ('sick', 'Sick Leave'), 
+    ('casual', 'Unpaid/Casual Leave'),
 ]
 
 STUDENT_LEAVE_TYPE_CHOICES = [

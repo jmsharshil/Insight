@@ -205,6 +205,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'seminar_reference_by', 'seminar_given_by',
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
+            'self_vehicle',
             'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations',
             'created_at', 'updated_at',
         ]
@@ -435,7 +436,7 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         model = SalesDailyPlan
         fields = [
             'id', 'user', 'user_name', 'plan_date', 'date', 'type',
-            'start_time', 'end_time', 'place', 'description', 'status',
+            'start_time', 'end_time', 'place', 'description', 'status', 'self_vehicle',
             'photos','reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'activities', 'custom_reminders', 'created_at', 'updated_at',

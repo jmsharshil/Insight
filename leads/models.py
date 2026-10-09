@@ -290,6 +290,7 @@ class SalesDailyPlan(models.Model):
         default='scheduled',
         help_text="Status of the plan"
     )
+    self_vehicle = models.BooleanField(default=False, help_text="Whether the user is using their own vehicle")
     reminder_two_days_before_sent = models.BooleanField(
         default=False,
         help_text="True once the 8:00 AM 2-days-before reminder has been sent."
@@ -437,6 +438,8 @@ class SalesDailyActivity(models.Model):
     location_link = models.URLField(blank=True,null=True,help_text="Google Map link for location/venue")
     from_date = models.DateField(null=True, blank=True, help_text="Start date of the activity")
     to_date = models.DateField(null=True, blank=True, help_text="End date of the activity")
+    
+    self_vehicle = models.BooleanField(default=False, help_text="Whether the user is using their own vehicle")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

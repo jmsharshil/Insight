@@ -21,7 +21,7 @@ class LeavePolicySerializer(serializers.ModelSerializer):
 
 
 class LeavePolicyInputSerializer(serializers.Serializer):
-    leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual', 'club', 'unpaid'])
+    leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual'])
     annual_quota = serializers.IntegerField()
     max_club_days = serializers.IntegerField(default=5)
     min_advance_days = serializers.IntegerField(default=3)
@@ -131,7 +131,7 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
 
     def _get_expected_roles(self, obj):
         applicant_role = getattr(obj.applied_by, 'role', '') if obj.applied_by else ''
-        if applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive']:
+        if applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller', 'associate_bdm', 'senior_tele_caller', 'deputy_bdm', 'senior_bdm']:
             return 'cmo', 'super_admin'
         if applicant_role == 'head_coordinator':
             return 'branch_manager', 'super_admin'
@@ -171,7 +171,7 @@ class LeaveApplicationDetailSerializer(serializers.ModelSerializer):
 
 
 class LeaveApplicationCreateSerializer(serializers.Serializer):
-    leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual', 'club', 'unpaid'], required=False, default='casual')
+    leave_type = serializers.ChoiceField(choices=['paid', 'sick', 'casual'], required=False, default='casual')
     from_date = serializers.DateField()
     to_date = serializers.DateField(required=False)
     is_half_day = serializers.BooleanField(default=False)
@@ -188,6 +188,18 @@ class LeaveApplicationCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({'to_date': 'to_date must be >= from_date.'})
         if data.get('is_half_day') and data['from_date'] != data['to_date']:
             raise serializers.ValidationError({'is_half_day': 'Half-day leave must be a single date.'})
+            
+        import datetime
+        leave_type = data.get('leave_type', 'casual')
+        if leave_type in ['paid', 'sick']:
+            curr = data['from_date']
+            while curr <= data['to_date']:
+                if curr.month in [4, 5, 6]:
+                    raise serializers.ValidationError(
+                        {"leave_type": "You cannot apply for Paid or Sick leave in April, May, or June. Only Unpaid/Casual leave is allowed."}
+                    )
+                curr += datetime.timedelta(days=1)
+                
         return data
 
 

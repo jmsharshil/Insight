@@ -225,6 +225,13 @@ class SalesDailyActivityCompleteView(APIView):
             activity.target_number = request.data.get('target_number')
             update_fields.append('target_number')
             
+        if 'self_vehicle' in request.data:
+            val = request.data.get('self_vehicle')
+            if isinstance(val, str):
+                val = val.lower() in ('true', 'yes', '1')
+            activity.self_vehicle = bool(val)
+            update_fields.append('self_vehicle')
+            
         for field in ['standard', 'board', 'medium', 'seminar_reference_by', 'seminar_given_by', 'location_link', 'from_date', 'to_date']:
             if field in request.data:
                 val = request.data.get(field)
@@ -404,6 +411,11 @@ class SalesDailyPlanView(APIView):
         start_time = serializer.validated_data.get('start_time')
         end_time = serializer.validated_data.get('end_time')
         place = serializer.validated_data.get('place', '')
+        self_vehicle = request.data.get('self_vehicle', False)
+        
+        # Parse self_vehicle to boolean if it comes as string
+        if isinstance(self_vehicle, str):
+            self_vehicle = self_vehicle.lower() in ('true', 'yes', '1')
 
         plan_id = request.data.get('id') or request.data.get('plan_id')
         if plan_id:
@@ -415,6 +427,7 @@ class SalesDailyPlanView(APIView):
                 plan.start_time = start_time
                 plan.end_time = end_time
                 plan.place = place
+                plan.self_vehicle = self_vehicle
                 plan.save()
                 created = False
             except SalesDailyPlan.DoesNotExist:
@@ -428,6 +441,7 @@ class SalesDailyPlanView(APIView):
                 start_time=start_time,
                 end_time=end_time,
                 place=place,
+                self_vehicle=self_vehicle,
             )
             created = True
 
@@ -469,6 +483,7 @@ class SalesDailyPlanView(APIView):
             if location_link: act_kwargs['location_link'] = location_link
             if from_date: act_kwargs['from_date'] = from_date
             if to_date: act_kwargs['to_date'] = to_date
+            act_kwargs['self_vehicle'] = self_vehicle
             
             activity = SalesDailyActivity.objects.create(**act_kwargs)
             timings_data = request.data.get('timings', [])
@@ -485,6 +500,22 @@ class SalesDailyPlanView(APIView):
             if activity:
                 updated = False
                 update_fields = ['updated_at']
+                
+                # Check for self_vehicle in request to allow independent updates
+                if 'self_vehicle' in request.data:
+                    val = request.data.get('self_vehicle')
+                    if isinstance(val, str):
+                        val = val.lower() in ('true', 'yes', '1')
+                    activity.self_vehicle = bool(val)
+                    update_fields.append('self_vehicle')
+                    updated = True
+                else:
+                    # Sync from plan
+                    if activity.self_vehicle != self_vehicle:
+                        activity.self_vehicle = self_vehicle
+                        update_fields.append('self_vehicle')
+                        updated = True
+
                 if 'students_expected' in request.data:
                     val = request.data.get('students_expected')
                     activity.students_expected = None if val in ('', 'null', 'undefined') else val
@@ -511,6 +542,7 @@ class SalesDailyPlanView(APIView):
                     update_fields.append('medium')
                     updated = True
                 if 'seminar_reference_by' in request.data:
+                    
                     val = request.data.get('seminar_reference_by')
                     activity.seminar_reference_by = '' if val in (None, 'null', 'undefined') else val
                     update_fields.append('seminar_reference_by')

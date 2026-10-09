@@ -282,7 +282,8 @@ class LeaveListCreateView(APIView):
             'reason': d['reason'],
         }
 
-        if role in ['counsellor', 'sales_senior_executive', 'sales_executive']:
+        applicant_primary_role = getattr(request.user, 'role', '')
+        if applicant_primary_role in ['counsellor', 'sales_senior_executive', 'sales_executive','tele_caller','associate_bdm','senior_tele_caller','deputy_bdm','senior_bdm']:
             # Sales team → notify cmo and super_admin
             cmo_q = User.objects.filter(get_role_filter_q('cmo'), is_active=True)
             sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
@@ -292,12 +293,12 @@ class LeaveListCreateView(APIView):
             if bid:
                 cmo_q = cmo_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
             approvers = (cmo_q | sa_q).distinct()
-        elif role == 'branch_manager':
+        elif applicant_primary_role == 'branch_manager':
             # BM's leave → notify only super_admin(s) in the same organization
             approvers = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
             if org:
                 approvers = approvers.filter(organization=org)
-        elif role == 'head_coordinator':
+        elif applicant_primary_role == 'head_coordinator':
             # HC's leave → notify branch_manager and super_admin
             bm_q = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
             sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
@@ -487,7 +488,7 @@ class LeaveApproveView(APIView):
             return Response({'success': False, 'message': 'Only pending leaves can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
-        applicant_role = _user_role(app.applied_by)
+        applicant_role = getattr(app.applied_by, 'role', '')
 
         # ── One-step approval: leave applied by branch_manager ──────────
         # Only super_admin can approve a branch_manager's leave (single step).
@@ -508,7 +509,7 @@ class LeaveApproveView(APIView):
 
 
         # ── Two-step approval ────────────────────────────
-        is_sales = applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive']
+        is_sales = applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller', 'associate_bdm', 'senior_tele_caller', 'deputy_bdm', 'senior_bdm']
         is_head_coordinator = applicant_role == 'head_coordinator'
         
         if is_sales:
@@ -564,7 +565,11 @@ class LeaveApproveView(APIView):
         # Step 2 Approval
         if role == step2_role:
             if not app.first_approver:
-                return Response({'success': False, 'message': f'First approval by {step1_role} is required.'}, status=status.HTTP_400_BAD_REQUEST)
+                if request.user.role == 'super_admin':
+                    app.first_approver = request.user
+                    app.first_approved_at = now
+                else:
+                    return Response({'success': False, 'message': f'First approval by {step1_role} is required.'}, status=status.HTTP_400_BAD_REQUEST)
             app.second_approver = request.user
             app.second_approved_at = now
             app.status = 'approved'
@@ -575,7 +580,7 @@ class LeaveApproveView(APIView):
             return Response({'success': True, 'message': 'Leave approved.'})
 
         # super_admin can do both steps at once (if not already Step 2 above)
-        if role == 'super_admin' and role != step2_role:
+        if request.user.role == 'super_admin' and role != step2_role:
             app.first_approver = app.first_approver or request.user
             app.first_approved_at = app.first_approved_at or now
             app.second_approver = request.user

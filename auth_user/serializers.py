@@ -61,7 +61,14 @@ class EmployeeFieldsMixin:
                 'accountant', 'house_keeping', 'security', 'faculty'
             ]
         
-        if role not in all_employee_roles:
+        additional_roles = getattr(instance, 'additional_roles', []) or []
+        is_employee = (role in all_employee_roles) or any(r in all_employee_roles for r in additional_roles)
+        is_faculty = (role == 'faculty') or ('faculty' in additional_roles)
+        is_paper_checker = (role == 'paper_checker') or ('paper_checker' in additional_roles)
+        is_exam_supervisor = (role == 'exam_supervisor') or ('exam_supervisor' in additional_roles)
+        is_examiner = (role == 'examiner') or ('examiner' in additional_roles)
+
+        if not is_employee:
             for f in EMPLOYEE_FIELDS:
                 ret.pop(f, None)
             if role == 'student':
@@ -69,8 +76,8 @@ class EmployeeFieldsMixin:
             elif role in ['parent', 'parents']:
                 ret['parent_id'] = getattr(instance, 'username', None)
             return ret
-            
-        if role != 'faculty':
+
+        if not is_faculty:
             for f in ['specialization', 'subject_expertise', 'employment_type', 'session_hours', 'levels']:
                 ret.pop(f, None)
         else:
@@ -101,14 +108,14 @@ class EmployeeFieldsMixin:
                 for ch in instance.faculty_chapters.select_related('subject').all()
             ] if hasattr(instance, 'faculty_chapters') else []
                 
-        if not (role == 'faculty' and emp_type in ['part_time', 'visiting']):
+        if not (is_faculty and emp_type in ['part_time', 'visiting']):
             ret.pop('hourly_rate', None)
             
-        exclude_salary = (role == 'faculty' and emp_type in ['part_time', 'visiting']) or role in ['paper_checker', 'exam_supervisor', 'examiner']
+        exclude_salary = (is_faculty and emp_type in ['part_time', 'visiting']) or is_paper_checker or is_exam_supervisor or is_examiner
         if exclude_salary:
             ret.pop('salary', None)
             
-        if role != 'paper_checker':
+        if not is_paper_checker:
             ret.pop('per_paper_rate', None)
             
         return ret
@@ -210,6 +217,8 @@ class EmployeeFieldsMixin:
             
         role = attrs.get('role', getattr(self.instance, 'role', None))
         emp_type = attrs.get('employment_type', getattr(self.instance, 'employment_type', None))
+        additional_roles = attrs.get('additional_roles', getattr(self.instance, 'additional_roles', []) or [])
+        is_faculty = (role == 'faculty') or ('faculty' in additional_roles)
         
         try:
             from payroll.utils import EMPLOYEE_ROLES
@@ -223,22 +232,29 @@ class EmployeeFieldsMixin:
                 'accountant', 'house_keeping', 'security', 'faculty'
             ]
 
-        if role not in all_employee_roles:
+        additional_roles = attrs.get('additional_roles', getattr(self.instance, 'additional_roles', []) or [])
+        is_employee = (role in all_employee_roles) or any(r in all_employee_roles for r in additional_roles)
+        is_faculty = (role == 'faculty') or ('faculty' in additional_roles)
+        is_paper_checker = (role == 'paper_checker') or ('paper_checker' in additional_roles)
+        is_exam_supervisor = (role == 'exam_supervisor') or ('exam_supervisor' in additional_roles)
+        is_examiner = (role == 'examiner') or ('examiner' in additional_roles)
+
+        if not is_employee:
             for f in EMPLOYEE_FIELDS:
                 attrs.pop(f, None)
         else:
-            if role != 'faculty':
+            if not is_faculty:
                 for f in ['specialization', 'subject_expertise', 'employment_type', 'session_hours']:
                     attrs.pop(f, None)
                         
-            if not (role == 'faculty' and emp_type in ['part_time', 'visiting']):
+            if not (is_faculty and emp_type in ['part_time', 'visiting']):
                 attrs.pop('hourly_rate', None)
                     
-            exclude_salary = (role == 'faculty' and emp_type in ['part_time', 'visiting']) or role in ['paper_checker', 'exam_supervisor', 'examiner']
+            exclude_salary = (is_faculty and emp_type in ['part_time', 'visiting']) or is_paper_checker or is_exam_supervisor or is_examiner
             if exclude_salary:
                 attrs.pop('salary', None)
                     
-            if role != 'paper_checker':
+            if not is_paper_checker:
                 attrs.pop('per_paper_rate', None)
                 
         return attrs
