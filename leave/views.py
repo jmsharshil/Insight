@@ -119,13 +119,21 @@ class LeaveListCreateView(APIView):
         d = ser.validated_data
         today = timezone.now().date()
 
-        # Role-specific restrictions (FRD §4.9.3): tele_caller/counsellor cannot apply in peak months
-        if role in ['tele_caller', 'counsellor']:
-            month = d['from_date'].month
-            if month in [3, 4, 5, 6]:
+        # Peak months restriction (April, May, June) for paid/sick leave, except for faculty
+        if role != 'faculty' and d.get('leave_type') in ['paid', 'sick']:
+            import datetime
+            curr = d['from_date']
+            has_restricted = False
+            while curr <= d.get('to_date', d['from_date']):
+                if curr.month in [4, 5, 6]:
+                    has_restricted = True
+                    break
+                curr += datetime.timedelta(days=1)
+                
+            if has_restricted:
                 return Response({
                     'success': False,
-                    'message': 'Leave applications blocked during peak admission months (Mar-Jun).'
+                    'message': 'Paid and Sick leave applications are blocked during April, May, and June for your role. You can only apply for Unpaid/Casual leave.'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         # Friday 12 PM deadline — only blocks leaves for the strictly NEXT calendar week
@@ -781,7 +789,7 @@ class LeaveBalanceView(APIView):
 
     def get(self, request):
         year = timezone.now().year
-        balances = LeaveBalance.objects.filter(user=request.user, year=year)
+        balances = LeaveBalance.objects.filter(user=request.user, year=year, leave_type__in=['paid', 'sick', 'casual'])
         
         if not balances.exists():
             bid = get_user_branch_id(request.user)
@@ -797,7 +805,7 @@ class LeaveBalanceView(APIView):
                 if branch:
                     from .utils import initialize_leave_balances_for_year
                     initialize_leave_balances_for_year(branch, year)
-                    balances = LeaveBalance.objects.filter(user=request.user, year=year)
+                    balances = LeaveBalance.objects.filter(user=request.user, year=year, leave_type__in=['paid', 'sick', 'casual'])
 
         return Response({'success': True, 'data': LeaveBalanceSerializer(balances, many=True).data})
 
@@ -815,7 +823,7 @@ class LeaveBalanceUserView(APIView):
         except ValueError:
             year = timezone.now().year
             
-        qs = LeaveBalance.objects.filter(user_id=user_id, year=year)
+        qs = LeaveBalance.objects.filter(user_id=user_id, year=year, leave_type__in=['paid', 'sick', 'casual'])
         if getattr(request.user, 'organization', None):
             qs = qs.filter(user__organization=request.user.organization)
             
@@ -835,7 +843,7 @@ class LeaveBalanceUserView(APIView):
                     if branch:
                         from .utils import initialize_leave_balances_for_year
                         initialize_leave_balances_for_year(branch, year)
-                        qs = LeaveBalance.objects.filter(user_id=user_id, year=year)
+                        qs = LeaveBalance.objects.filter(user_id=user_id, year=year, leave_type__in=['paid', 'sick', 'casual'])
                         if getattr(request.user, 'organization', None):
                             qs = qs.filter(user__organization=request.user.organization)
 

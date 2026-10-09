@@ -188,18 +188,6 @@ class LeaveApplicationCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({'to_date': 'to_date must be >= from_date.'})
         if data.get('is_half_day') and data['from_date'] != data['to_date']:
             raise serializers.ValidationError({'is_half_day': 'Half-day leave must be a single date.'})
-            
-        import datetime
-        leave_type = data.get('leave_type', 'casual')
-        if leave_type in ['paid', 'sick']:
-            curr = data['from_date']
-            while curr <= data['to_date']:
-                if curr.month in [4, 5, 6]:
-                    raise serializers.ValidationError(
-                        {"leave_type": "You cannot apply for Paid or Sick leave in April, May, or June. Only Unpaid/Casual leave is allowed."}
-                    )
-                curr += datetime.timedelta(days=1)
-                
         return data
 
 
