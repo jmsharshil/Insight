@@ -222,8 +222,9 @@ class LeaveListCreateView(APIView):
                 'message': "Total leave days calculated is 0. Please ensure you are not exclusively applying on Sundays or holidays."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Max 3 days limit
-        if d['leave_type'] not in ['sick', 'unpaid'] and total_days > Decimal(3):
+        # Max 3 days limit (sick, unpaid, and unconfigured casual leaves are exempt)
+        is_casual_unpaid = (d['leave_type'] == 'casual' and not policy)
+        if d['leave_type'] not in ['sick', 'unpaid'] and not is_casual_unpaid and total_days > Decimal(3):
             return Response({
                 'success': False,
                 'message': "Maximum 3 days of leave allowed at once for this leave type."
@@ -246,7 +247,8 @@ class LeaveListCreateView(APIView):
                 return Response({'success': False, 'message': f"Club leave cap exceeded (max {policy.max_club_days} days/year)."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Balance check
-        if d['leave_type'] != 'unpaid':
+        # Unpaid leave (and casual leave without a defined quota policy) does not require a leave balance
+        if d['leave_type'] != 'unpaid' and not is_casual_unpaid:
             balance = LeaveBalance.objects.filter(
                 user=request.user, leave_type=d['leave_type'], year=today.year,
             ).first()
@@ -389,7 +391,7 @@ class LeaveDetailView(APIView):
         if app is None:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
         role = _user_role(request.user)
-        if role not in ADMIN_ROLES and app.applied_by != request.user:
+        if role not in set(ADMIN_ROLES + LEAVE_APPROVE_ROLES) and app.applied_by != request.user:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         return Response({'success': True, 'data': LeaveApplicationDetailSerializer(app, context={'request': request}).data})
 

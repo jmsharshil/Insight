@@ -615,7 +615,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         while curr <= overlap_end:
             if curr.weekday() < 5:  # Only count weekdays for leaves
                 leave_dates_in_month.add(curr)
-                if l.leave_type == 'unpaid':
+                if l.leave_type in ['unpaid', 'casual']:
                     unpaid_leave_days += Decimal(1)
             curr += timedelta(days=1)
         leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
@@ -1053,7 +1053,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         while curr <= overlap_end:
             if curr.weekday() < 5:  # Only count weekdays for leaves
                 leave_dates_in_month.add(curr)
-                if l.leave_type == 'unpaid':
+                if l.leave_type in ['unpaid', 'casual']:
                     unpaid_leave_days += Decimal(1)
             curr += timedelta(days=1)
         leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
@@ -1504,7 +1504,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         while curr <= overlap_end:
             if curr.weekday() < 5:  # Only count weekdays for leaves
                 leave_dates_in_month.add(curr)
-                if l.leave_type == 'unpaid':
+                if l.leave_type in ['unpaid', 'casual']:
                     unpaid_leave_days += Decimal(1)
             curr += timedelta(days=1)
         leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
