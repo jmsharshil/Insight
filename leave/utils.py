@@ -11,11 +11,13 @@ logger = logging.getLogger(__name__)
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
     from chat.notifications import send_system_notification
     if recipient_user_id:
+        meta = dict(metadata or {})
+        meta.setdefault('skip_whatsapp', True)
         send_system_notification(
             user_id=str(recipient_user_id),
             title=title,
             body=body,
-            metadata=metadata,
+            metadata=meta,
             email_template=email_template,
             email_context=email_context,
             email_subject=email_subject,
@@ -678,23 +680,35 @@ def get_leave_approver_roles(applicant_role):
 def get_approvers_for_step(app, step_role):
     """
     Retrieves active User objects matching the given step_role for this leave application.
+    Focuses strictly on user's primary role (not additional_roles) so that approvers for
+    different steps (e.g. head_coordinator vs branch_manager) do not overlap inappropriately.
     Applies organization and branch filtering.
     """
     from django.contrib.auth import get_user_model
-    from core.utils import get_role_filter_q
     from django.db import models
 
     User = get_user_model()
     if not step_role:
         return User.objects.none()
 
-    qs = User.objects.filter(get_role_filter_q(step_role), is_active=True)
+    if step_role == 'branch_manager':
+        qs = User.objects.filter(
+            models.Q(role='branch_manager') | models.Q(role='admin_senior_executive'),
+            is_active=True
+        )
+    else:
+        qs = User.objects.filter(role=step_role, is_active=True)
+
     org = getattr(getattr(app, 'branch', None), 'organization', None) or getattr(app.applied_by, 'organization', None)
     if org:
         qs = qs.filter(organization=org)
 
     if app.branch_id and step_role != 'super_admin':
-        qs = qs.filter(models.Q(branch_id=app.branch_id) | models.Q(branch_id__isnull=True))
+        qs = qs.filter(
+            models.Q(branch_id=app.branch_id) |
+            models.Q(branch_id__isnull=True) |
+            models.Q(branches__id=app.branch_id)
+        )
 
     return qs.distinct()
 
@@ -880,30 +894,6 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
     from chat.notifications import send_whatsapp_text, send_whatsapp_with_fallback, send_system_notification
     from core.utils import get_user_role
 
-    User = get_user_model()
-    phone_clean = str(sender_wa_id or '').strip()
-    if phone_clean.startswith('+'):
-        phone_clean = phone_clean[1:]
-    phone_10 = phone_clean[2:] if (phone_clean.startswith('91') and len(phone_clean) == 12) else phone_clean
-
-    approver = User.objects.filter(
-        Q(phone=sender_wa_id) |
-        Q(phone=phone_clean) |
-        Q(phone=phone_10) |
-        Q(phone=f'+91{phone_10}') |
-        Q(phone=f'91{phone_10}') |
-        Q(phone=f'+{phone_clean}'),
-        is_active=True
-    ).first()
-
-    if not approver:
-        logger.warning("[WA EMP LEAVE] No active user found for sender_wa_id=%s", sender_wa_id)
-        send_whatsapp_text(
-            to=sender_wa_id,
-            body="Unauthorized: Your phone number is not registered as an authorized approver."
-        )
-        return True
-
     try:
         app = LeaveApplication.objects.select_related('applied_by', 'branch').get(id=leave_id)
     except (LeaveApplication.DoesNotExist, ValueError, TypeError):
@@ -921,6 +911,79 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         )
         return True
 
+    applicant_role = getattr(app.applied_by, 'role', '')
+    step1_role, step2_role = get_leave_approver_roles(applicant_role)
+
+    # Resolve approver user by sender phone number.
+    User = get_user_model()
+    phone_clean = str(sender_wa_id or '').strip()
+    if phone_clean.startswith('+'):
+        phone_clean = phone_clean[1:]
+    phone_10 = phone_clean[2:] if (phone_clean.startswith('91') and len(phone_clean) == 12) else phone_clean
+
+    candidates = list(User.objects.filter(
+        Q(phone=sender_wa_id) |
+        Q(phone=phone_clean) |
+        Q(phone=phone_10) |
+        Q(phone=f'+91{phone_10}') |
+        Q(phone=f'91{phone_10}') |
+        Q(phone=f'+{phone_clean}'),
+        is_active=True
+    ))
+
+    if not candidates:
+        logger.warning("[WA EMP LEAVE] No active user found for sender_wa_id=%s", sender_wa_id)
+        send_whatsapp_text(
+            to=sender_wa_id,
+            body="Unauthorized: Your phone number is not registered as an authorized approver."
+        )
+        return True
+
+    # Smart candidate selection:
+    # 1. Filter out the applicant if other candidates exist with the same phone
+    eligible_candidates = [u for u in candidates if u.id != app.applied_by_id] or candidates
+
+    def matches_step2(u):
+        if not step2_role:
+            return False
+        if u.role == step2_role or u.role == 'super_admin':
+            return True
+        if step2_role == 'branch_manager' and u.role in ('branch_manager', 'admin_senior_executive'):
+            return True
+        add_roles = getattr(u, 'additional_roles', None) or []
+        return step2_role in add_roles
+
+    def matches_step1(u):
+        if not step1_role:
+            return False
+        if u.role == step1_role or u.role == 'super_admin':
+            return True
+        add_roles = getattr(u, 'additional_roles', None) or []
+        return step1_role in add_roles
+
+    approver = None
+    if app.first_approver:
+        # Step 1 is already completed; find Step 2 approver first
+        for u in eligible_candidates:
+            if matches_step2(u):
+                approver = u
+                break
+    else:
+        # Step 1 is pending; find Step 1 approver first
+        for u in eligible_candidates:
+            if matches_step1(u):
+                approver = u
+                break
+
+    if not approver:
+        for u in eligible_candidates:
+            if matches_step2(u) or u.role in ('super_admin', 'branch_manager', 'admin_senior_executive'):
+                approver = u
+                break
+
+    if not approver:
+        approver = eligible_candidates[0]
+
     if app.applied_by == approver:
         send_whatsapp_text(
             to=sender_wa_id,
@@ -930,14 +993,15 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
 
     now = timezone.now()
     approver_role = get_user_role(approver)
-    applicant_role = getattr(app.applied_by, 'role', '')
-    step1_role, step2_role = get_leave_approver_roles(applicant_role)
+
+    is_step1_auth = matches_step1(approver) or (approver_role == step1_role)
+    is_step2_auth = matches_step2(approver) or (approver_role == step2_role)
 
     # ── Action: REJECT ──────────────────────────────────────────────
     if action == 'reject':
         is_authorized = (
-            approver_role in [step1_role, step2_role, 'super_admin'] or
-            approver.role == 'super_admin'
+            is_step1_auth or is_step2_auth or
+            approver.role in ('super_admin', 'branch_manager', 'admin_senior_executive')
         )
         if not is_authorized:
             send_whatsapp_text(
@@ -962,7 +1026,7 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
                 user_id=str(app.applied_by.id),
                 title="Leave Rejected",
                 body=f"Your {app.leave_type} leave was rejected by {approver.name}.",
-                metadata={"leave_id": str(app.id), "status": "rejected"},
+                metadata={"leave_id": str(app.id), "status": "rejected", "skip_whatsapp": True},
             )
             if getattr(app.applied_by, 'phone', None):
                 send_whatsapp_with_fallback(
@@ -1012,15 +1076,38 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         )
         return True
 
-    # Case B: Step 1 Approval
-    if approver_role == step1_role:
-        if app.first_approver:
+    # Case B: If Step 1 has already been approved, proceed to Step 2 if authorized!
+    if app.first_approver:
+        if is_step2_auth:
+            app.second_approver = approver
+            app.second_approved_at = now
+            app.status = 'approved'
+            app.reviewed_by = approver
+            app.reviewed_at = now
+            app.save()
+
+            finalize_leave_approval(app, approver, now)
+
             send_whatsapp_text(
                 to=sender_wa_id,
-                body=f"Step 1 approval for {applicant_name}'s leave has already been completed."
+                body=f"✅ Leave application for {applicant_name} is now fully APPROVED."
             )
             return True
+        else:
+            if is_step1_auth:
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body=f"Step 1 approval for {applicant_name}'s leave has already been completed."
+                )
+            else:
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body="Permission denied: You are not authorized to approve this leave request."
+                )
+            return True
 
+    # Case C: Step 1 is NOT yet approved
+    if is_step1_auth:
         app.first_approver = approver
         app.first_approved_at = now
         app.save(update_fields=['first_approver', 'first_approved_at'])
@@ -1044,7 +1131,7 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
                 str(u.id),
                 title="Leave awaiting your approval",
                 body=f"{applicant_name} leave approved by {approver_role}. Your approval needed.",
-                metadata={"leave_id": str(app.id), "approval_step": 2},
+                metadata={"leave_id": str(app.id), "approval_step": 2, "skip_whatsapp": True},
                 email_template='emails/leave_applied.html',
                 email_context={
                     'applicant_name': applicant_name,
@@ -1059,34 +1146,32 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
 
         return True
 
-    # Case C: Step 2 Approval (or super_admin finalization)
-    if approver_role == step2_role or approver.role == 'super_admin':
-        if not app.first_approver:
-            if approver.role == 'super_admin':
-                # Super Admin bypass: complete both steps directly
-                app.first_approver = approver
-                app.first_approved_at = now
-            else:
-                send_whatsapp_text(
-                    to=sender_wa_id,
-                    body=f"First approval by {step1_role} is required before Step 2 approval."
-                )
-                return True
+    # Case D: Step 2 approver or super_admin clicks while Step 1 is still pending
+    if is_step2_auth:
+        if approver.role == 'super_admin':
+            # Super Admin bypass: complete both steps directly
+            app.first_approver = approver
+            app.first_approved_at = now
+            app.second_approver = approver
+            app.second_approved_at = now
+            app.status = 'approved'
+            app.reviewed_by = approver
+            app.reviewed_at = now
+            app.save()
 
-        app.second_approver = approver
-        app.second_approved_at = now
-        app.status = 'approved'
-        app.reviewed_by = approver
-        app.reviewed_at = now
-        app.save()
+            finalize_leave_approval(app, approver, now)
 
-        finalize_leave_approval(app, approver, now)
-
-        send_whatsapp_text(
-            to=sender_wa_id,
-            body=f"✅ Leave application for {applicant_name} is now fully APPROVED."
-        )
-        return True
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body=f"✅ Leave application for {applicant_name} is now fully APPROVED."
+            )
+            return True
+        else:
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body=f"First approval by {step1_role} is required before Step 2 approval."
+            )
+            return True
 
     send_whatsapp_text(
         to=sender_wa_id,

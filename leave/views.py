@@ -42,11 +42,13 @@ def _user_role(user):
 def notify(recipient_user_id, title, body, metadata=None, email_template=None, email_context=None, email_subject=None):
     from chat.notifications import send_system_notification
     if recipient_user_id:
+        meta = dict(metadata or {})
+        meta.setdefault('skip_whatsapp', True)
         send_system_notification(
             user_id=str(recipient_user_id),
             title=title,
             body=body,
-            metadata=metadata,
+            metadata=meta,
             email_template=email_template,
             email_context=email_context,
             email_subject=email_subject,
@@ -487,11 +489,8 @@ class LeaveApproveView(APIView):
             app.save(update_fields=['first_approver', 'first_approved_at'])
 
             # Push notification to Step 2 Approvers
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            step2_users = User.objects.filter(get_role_filter_q(step2_role), is_active=True)
-            if app.branch_id and step2_role != 'super_admin':
-                step2_users = step2_users.filter(models.Q(branch_id=app.branch_id) | models.Q(branch_id__isnull=True, organization_id=app.branch.organization_id))
+            from .utils import get_approvers_for_step
+            step2_users = get_approvers_for_step(app, step2_role)
 
             if not step2_users.exists():
                 # Auto-approve if no step 2 user exists
