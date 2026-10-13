@@ -293,45 +293,11 @@ class LeaveListCreateView(APIView):
         }
 
         applicant_primary_role = getattr(request.user, 'role', '')
-        if applicant_primary_role in ['counsellor', 'sales_senior_executive', 'sales_executive','tele_caller','associate_bdm','senior_tele_caller','deputy_bdm','senior_bdm']:
-            # Sales team → notify cmo and super_admin
-            cmo_q = User.objects.filter(get_role_filter_q('cmo'), is_active=True)
-            sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
-            if org:
-                cmo_q = cmo_q.filter(organization=org)
-                sa_q = sa_q.filter(organization=org)
-            if bid:
-                cmo_q = cmo_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
-            approvers = (cmo_q | sa_q).distinct()
-        elif applicant_primary_role == 'branch_manager':
-            # BM's leave → notify only super_admin(s) in the same organization
-            approvers = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
-            if org:
-                approvers = approvers.filter(organization=org)
-        elif applicant_primary_role == 'head_coordinator':
-            # HC's leave → notify branch_manager and super_admin
-            bm_q = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
-            sa_q = User.objects.filter(get_role_filter_q('super_admin'), is_active=True)
-            if org:
-                bm_q = bm_q.filter(organization=org)
-                sa_q = sa_q.filter(organization=org)
-            if bid:
-                bm_q = bm_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
-            approvers = (bm_q | sa_q).distinct()
+        from .utils import get_leave_approver_roles, get_approvers_for_step, send_employee_leave_whatsapp_notification
+        step1_role, step2_role = get_leave_approver_roles(applicant_primary_role)
+        step1_approvers = get_approvers_for_step(app, step1_role)
 
-        else:
-            # Regular staff → notify head_coordinator and branch_manager
-            hc_q = User.objects.filter(get_role_filter_q('head_coordinator'), is_active=True)
-            bm_q = User.objects.filter(get_role_filter_q('branch_manager'), is_active=True)
-            if org:
-                hc_q = hc_q.filter(organization=org)
-                bm_q = bm_q.filter(organization=org)
-            if bid:
-                hc_q = hc_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
-                bm_q = bm_q.filter(models.Q(branch_id=bid) | models.Q(branch_id__isnull=True))
-            approvers = (hc_q | bm_q).distinct()
-
-        for approver in approvers:
+        for approver in step1_approvers:
             notify(
                 str(approver.id),
                 title="Leave request pending approval",
@@ -340,27 +306,9 @@ class LeaveListCreateView(APIView):
                 email_template='emails/leave_applied.html',
                 email_context=notif_ctx,
             )
-            # WhatsApp: leave_applied_ to each approver
+            # WhatsApp: leave_applied_ with [Approve] & [Reject] buttons to Step 1 approver
             try:
-                if getattr(approver, 'phone', None):
-                    from chat.notifications import send_whatsapp_with_fallback
-                    send_whatsapp_with_fallback(
-                        to=approver.phone,
-                        template_name="leave_applied_",
-                        language_code="en",
-                        components=[{
-                            "type": "body",
-                            "parameters": [
-                                {"type": "text", "text": request.user.name},
-                                {"type": "text", "text": d['leave_type']},
-                                {"type": "text", "text": str(d['from_date'])},
-                                {"type": "text", "text": str(d['to_date'])},
-                                {"type": "text", "text": d['reason'][:100]},
-                            ]
-                        }],
-                        fallback_body=notif_body,
-                        user_id=str(approver.id),
-                    )
+                send_employee_leave_whatsapp_notification(app, approver, approval_step=1)
             except Exception as wa_err:
                 logger.error(f"[Leave Applied] WhatsApp to approver {approver.id} failed: {wa_err}")
 
@@ -569,6 +517,11 @@ class LeaveApproveView(APIView):
                         'reason': app.reason
                     }
                 )
+                try:
+                    from .utils import send_employee_leave_whatsapp_notification
+                    send_employee_leave_whatsapp_notification(app, u, approval_step=2)
+                except Exception as wa_err:
+                    logger.error(f"[Leave Step 2] WhatsApp to approver {u.id} failed: {wa_err}")
 
             return Response({'success': True, 'message': f'First approval done. Awaiting {step2_role}.'})
 

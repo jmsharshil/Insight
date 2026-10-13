@@ -103,14 +103,20 @@ class WhatsAppWebhookView(View):
         # ── Forward Webhook to CRM (Option 1) ──
         forward_url = getattr(settings, 'WHATSAPP_CRM_WEBHOOK_URL', None)
         if forward_url:
-            try:
-                import requests
-                # Fire and forget request to forward the webhook
-                # Using a short timeout so we don't block responding to Meta
-                requests.post(forward_url, json=body, timeout=5)
-                logger.info(f"[WHATSAPP WEBHOOK] Forwarded payload to {forward_url}")
-            except Exception as e:
-                logger.error(f"[WHATSAPP WEBHOOK] Failed to forward to {forward_url}: {e}")
+            def _forward_to_crm(p_body, p_headers):
+                try:
+                    import requests
+                    f_headers = {'Content-Type': 'application/json'}
+                    if 'X-Hub-Signature-256' in p_headers:
+                        f_headers['X-Hub-Signature-256'] = p_headers['X-Hub-Signature-256']
+                    requests.post(forward_url, json=p_body, headers=f_headers, timeout=10)
+                    logger.info(f"[WHATSAPP WEBHOOK] Forwarded payload to {forward_url}")
+                except Exception as e:
+                    logger.error(f"[WHATSAPP WEBHOOK] Failed to forward to {forward_url}: {e}")
+
+            import threading
+            req_headers = dict(request.headers)
+            threading.Thread(target=_forward_to_crm, args=(body, req_headers), daemon=True).start()
 
         for entry in body.get('entry', []):
             for change in entry.get('changes', []):
@@ -218,10 +224,12 @@ class WhatsAppWebhookView(View):
         )
 
         try:
-            from leave.utils import handle_student_leave_whatsapp_approval
-            handle_student_leave_whatsapp_approval(sender_wa_id, text_body, text_body)
+            from leave.utils import handle_employee_leave_whatsapp_approval, handle_student_leave_whatsapp_approval
+            handled = handle_employee_leave_whatsapp_approval(sender_wa_id, text_body, text_body)
+            if not handled:
+                handle_student_leave_whatsapp_approval(sender_wa_id, text_body, text_body)
         except Exception as e:
-            logger.error("[WHATSAPP WEBHOOK] Error in student leave text approval handler: %s", e)
+            logger.error("[WHATSAPP WEBHOOK] Error in leave text approval handler: %s", e)
 
     def _on_media_message(self, sender_wa_id, sender_name, media_type, media_data, msg_id):
         """Handle an incoming media message (image, document, video, audio)."""
@@ -283,10 +291,12 @@ class WhatsAppWebhookView(View):
         )
 
         try:
-            from leave.utils import handle_student_leave_whatsapp_approval
-            handle_student_leave_whatsapp_approval(sender_wa_id, reply_id, reply_title)
+            from leave.utils import handle_employee_leave_whatsapp_approval, handle_student_leave_whatsapp_approval
+            handled = handle_employee_leave_whatsapp_approval(sender_wa_id, reply_id, reply_title)
+            if not handled:
+                handle_student_leave_whatsapp_approval(sender_wa_id, reply_id, reply_title)
         except Exception as e:
-            logger.error("[WHATSAPP WEBHOOK] Error in student leave interactive approval handler: %s", e)
+            logger.error("[WHATSAPP WEBHOOK] Error in leave interactive approval handler: %s", e)
 
     def _on_button_reply(self, sender_wa_id, sender_name, button_data, msg_id):
         """Handle template quick-reply button responses."""
@@ -304,10 +314,12 @@ class WhatsAppWebhookView(View):
         )
 
         try:
-            from leave.utils import handle_student_leave_whatsapp_approval
-            handle_student_leave_whatsapp_approval(sender_wa_id, payload, text)
+            from leave.utils import handle_employee_leave_whatsapp_approval, handle_student_leave_whatsapp_approval
+            handled = handle_employee_leave_whatsapp_approval(sender_wa_id, payload, text)
+            if not handled:
+                handle_student_leave_whatsapp_approval(sender_wa_id, payload, text)
         except Exception as e:
-            logger.error("[WHATSAPP WEBHOOK] Error in student leave button approval handler: %s", e)
+            logger.error("[WHATSAPP WEBHOOK] Error in leave button approval handler: %s", e)
 
     def _on_reaction(self, sender_wa_id, sender_name, reaction_data, msg_id):
         """Handle emoji reactions to messages."""
