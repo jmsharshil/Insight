@@ -136,8 +136,29 @@ def _setup_payment_bank_and_notify(admission):
     if getattr(admission, 'bank_account', None):
         return  # already assigned
 
+    from decimal import Decimal
     payment_amount = _get_bank_selection_amount(admission)
-    eligible_banks = select_bank_accounts_for_payment(payment_amount)
+
+    # Razorpay amount = total_amount - token_amount (10000) in all cases.
+    # If a fee_structure is attached use its total_amount, otherwise use
+    # the computed payment_amount from _get_bank_selection_amount.
+    TOKEN_AMOUNT = Decimal('10000')
+    if getattr(admission, 'fee_structure', None):
+        fs = admission.fee_structure
+        amount_to_pay = Decimal(str(fs.total_amount)) - TOKEN_AMOUNT
+    else:
+        amount_to_pay = Decimal(str(payment_amount)) - TOKEN_AMOUNT
+
+    # Fallback to default amounts if the resulting amount is zero or negative
+    if amount_to_pay <= 0:
+        default_course_fees = {
+            'cseet': Decimal('1000'),
+            'cs_executive': Decimal('2000'),
+            'cs_professional': Decimal('5000'),
+        }
+        amount_to_pay = default_course_fees.get(admission.course, Decimal('1'))
+
+    eligible_banks = select_bank_accounts_for_payment(amount_to_pay)
     if not eligible_banks:
         eligible_banks = list(BankAccount.objects.filter(is_active=True))
     if not eligible_banks:
@@ -153,22 +174,6 @@ def _setup_payment_bank_and_notify(admission):
         changed_by=None,
         note='Form submitted. Waiting for fee payment.',
     )
-    
-    amount_to_pay = payment_amount
-    if getattr(admission, 'fee_structure', None):
-        fs = admission.fee_structure
-        # User requested: razorpay amount should be fee_structue.total_amount - token_amount, with token_amount=10000 for now
-        token_amount = 10000
-        amount_to_pay = fs.total_amount - token_amount
-
-    # Fallback to default amounts for testing if amount is zero
-    if amount_to_pay <= 0:
-        default_course_fees = {
-            'cseet': 1000,
-            'cs_executive': 2000,
-            'cs_professional': 5000,
-        }
-        amount_to_pay = default_course_fees.get(admission.course, 1)
 
     print("Amount to pay..........",amount_to_pay)
     razorpay_link_url = ""
@@ -452,10 +457,10 @@ class AdmissionDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check if the student has already filled out the form.
-        # (Auto-created admissions have dob=None until the student submits the form)
+        # Check if the student has already submitted the form.
+        # After first POST submission, bank is assigned and status moves to 'payment_pending'.
         is_student_form_submit = (request.method == 'POST')
-        if is_student_form_submit and admission.dob is not None:
+        if is_student_form_submit and admission.status != 'form_pending':
             return Response(
                 {'success': False, 'message': 'You have already submitted this admission form.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -470,8 +475,7 @@ class AdmissionDetailView(APIView):
         serializer.save()
         _assign_fee_structure(admission)
 
-        # Auto-assign bank and send payment email directly if form is submitted
-        if admission.status == 'form_pending' and admission.dob is not None:
+        if is_student_form_submit and admission.status == 'form_pending':
             _setup_payment_bank_and_notify(admission)
 
         return Response(
