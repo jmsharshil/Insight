@@ -53,6 +53,7 @@ class StudentService:
             father_name = admission.father_name,
             mother_name = admission.mother_name,
             dob         = admission.dob,
+            gender      = admission.gender or '',
             category    = admission.category,
 
             # Contact

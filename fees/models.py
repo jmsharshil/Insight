@@ -60,9 +60,9 @@ class FeeStructure(models.Model):
         'batches.CourseLevel', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
     )
-    attempt     = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True)
+    attempt     = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True,null=True)
     # Only for CS Executive / CS Professional
-    group_module = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES, blank=True)
+    group_module = models.CharField(max_length=20, choices=GROUP_MODULE_CHOICES, blank=True,null=True)
     year        = models.PositiveSmallIntegerField(null=True, blank=True)
     total_amount = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,

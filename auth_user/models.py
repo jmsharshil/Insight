@@ -4,7 +4,9 @@ import uuid
 import random
 import secrets
 from datetime import timedelta
+from decimal import Decimal
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 
 LEVEL_CHOICES = [('executive', 'Executive'), ('professional', 'Professional')]
 EMPLOYMENT_TYPE_CHOICES = [
@@ -33,6 +35,11 @@ class UserManager(BaseUserManager):
         if not email:
             raise ValueError("Email is required")
         email = self.normalize_email(email)
+        phone = extra_fields.get('phone')
+        if phone:
+            extra_fields['phone'] = str(phone).strip()
+        elif phone == '':
+            extra_fields['phone'] = None
         user = self.model(username=username,email=email,role=role,**extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -78,7 +85,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     organization = models.ForeignKey(Organization,on_delete=models.CASCADE,related_name='users',null=True,blank=True)
     username = models.CharField(max_length=100,unique=True)
     email = models.EmailField()
-    phone = models.CharField(max_length=15)
+    phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=50,choices=ROLE_CHOICES,default='student')
     branch = models.ForeignKey('branch.Branch', null=True, blank=True, on_delete=models.SET_NULL, related_name='users',)
@@ -132,10 +139,35 @@ class User(AbstractBaseUser, PermissionsMixin):
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['email']
 
+    def clean(self):
+        super().clean()
+        if self.phone:
+            self.phone = self.phone.strip()
+            qs = User.objects.filter(phone=self.phone)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError({'phone': 'User with this phone number already exists.'})
+
     def save(self, *args, **kwargs):
         # Auto-generate employee_id if not set, mirroring FacultyProfile logic
         if not self.employee_id or self.employee_id != self.username:
             self.employee_id = self.username
+        if self.phone:
+            self.phone = self.phone.strip()
+        elif self.phone == '':
+            self.phone = None
+
+        if (self.working_hours is None or Decimal(str(self.working_hours)) == 0) and self.work_start_time and self.work_end_time:
+            from auth_user.utils import calculate_working_hours
+            calculated_hours = calculate_working_hours(self.work_start_time, self.work_end_time)
+            if calculated_hours > 0:
+                self.working_hours = calculated_hours
+                if kwargs.get('update_fields') is not None:
+                    update_fields = set(kwargs['update_fields'])
+                    update_fields.add('working_hours')
+                    kwargs['update_fields'] = update_fields
+
         super().save(*args, **kwargs)
 
     def get_all_roles(self):

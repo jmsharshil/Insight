@@ -1,4 +1,5 @@
 import logging
+import uuid
 import datetime
 from datetime import timedelta
 from django.utils import timezone
@@ -8,7 +9,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from core.utils import apply_filters
+from core.utils import apply_filters, get_user_branch_ids
 from django.db.models import Avg, Count, F, Q, ExpressionWrapper, FloatField, Max, Min
 from django.db.models.functions import Coalesce
 import csv
@@ -43,6 +44,237 @@ QUERY_ROLES = ['super_admin', 'paper_checker', 'admin_senior_executive']
 def _user_role(user):
     from core.utils import get_user_role
     return get_user_role(user)
+
+
+def _is_valid_uuid(val):
+    if not val:
+        return False
+    try:
+        uuid.UUID(str(val).strip())
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def _parse_filter_date(val):
+    if not val:
+        return None, None
+    if isinstance(val, (datetime.date, datetime.datetime)):
+        return (val.date() if isinstance(val, datetime.datetime) else val), None
+    clean = str(val).strip()
+    if not clean:
+        return None, None
+    clean = clean.split('T')[0].split(' ')[0]
+    try:
+        return datetime.date.fromisoformat(clean), None
+    except (ValueError, TypeError):
+        return None, f"Invalid date format: '{val}'. Expected YYYY-MM-DD."
+
+
+def apply_exam_filters_to_results(qs, request):
+    """
+    Applies branch wise, batch wise, subject wise, mode wise, type wise,
+    status wise, and date filters across PublishedResult (via exam__ relation),
+    mirroring the filters on /api/v1/exams/.
+    """
+    org = getattr(request.user, 'organization', None)
+    if org:
+        qs = qs.filter(exam__branch__organization=org)
+
+    role = _user_role(request.user)
+    if role != 'super_admin' and getattr(request.user, 'is_authenticated', False):
+        branch_ids = get_user_branch_ids(request.user)
+        if branch_ids is not None:
+            qs = qs.filter(exam__branch_id__in=branch_ids)
+
+    # 1. Branch filter (branch_id / branch)
+    branch_val = (request.query_params.get('branch_id') or request.query_params.get('branch') or '').strip()
+    if branch_val:
+        if _is_valid_uuid(branch_val):
+            qs = qs.filter(exam__branch_id=branch_val)
+        else:
+            qs = qs.filter(exam__branch__name__iexact=branch_val)
+
+    # 2. Batch filter (batch_id / batch)
+    batch_val = (request.query_params.get('batch_id') or request.query_params.get('batch') or '').strip()
+    if batch_val:
+        if _is_valid_uuid(batch_val):
+            qs = qs.filter(exam__batch_id=batch_val)
+        else:
+            qs = qs.filter(exam__batch__name__iexact=batch_val)
+
+    # 3. Subject filter (subject_id / subject)
+    subject_val = (request.query_params.get('subject_id') or request.query_params.get('subject') or '').strip()
+    if subject_val:
+        if _is_valid_uuid(subject_val):
+            qs = qs.filter(exam__subject_id=subject_val)
+        else:
+            qs = qs.filter(exam__subject__name__iexact=subject_val)
+
+    # 4. Faculty filter (faculty_id / faculty)
+    faculty_val = (request.query_params.get('faculty_id') or request.query_params.get('faculty') or '').strip()
+    if faculty_val:
+        if _is_valid_uuid(faculty_val):
+            qs = qs.filter(exam__faculty_id=faculty_val)
+        else:
+            qs = qs.filter(exam__faculty__user__name__icontains=faculty_val)
+
+    # 5. Mode filter (exam_mode / mode)
+    mode_val = (request.query_params.get('exam_mode') or request.query_params.get('mode') or '').strip()
+    if mode_val:
+        qs = qs.filter(exam__exam_mode__iexact=mode_val)
+
+    # 6. Type filter (exam_type / type)
+    type_val = (request.query_params.get('exam_type') or request.query_params.get('type') or '').strip()
+    if type_val:
+        qs = qs.filter(exam__exam_type__iexact=type_val)
+
+    # 7. Status filter (status / exam_status)
+    status_val = (request.query_params.get('status') or request.query_params.get('exam_status') or '').strip()
+    if status_val:
+        qs = qs.filter(exam__status__iexact=status_val)
+
+    # 8. Date filter (exact scheduled_date / date)
+    date_val = (request.query_params.get('scheduled_date') or request.query_params.get('date') or '').strip()
+    if date_val:
+        d_obj, err = _parse_filter_date(date_val)
+        if err:
+            return qs, err
+        qs = qs.filter(exam__scheduled_date=d_obj)
+
+    # Date range - from (date_from / from_date / start_date / scheduled_date__gte)
+    date_from = (request.query_params.get('date_from') or request.query_params.get('from_date') or request.query_params.get('start_date') or request.query_params.get('scheduled_date__gte') or '').strip()
+    if date_from:
+        d_obj, err = _parse_filter_date(date_from)
+        if err:
+            return qs, err
+        qs = qs.filter(exam__scheduled_date__gte=d_obj)
+
+    # Date range - to (date_to / to_date / end_date / scheduled_date__lte)
+    date_to = (request.query_params.get('date_to') or request.query_params.get('to_date') or request.query_params.get('end_date') or request.query_params.get('scheduled_date__lte') or '').strip()
+    if date_to:
+        d_obj, err = _parse_filter_date(date_to)
+        if err:
+            return qs, err
+        qs = qs.filter(exam__scheduled_date__lte=d_obj)
+
+    # 9. Exam filter (exam_id / exam)
+    exam_val = (request.query_params.get('exam_id') or request.query_params.get('exam') or '').strip()
+    if exam_val:
+        if _is_valid_uuid(exam_val):
+            qs = qs.filter(exam_id=exam_val)
+        else:
+            qs = qs.filter(exam__title__icontains=exam_val)
+
+    # 10. Search filter (exam title or subject name)
+    search_val = (request.query_params.get('search') or '').strip()
+    if search_val:
+        qs = qs.filter(Q(exam__title__icontains=search_val) | Q(exam__subject__name__icontains=search_val))
+
+    return qs, None
+
+
+def apply_exam_filters_to_exams(qs, request):
+    """
+    Applies branch wise, batch wise, subject wise, mode wise, type wise,
+    status wise, and date filters directly on Exam queryset,
+    mirroring the filters on /api/v1/exams/.
+    """
+    org = getattr(request.user, 'organization', None)
+    if org:
+        qs = qs.filter(branch__organization=org)
+
+    role = _user_role(request.user)
+    if role != 'super_admin' and getattr(request.user, 'is_authenticated', False):
+        branch_ids = get_user_branch_ids(request.user)
+        if branch_ids is not None:
+            qs = qs.filter(branch_id__in=branch_ids)
+
+    # 1. Branch filter (branch_id / branch)
+    branch_val = (request.query_params.get('branch_id') or request.query_params.get('branch') or '').strip()
+    if branch_val:
+        if _is_valid_uuid(branch_val):
+            qs = qs.filter(branch_id=branch_val)
+        else:
+            qs = qs.filter(branch__name__iexact=branch_val)
+
+    # 2. Batch filter (batch_id / batch)
+    batch_val = (request.query_params.get('batch_id') or request.query_params.get('batch') or '').strip()
+    if batch_val:
+        if _is_valid_uuid(batch_val):
+            qs = qs.filter(batch_id=batch_val)
+        else:
+            qs = qs.filter(batch__name__iexact=batch_val)
+
+    # 3. Subject filter (subject_id / subject)
+    subject_val = (request.query_params.get('subject_id') or request.query_params.get('subject') or '').strip()
+    if subject_val:
+        if _is_valid_uuid(subject_val):
+            qs = qs.filter(subject_id=subject_val)
+        else:
+            qs = qs.filter(subject__name__iexact=subject_val)
+
+    # 4. Faculty filter (faculty_id / faculty)
+    faculty_val = (request.query_params.get('faculty_id') or request.query_params.get('faculty') or '').strip()
+    if faculty_val:
+        if _is_valid_uuid(faculty_val):
+            qs = qs.filter(faculty_id=faculty_val)
+        else:
+            qs = qs.filter(faculty__user__name__icontains=faculty_val)
+
+    # 5. Mode filter (exam_mode / mode)
+    mode_val = (request.query_params.get('exam_mode') or request.query_params.get('mode') or '').strip()
+    if mode_val:
+        qs = qs.filter(exam_mode__iexact=mode_val)
+
+    # 6. Type filter (exam_type / type)
+    type_val = (request.query_params.get('exam_type') or request.query_params.get('type') or '').strip()
+    if type_val:
+        qs = qs.filter(exam_type__iexact=type_val)
+
+    # 7. Status filter (status / exam_status)
+    status_val = (request.query_params.get('status') or request.query_params.get('exam_status') or '').strip()
+    if status_val:
+        qs = qs.filter(status__iexact=status_val)
+
+    # 8. Date filter (exact scheduled_date / date)
+    date_val = (request.query_params.get('scheduled_date') or request.query_params.get('date') or '').strip()
+    if date_val:
+        d_obj, err = _parse_filter_date(date_val)
+        if err:
+            return qs, err
+        qs = qs.filter(scheduled_date=d_obj)
+
+    # Date range - from (date_from / from_date / start_date / scheduled_date__gte)
+    date_from = (request.query_params.get('date_from') or request.query_params.get('from_date') or request.query_params.get('start_date') or request.query_params.get('scheduled_date__gte') or '').strip()
+    if date_from:
+        d_obj, err = _parse_filter_date(date_from)
+        if err:
+            return qs, err
+        qs = qs.filter(scheduled_date__gte=d_obj)
+
+    # Date range - to (date_to / to_date / end_date / scheduled_date__lte)
+    date_to = (request.query_params.get('date_to') or request.query_params.get('to_date') or request.query_params.get('end_date') or request.query_params.get('scheduled_date__lte') or '').strip()
+    if date_to:
+        d_obj, err = _parse_filter_date(date_to)
+        if err:
+            return qs, err
+        qs = qs.filter(scheduled_date__lte=d_obj)
+
+    # 9. Exam filter (exam_id / exam)
+    exam_val = (request.query_params.get('exam_id') or request.query_params.get('exam') or '').strip()
+    if exam_val:
+        if _is_valid_uuid(exam_val):
+            qs = qs.filter(id=exam_val)
+        else:
+            qs = qs.filter(title__icontains=exam_val)
+
+    # 10. Search filter (exam title or subject name)
+    search_val = (request.query_params.get('search') or '').strip()
+    if search_val:
+        qs = qs.filter(Q(title__icontains=search_val) | Q(subject__name__icontains=search_val))
+
+    return qs, None
 
 
 def build_exam_export_workbook(rows):
@@ -1120,10 +1352,15 @@ class RecheckRequestActionView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SubjectWiseResultView(APIView):
-    """GET /results/subject-wise/?subject_id=...&batch_id=...&exam_id=...
+    """GET /results/subject-wise/?subject_id=...&batch_id=...&branch_id=...&exam_mode=...&exam_type=...&status=...&scheduled_date=...
     Aggregates results by subject (via Exam.subject). Groups ONLY by subject
     to eliminate duplication (overall across exams/batches unless filtered).
+    Supports filters: branch wise, batch wise, subject wise, mode wise, type wise, status wise, date filter.
     """
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['exam_mode', 'exam_type', 'status', 'batch_id', 'scheduled_date', 'branch_id', 'subject_id']
+    search_fields = ['exam__title', 'exam__subject__name']
+
     def get(self, request):
         role = _user_role(request.user)
         if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
@@ -1136,19 +1373,9 @@ class SubjectWiseResultView(APIView):
             exam__is_deleted=False,
         )
 
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(exam__branch__organization=request.user.organization)
-
-        # Apply filters (narrows scope before grouping)
-        subject_id = request.query_params.get('subject_id')
-        batch_id = request.query_params.get('batch_id')
-        exam_id = request.query_params.get('exam_id')
-        if subject_id:
-            qs = qs.filter(exam__subject_id=subject_id)
-        if batch_id:
-            qs = qs.filter(exam__batch_id=batch_id)
-        if exam_id:
-            qs = qs.filter(exam_id=exam_id)
+        qs, err = apply_exam_filters_to_results(qs, request)
+        if err:
+            return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
         # Pre-annotate for grouping by subject only (no dupes)
         qs = qs.annotate(
@@ -1181,10 +1408,15 @@ class SubjectWiseResultView(APIView):
 
 
 class FacultyWiseResultView(APIView):
-    """GET /results/faculty-wise/?faculty_id=...&subject_id=...&batch_id=...
+    """GET /results/faculty-wise/?faculty_id=...&subject_id=...&batch_id=...&branch_id=...&exam_mode=...&exam_type=...&status=...&scheduled_date=...
     Aggregates by faculty ONLY (via Exam.faculty) — one record per faculty
     with overall results across all subjects/batches/exams (unless filtered).
+    Supports filters: branch wise, batch wise, subject wise, mode wise, type wise, status wise, date filter.
     """
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['exam_mode', 'exam_type', 'status', 'batch_id', 'scheduled_date', 'branch_id', 'subject_id']
+    search_fields = ['exam__title', 'exam__faculty__user__name', 'exam__subject__name']
+
     def get(self, request):
         role = _user_role(request.user)
         if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
@@ -1197,22 +1429,9 @@ class FacultyWiseResultView(APIView):
             exam__is_deleted=False,
         )
 
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(exam__branch__organization=request.user.organization)
-
-        # Apply filters (narrows scope before grouping)
-        faculty_id = request.query_params.get('faculty_id')
-        subject_id = request.query_params.get('subject_id')
-        batch_id = request.query_params.get('batch_id')
-        exam_id = request.query_params.get('exam_id')
-        if faculty_id:
-            qs = qs.filter(exam__faculty_id=faculty_id)
-        if subject_id:
-            qs = qs.filter(exam__subject_id=subject_id)
-        if batch_id:
-            qs = qs.filter(exam__batch_id=batch_id)
-        if exam_id:
-            qs = qs.filter(exam_id=exam_id)
+        qs, err = apply_exam_filters_to_results(qs, request)
+        if err:
+            return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
         # Pre-annotate for grouping by faculty only (one record per faculty)
         qs = qs.annotate(
@@ -1244,9 +1463,14 @@ class FacultyWiseResultView(APIView):
 
 
 class BatchWiseResultView(APIView):
-    """GET /results/batch-wise/?batch_id=...&subject_id=...
+    """GET /results/batch-wise/?batch_id=...&subject_id=...&branch_id=...&exam_mode=...&exam_type=...&status=...&scheduled_date=...
     Aggregates overall results by batch (via Exam.batch) across ALL exams and subjects.
+    Supports filters: branch wise, batch wise, subject wise, mode wise, type wise, status wise, date filter.
     """
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['exam_mode', 'exam_type', 'status', 'batch_id', 'scheduled_date', 'branch_id', 'subject_id']
+    search_fields = ['exam__title', 'exam__batch__name', 'exam__subject__name']
+
     def get(self, request):
         role = _user_role(request.user)
         if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
@@ -1259,19 +1483,9 @@ class BatchWiseResultView(APIView):
             exam__is_deleted=False,
         )
 
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(exam__branch__organization=request.user.organization)
-
-        # Apply filters (narrows scope before grouping)
-        batch_id = request.query_params.get('batch_id')
-        subject_id = request.query_params.get('subject_id')
-        exam_id = request.query_params.get('exam_id')
-        if batch_id:
-            qs = qs.filter(exam__batch_id=batch_id)
-        if subject_id:
-            qs = qs.filter(exam__subject_id=subject_id)
-        if exam_id:
-            qs = qs.filter(exam_id=exam_id)
+        qs, err = apply_exam_filters_to_results(qs, request)
+        if err:
+            return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
         # Pre-annotate for grouping by batch only (overall across subjects/exams)
         qs = qs.annotate(
@@ -1306,17 +1520,23 @@ class BatchWiseResultView(APIView):
 class ResultAnalyticsView(APIView):
     """GET /results/analytics/ or /results/summary/ — Overall summary + top performers by category.
     Uses default PublishedResult model with annotations (no extra models).
+    Supports filters: branch wise, batch wise, subject wise, mode wise, type wise, status wise, date filter.
     """
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['exam_mode', 'exam_type', 'status', 'batch_id', 'scheduled_date', 'branch_id', 'subject_id']
+    search_fields = ['exam__title', 'exam__subject__name']
+
     def get(self, request):
         role = _user_role(request.user)
         if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty').filter(
+        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty', 'exam__branch').filter(
             exam__is_deleted=False
         )
-        if getattr(request.user, 'organization', None):
-            base_qs = base_qs.filter(exam__branch__organization=request.user.organization)
+        base_qs, err = apply_exam_filters_to_results(base_qs, request)
+        if err:
+            return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
         # Overall summary
         total_results = base_qs.count()
@@ -1465,14 +1685,9 @@ class ResultExportView(APIView):
                 exam__subject__isnull=False,
                 exam__is_deleted=False,
             )
-            if org_filter:
-                qs = qs.filter(exam__branch__organization=org_filter)
-            if subject_id:
-                qs = qs.filter(exam__subject_id=subject_id)
-            if batch_id:
-                qs = qs.filter(exam__batch_id=batch_id)
-            if exam_id:
-                qs = qs.filter(exam_id=exam_id)
+            qs, err = apply_exam_filters_to_results(qs, request)
+            if err:
+                return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
             qs = qs.annotate(
                 subject_id=F('exam__subject_id'),
@@ -1510,18 +1725,12 @@ class ResultExportView(APIView):
             # Updated to match FacultyWiseResultView: one record per faculty (overall across subjects)
             writer.writerow(['Faculty ID', 'Faculty Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
             qs = PublishedResult.objects.select_related('exam__faculty__user', 'exam__subject', 'exam__batch', 'exam__branch').filter(
-                exam__is_deleted=False
+                exam__faculty__isnull=False,
+                exam__is_deleted=False,
             )
-            if org_filter:
-                qs = qs.filter(exam__branch__organization=org_filter)
-            if faculty_id:
-                qs = qs.filter(exam__faculty_id=faculty_id)
-            if subject_id:
-                qs = qs.filter(exam__subject_id=subject_id)
-            if batch_id:
-                qs = qs.filter(exam__batch_id=batch_id)
-            if exam_id:
-                qs = qs.filter(exam_id=exam_id)
+            qs, err = apply_exam_filters_to_results(qs, request)
+            if err:
+                return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
             qs = qs.annotate(
                 faculty_id=F('exam__faculty_id'),
@@ -1553,16 +1762,12 @@ class ResultExportView(APIView):
         elif export_type == 'batch-wise':
             writer.writerow(['Batch ID', 'Batch Name', 'Total Students', 'Passed Students', 'Pass Percentage', 'Average Marks', 'Highest Marks', 'Lowest Marks'])
             qs = PublishedResult.objects.select_related('exam__batch', 'exam__branch').filter(
-                exam__is_deleted=False
+                exam__batch__isnull=False,
+                exam__is_deleted=False,
             )
-            if org_filter:
-                qs = qs.filter(exam__branch__organization=org_filter)
-            if batch_id:
-                qs = qs.filter(exam__batch_id=batch_id)
-            if subject_id:
-                qs = qs.filter(exam__subject_id=subject_id)
-            if exam_id:
-                qs = qs.filter(exam_id=exam_id)
+            qs, err = apply_exam_filters_to_results(qs, request)
+            if err:
+                return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
             qs = qs.annotate(
                 batch_id=F('exam__batch_id'),
@@ -1593,11 +1798,12 @@ class ResultExportView(APIView):
 
         elif export_type in ('summary', 'analytics'):
             # Export overall + top lists (flattened with sections)
-            base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty').filter(
+            base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty', 'exam__branch').filter(
                 exam__is_deleted=False
             )
-            if org_filter:
-                base_qs = base_qs.filter(exam__branch__organization=org_filter)
+            base_qs, err = apply_exam_filters_to_results(base_qs, request)
+            if err:
+                return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
             overall = base_qs.aggregate(
                 total_students=Count('id'),
@@ -1639,8 +1845,12 @@ class ResultDelayFlowView(APIView):
     """
     API endpoint for the "Result Delay Flow" report to track the exam results pipeline delays.
     Matches the spreadsheet layout and calculates "X DAYS LATE" or "ON TIME".
+    Supports filters: branch wise, batch wise, subject wise, mode wise, type wise, status wise, date filter.
     """
     # permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['exam_mode', 'exam_type', 'status', 'batch_id', 'scheduled_date', 'branch_id', 'subject_id']
+    search_fields = ['title', 'subject__name']
     
     def _calc_delay_status(self, expected_date, actual_date):
         if not expected_date:
@@ -1658,47 +1868,21 @@ class ResultDelayFlowView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         # ── Query-parameter filters ──────────────────────────────────────────────
-        search       = request.query_params.get('search', '').strip()       # exam title or subject name
-        subject_id   = request.query_params.get('subject_id', '').strip()   # UUID of Subject
-        batch_id     = request.query_params.get('batch_id', '').strip()     # UUID of Batch
-        exam_status  = request.query_params.get('exam_status', '').strip()  # e.g. completed, results_published
-        date_from    = request.query_params.get('date_from', '').strip()    # YYYY-MM-DD  (scheduled_date >=)
-        date_to      = request.query_params.get('date_to', '').strip()      # YYYY-MM-DD  (scheduled_date <=)
         delay_status = request.query_params.get('delay_status', '').strip().upper()
         # delay_status accepted values: ON_TIME, LATE, PENDING
         # ────────────────────────────────────────────────────────────────────────
 
         qs = Exam.objects.filter(is_deleted=False).exclude(status='draft')
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(branch__organization=request.user.organization)
 
-        # Apply DB-level filters (fast path before Python-level iteration)
-        if search:
-            qs = qs.filter(Q(title__icontains=search) | Q(subject__name__icontains=search))
-        if subject_id:
-            qs = qs.filter(subject_id=subject_id)
-        if batch_id:
-            qs = qs.filter(batch_id=batch_id)
-        if exam_status:
-            qs = qs.filter(status=exam_status)
-        if date_from:
-            try:
-                import datetime as dt
-                qs = qs.filter(scheduled_date__gte=dt.date.fromisoformat(date_from))
-            except ValueError:
-                return Response({'success': False, 'message': 'Invalid date_from format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
-        if date_to:
-            try:
-                import datetime as dt
-                qs = qs.filter(scheduled_date__lte=dt.date.fromisoformat(date_to))
-            except ValueError:
-                return Response({'success': False, 'message': 'Invalid date_to format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+        qs, err = apply_exam_filters_to_exams(qs, request)
+        if err:
+            return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
 
-        qs = qs.select_related('batch', 'subject').prefetch_related(
+        qs = qs.select_related('batch', 'subject', 'branch').prefetch_related(
             'paper_checkers', 'marksheets__paper_checker', 'answer_key_logs', 'published_results'
         ).order_by('-scheduled_date')
 
@@ -1835,12 +2019,17 @@ class ResultDelayFlowView(APIView):
             'success': True,
             'count': len(data),
             'filters_applied': {
-                'search': search or None,
-                'subject_id': subject_id or None,
-                'batch_id': batch_id or None,
-                'exam_status': exam_status or None,
-                'date_from': date_from or None,
-                'date_to': date_to or None,
+                'branch_id': request.query_params.get('branch_id') or request.query_params.get('branch') or None,
+                'batch_id': request.query_params.get('batch_id') or request.query_params.get('batch') or None,
+                'subject_id': request.query_params.get('subject_id') or request.query_params.get('subject') or None,
+                'faculty_id': request.query_params.get('faculty_id') or request.query_params.get('faculty') or None,
+                'exam_mode': request.query_params.get('exam_mode') or request.query_params.get('mode') or None,
+                'exam_type': request.query_params.get('exam_type') or request.query_params.get('type') or None,
+                'status': request.query_params.get('status') or request.query_params.get('exam_status') or None,
+                'scheduled_date': request.query_params.get('scheduled_date') or request.query_params.get('date') or None,
+                'date_from': request.query_params.get('date_from') or request.query_params.get('from_date') or request.query_params.get('start_date') or request.query_params.get('scheduled_date__gte') or None,
+                'date_to': request.query_params.get('date_to') or request.query_params.get('to_date') or request.query_params.get('end_date') or request.query_params.get('scheduled_date__lte') or None,
+                'search': request.query_params.get('search', '').strip() or None,
                 'delay_status': delay_status or None,
             },
             'data': data,

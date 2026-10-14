@@ -26,5 +26,12 @@ def sync_faculty_profile_to_user(sender, instance, **kwargs):
             setattr(user, field, profile_value)
             updated_fields.append(field)
 
+    if 'work_start_time' in updated_fields or 'work_end_time' in updated_fields:
+        if user.work_start_time and user.work_end_time:
+            from auth_user.utils import calculate_working_hours
+            user.working_hours = calculate_working_hours(user.work_start_time, user.work_end_time)
+            if 'working_hours' not in updated_fields:
+                updated_fields.append('working_hours')
+
     if updated_fields:
         user.save(update_fields=updated_fields)

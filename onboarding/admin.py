@@ -11,7 +11,7 @@ class AdmissionAdmin(admin.ModelAdmin):
     )
     search_fields = ('first_name', 'surname', 'email', 'phone_student', 'transaction_id')
     list_filter = (
-        'status', 'branch', 'course', 'group_module', 'category',
+        'status', 'branch', 'course', 'group_module', 'gender', 'category',
         'fee_structure', 'submitted_at', 'payment_submitted_at',
         'assigned_counsellor',
     )

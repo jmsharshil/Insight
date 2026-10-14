@@ -2,6 +2,7 @@ from django.conf import settings
 from urllib.parse import urlencode
 import secrets
 import string
+from decimal import Decimal, ROUND_HALF_UP
 from core.sender import send_email
 from chat.notifications import send_whatsapp_with_fallback
 
@@ -446,3 +447,55 @@ def generate_username(role, branch=None, branches=None, course=None, batch_attem
         seq = 1
             
     return f"{prefix}{seq:04d}", seq
+
+
+def calculate_working_hours(start_time, end_time):
+    """
+    Calculate working hours between start_time and end_time.
+    Supports datetime.time, datetime.datetime, or string representations (e.g. '09:00', '17:30').
+    Handles overnight shifts (end_time < start_time) by treating end_time as the next day.
+    Returns Decimal with 2 decimal places.
+    """
+    if not start_time or not end_time:
+        return Decimal('0.00')
+
+    from datetime import datetime, date, time, timedelta
+
+    def _parse_time(t):
+        if not t:
+            return None
+        if isinstance(t, time):
+            return t
+        if isinstance(t, datetime):
+            return t.time()
+        if isinstance(t, str):
+            t_str = t.strip()
+            if not t_str:
+                return None
+            try:
+                return time.fromisoformat(t_str)
+            except (ValueError, AttributeError):
+                pass
+            for fmt in ('%H:%M:%S', '%H:%M', '%H:%M:%S.%f', '%I:%M %p', '%I:%M:%S %p'):
+                try:
+                    return datetime.strptime(t_str, fmt).time()
+                except ValueError:
+                    pass
+        return None
+
+    parsed_start = _parse_time(start_time)
+    parsed_end = _parse_time(end_time)
+
+    if not parsed_start or not parsed_end:
+        return Decimal('0.00')
+
+    dummy_date = date(2000, 1, 1)
+    s_dt = datetime.combine(dummy_date, parsed_start)
+    e_dt = datetime.combine(dummy_date, parsed_end)
+
+    if e_dt < s_dt:
+        e_dt += timedelta(days=1)
+
+    diff_seconds = (e_dt - s_dt).total_seconds()
+    hours = Decimal(str(diff_seconds)) / Decimal('3600')
+    return hours.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
