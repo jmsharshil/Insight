@@ -98,7 +98,7 @@ def _not_found():
 
 
 def _assign_fee_structure(admission):
-    """Dynamically assign FeeStructure based on course, attempt, and year."""
+    """Assign an active FeeStructure matching the admission's course details."""
     if not admission.course or not admission.batch_attempt or not admission.attempt_year:
         return
         
@@ -112,13 +112,21 @@ def _assign_fee_structure(admission):
     level_query = level_name_map.get(admission.course)
     
     if level_query:
-        fs = FeeStructure.objects.filter(
-            level__name__icontains=level_query,
-            attempt=admission.batch_attempt,
-            year=admission.attempt_year,
-            is_active=True
-        ).first()
-        
+        filters = {
+            'attempt': admission.batch_attempt,
+            'year': admission.attempt_year,
+            'is_active': True,
+        }
+        if admission.course != 'cseet':
+            filters['group_module'] = admission.group_module or ''
+
+        base_queryset = FeeStructure.objects.filter(**filters).order_by('-created_at')
+        fs = base_queryset.filter(level__name__icontains=level_query).first()
+        if fs is None:
+            fs = base_queryset.filter(course__name__icontains=level_query).first()
+        if fs is None:
+            fs = base_queryset.filter(batch__course__name__icontains=level_query).first()
+
         if fs:
             admission.fee_structure = fs
             admission.save(update_fields=['fee_structure'])
