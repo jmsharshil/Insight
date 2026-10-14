@@ -172,6 +172,52 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         admission.refresh_from_db()
         self.assertEqual(admission.fee_structure, matching_structure)
 
+    def test_existing_admission_fee_structure_is_not_replaced(self):
+        from onboarding.views import _assign_fee_structure
+
+        linked_structure = self._create_fee_structure(group_module='module_2')
+        self._create_fee_structure(group_module='module_1')
+        admission = _make_admission(
+            fee_structure=linked_structure,
+            course='cs_executive',
+            group_module='module_1',
+            batch_attempt='june',
+            attempt_year=2026,
+            status='form_pending',
+        )
+
+        _assign_fee_structure(admission)
+
+        admission.refresh_from_db()
+        self.assertEqual(admission.fee_structure, linked_structure)
+
+    def test_admission_post_persists_submitted_fee_structure(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from onboarding.views import AdmissionListView
+
+        fee_structure = self._create_fee_structure()
+        admission = _make_admission(status='form_pending')
+        user = User.objects.create_user(
+            username='fee_structure_post',
+            email='fee_structure_post@example.com',
+            password='testpass123',
+            role='student',
+            name='Fee Structure Post',
+        )
+        request = APIRequestFactory().post(
+            '/api/admissions/',
+            {'id': admission.id, 'fee_structure': str(fee_structure.id)},
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        with patch('onboarding.views._setup_payment_bank_and_notify'):
+            response = AdmissionListView.as_view()(request)
+
+        self.assertEqual(response.status_code, 201)
+        admission.refresh_from_db()
+        self.assertEqual(admission.fee_structure, fee_structure)
+
     def test_razorpay_amount_uses_selected_fee_structure_token_amount(self):
         from onboarding.views import _setup_payment_bank_and_notify
 
