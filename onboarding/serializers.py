@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import Admission, ADMISSION_STATUS_CHOICES, PAYMENT_TYPE_CHOICES, ICSI_FEES_PAYMENT_CHOICES
+from .models import (
+    Admission, ADMISSION_STATUS_CHOICES, PAYMENT_TYPE_CHOICES,
+    ICSI_FEES_PAYMENT_CHOICES, GENDER_CHOICES
+)
 
 from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
 from leads.serializers import VALID_COMBINATIONS
@@ -52,6 +55,7 @@ class AdmissionSerializer(serializers.Serializer):
     father_name  = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     mother_name  = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     dob          = serializers.DateField(required=False, allow_null=True)
+    gender       = serializers.ChoiceField(choices=GENDER_CHOICES, required=False, allow_blank=True, allow_null=True)
     category     = serializers.ChoiceField(choices=CATEGORY_TYPE_CHOICES, required=False, allow_null=True)
 
     # ── Contact ───────────────────────────────────────────────────────────────
@@ -259,6 +263,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
 
 
     category_display = serializers.CharField(source="get_category_display", read_only=True)
+    gender_display = serializers.CharField(source="get_gender_display", read_only=True)
     course_display = serializers.CharField(source="get_course_display", read_only=True)
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)
@@ -275,6 +280,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
         model = Admission
         fields = [
             'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
+            'gender', 'gender_display',
             'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
          'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display']
@@ -286,6 +292,7 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
 
 
     category_display = serializers.CharField(source="get_category_display", read_only=True)
+    gender_display = serializers.CharField(source="get_gender_display", read_only=True)
     course_display = serializers.CharField(source="get_course_display", read_only=True)
     group_module_display = serializers.CharField(source="get_group_module_display", read_only=True)
     batch_attempt_display = serializers.CharField(source="get_batch_attempt_display", read_only=True)

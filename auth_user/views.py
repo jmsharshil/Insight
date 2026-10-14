@@ -416,7 +416,9 @@ class AddUserAPIView(APIView):
                             hourly_rate=user.hourly_rate,
                             session_hours=user.session_hours,
                             salary=user.salary,
-                            salary_retention_percentage=user.salary_retention_percentage
+                            salary_retention_percentage=user.salary_retention_percentage,
+                            work_start_time=user.work_start_time,
+                            work_end_time=user.work_end_time,
                         )
                         if qr_file:
                             fp.qr_code.save(qr_file.name, qr_file, save=True)
@@ -432,6 +434,7 @@ class AddUserAPIView(APIView):
             return Response({
                 "message": "User created successfully. Password setup email sent.",
                 "user_id": str(user.id),
+                "working_hours": str(user.working_hours),
                 "branch": str(user.branch.id) if user.branch else None,
                 "branches": [str(b.id) for b in user.branches.all()],
             }, status=status.HTTP_201_CREATED)

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from decimal import Decimal
 from .models import User, Organization
 from branch.models import Branch
 from django.conf import settings
@@ -256,6 +257,31 @@ class EmployeeFieldsMixin:
                     
             if not is_paper_checker:
                 attrs.pop('per_paper_rate', None)
+
+            # Auto-calculate working_hours if not provided and work start/end times are present
+            start_time = attrs.get('work_start_time') or getattr(self.instance, 'work_start_time', None)
+            end_time = attrs.get('work_end_time') or getattr(self.instance, 'work_end_time', None)
+            working_hours_val = attrs.get('working_hours')
+
+            initial_wh = None
+            if hasattr(self, 'initial_data') and hasattr(self.initial_data, 'get'):
+                initial_wh = self.initial_data.get('working_hours')
+
+            wh_not_added = (
+                working_hours_val is None 
+                or (isinstance(working_hours_val, (int, float, Decimal)) and Decimal(str(working_hours_val)) == 0)
+                or initial_wh in ['', 'null', 'undefined', None, 0, '0', '0.0', '0.00']
+            )
+
+            is_new = self.instance is None
+            time_changed = ('work_start_time' in attrs or 'work_end_time' in attrs)
+            instance_has_no_wh = bool(self.instance and (not getattr(self.instance, 'working_hours', None) or Decimal(str(self.instance.working_hours)) == 0))
+
+            if wh_not_added and start_time and end_time and (is_new or time_changed or instance_has_no_wh):
+                from auth_user.utils import calculate_working_hours
+                calc_wh = calculate_working_hours(start_time, end_time)
+                if calc_wh > 0:
+                    attrs['working_hours'] = calc_wh
                 
         return attrs
 
@@ -346,6 +372,17 @@ class RegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['username', 'email', 'phone', 'name', 'role', 'password', 'organization']
+        extra_kwargs = {
+            'phone': {'required': True, 'allow_blank': False}
+        }
+
+    def validate_phone(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Phone number is required.")
+        phone = str(value).strip()
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError("User with this phone number already exists.")
+        return phone
 
     def create(self, validated_data):
         password = validated_data.pop('password')
@@ -395,7 +432,8 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         model = User
         fields = ['username','email','phone','name','role','branch','branches','linked_students','organization', 'accessible_modules', 'additional_roles'] + EMPLOYEE_FIELDS
         extra_kwargs = {
-            'username': {'required': False, 'allow_null': True, 'allow_blank': True}
+            'username': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'phone': {'required': True, 'allow_blank': False}
         }
 
     def to_internal_value(self, data):
@@ -428,6 +466,14 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             raise serializers.ValidationError(f"Invalid roles: {', '.join(invalid_roles)}")
         
         return distinct_roles
+
+    def validate_phone(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Phone number is required.")
+        phone = str(value).strip()
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError("User with this phone number already exists.")
+        return phone
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -526,6 +572,14 @@ class OrganizationCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     phone = serializers.CharField(max_length=15)
     name = serializers.CharField(max_length=255)
+
+    def validate_phone(self, value):
+        if not value or not str(value).strip():
+            raise serializers.ValidationError("Phone number is required.")
+        phone = str(value).strip()
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError("A user with this phone number already exists.")
+        return phone
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -666,6 +720,17 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
             raise serializers.ValidationError(f"Invalid roles: {', '.join(invalid_roles)}")
         
         return distinct_roles
+
+    def validate_phone(self, value):
+        if value:
+            phone = str(value).strip()
+            qs = User.objects.filter(phone=phone)
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            if qs.exists():
+                raise serializers.ValidationError("Phone number already exists.")
+            return phone
+        return value
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():
@@ -898,6 +963,17 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         else:
             data['profile_pic'] = None
         return data
+
+    def validate_phone(self, value):
+        if value:
+            phone = str(value).strip()
+            qs = User.objects.filter(phone=phone)
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            if qs.exists():
+                raise serializers.ValidationError("This phone number is already in use.")
+            return phone
+        return value
 
     def validate_email(self, value):
         if User.objects.exclude(id=self.instance.id).filter(email=value).exists():

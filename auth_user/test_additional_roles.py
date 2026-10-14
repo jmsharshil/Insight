@@ -98,7 +98,7 @@ class AdditionalRolesTestCase(TestCase):
         """Test creating a user with multiple additional_roles"""
         data = {
             'email': 'multi_roles@test.org',
-            'phone': '7777777777',
+            'phone': '7777777778',
             'name': 'Multi Roles User',
             'role': 'admin_executive',
             'branch': str(self.branch.id),
@@ -324,7 +324,7 @@ class AdditionalRolesTestCase(TestCase):
         
         # Update with duplicates
         data = {
-            'additional_roles': ['accountant', 'accountant', 'fees', 'accountant'],
+            'additional_roles': ['accountant', 'accountant', 'admin_executive', 'accountant'],
         }
         
         serializer = UpdateUserSerializer(user, data=data, partial=True)
@@ -333,5 +333,5 @@ class AdditionalRolesTestCase(TestCase):
         updated_user = serializer.save()
         
         # Check that only distinct roles are stored
-        self.assertEqual(set(updated_user.additional_roles), {'accountant', 'fees'})
+        self.assertEqual(set(updated_user.additional_roles), {'accountant', 'admin_executive'})
         self.assertEqual(len(updated_user.additional_roles), 2)

@@ -36,6 +36,12 @@ ICSI_FEES_PAYMENT_CHOICES = [
     ('pay_through_institute', 'Pay through Institute'),
 ]
 
+GENDER_CHOICES = [
+    ('male', 'Male'),
+    ('female', 'Female'),
+    ('other', 'Other'),
+]
+
 # ── 5 Bank Accounts (round-robin assignment) ─────────────────────────────────
 BANK_ACCOUNTS = [
     {
@@ -113,6 +119,7 @@ class Admission(models.Model):
     father_name     = models.CharField(max_length=100, blank=True, null=True)
     mother_name     = models.CharField(max_length=100, blank=True, null=True)
     dob             = models.DateField(blank=True,null=True)
+    gender          = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True, null=True)
     category        = models.CharField(max_length=10, choices=CATEGORY_TYPE_CHOICES, blank=True, null=True)
 
     # ── Contact ───────────────────────────────────────────────────────────────

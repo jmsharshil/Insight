@@ -253,3 +253,47 @@ class AdmissionToStudentFeeIntegrationTest(TestCase):
                 student_count, 0,
                 f"Status '{status}' should not create a Student, but found {student_count}."
             )
+
+
+class AdmissionGenderFieldTest(TestCase):
+    def test_admission_gender_choices_and_serialization(self):
+        from onboarding.serializers import AdmissionSerializer, AdmissionListSerializer, AdmissionDetailSerializer
+
+        # Valid gender values
+        for g_val in ['male', 'female', 'other']:
+            admission = _make_admission(
+                email=f'{g_val}@test.com',
+                phone_student=f'987654321{len(g_val)}',
+                gender=g_val
+            )
+            self.assertEqual(admission.gender, g_val)
+            self.assertEqual(admission.get_gender_display(), g_val.capitalize())
+
+            # Test AdmissionListSerializer
+            list_data = AdmissionListSerializer(admission).data
+            self.assertEqual(list_data['gender'], g_val)
+            self.assertEqual(list_data['gender_display'], g_val.capitalize())
+
+            # Test AdmissionDetailSerializer
+            detail_data = AdmissionDetailSerializer(admission).data
+            self.assertEqual(detail_data['gender'], g_val)
+            self.assertEqual(detail_data['gender_display'], g_val.capitalize())
+
+    def test_admission_gender_passed_to_student(self):
+        from students.utils import StudentService
+        from auth_user.models import User
+
+        admission = _make_admission(
+            email='gender_student@test.com',
+            phone_student='9876500001',
+            gender='female',
+        )
+        user = User.objects.create_user(
+            username='gender_student',
+            email='gender_student@test.com',
+            phone='9876500001',
+            name='Female Student',
+            role='student',
+        )
+        student = StudentService.create_from_admission(admission, user)
+        self.assertEqual(student.gender, 'female')
