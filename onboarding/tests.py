@@ -8,11 +8,13 @@ Tests verify that enrolling an Admission automatically creates:
 """
 from django.test import TestCase
 from django.utils import timezone
+from unittest.mock import patch
 
 from onboarding.models import Admission
 from fees.models import FeeStructure, StudentFee, BankAccount, InstallmentPlan, InstallmentItem
 from students.models import Student
 from auth_user.models import User
+from batches.models import Course, CourseLevel
 
 
 def _make_admission(fee_structure=None, **overrides):
@@ -130,6 +132,74 @@ class AdmissionBankAssignmentTest(TestCase):
 
         amount = _get_bank_selection_amount(admission)
         self.assertEqual(amount, 15000)
+
+
+class AdmissionFeeStructureSelectionTest(TestCase):
+    def setUp(self):
+        self.course = Course.objects.create(name='CS Executive', code='CS-EXEC')
+        self.level = CourseLevel.objects.create(course=self.course, name='CS Executive')
+
+    def _create_fee_structure(self, *, attempt='june', year=2026, group_module='module_1', total_amount=30000, token_amount=5000):
+        return FeeStructure.objects.create(
+            name=f'Executive {attempt} {year} {group_module}',
+            course=self.course,
+            level=self.level,
+            attempt=attempt,
+            year=year,
+            group_module=group_module,
+            total_amount=total_amount,
+            token_amount=token_amount,
+            is_active=True,
+        )
+
+    def test_selects_fee_structure_matching_admission_module_attempt_and_year(self):
+        from onboarding.views import _assign_fee_structure
+
+        self._create_fee_structure(group_module='module_2')
+        self._create_fee_structure(attempt='oct')
+        self._create_fee_structure(year=2025)
+        matching_structure = self._create_fee_structure()
+        admission = _make_admission(
+            course='cs_executive',
+            group_module='module_1',
+            batch_attempt='june',
+            attempt_year=2026,
+            status='form_pending',
+        )
+
+        _assign_fee_structure(admission)
+
+        admission.refresh_from_db()
+        self.assertEqual(admission.fee_structure, matching_structure)
+
+    def test_razorpay_amount_uses_selected_fee_structure_token_amount(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        fee_structure = self._create_fee_structure(total_amount=30000, token_amount=5000)
+        admission = _make_admission(
+            fee_structure=fee_structure,
+            payment_type='full_payment',
+            status='form_pending',
+        )
+        bank = BankAccount.objects.create(
+            name='Test Bank',
+            bank_name='Test Bank',
+            account_number='123456789',
+            ifsc_code='TEST0000001',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/link', 'id': 'plink_test'}},
+            ) as create_payment_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 25000)
 
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):
