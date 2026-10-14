@@ -578,8 +578,8 @@ def send_system_notification(
                         user_id=str(user.id),
                         delay_seconds=delay_seconds or 0
                     )
-                elif getattr(user, 'phone', None):
-                    # Fallback: send plain text WhatsApp if no template is specified
+                elif getattr(user, 'phone', None) and not (metadata and metadata.get('skip_whatsapp')):
+                    # Fallback: send plain text WhatsApp if no template is specified and not skipped
                     send_whatsapp_text(to=user.phone, body=body, user_id=str(user.id))
             except Exception as e:
                 logger.error("Failed to send WhatsApp notification to %s: %s", user.id, e)
