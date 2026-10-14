@@ -1,8 +1,12 @@
 from rest_framework import serializers
 from .models import (
-    Admission, ADMISSION_STATUS_CHOICES, PAYMENT_TYPE_CHOICES,
-    ICSI_FEES_PAYMENT_CHOICES, GENDER_CHOICES
+    Admission,
+    ADMISSION_STATUS_CHOICES,
+    PAYMENT_TYPE_CHOICES,
+    ICSI_FEES_PAYMENT_CHOICES,
+    GENDER_CHOICES,
 )
+from fees.models import FeeStructure
 
 from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
 from leads.serializers import VALID_COMBINATIONS
@@ -80,7 +84,11 @@ class AdmissionSerializer(serializers.Serializer):
     batch_attempt = serializers.ChoiceField(choices=ATTEMPT_TYPE_CHOICES, required=False, allow_null=True)
     attempt_year  = serializers.IntegerField(min_value=2000, max_value=2100, required=False, allow_null=True)
     location      = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
-    fee_structure = serializers.ChoiceField(choices=[('lumpsum', 'Lumpsum'), ('installment', 'Installment')], required=False, allow_null=True)
+    fee_structure = serializers.PrimaryKeyRelatedField(
+        queryset=FeeStructure.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
     icsi_fees_payment = serializers.ChoiceField(choices=ICSI_FEES_PAYMENT_CHOICES, required=False, allow_null=True)
 
