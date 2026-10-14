@@ -380,8 +380,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         if not value or not str(value).strip():
             raise serializers.ValidationError("Phone number is required.")
         phone = str(value).strip()
-        if User.objects.filter(phone=phone).exists():
-            raise serializers.ValidationError("User with this phone number already exists.")
+        # Uniqueness check disabled (existing data has duplicate phones)
+        # if User.objects.filter(phone=phone).exists():
+        #     raise serializers.ValidationError("User with this phone number already exists.")
         return phone
 
     def create(self, validated_data):
@@ -471,8 +472,9 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
         if not value or not str(value).strip():
             raise serializers.ValidationError("Phone number is required.")
         phone = str(value).strip()
-        if User.objects.filter(phone=phone).exists():
-            raise serializers.ValidationError("User with this phone number already exists.")
+        # Uniqueness check disabled (existing data has duplicate phones)
+        # if User.objects.filter(phone=phone).exists():
+        #     raise serializers.ValidationError("User with this phone number already exists.")
         return phone
 
     def validate_email(self, value):
@@ -577,8 +579,9 @@ class OrganizationCreateSerializer(serializers.Serializer):
         if not value or not str(value).strip():
             raise serializers.ValidationError("Phone number is required.")
         phone = str(value).strip()
-        if User.objects.filter(phone=phone).exists():
-            raise serializers.ValidationError("A user with this phone number already exists.")
+        # Uniqueness check disabled (existing data has duplicate phones)
+        # if User.objects.filter(phone=phone).exists():
+        #     raise serializers.ValidationError("A user with this phone number already exists.")
         return phone
 
     def validate_email(self, value):
@@ -724,11 +727,12 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     def validate_phone(self, value):
         if value:
             phone = str(value).strip()
-            qs = User.objects.filter(phone=phone)
-            if self.instance:
-                qs = qs.exclude(id=self.instance.id)
-            if qs.exists():
-                raise serializers.ValidationError("Phone number already exists.")
+            # Uniqueness check disabled (existing data has duplicate phones)
+            # qs = User.objects.filter(phone=phone)
+            # if self.instance:
+            #     qs = qs.exclude(id=self.instance.id)
+            # if qs.exists():
+            #     raise serializers.ValidationError("Phone number already exists.")
             return phone
         return value
 
@@ -967,11 +971,12 @@ class UserProfileSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     def validate_phone(self, value):
         if value:
             phone = str(value).strip()
-            qs = User.objects.filter(phone=phone)
-            if self.instance:
-                qs = qs.exclude(id=self.instance.id)
-            if qs.exists():
-                raise serializers.ValidationError("This phone number is already in use.")
+            # Uniqueness check disabled (existing data has duplicate phones)
+            # qs = User.objects.filter(phone=phone)
+            # if self.instance:
+            #     qs = qs.exclude(id=self.instance.id)
+            # if qs.exists():
+            #     raise serializers.ValidationError("This phone number is already in use.")
             return phone
         return value
 
