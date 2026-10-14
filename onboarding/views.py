@@ -98,7 +98,10 @@ def _not_found():
 
 
 def _assign_fee_structure(admission):
-    """Assign an active FeeStructure matching the admission's course details."""
+    """Assign a matching FeeStructure only when the admission has none."""
+    if admission.fee_structure:
+        return
+
     if not admission.course or not admission.batch_attempt or not admission.attempt_year:
         return
         
