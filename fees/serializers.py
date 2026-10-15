@@ -46,6 +46,8 @@ class FeeStructureDetailSerializer(serializers.ModelSerializer):
 
 
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
     class Meta:
         model = FeeStructure
         fields = ['name', 'course', 'batch', 'level', 'attempt', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',

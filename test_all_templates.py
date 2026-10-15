@@ -47,7 +47,21 @@ def test_all_templates():
         },
         {
             "name": "admission_process",
-            "components": [{"type": "body", "parameters": [{"type": "text", "text": "John Doe"}]}]
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": "John Doe"},
+                        {"type": "text", "text": "Insight Institute of Professional Studies"},
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": 0,
+                    "parameters": [{"type": "text", "text": "insight/student/admission-form?id=1"}],
+                },
+            ],
         },
         {
             "name": "no_one_institute_in_gujarat_",

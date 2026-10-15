@@ -2023,17 +2023,20 @@ class LeadStatusUpdateView(APIView):
                         f"assigned to counsellor: {counsellor_name}"
                     )
                     
+                    admission_link = f"{settings.FRONTEND_BASE_URL}/insight/student/admission-form?id={lead.id}"
+                    button_url_path = f"insight/student/admission-form?id={lead.id}"
+                    org_name = getattr(admission.branch.organization, 'name', 'Insight Institute of Professional Studies') if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None) else 'Insight Institute of Professional Studies'
+                    student_name = admission.first_name or "Student"
+                    text_content = f"Hello {student_name},\n\nYour inquiry with {org_name} has been processed and we're ready to proceed with your admission.\n\nTap below to complete your admission form and upload the required documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\n{org_name}"
+
                     if admission.email:
                         try:
-                            admission_link = f"{settings.FRONTEND_BASE_URL}/insight/student/admission-form?id={lead.id}"
                             subject = "Complete Your Admission Process"
-                            text_content = f"Hello {admission.first_name},\n\nWe are thrilled to welcome you! Your lead has been converted, and we are ready to proceed with your admission.\n\nPlease click the link below to complete your admission form and upload the necessary documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\nInsight Institute Team"
-                            
                             template_context = {
-                                'student_name': admission.first_name,
+                                'student_name': student_name,
                                 'admission_link': admission_link,
                                 'primary_color': '#ed7c31',
-                                'org_name': getattr(admission.branch.organization, 'name', 'Insight Institute of Professional Studies') if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None) else 'Insight Institute of Professional Studies',
+                                'org_name': org_name,
                             }
                             
                             send_email(
@@ -2044,20 +2047,39 @@ class LeadStatusUpdateView(APIView):
                                 template_context=template_context,
                                 organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                             )
-                            
-                            try:
-                                send_whatsapp_with_fallback(
-                                    to=admission.phone_student,
-                                    template_name="admission_process_",
-                                    language_code="en",
-                                    components=[{"type": "body", "parameters": [{"type": "text", "text": admission.first_name}]}],
-                                    fallback_body=text_content,
-                                )
-                            except Exception as e:
-                                print(e)
                             logger.info(f"Admission form email sent to {admission.email}")
                         except Exception as e:
                             logger.error(f"Failed to send admission form email to {admission.email}: {e}")
+
+                    if admission.phone_student:
+                        try:
+                            send_whatsapp_with_fallback(
+                                to=admission.phone_student,
+                                template_name="admission_process",
+                                language_code="en",
+                                components=[
+                                    {
+                                        "type": "body",
+                                        "parameters": [
+                                            {"type": "text", "text": student_name},
+                                            {"type": "text", "text": org_name},
+                                            {"type": "text", "text": lead.id}
+                                        ],
+                                    },
+                                    {
+                                        "type": "button",
+                                        "sub_type": "url",
+                                        "index": 0,
+                                        "parameters": [
+                                            {"type": "text", "text": button_url_path}
+                                        ],
+                                    },
+                                ],
+                                fallback_body=text_content,
+                            )
+                            logger.info(f"Admission form WhatsApp sent to {admission.phone_student}")
+                        except Exception as e:
+                            logger.error(f"Failed to send admission form WhatsApp to {admission.phone_student}: {e}")
 
             except Exception as e:
                 logger.error(f"Error creating admission for lead {lead.id}: {str(e)}")
