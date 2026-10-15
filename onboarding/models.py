@@ -1,6 +1,4 @@
-from django.db import models
-
-# Create your models here.
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
 
@@ -28,6 +26,7 @@ ADMISSION_STATUS_CHOICES = [
 
 PAYMENT_TYPE_CHOICES = [
     ('full_payment', 'Full Payment'),
+    ('token', 'Token Payment'),
     ('finance', 'Finance'),
 ]
 
@@ -247,6 +246,30 @@ class Admission(models.Model):
         self.note = note
         self.save(update_fields=['bank_account', 'status', 'note', 'updated_at'])
         return True
+
+    @property
+    def remaining_fees(self):
+        """
+        Calculates remaining fee if student opted for token payment.
+        """
+        if self.payment_type == 'token' and self.fee_structure:
+            from onboarding.views import _get_module_fee
+            total_fee = _get_module_fee(self.fee_structure, self.group_module)
+            token_paid = Decimal(str(self.payment_amount or self.fee_structure.token_amount or 0))
+            return max(Decimal('0'), total_fee - token_paid)
+        return Decimal('0')
+
+    @property
+    def token_payment_terms_note(self):
+        """
+        Notice for token payment: remaining fees must be paid in 15 days or considered as finance.
+        """
+        if self.payment_type == 'token':
+            remaining = self.remaining_fees
+            if remaining > 0:
+                return f"In 15 days you have to pay remaining fees (₹{float(remaining):,.0f}) otherwise it will be considered as Finance."
+            return "In 15 days you have to pay remaining fees otherwise it will be considered as Finance."
+        return None
 
 
 class AdmissionStatusHistory(models.Model):

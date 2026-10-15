@@ -72,17 +72,26 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
         inst_mod4 = data.get('institute_fees_module_4') or 0
         inst_mod5 = data.get('institute_fees_module_5') or 0
         
+        course = data.get('course')
+        if not course and self.instance:
+            course = self.instance.course
+
         level = data.get('level')
         if not level and self.instance:
             level = self.instance.level
             
         level_name = level.name.upper().replace(' ', '').replace('_', '') if level and level.name else ''
+        course_name = course.name.upper().replace(' ', '').replace('_', '') if course and course.name else ''
         
-        if 'CSEET' in level_name:
-            # For CSEET, the user provides the total_amount directly, so we just ensure it exists
-            # (or fallback to component sum if somehow they left it blank)
+        has_module_breakdown = bool(inst_all or inst_mod1 or inst_mod2 or inst_mod3 or inst_mod4 or inst_mod5)
+
+        if 'CSEET' in level_name or 'CSEET' in course_name or not has_module_breakdown:
+            # For CSEET or when module breakdown is not provided, respect total_amount directly
             if 'total_amount' not in data or data['total_amount'] is None:
-                data['total_amount'] = reg + exam + token + reg_cseet + reg_direct + inst_all + inst_mod1 + inst_mod2 + inst_mod3 + inst_mod4 + inst_mod5
+                if self.instance and self.instance.total_amount:
+                    data['total_amount'] = self.instance.total_amount
+                else:
+                    data['total_amount'] = reg + exam + token + reg_cseet + reg_direct + inst_all + inst_mod1 + inst_mod2 + inst_mod3 + inst_mod4 + inst_mod5
         else:
             # For CS Executive and CS Professional, calculate based on modules
             # If all_modules is not provided, calculate it as sum of module 1 to 5
@@ -92,6 +101,13 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
     
             # total_amount is equal to all_modules
             data['total_amount'] = inst_all
+
+        # Validate token_amount constraints
+        if token < 0:
+            raise serializers.ValidationError({'token_amount': 'Token amount cannot be negative.'})
+        computed_total = data.get('total_amount')
+        if computed_total is not None and token > computed_total:
+            raise serializers.ValidationError({'token_amount': 'Token amount cannot exceed total amount.'})
 
         return data
 

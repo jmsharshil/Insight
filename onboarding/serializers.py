@@ -283,6 +283,8 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
     payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
     icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
+    remaining_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    token_payment_terms_note = serializers.CharField(read_only=True)
 
     class Meta:
         model = Admission
@@ -291,7 +293,8 @@ class AdmissionListSerializer(serializers.ModelSerializer):
             'gender', 'gender_display',
             'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
-         'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display']
+            'remaining_fees', 'token_payment_terms_note',
+            'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display']
 
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
@@ -312,6 +315,8 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
     payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
     icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
+    remaining_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    token_payment_terms_note = serializers.CharField(read_only=True)
 
     class Meta:
         model = Admission

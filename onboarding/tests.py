@@ -245,13 +245,31 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         admission.refresh_from_db()
         self.assertEqual(admission.fee_structure, fee_structure)
 
-    def test_razorpay_amount_uses_linked_fee_structure_total(self):
+    def test_razorpay_amount_token_payment(self):
+        """When student selects 'token', Razorpay link uses fee_structure.token_amount."""
         from onboarding.views import _setup_payment_bank_and_notify
 
-        fee_structure = self._create_fee_structure(total_amount=30000, token_amount=10000)
+        fee_structure = FeeStructure.objects.create(
+            name='Executive June 2027 Combined',
+            course=self.course,
+            level=self.level,
+            attempt='june',
+            year=2027,
+            group_module='all',
+            institute_fees_module_1=15000,
+            institute_fees_module_2=18000,
+            institute_fees_all_modules=30000,
+            total_amount=30000,
+            token_amount=5000,
+            is_active=True,
+        )
         admission = _make_admission(
+            course='cs_executive',
+            group_module='module_1',
+            batch_attempt='june',
+            attempt_year=2027,
             fee_structure=fee_structure,
-            payment_type='full_payment',
+            payment_type='token',
             status='form_pending',
         )
         bank = BankAccount.objects.create(
@@ -272,7 +290,196 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         ):
             _setup_payment_bank_and_notify(admission)
 
-        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 25000)
+        # Token payment sends token_amount (5000)
+        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 5000)
+
+    def test_razorpay_amount_full_payment_module_1(self):
+        """When student selects 'full_payment' for Module 1, Razorpay link uses module 1 fees without deducting token."""
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        fee_structure = FeeStructure.objects.create(
+            name='Executive June 2027 Combined',
+            course=self.course,
+            level=self.level,
+            attempt='june',
+            year=2027,
+            group_module='all',
+            institute_fees_module_1=15000,
+            institute_fees_module_2=18000,
+            institute_fees_all_modules=30000,
+            total_amount=30000,
+            token_amount=5000,
+            is_active=True,
+        )
+        admission = _make_admission(
+            course='cs_executive',
+            group_module='module_1',
+            batch_attempt='june',
+            attempt_year=2027,
+            fee_structure=fee_structure,
+            payment_type='full_payment',
+            status='form_pending',
+        )
+        bank = BankAccount.objects.create(
+            name='Test Bank 2',
+            bank_name='Test Bank 2',
+            account_number='987654321',
+            ifsc_code='TEST0000002',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/link', 'id': 'plink_test'}},
+            ) as create_payment_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        # Full payment for module 1 sends module 1 fee (15000) without deducting token fee
+        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 15000)
+
+    def test_razorpay_amount_full_payment_both_modules(self):
+        """When student selects 'full_payment' for both modules, Razorpay link uses all_modules fee."""
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        fee_structure = FeeStructure.objects.create(
+            name='Executive June 2027 Combined',
+            course=self.course,
+            level=self.level,
+            attempt='june',
+            year=2027,
+            group_module='all',
+            institute_fees_module_1=15000,
+            institute_fees_module_2=18000,
+            institute_fees_all_modules=30000,
+            total_amount=30000,
+            token_amount=5000,
+            is_active=True,
+        )
+        admission = _make_admission(
+            course='cs_executive',
+            group_module='both',
+            batch_attempt='june',
+            attempt_year=2027,
+            fee_structure=fee_structure,
+            payment_type='full_payment',
+            status='form_pending',
+        )
+        bank = BankAccount.objects.create(
+            name='Test Bank 3',
+            bank_name='Test Bank 3',
+            account_number='987654322',
+            ifsc_code='TEST0000003',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/link', 'id': 'plink_test'}},
+            ) as create_payment_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 30000)
+
+    def test_token_payment_terms_note_and_webhook_update(self):
+        """When student selects 'token', remaining fees and 15-day notice are set, and webhook records the note."""
+        from onboarding.views import _setup_payment_bank_and_notify
+        from fees.razorpay_service import process_payment_link_paid_event
+        from onboarding.serializers import AdmissionDetailSerializer
+
+        fee_structure = FeeStructure.objects.create(
+            name='Executive June 2027 Combined',
+            course=self.course,
+            level=self.level,
+            attempt='june',
+            year=2027,
+            group_module='all',
+            institute_fees_module_1=15000,
+            institute_fees_module_2=18000,
+            institute_fees_all_modules=30000,
+            total_amount=30000,
+            token_amount=5000,
+            is_active=True,
+        )
+        admission = _make_admission(
+            course='cs_executive',
+            group_module='module_1',
+            batch_attempt='june',
+            attempt_year=2027,
+            fee_structure=fee_structure,
+            payment_type='token',
+            status='payment_pending',
+        )
+
+        # 1. Check remaining fees & token note properties
+        self.assertEqual(admission.remaining_fees, 10000)
+        self.assertIn("15 days you have to pay remaining fees (₹10,000) otherwise it will be considered as Finance", admission.token_payment_terms_note)
+
+        # 2. Check serializer exposure
+        data = AdmissionDetailSerializer(admission).data
+        self.assertEqual(data['remaining_fees'], '10000.00')
+        self.assertEqual(data['token_payment_terms_note'], admission.token_payment_terms_note)
+
+        # 3. Test setup notification passes note to email
+        bank = BankAccount.objects.create(
+            name='Test Bank 4',
+            bank_name='Test Bank 4',
+            account_number='987654323',
+            ifsc_code='TEST0000004',
+        )
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/link', 'id': 'plink_token_test'}},
+            ),
+            patch('core.sender.send_email') as send_email_mock,
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        self.assertTrue(send_email_mock.called)
+        context = send_email_mock.call_args.kwargs['template_context']
+        self.assertIn('token_note', context)
+        self.assertIn("15 days you have to pay remaining fees", context['token_note'])
+
+        # 4. Test Razorpay webhook paid event records the token_note
+        payload = {
+            'payload': {
+                'payment_link': {
+                    'entity': {
+                        'id': 'plink_token_test',
+                        'reference_id': f'ADM_{admission.id}_12345',
+                        'amount_paid': 500000,
+                    }
+                },
+                'payment': {
+                    'entity': {
+                        'id': 'pay_test_token_123',
+                    }
+                }
+            }
+        }
+        with (
+            patch('fees.razorpay_service.send_admission_payment_notification') as notify_mock,
+            patch('fees.razorpay_service.transfer_payment_to_linked_account'),
+        ):
+            res = process_payment_link_paid_event(payload)
+
+        self.assertTrue(res['success'])
+        admission.refresh_from_db()
+        self.assertEqual(admission.status, 'approval_pending')
+        self.assertEqual(admission.payment_amount, 5000)
+        self.assertIn("15 days you have to pay remaining fees", admission.payment_note)
+        self.assertIn("15 days you have to pay remaining fees", admission.note)
+        self.assertTrue(notify_mock.called)
 
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):

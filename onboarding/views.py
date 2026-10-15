@@ -120,19 +120,58 @@ def _assign_fee_structure(admission):
             'year': admission.attempt_year,
             'is_active': True,
         }
-        if admission.course != 'cseet':
-            filters['group_module'] = admission.group_module or ''
 
-        base_queryset = FeeStructure.objects.filter(**filters).order_by('-created_at')
-        fs = base_queryset.filter(level__name__icontains=level_query).first()
+        fs = None
+        # 1. First try matching with student's specific group_module
+        if admission.course != 'cseet' and admission.group_module:
+            module_filters = {**filters, 'group_module': admission.group_module}
+            base_queryset = FeeStructure.objects.filter(**module_filters).order_by('-created_at')
+            fs = base_queryset.filter(level__name__icontains=level_query).first()
+            if fs is None:
+                fs = base_queryset.filter(course__name__icontains=level_query).first()
+            if fs is None:
+                fs = base_queryset.filter(batch__course__name__icontains=level_query).first()
+
+        # 2. Fallback to general/combined fee structure for the level, attempt, and year
         if fs is None:
-            fs = base_queryset.filter(course__name__icontains=level_query).first()
-        if fs is None:
-            fs = base_queryset.filter(batch__course__name__icontains=level_query).first()
+            base_queryset = FeeStructure.objects.filter(**filters).order_by('-created_at')
+            fs = base_queryset.filter(level__name__icontains=level_query).first()
+            if fs is None:
+                fs = base_queryset.filter(course__name__icontains=level_query).first()
+            if fs is None:
+                fs = base_queryset.filter(batch__course__name__icontains=level_query).first()
 
         if fs:
             admission.fee_structure = fs
             admission.save(update_fields=['fee_structure'])
+
+
+def _get_module_fee(fee_structure, group_module):
+    """
+    Resolves the fee component from the fee structure matching the student's group_module selection.
+    Falls back to institute_fees_all_modules or total_amount if specific module fee is not set.
+    """
+    from decimal import Decimal
+    if not fee_structure:
+        return Decimal('0')
+
+    gm = (group_module or '').strip().lower()
+    if gm == 'module_1' and fee_structure.institute_fees_module_1:
+        return Decimal(str(fee_structure.institute_fees_module_1))
+    elif gm == 'module_2' and fee_structure.institute_fees_module_2:
+        return Decimal(str(fee_structure.institute_fees_module_2))
+    elif gm == 'module_3' and fee_structure.institute_fees_module_3:
+        return Decimal(str(fee_structure.institute_fees_module_3))
+    elif gm == 'module_4' and fee_structure.institute_fees_module_4:
+        return Decimal(str(fee_structure.institute_fees_module_4))
+    elif gm == 'module_5' and fee_structure.institute_fees_module_5:
+        return Decimal(str(fee_structure.institute_fees_module_5))
+    elif gm in ('all', 'both', 'full') and fee_structure.institute_fees_all_modules:
+        return Decimal(str(fee_structure.institute_fees_all_modules))
+
+    if fee_structure.institute_fees_all_modules:
+        return Decimal(str(fee_structure.institute_fees_all_modules))
+    return Decimal(str(fee_structure.total_amount or 0))
 
 
 def _setup_payment_bank_and_notify(admission):
@@ -150,15 +189,20 @@ def _setup_payment_bank_and_notify(admission):
     from decimal import Decimal
     payment_amount = _get_bank_selection_amount(admission)
 
-    # Razorpay amount = total_amount - token_amount (10000) in all cases.
-    # If a fee_structure is attached use its total_amount, otherwise use
-    # the computed payment_amount from _get_bank_selection_amount.
-    TOKEN_AMOUNT = Decimal('10000')
+    # Calculate amount_to_pay:
+    # - If student chose 'token': use fee_structure.token_amount.
+    # - If student chose 'full_payment': use selected module fee without deducting token fee.
+    # - Otherwise fallback to payment_amount.
     if getattr(admission, 'fee_structure', None):
         fs = admission.fee_structure
-        amount_to_pay = Decimal(str(fs.total_amount)) - TOKEN_AMOUNT
+        if admission.payment_type == 'token':
+            amount_to_pay = Decimal(str(fs.token_amount or 0))
+        elif admission.payment_type == 'full_payment':
+            amount_to_pay = _get_module_fee(fs, admission.group_module)
+        else:
+            amount_to_pay = Decimal(str(payment_amount))
     else:
-        amount_to_pay = Decimal(str(payment_amount)) - TOKEN_AMOUNT
+        amount_to_pay = Decimal(str(payment_amount))
 
     # Fallback to default amounts if the resulting amount is zero or negative
     if amount_to_pay <= 0:
@@ -186,15 +230,16 @@ def _setup_payment_bank_and_notify(admission):
         note='Form submitted. Waiting for fee payment.',
     )
 
-    print("Amount to pay..........",amount_to_pay)
+    print("Amount to pay..........", amount_to_pay)
     razorpay_link_url = ""
     
-    # Only generate Razorpay link if student opted for full payment
-    if amount_to_pay > 0 and admission.payment_type == 'full_payment':
+    # Generate Razorpay link if student opted for full payment OR token payment
+    if amount_to_pay > 0 and admission.payment_type in ('full_payment', 'token'):
         try:
             # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
             import time
             unique_ref = f"ADM_{admission.id}_{int(time.time())}"
+            payment_type_label = "Token" if admission.payment_type == 'token' else "Full Payment"
             
             response = create_payment_link(
                 amount=amount_to_pay,
@@ -202,7 +247,7 @@ def _setup_payment_bank_and_notify(admission):
                 customer_name=f"{admission.first_name} {admission.surname}".strip(),
                 customer_email=admission.email,
                 customer_contact=admission.phone_student,
-                description="Insight Institute Fee Payment",
+                description=f"Insight Institute Fee Payment ({payment_type_label})",
             )
             print("================================================")
             print(response)
@@ -231,6 +276,7 @@ def _setup_payment_bank_and_notify(admission):
             from core.sender import send_email
             payment_link = f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://127.0.0.1:5173')}/insight/student/payment-upload?id={admission.id}"
             
+            token_note = admission.token_payment_terms_note
             # Build rich HTML context (similar to payment_receipt.html and other system emails)
             template_context = {
                 'student_name': f"{admission.first_name} {admission.surname}".strip(),
@@ -242,9 +288,17 @@ def _setup_payment_bank_and_notify(admission):
                 'ifsc_code': assigned_bank.ifsc_code,
                 'branch': getattr(assigned_bank, 'branch_name', ''),
                 'upload_link': payment_link,
+                'token_note': token_note,
                 'primary_color': '#ed7c31',
                 'org_name': 'Insight Institute of Professional Studies',
             }
+
+            token_notice_block = (
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "IMPORTANT NOTICE (TOKEN PAYMENT)\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{token_note}\n\n"
+            ) if token_note else ""
 
             # Rich plain-text version (kept exactly as original for compatibility with all email clients)
             bank_details = (
@@ -259,6 +313,7 @@ def _setup_payment_bank_and_notify(admission):
                 f"Hello {admission.first_name},\n\n"
                 f"Thank you for submitting your admission form. "
                 f"Please complete your fee payment to proceed with your enrollment.\n\n"
+                f"{token_notice_block}"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"ONLINE PAYMENT LINK\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

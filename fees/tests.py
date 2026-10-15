@@ -570,7 +570,7 @@ class FeeStructureAPITest(TestCase):
 
         self.client = Client(HTTP_AUTHORIZATION=f'Bearer {str(AccessToken.for_user(_adm))}')
 
-        self.course = Course.objects.create(name='CSEET', code='CSEET01', course_type='cseet')
+        self.course = Course.objects.create(name='CSEET', code='CSEET01')
 
         self.fee = FeeStructure.objects.create(
 
@@ -613,6 +613,94 @@ class FeeStructureAPITest(TestCase):
         self.assertEqual(response.status_code, 201)
 
         self.assertEqual(FeeStructure.objects.count(), 2)
+
+
+
+    def test_create_fee_structure_with_token_amount(self):
+
+        response = self.client.post(
+
+            '/api/v1/fee-structures/',
+
+            data=json.dumps({
+
+                'name': 'CSEET Fee With Token',
+
+                'course': str(self.course.id),
+
+                'total_amount': 30000,
+
+                'token_amount': 5000,
+
+            }),
+
+            content_type='application/json',
+
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        fs = FeeStructure.objects.get(name='CSEET Fee With Token')
+
+        self.assertEqual(float(fs.token_amount), 5000.0)
+
+        self.assertEqual(float(fs.total_amount), 30000.0)
+
+
+
+    def test_create_fee_structure_negative_token_amount(self):
+
+        response = self.client.post(
+
+            '/api/v1/fee-structures/',
+
+            data=json.dumps({
+
+                'name': 'Invalid Negative Token',
+
+                'course': str(self.course.id),
+
+                'total_amount': 30000,
+
+                'token_amount': -500,
+
+            }),
+
+            content_type='application/json',
+
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        self.assertIn('token_amount', response.json()['errors'])
+
+
+
+    def test_create_fee_structure_token_exceeding_total(self):
+
+        response = self.client.post(
+
+            '/api/v1/fee-structures/',
+
+            data=json.dumps({
+
+                'name': 'Invalid Exceeding Token',
+
+                'course': str(self.course.id),
+
+                'total_amount': 10000,
+
+                'token_amount': 25000,
+
+            }),
+
+            content_type='application/json',
+
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+        self.assertIn('token_amount', response.json()['errors'])
 
 
 

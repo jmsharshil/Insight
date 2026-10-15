@@ -1550,7 +1550,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     # ── 9-hour shortfall deduction for non-exempt roles ──
     # Roles exempt from 9-hour rule (same as in attendance/views.py)
     NINE_HOUR_EXEMPT_ROLES = ['faculty', 'exam_supervisor', 'paper_checker', 'house_keeping', 'security']
-    REQUIRED_SHIFT_MINUTES = 9 * 60  # 540 minutes
+    REQUIRED_SHIFT_MINUTES = int(Decimal(str(user.working_hours or 0)) * 60) if (user.working_hours or 0) > 0 else 9 * 60
+    _half_day_dates_early = set(attendance_records.filter(status='half_day').values_list('date', flat=True))
     SHORTFALL_BUFFER_MINUTES = 5  # Combined 5-minute grace
 
     daily_delays = defaultdict(int)
@@ -1601,6 +1602,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     for d_date, d_delay in daily_delays.items():
         if d_date.weekday() == 6:
             continue
+        if d_date in _half_day_dates_early:
+            continue  # half day already deducted as 0.5 day; avoid double deduction
         # Apply combined 5-minute buffer per day
         if d_delay > SHORTFALL_BUFFER_MINUTES:
             penalty_min = d_delay - SHORTFALL_BUFFER_MINUTES

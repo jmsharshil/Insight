@@ -793,3 +793,32 @@ def evaluate_daily_slots_attendance(
         created_or_updated.append(record)
 
     return created_or_updated
+
+
+def apply_half_day_rule(record, user, checkout_time=None):
+    """
+    If the employee checks out >= 1 hour before their required working_hours,
+    mark the record as 'half_day'. Returns a message to append to the response.
+    """
+    from decimal import Decimal
+    from auth_user.utils import calculate_working_hours
+
+    required = Decimal(str(getattr(user, 'working_hours', 0) or 0))
+    if required <= 0:
+        required = calculate_working_hours(
+            getattr(user, 'work_start_time', None), getattr(user, 'work_end_time', None)
+        )
+    checkout_time = checkout_time or record.checked_out_at
+    if required <= 0 or not record.checked_in_at or not checkout_time:
+        return ''
+
+    worked = Decimal(str((checkout_time - record.checked_in_at).total_seconds())) / Decimal(3600)
+    shortfall = required - worked
+    if shortfall >= Decimal('1'):
+        record.status = 'half_day'
+        record.save(update_fields=['status'])
+        return (
+            f" You checked out {shortfall.quantize(Decimal('0.01'))} hours before your required "
+            f"{required.quantize(Decimal('0.01'))} working hours, so this day is considered as a half day."
+        )
+    return ''

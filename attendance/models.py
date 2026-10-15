@@ -337,6 +337,16 @@ EMPLOYEE_ATTENDANCE_STATUS_CHOICES = [
     ('checkout_pending', 'Checkout Pending'),
 ]
 
+EMPLOYEE_CHECKIN_METHOD_CHOICES = [
+    ('selfie', 'Start-Day Selfie (Sales Module)'),
+    ('qr', 'QR Scan'),
+]
+
+EMPLOYEE_CHECKOUT_METHOD_CHOICES = [
+    ('selfie', 'End-Day Selfie (Sales Module)'),
+    ('qr', 'QR Scan'),
+]
+
 
 class EmployeeAttendanceRecord(models.Model):
     """
@@ -388,6 +398,22 @@ class EmployeeAttendanceRecord(models.Model):
     shortfall_minutes = models.PositiveIntegerField(
         default=0,
         help_text='Minutes short of 9-hour shift requirement (0 = met or exempt).',
+    )
+
+    # ── Check-in / Check-out method ───────────────────────────────────────────
+    check_in_method = models.CharField(
+        max_length=20,
+        choices=EMPLOYEE_CHECKIN_METHOD_CHOICES,
+        null=True,
+        blank=True,
+        help_text="How the employee checked in: 'selfie' = start-day selfie via sales module, 'qr' = QR scan.",
+    )
+    check_out_method = models.CharField(
+        max_length=20,
+        choices=EMPLOYEE_CHECKOUT_METHOD_CHOICES,
+        null=True,
+        blank=True,
+        help_text="How the employee checked out: 'selfie' = end-day selfie via sales module, 'qr' = QR scan.",
     )
 
     # ── Geofencing audit ──────────────────────────────────────────────────────

@@ -55,24 +55,38 @@ When the backend receives the form submission, the system automatically runs the
 ## 4. Razorpay Link Generation
 After the fee structure is linked, the system computes the amount the student needs to pay.
 
-Based on our current configuration, the amount requested via Razorpay is:
-**`Amount to Pay = Fee Structure Total Amount - Token Amount`** *(currently hardcoded to subtract 10,000)*.
+Based on the student's selected `payment_type`:
+- **Token Payment (`token`):** The Razorpay link amount is dynamically set to the `FeeStructure.token_amount`.
+  - The remaining fee is calculated as: `Module Fee - Token Amount`.
+  - The system automatically generates the 15-day policy notice:
+    > *"In 15 days you have to pay remaining fees (₹XX,XXX) otherwise it will be considered as Finance."*
+- **Full Payment (`full_payment`):** The Razorpay link amount is set to the fee of the student's selected module (e.g., `institute_fees_module_1` for Module 1, `institute_fees_module_2` for Module 2, or `institute_fees_all_modules` for both/all) **without deducting the token fee**.
 
 > [!IMPORTANT]
-> The Razorpay payment link will **only be generated and sent** if the student selected **"Full Payment"** (`full_payment`) for their payment type on the admission form. If they select **"Finance"**, no payment link is created.
+> The Razorpay payment link will **only be generated and sent** if the student selected **"Full Payment"** (`full_payment`) or **"Token Payment"** (`token`) on the admission form. If they select **"Finance"** (`finance`), no payment link is created.
 
 If the student is eligible for a link, the backend makes an API call to Razorpay via the `create_payment_link()` service.
 - **Reference ID:** Uniquely generated as `ADM_{id}_{timestamp}`.
 - **Customer Info:** Populated with the student's name, email, and phone number.
 
-## 5. Email Notification
-Once Razorpay returns a successful `short_url` payment link, the backend triggers an email notification to the student's registered email address.
+## 5. Email & WhatsApp Setup Notification
+Once Razorpay returns a successful `short_url` payment link, the backend triggers an email notification to the student's registered email address (and WhatsApp message).
 
-The email includes:
+The setup message includes:
 - A welcoming message confirming their form submission.
+- **Remaining Fee Notice (for Token Payments):** An alert box highlighting that remaining fees must be paid within 15 days or it will be converted to Finance.
 - The **Secure Online Payment Link** (the Razorpay `short_url`).
-- Alternative offline bank transfer details (the bank account dynamically assigned to them in a round-robin style to stay under daily limits).
-- A portal link to upload their payment receipt if they choose the offline bank transfer route.
+- Alternative offline bank transfer details (assigned round-robin to stay under daily limits).
+- A portal link to upload their payment receipt if they choose offline bank transfer.
 
-> [!TIP]
-> Additionally, a WhatsApp notification containing the exact same payment link is sent out via your `send_whatsapp_with_fallback` integration.
+## 6. Post-Payment Confirmation & Receipt
+When the student pays the token amount via Razorpay:
+1. **Webhook Event (`payment_link.paid`):**
+   - Marks the admission as `approval_pending`.
+   - Records the transaction ID and stores the remaining fee notice in `admission.payment_note`, `admission.note`, and the status history.
+2. **Payment Receipt Email & WhatsApp:**
+   - Automatically sends an official PDF receipt.
+   - Highlights the 15-day remaining fee notice:
+     > *"⚠️ Important Notice Regarding Remaining Fees: In 15 days you have to pay remaining fees (₹XX,XXX) otherwise it will be considered as Finance."*
+3. **API & Admin Visibility:**
+   - Both `remaining_fees` and `token_payment_terms_note` are exposed in `AdmissionListSerializer` and `AdmissionDetailSerializer` for frontend display.

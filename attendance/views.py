@@ -444,6 +444,7 @@ class QRScanView(APIView):
                     user=user, date=today, timetable_slot=timetable_slot_obj,
                     branch_id=branch.id, status='checkout_pending', checked_in_at=now,
                     latitude=emp_lat, longitude=emp_lng, location_verified=geo_verified,
+                    check_in_method='qr',
                 )
                 message = f'Employee Check In recorded successfully.'
             
@@ -466,8 +467,11 @@ class QRScanView(APIView):
                 record = open_record
                 record.checked_out_at = now
                 record.status = 'present'
-                record.save(update_fields=['checked_out_at', 'status'])
+                record.check_out_method = 'qr'
+                record.save(update_fields=['checked_out_at', 'status', 'check_out_method'])
                 message = f'Employee Check Out recorded successfully.'
+                from attendance.utils import apply_half_day_rule
+                message += apply_half_day_rule(record, user, now)
 
                 # ── 9-hour shift violation for non-exempt roles ──
                 if role not in NINE_HOUR_EXEMPT_ROLES and record.checked_in_at:
@@ -1680,6 +1684,7 @@ class EmployeeCheckInOutView(APIView):
                 user=user, date=today, timetable_slot=timetable_slot_obj,
                 branch_id=bid, status='checkout_pending', checked_in_at=now,
                 latitude=emp_lat, longitude=emp_lng, location_verified=geo_verified,
+                check_in_method='qr',  # checked in via QR scan
             )
             message = f'Check In recorded successfully.'
         
@@ -1697,8 +1702,11 @@ class EmployeeCheckInOutView(APIView):
             record = open_record
             record.checked_out_at = now
             record.status = 'present'
-            record.save(update_fields=['checked_out_at', 'status'])
+            record.check_out_method = 'qr'
+            record.save(update_fields=['checked_out_at', 'status', 'check_out_method'])
             message = f'Check Out recorded successfully.'
+            from attendance.utils import apply_half_day_rule
+            message += apply_half_day_rule(record, user, now)
 
             # ── 9-hour shift violation for non-exempt roles ──
             if role not in NINE_HOUR_EXEMPT_ROLES and record.checked_in_at:

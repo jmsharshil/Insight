@@ -195,6 +195,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
     )
     allocations = serializers.SerializerMethodField()
     violations = serializers.SerializerMethodField()
+    attendance = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyActivity
@@ -206,10 +207,31 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
             'self_vehicle',
-            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations',
+            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations', 'attendance',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'attendance', 'created_at', 'updated_at']
+
+    def get_attendance(self, obj):
+        from attendance.models import EmployeeAttendanceRecord
+        date = obj.activity_date or timezone.localdate()
+        record = EmployeeAttendanceRecord.objects.filter(
+            user=obj.user,
+            date=date,
+        ).order_by('-checked_in_at').first()
+        if not record:
+            return None
+        return {
+            'record_id': str(record.id),
+            'status': record.status,
+            'status_display': record.get_status_display(),
+            'checked_in_at': record.checked_in_at.isoformat() if record.checked_in_at else None,
+            'checked_out_at': record.checked_out_at.isoformat() if record.checked_out_at else None,
+            'check_in_method': record.check_in_method,
+            'check_in_method_display': record.get_check_in_method_display() if record.check_in_method else None,
+            'check_out_method': record.check_out_method,
+            'check_out_method_display': record.get_check_out_method_display() if record.check_out_method else None,
+        }
 
     def get_allocations(self, obj):
         from inventory.serializers import ItemAllocationSerializer

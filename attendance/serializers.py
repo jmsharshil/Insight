@@ -293,6 +293,8 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     marked_by_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    check_in_method_display = serializers.CharField(source='get_check_in_method_display', read_only=True)
+    check_out_method_display = serializers.CharField(source='get_check_out_method_display', read_only=True)
     # Override datetime fields to return IST (Asia/Kolkata) times instead of UTC
     checked_in_at = serializers.SerializerMethodField()
     checked_out_at = serializers.SerializerMethodField()
@@ -307,6 +309,8 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'correction_note',
             'shortfall_minutes', 'latitude', 'longitude', 'location_verified',
+            'check_in_method', 'check_in_method_display',
+            'check_out_method', 'check_out_method_display',
         ]
 
     def get_user_name(self, obj):

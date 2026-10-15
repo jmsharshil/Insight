@@ -294,6 +294,14 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
         receipt_number = f"ADM-RZP-{rp_payment_id[:10]}" if rp_payment_id else f"ADM-{admission.id}"
         receipt_date = tz.localtime().strftime('%d %b, %Y')
 
+        token_note = getattr(admission, 'token_payment_terms_note', None)
+        token_notice_block = (
+            f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"IMPORTANT NOTICE (REMAINING FEES):\n"
+            f"{token_note}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ) if token_note else ""
+
         subject = f"Payment Receipt – ₹{amount_paid:,.0f} | Insight Institute"
         text_body = (
             f"Dear {student_name},\n\n"
@@ -305,7 +313,8 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
             f"Status         : Payment Received — Pending Enrollment Approval\n\n"
             f"Your official receipt is attached to this email. "
             f"Our team will complete your enrollment shortly. "
-            f"You will receive your login credentials once approved.\n\n"
+            f"You will receive your login credentials once approved."
+            f"{token_notice_block}\n\n"
             f"Thank you,\nInsight Institute of Professional Studies"
         )
         template_context = {
@@ -315,6 +324,7 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
             'payment_mode': 'Razorpay (Online)',
             'transaction_ref': rp_payment_id or 'N/A',
             'payment_date': receipt_date,
+            'token_note': token_note,
             'primary_color': '#ed7c31',
             'org_name': 'Insight Institute of Professional Studies',
         }
@@ -388,6 +398,7 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
             if not phones:
                 logger.info(f"[Razorpay] No WhatsApp phones for ADM {admission.id} — skipping WA.")
             else:
+                wa_token_part = f"\n\n⚠️ *Important Notice:*\n{token_note}" if token_note else ""
                 wa_caption = (
                     f"✅ *Payment Receipt — Insight Institute*\n"
                     f"Dear {student_name},\n\n"
@@ -396,7 +407,8 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
                     f"Transaction ID: {rp_payment_id or 'N/A'}\n"
                     f"Date          : {receipt_date}\n\n"
                     f"Your enrollment is pending approval. "
-                    f"You will receive login credentials once approved.\n"
+                    f"You will receive login credentials once approved."
+                    f"{wa_token_part}\n\n"
                     f"— Insight Institute of Professional Studies"
                 )
 
@@ -553,21 +565,32 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             if admission.status != 'payment_pending':
                 return {"success": True, "processed": "ADM", "note": "Already processed."}
 
+            token_note = getattr(admission, 'token_payment_terms_note', None)
+            payment_note = f"Paid via Razorpay: {link_entity.get('id')}"
+            history_note = f"Payment auto-verified via Razorpay. Txn: {rp_payment_id}"
+            if token_note:
+                payment_note += f". {token_note}"
+                history_note += f". {token_note}"
+                if not admission.note:
+                    admission.note = token_note
+                else:
+                    admission.note = f"{admission.note}\n{token_note}"
+
             admission.transaction_id       = rp_payment_id
-            admission.payment_note         = f"Paid via Razorpay: {link_entity.get('id')}"
+            admission.payment_note         = payment_note
             admission.payment_submitted_at = timezone.now()
             admission.payment_amount       = amount_paid
             admission.razorpay_payment_id  = rp_payment_id
             admission.status               = 'approval_pending'
             admission.save(update_fields=[
                 'transaction_id', 'payment_note', 'payment_submitted_at',
-                'payment_amount', 'razorpay_payment_id', 'status', 'updated_at',
+                'payment_amount', 'razorpay_payment_id', 'status', 'updated_at', 'note',
             ])
             AdmissionStatusHistory.objects.create(
                 admission  = admission,
                 status     = 'approval_pending',
                 changed_by = None,
-                note       = f"Payment auto-verified via Razorpay. Txn: {rp_payment_id}",
+                note       = history_note,
             )
             logger.info(f"[Razorpay] Admission {adm_id} moved to approval_pending.")
 

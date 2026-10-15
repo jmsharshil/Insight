@@ -7,6 +7,13 @@
 
 <p>Your payment has been successfully verified. Please find the official receipt attached as a PDF.</p>
 
+{% if token_note %}
+<div class="info-box" style="background-color: #fff3cd; border: 1px solid #ffeeba; border-left: 5px solid #ffc107; padding: 15px; margin: 20px 0; color: #856404; border-radius: 6px;">
+    <h4 style="margin: 0 0 6px 0; color: #856404; font-size: 15px;">⚠️ Important Notice Regarding Remaining Fees</h4>
+    <p style="margin: 0; font-size: 14px; line-height: 1.5; font-weight: 500;">{{ token_note }}</p>
+</div>
+{% endif %}
+
 <div class="info-box">
     <h3 style="margin-top: 0; color: {{ primary_color }};">Receipt Details</h3>
     <ul>

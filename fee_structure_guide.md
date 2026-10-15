@@ -47,11 +47,11 @@ When associating a student, lead, or batch, you can specify the `group_module` t
 - `module_4` (4th Module)
 - `module_5` (5th Module)
 
-## 5. Other Fees
+## 5. Other Fees & Token Amount
 
-You can also track other non-institute fees, such as:
+You can also track other fees and configure the token amount:
 - ICSI Registration Fees (via CSEET or Direct)
 - ICSI Exam Fees
-- Token Amount
+- **Token Amount**: Configured per fee structure. When a student fills an admission form choosing full payment, this token amount is dynamically deducted from the total fee structure amount (`total_amount - token_amount`) to create the Razorpay payment link.
 
-*Note: These are tracked for accounting purposes but for CS Executive/Professional, the `total_amount` will strictly follow the Institute Fees calculation.*
+*Note: For CS Executive/Professional, the `total_amount` strictly follows the Institute Fees calculation, while `token_amount` specifies the initial token portion subtracted during Razorpay link generation.*

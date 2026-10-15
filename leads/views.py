@@ -1000,12 +1000,15 @@ class SalesActivityPhotoView(APIView):
                         longitude=photo.longitude,
                         location_verified=False,
                         marked_by=activity.user,
+                        check_in_method='selfie',  # checked in via start-day selfie in sales module
                     )
                     attendance_info = {
                         'action': 'check_in',
                         'record_id': str(rec.id),
                         'status': 'checkout_pending',
                         'checked_in_at': rec.checked_in_at.isoformat(),
+                        'check_in_method': rec.check_in_method,
+                        'check_out_method': rec.check_out_method,
                     }
                 else:
                     logger.warning(f"Could not auto check-in user {activity.user.id}: no branch found")
@@ -1029,6 +1032,7 @@ class SalesActivityPhotoView(APIView):
                 if open_rec:
                     open_rec.checked_out_at = checkout_time
                     open_rec.status = 'present'
+                    open_rec.check_out_method = 'selfie'
                     role = getattr(activity.user, 'role', '')
                     if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
                         duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
@@ -1040,6 +1044,8 @@ class SalesActivityPhotoView(APIView):
                         'record_id': str(open_rec.id),
                         'status': open_rec.status,
                         'checked_out_at': open_rec.checked_out_at.isoformat(),
+                        'check_in_method': open_rec.check_in_method,
+                        'check_out_method': open_rec.check_out_method,
                     }
                 else:
                     bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
@@ -1063,12 +1069,16 @@ class SalesActivityPhotoView(APIView):
                             longitude=photo.longitude,
                             location_verified=False,
                             marked_by=activity.user,
+                            check_in_method='selfie',
+                            check_out_method='selfie',
                         )
                         attendance_info = {
                             'action': 'check_out',
                             'record_id': str(rec.id),
                             'status': 'present',
                             'checked_out_at': rec.checked_out_at.isoformat(),
+                            'check_in_method': rec.check_in_method,
+                            'check_out_method': rec.check_out_method,
                         }
             except Exception as e:
                 logger.error(f"Auto check-out on end_selfie failed: {e}", exc_info=True)
