@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.contrib import messages
+from django.db import models as db_models
+from django.db.models import ProtectedError
 from batches.models import *
 
 @admin.register(Course)
@@ -84,10 +87,68 @@ class CourseLevelAdmin(admin.ModelAdmin):
 
 @admin.register(Syllabus)
 class SyllabusAdmin(admin.ModelAdmin):
-    list_display = ('id', 'organization', 'level', 'name', 'year', 'is_active', 'created_at',)
+    list_display = ('id', 'organization', 'level', 'name', 'year', 'is_active', 'created_at', 'subject_count', 'batch_count',)
     search_fields = ('name',)
     list_filter = ('level', 'year', 'organization', 'is_active',)
     list_editable = ['is_active', 'year']
+
+    def subject_count(self, obj):
+        return obj.subjects.count()
+    subject_count.short_description = '# Subjects'
+
+    def batch_count(self, obj):
+        return obj.batches.count()
+    batch_count.short_description = '# Batches'
+
+    def delete_model(self, request, obj):
+        """Safe delete: cascade-deletes subjects, chapters, modules.
+        Warns admin if the syllabus has linked subjects/batches before deleting."""
+        try:
+            subject_count = obj.subjects.count()
+            batch_count = obj.batches.count()
+            obj.delete()
+            if subject_count or batch_count:
+                self.message_user(
+                    request,
+                    f"Syllabus '{obj.name}' deleted along with {subject_count} subject(s) "
+                    f"and {batch_count} batch reference(s) were cleared.",
+                    messages.WARNING,
+                )
+        except ProtectedError as e:
+            protected = ', '.join(str(o) for o in list(e.protected_objects)[:5])
+            self.message_user(
+                request,
+                f"Cannot delete Syllabus '{obj.name}': it is referenced by protected records — {protected}. "
+                f"Please remove those records first.",
+                messages.ERROR,
+            )
+        except Exception as e:
+            self.message_user(
+                request,
+                f"Error deleting Syllabus '{obj.name}': {e}",
+                messages.ERROR,
+            )
+
+    def delete_queryset(self, request, queryset):
+        """Safe bulk delete from the changelist action."""
+        deleted = 0
+        failed = []
+        for obj in queryset:
+            try:
+                obj.delete()
+                deleted += 1
+            except ProtectedError as e:
+                failed.append(f"'{obj.name}' (protected by {len(e.protected_objects)} record(s))")
+            except Exception as e:
+                failed.append(f"'{obj.name}' ({e})")
+        if deleted:
+            self.message_user(request, f"Successfully deleted {deleted} syllabus(es).", messages.SUCCESS)
+        if failed:
+            self.message_user(
+                request,
+                f"Could not delete: {', '.join(failed)}. Remove linked records first.",
+                messages.ERROR,
+            )
 
 @admin.register(Chapter)
 class ChapterAdmin(admin.ModelAdmin):
