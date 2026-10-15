@@ -47,7 +47,7 @@ REFUND_STATUS_CHOICES = [
 class FeeStructure(models.Model):
     """Defines the fee for a particular course/batch."""
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name        = models.CharField(max_length=200)
+    name        = models.CharField(max_length=200, blank=True)
     course      = models.ForeignKey(
         'batches.Course', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
@@ -59,6 +59,11 @@ class FeeStructure(models.Model):
     level       = models.ForeignKey(
         'batches.CourseLevel', on_delete=models.CASCADE,
         related_name='fee_structures', null=True, blank=True,
+    )
+    syllabus    = models.ForeignKey(
+        'batches.Syllabus', on_delete=models.SET_NULL,
+        related_name='fee_structures', null=True, blank=True,
+        verbose_name='Syllabus'
     )
     attempt     = models.CharField(max_length=10, choices=ATTEMPT_TYPE_CHOICES, blank=True,null=True)
     # Only for CS Executive / CS Professional
@@ -133,15 +138,122 @@ class FeeStructure(models.Model):
     def __str__(self):
         return f"{self.name} — ₹{self.total_amount}"
 
+    @property
+    def modules_count(self):
+        """Count of active modules belonging to this fee structure's syllabus."""
+        if self.syllabus_id and self.syllabus:
+            return self.syllabus.modules.filter(is_active=True).count()
+        return 0
+
+    @property
+    def syllabus_modules(self):
+        """List of active module summaries for this fee structure's syllabus."""
+        if self.syllabus_id and self.syllabus:
+            return list(self.syllabus.modules.filter(is_active=True).order_by('order', 'name').values('id', 'name', 'order', 'description'))
+        return []
+
     def save(self, *args, **kwargs):
-        """Always auto-calculate total_amount as sum of fee components.
-        (Removed conditional to prevent NOT NULL errors on creation when
-        components sum to 0; legacy records will be updated on next save.)
-        """
-        # reg = self.icsi_registration_fees or 0
-        # exam = self.icsi_exam_fees or 0
-        # token = self.token_amount or 0
-        # self.total_amount = reg + exam + token
+        # Auto-sync level and course from syllabus if missing
+        if self.syllabus_id and self.syllabus:
+            if not self.level_id and self.syllabus.level_id:
+                self.level = self.syllabus.level
+            if not self.course_id and self.syllabus.level and self.syllabus.level.course_id:
+                self.course = self.syllabus.level.course
+
+        # Auto-sync course from level if missing
+        if not self.course_id and self.level_id and self.level:
+            self.course = self.level.course
+
+        # Auto-generate name if not explicitly provided (matching Batch name logic)
+        if not self.name:
+            from django.utils import timezone
+
+            # Resolve year
+            year = self.year
+            if not year and self.batch_id and self.batch:
+                year = getattr(self.batch, 'attempt_year', None) or (self.batch.start_date.year if self.batch.start_date else None)
+            if not year and self.attempt:
+                try:
+                    from batches.services import get_exam_attempt_year
+                    course_type_for_year = 'cseet'
+                    if self.level_id and self.level and self.level.name:
+                        course_type_for_year = self.level.name.strip().replace(' ', '_').lower()
+                    elif self.course_id and self.course:
+                        course_type_for_year = getattr(self.course, 'course_type', None) or 'cseet'
+                    year = get_exam_attempt_year(
+                        course=course_type_for_year,
+                        batch_attempt=self.attempt,
+                        group_module=self.group_module or '',
+                        form_date=timezone.now().date(),
+                    )
+                except Exception:
+                    year = timezone.now().year
+            if not year:
+                year = timezone.now().year
+
+            if not self.year:
+                self.year = year
+
+            # Resolve course_type
+            course_type = None
+            if self.level_id and self.level and self.level.name:
+                course_type = self.level.name.strip().replace(' ', '_')
+            if not course_type and self.course:
+                course_type = getattr(self.course, 'course_type', None)
+            if not course_type and self.course:
+                first_level = self.course.levels.filter(is_active=True).first()
+                if first_level:
+                    course_type = first_level.name.strip().replace(' ', '_')
+            if not course_type and self.course and self.course.name:
+                course_type = self.course.name.strip().replace(' ', '_')
+            if not course_type and self.batch_id and self.batch and self.batch.course:
+                course_type = getattr(self.batch.course, 'course_type', None) or self.batch.course.name.strip().replace(' ', '_')
+            if not course_type:
+                course_type = 'standard'
+
+            # Group module & attempt
+            group_module = (self.group_module or (self.batch.group_module if self.batch_id and self.batch else '')) or ''
+            attempt = (self.attempt or (self.batch.batch_attempt if self.batch_id and self.batch else '')) or ''
+
+            # Branch (if batch has branch or created_by has branch)
+            branch = None
+            if self.batch_id and self.batch and self.batch.branch:
+                branch = self.batch.branch
+            elif self.created_by_id and hasattr(self.created_by, 'branch') and self.created_by.branch:
+                branch = self.created_by.branch
+
+            branch_prefix = ''
+            if branch and getattr(branch, 'name', None):
+                try:
+                    parts = branch.name.split('-')
+                    if len(parts) >= 2:
+                        bseq = parts[-1]
+                        branch_prefix = f"{bseq.lstrip('0') or '0'}".upper()
+                    else:
+                        branch_prefix = f"{branch.name[:4]}".upper()
+                except Exception:
+                    branch_prefix = 'BXX'
+
+            ct_upper = str(course_type).upper() if course_type else ""
+            attempt_upper = str(attempt).upper() if attempt and attempt.lower() != 'unknown' else ""
+            year_str = str(year)[-2:] if year else ""
+            gm_upper = str(group_module).upper() if group_module else ""
+            branch_prefix = branch_prefix.strip()
+
+            base_parts = [branch_prefix, ct_upper, attempt_upper, year_str, gm_upper]
+            base_prefix = '_'.join(p for p in base_parts if p)
+
+            # Use base_prefix directly as the name (no sequence number suffix).
+            # Only add a numeric suffix (_2, _3, ...) if the name already exists.
+            candidate_name = base_prefix if base_prefix else 'FEE'
+            if FeeStructure.objects.filter(name=candidate_name).exclude(pk=self.pk).exists():
+                suffix = 2
+                while FeeStructure.objects.filter(name=f"{candidate_name}_{suffix}").exclude(pk=self.pk).exists():
+                    suffix += 1
+                candidate_name = f"{candidate_name}_{suffix}"
+
+            self.name = candidate_name
+
         super().save(*args, **kwargs)
 
 

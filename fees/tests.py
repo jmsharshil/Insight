@@ -734,6 +734,77 @@ class FeeStructureAPITest(TestCase):
 
         self.assertEqual(self.fee.total_amount, 35000)
 
+    def test_fee_structure_with_syllabus_and_modules_count(self):
+        from batches.models import CourseLevel, Syllabus, SyllabusModule
+
+        level = CourseLevel.objects.create(course=self.course, name='CS Executive Level')
+        syllabus = Syllabus.objects.create(level=level, name='2026 Executive Syllabus', year=2026)
+        mod1 = SyllabusModule.objects.create(syllabus=syllabus, name='Module 1', order=1)
+        mod2 = SyllabusModule.objects.create(syllabus=syllabus, name='Module 2', order=2)
+
+        # 1. Model level check
+        fs = FeeStructure.objects.create(
+            name='Executive 2026 Fee',
+            course=self.course,
+            level=level,
+            syllabus=syllabus,
+            total_amount=30000,
+        )
+        self.assertEqual(fs.modules_count, 2)
+        self.assertEqual(len(fs.syllabus_modules), 2)
+        self.assertEqual(fs.syllabus_modules[0]['name'], 'Module 1')
+        self.assertEqual(fs.syllabus_modules[1]['name'], 'Module 2')
+
+        # 2. GET fee structure detail via API
+        response = self.client.get(f'/api/v1/fee-structures/{fs.id}/')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()['data']
+        self.assertEqual(data['syllabus'], str(syllabus.id))
+        self.assertEqual(data['syllabus_name'], '2026 Executive Syllabus')
+        self.assertEqual(data['modules_count'], 2)
+        self.assertEqual(len(data['modules']), 2)
+
+        # 3. POST new fee structure with syllabus
+        post_res = self.client.post(
+            '/api/v1/fee-structures/',
+            data=json.dumps({
+                'name': 'API Created Fee Structure with Syllabus',
+                'course': str(self.course.id),
+                'syllabus': str(syllabus.id),
+                'total_amount': 25000,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(post_res.status_code, 201)
+        post_data = post_res.json()['data']
+        self.assertEqual(post_data['syllabus'], str(syllabus.id))
+        self.assertEqual(post_data['syllabus_name'], '2026 Executive Syllabus')
+        self.assertEqual(post_data['modules_count'], 2)
+
+        # 4. GET /api/v1/syllabuses/<syllabus_id>/modules/
+        mod_res = self.client.get(f'/api/v1/syllabuses/{syllabus.id}/modules/')
+        self.assertEqual(mod_res.status_code, 200)
+        mod_json = mod_res.json()
+        self.assertEqual(mod_json['modules_count'], 2)
+        self.assertEqual(len(mod_json['data']), 2)
+
+        # 5. GET /api/v1/syllabuses/<syllabus_id>/
+        syl_detail_res = self.client.get(f'/api/v1/syllabuses/{syllabus.id}/')
+        self.assertEqual(syl_detail_res.status_code, 200)
+        syl_json = syl_detail_res.json()['data']
+        self.assertEqual(syl_json['modules_count'], 2)
+        self.assertEqual(len(syl_json['modules']), 2)
+
+        # 6. GET /api/v1/batches/dropdowns/ includes syllabuses with modules_count
+        drop_res = self.client.get('/api/v1/batches/dropdowns/')
+        self.assertEqual(drop_res.status_code, 200)
+        drop_data = drop_res.json()['data']
+        self.assertIn('syllabuses', drop_data)
+        matched_syl = next((s for s in drop_data['syllabuses'] if str(s['id']) == str(syllabus.id)), None)
+        self.assertIsNotNone(matched_syl)
+        self.assertEqual(matched_syl['modules_count'], 2)
+
+
 
 
     def test_delete_fee_structure(self):

@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot, DAY_CHOICES, SESSION_CHOICES,
-    CourseLevel, Chapter, Syllabus,
+    CourseLevel, Chapter, Syllabus, SyllabusModule,
     SESSION_TYPE_CHOICES, SLOT_CODE_CHOICES,
 )
 from django.conf import settings
@@ -18,17 +18,85 @@ User = get_user_model()
 #  Course Serializers
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# E2 — SyllabusModule serializer (forward-declared so SyllabusSerializer can use it)
+class SyllabusModuleSerializer(serializers.ModelSerializer):
+    """Read/write serializer for SyllabusModule."""
+    subjects = serializers.SerializerMethodField(read_only=True)
+    chapters = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = SyllabusModule
+        fields = [
+            'id', 'syllabus', 'name', 'order', 'description',
+            'is_active', 'created_at', 'subjects', 'chapters',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_subjects(self, obj):
+        qs = Subject.objects.filter(module=obj, is_active=True)
+        return SubjectListSerializer(qs, many=True, context=self.context).data
+
+    def get_chapters(self, obj):
+        qs = obj.chapters.filter(is_active=True).order_by('order', 'name')
+        return ChapterSerializer(qs, many=True, context=self.context).data
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data.get('organization') is None:
+            request = self.context.get('request')
+            if request and getattr(request.user, 'organization', None):
+                validated_data['organization'] = request.user.organization
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop('syllabus', None)  # don't allow moving module to another syllabus
+        return super().update(instance, validated_data)
+
+
 # E2 — forward declare so CourseDetailSerializer can reference it
 class SyllabusSerializer(serializers.ModelSerializer):
-    subjects = serializers.SerializerMethodField()
+    modules  = serializers.SerializerMethodField(read_only=True)
+    modules_count = serializers.SerializerMethodField(read_only=True)
+    level_name = serializers.CharField(source='level.name', read_only=True, default=None)
+    course_id = serializers.UUIDField(source='level.course_id', read_only=True, default=None)
+    course_name = serializers.CharField(source='level.course.name', read_only=True, default=None)
+    subjects = serializers.SerializerMethodField(read_only=True)  # subjects not in any module
+    chapters = serializers.SerializerMethodField(read_only=True)  # chapters not in any module
 
     class Meta:
         model = Syllabus
-        fields = ['id', 'level', 'name', 'year', 'description', 'is_active', 'created_at', 'subjects']
+        fields = [
+            'id', 'level', 'level_name', 'course_id', 'course_name', 'name', 'year', 'description',
+            'start_date', 'end_date',
+            'is_active', 'created_at',
+            'modules_count', 'modules', 'subjects', 'chapters',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_modules_count(self, obj):
+        return obj.modules.filter(is_active=True).count()
+
+    def validate(self, data):
+        start_date = data.get('start_date') or (self.instance.start_date if self.instance else None)
+        end_date = data.get('end_date') or (self.instance.end_date if self.instance else None)
+        if start_date and end_date and end_date < start_date:
+            raise serializers.ValidationError({'end_date': 'End date cannot be earlier than start date.'})
+        return data
+
+    def get_modules(self, obj):
+        qs = obj.modules.filter(is_active=True).order_by('order', 'name')
+        return SyllabusModuleSerializer(qs, many=True, context=self.context).data
 
     def get_subjects(self, obj):
-        qs = Subject.objects.filter(syllabus=obj, is_active=True)
+        # subjects that belong to this syllabus but NOT assigned to any module
+        qs = Subject.objects.filter(syllabus=obj, module__isnull=True, is_active=True)
         return SubjectListSerializer(qs, many=True, context=self.context).data
+
+    def get_chapters(self, obj):
+        # Direct chapters under syllabus without a module (or chapters of subjects without module)
+        direct_qs = obj.direct_chapters.filter(module__isnull=True, is_active=True)
+        subj_chapters_qs = Chapter.objects.filter(subject__syllabus=obj, module__isnull=True, is_active=True)
+        qs = (direct_qs | subj_chapters_qs).distinct().order_by('order', 'name')
+        return ChapterSerializer(qs, many=True, context=self.context).data
 
 class CourseLevelSerializer(serializers.ModelSerializer):
     """Read/write serializer for CourseLevel (E2)."""
@@ -109,6 +177,9 @@ class CourseCreateUpdateSerializer(serializers.ModelSerializer):
 # E2 — forward declare so SubjectListSerializer can reference it
 class ChapterSerializer(serializers.ModelSerializer):
     """Read/write serializer for Chapter (E2). faculties = User IDs (role='faculty')."""
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+    syllabus_name = serializers.CharField(source='syllabus.name', read_only=True)
+    module_name = serializers.CharField(source='module.name', read_only=True)
     faculties = serializers.PrimaryKeyRelatedField(
         many=True,
         queryset=User.objects.filter(role='faculty'),
@@ -119,10 +190,13 @@ class ChapterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Chapter
         fields = [
-            'id', 'subject', 'name', 'description', 'is_active',
+            'id', 'subject', 'subject_name',
+            'syllabus', 'syllabus_name',
+            'module', 'module_name',
+            'name', 'order', 'description', 'is_active',
             'duration_hours', 'faculties', 'faculties_details'
         ]
-        read_only_fields = ['id', 'subject']
+        read_only_fields = ['id']
 
     def to_internal_value(self, data):
         data = data.copy() if hasattr(data, 'copy') else dict(data)
@@ -164,11 +238,34 @@ class ChapterSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, data):
-        # order is now optional — no uniqueness check needed
+        # Infer parent relationships
+        subject = data.get('subject') or (self.instance.subject if self.instance else None) or self.context.get('subject')
+        module = data.get('module') or (self.instance.module if self.instance else None) or self.context.get('module')
+        syllabus = data.get('syllabus') or (self.instance.syllabus if self.instance else None) or self.context.get('syllabus')
+
+        if not subject and not module and not syllabus:
+            raise serializers.ValidationError('Chapter must belong to a subject, module, or syllabus.')
         return data
 
     def create(self, validated_data):
         faculties = validated_data.pop('faculties', None)
+        module = validated_data.get('module') or self.context.get('module')
+        subject = validated_data.get('subject') or self.context.get('subject')
+        syllabus = validated_data.get('syllabus') or self.context.get('syllabus')
+
+        if module:
+            validated_data['module'] = module
+            if not syllabus and module.syllabus:
+                validated_data['syllabus'] = module.syllabus
+        if subject:
+            validated_data['subject'] = subject
+            if not syllabus and subject.syllabus:
+                validated_data['syllabus'] = subject.syllabus
+            if not validated_data.get('module') and subject.module:
+                validated_data['module'] = subject.module
+        if syllabus and 'syllabus' not in validated_data:
+            validated_data['syllabus'] = syllabus
+
         chapter = super().create(validated_data)
         if faculties is not None:
             chapter.faculties.set(faculties)
@@ -185,6 +282,7 @@ class ChapterSerializer(serializers.ModelSerializer):
 class SubjectListSerializer(serializers.ModelSerializer):
     level_name = serializers.CharField(source='level.name', read_only=True)
     syllabus_name = serializers.CharField(source='syllabus.name', read_only=True)
+    module_name = serializers.CharField(source='module.name', read_only=True)
     course_name = serializers.CharField(source='level.course.name', read_only=True)
     chapters    = serializers.SerializerMethodField()
     papers = serializers.SerializerMethodField()
@@ -192,8 +290,10 @@ class SubjectListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Subject
-        fields = ['id', 'level', 'level_name', 'syllabus', 'syllabus_name', 'course_name', 'name', 'code',
-                  'total_hours', 'is_active', 'chapters','papers', 'exams']
+        fields = ['id', 'level', 'level_name', 'syllabus', 'syllabus_name',
+                  'module', 'module_name',
+                  'course_name', 'name', 'code',
+                  'total_hours', 'is_active', 'chapters', 'papers', 'exams']
 
     def get_chapters(self, obj):
         qs = obj.chapters.filter(is_active=True)
@@ -213,7 +313,7 @@ class SubjectListSerializer(serializers.ModelSerializer):
 class SubjectCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
-        fields = ['level', 'syllabus', 'name', 'is_active', 'organization']
+        fields = ['level', 'syllabus', 'module', 'name', 'is_active', 'organization']
         # total_hours is now auto-managed via Chapter.duration_hours signals
 
     # def validate_code(self, value):

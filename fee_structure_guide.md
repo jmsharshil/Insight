@@ -52,6 +52,19 @@ When associating a student, lead, or batch, you can specify the `group_module` t
 You can also track other fees and configure the token amount:
 - ICSI Registration Fees (via CSEET or Direct)
 - ICSI Exam Fees
-- **Token Amount**: Configured per fee structure. When a student fills an admission form choosing full payment, this token amount is dynamically deducted from the total fee structure amount (`total_amount - token_amount`) to create the Razorpay payment link.
+- **Token Amount**: Configured per fee structure. When a student chooses token payment, this amount is used for the Razorpay link; when choosing full payment, module fees apply.
 
-*Note: For CS Executive/Professional, the `total_amount` strictly follows the Institute Fees calculation, while `token_amount` specifies the initial token portion subtracted during Razorpay link generation.*
+*Note: For CS Executive/Professional, the `total_amount` strictly follows the Institute Fees calculation, while `token_amount` specifies the initial token portion.*
+
+## 6. Syllabus Selection & Module Inspection
+
+Fee structures now support selecting a **Syllabus** (`syllabus`):
+- **Syllabus Field**: Link a Fee Structure to a specific academic syllabus (e.g., `2026 CS Executive Syllabus`).
+- **Dynamic Module Count**:
+  - Whenever a syllabus is selected, the system automatically inspects how many active modules belong to it (`modules_count`).
+  - Returns the list of modules (`modules`: `[{ "id": "...", "name": "Module 1", "order": 1 }, ...]`).
+- **Endpoints for Syllabus & Modules**:
+  - `GET /api/v1/syllabuses/<syllabus_id>/modules/` — Returns the module count and module list for a selected syllabus.
+  - `GET /api/v1/syllabuses/<syllabus_id>/` — Direct syllabus inspection returning `modules_count` and `modules`.
+  - `GET /api/v1/batches/dropdowns/` — Preloads all active syllabuses with their precomputed `modules_count` and module list for instant frontend selection.
+

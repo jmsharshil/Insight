@@ -21,12 +21,16 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True, default=None)
     batch_name = serializers.CharField(source='batch.name', read_only=True, default=None)
     level_name = serializers.CharField(source='level.name', read_only=True, default=None)
+    syllabus_name = serializers.CharField(source='syllabus.name', read_only=True, default=None)
+    modules_count = serializers.IntegerField(read_only=True)
+    modules = serializers.SerializerMethodField(read_only=True)
     attempt_display = serializers.CharField(source='get_attempt_display', read_only=True)
 
     class Meta:
         model = FeeStructure
         fields = ['id', 'name', 'course', 'course_name', 'batch', 'batch_name',
-                  'level', 'level_name', 'attempt', 'attempt_display', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
+                  'level', 'level_name', 'syllabus', 'syllabus_name', 'modules_count', 'modules',
+                  'attempt', 'attempt_display', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
                   'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
                   'icsi_registration_fees_direct', 'institute_fees_all_modules',
                   'institute_fees_module_1', 'institute_fees_module_2',
@@ -34,21 +38,32 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
                   'institute_fees_module_5',
                   'is_active', 'created_at']
 
+    def get_modules(self, obj):
+        return obj.syllabus_modules
+
 
 class FeeStructureDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True, default=None)
     batch_name = serializers.CharField(source='batch.name', read_only=True, default=None)
     level_name = serializers.CharField(source='level.name', read_only=True, default=None)
+    syllabus_name = serializers.CharField(source='syllabus.name', read_only=True, default=None)
+    modules_count = serializers.IntegerField(read_only=True)
+    modules = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = FeeStructure
         fields = '__all__'
 
+    def get_modules(self, obj):
+        return obj.syllabus_modules
+
 
 class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
     class Meta:
         model = FeeStructure
-        fields = ['name', 'course', 'batch', 'level', 'attempt', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
+        fields = ['name', 'course', 'batch', 'level', 'syllabus', 'attempt', 'group_module', 'year', 'total_amount', 'icsi_registration_fees',
                   'icsi_exam_fees', 'token_amount', 'icsi_registration_fees_via_cseet',
                   'icsi_registration_fees_direct', 'institute_fees_all_modules',
                   'institute_fees_module_1', 'institute_fees_module_2',

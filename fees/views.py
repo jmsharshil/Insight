@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 class FeeStructureListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['course', 'batch', 'is_active']
+    filterset_fields = ['course', 'batch', 'level', 'syllabus', 'is_active']
     search_fields = ['name']
     ordering_fields = '__all__'
 
@@ -53,7 +53,7 @@ class FeeStructureListView(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        queryset = FeeStructure.objects.select_related('course', 'batch').prefetch_related('student_fees').all()
+        queryset = FeeStructure.objects.select_related('course', 'batch', 'level', 'syllabus').prefetch_related('student_fees', 'syllabus__modules').all()
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(
                 Q(course__organization=request.user.organization) |
@@ -62,12 +62,18 @@ class FeeStructureListView(APIView):
 
         course_id = request.GET.get('course_id')
         batch_id = request.GET.get('batch_id')
+        level_id = request.GET.get('level_id') or request.GET.get('level')
+        syllabus_id = request.GET.get('syllabus_id') or request.GET.get('syllabus')
         is_active = request.GET.get('is_active')
 
         if course_id:
             queryset = queryset.filter(course_id=course_id)
         if batch_id:
             queryset = queryset.filter(batch_id=batch_id)
+        if level_id:
+            queryset = queryset.filter(level_id=level_id)
+        if syllabus_id:
+            queryset = queryset.filter(syllabus_id=syllabus_id)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
 
@@ -101,7 +107,7 @@ class FeeStructureDetailView(APIView):
 
     def _get(self, request, pk):
         try:
-            queryset = FeeStructure.objects.select_related('course', 'batch').all()
+            queryset = FeeStructure.objects.select_related('course', 'batch', 'level', 'syllabus').prefetch_related('syllabus__modules').all()
             if getattr(request.user, 'organization', None):
                 queryset = queryset.filter(
                     Q(course__organization=request.user.organization) |

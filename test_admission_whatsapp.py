@@ -43,7 +43,7 @@ data = {
                 "parameters": [
                     {
                         "type": "text",
-                        "text": "api/auth/set-password?token=DTFYFYTYTYFRY"
+                        "text": "insight/student/admission-form?id=1"
                     }
                 ]
             }

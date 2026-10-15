@@ -88,6 +88,7 @@ class Subject(models.Model):
     organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     level       = models.ForeignKey('batches.CourseLevel', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
     syllabus    = models.ForeignKey('batches.Syllabus', on_delete=models.CASCADE, related_name='subjects', null=True, blank=True)
+    module      = models.ForeignKey('batches.SyllabusModule', on_delete=models.SET_NULL, related_name='subjects', null=True, blank=True)
     name        = models.CharField(max_length=200)
     code        = models.CharField(max_length=30, blank=True)
     total_hours = models.PositiveIntegerField(default=0)
@@ -420,6 +421,8 @@ class Syllabus(models.Model):
     name         = models.CharField(max_length=200)
     year         = models.PositiveIntegerField(null=True, blank=True)
     description  = models.TextField(blank=True)
+    start_date   = models.DateField(null=True, blank=True)
+    end_date     = models.DateField(null=True, blank=True)  # optional
     is_active    = models.BooleanField(default=True)
     created_at   = models.DateTimeField(auto_now_add=True)
 
@@ -431,10 +434,38 @@ class Syllabus(models.Model):
         return f"{self.level.name} | Syllabus: {self.name}"
 
 
+# E2 ─ Optional Module grouping inside a Syllabus
+class SyllabusModule(models.Model):
+    """Optional layer between Syllabus and Subject.
+    When used, subjects are grouped under a module instead of hanging
+    directly off the syllabus.
+    """
+    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey('auth_user.Organization', on_delete=models.CASCADE, related_name='syllabus_modules', null=True, blank=True)
+    syllabus     = models.ForeignKey(Syllabus, on_delete=models.CASCADE, related_name='modules')
+    name         = models.CharField(max_length=200)
+    order        = models.PositiveSmallIntegerField(null=True, blank=True)
+    description  = models.TextField(blank=True)
+    is_active    = models.BooleanField(default=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'syllabus_modules'
+        ordering = ['order', 'name']
+        indexes = [
+            models.Index(fields=['syllabus', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.syllabus.name} | Module: {self.name}"
+
+
 # E2 ─ Subject Chapters
 class Chapter(models.Model):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    subject     = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters')
+    subject     = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='chapters', null=True, blank=True)
+    syllabus    = models.ForeignKey(Syllabus, on_delete=models.CASCADE, related_name='direct_chapters', null=True, blank=True)
+    module      = models.ForeignKey(SyllabusModule, on_delete=models.SET_NULL, related_name='chapters', null=True, blank=True)
     name        = models.CharField(max_length=200)
     order       = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)
@@ -444,10 +475,21 @@ class Chapter(models.Model):
 
     class Meta:
         db_table = 'subject_chapters'
-        ordering = ['name']
+        ordering = ['order', 'name']
+        indexes = [
+            models.Index(fields=['subject', 'is_active']),
+            models.Index(fields=['syllabus', 'is_active']),
+            models.Index(fields=['module', 'is_active']),
+        ]
 
     def __str__(self):
-        return f"{self.subject.code} | Ch: {self.name}"
+        if self.subject:
+            return f"{self.subject.code} | Ch: {self.name}"
+        if self.module:
+            return f"{self.module.name} | Ch: {self.name}"
+        if self.syllabus:
+            return f"{self.syllabus.name} | Ch: {self.name}"
+        return f"Ch: {self.name}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
