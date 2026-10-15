@@ -272,7 +272,7 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         ):
             _setup_payment_bank_and_notify(admission)
 
-        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 25000)
+        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 20000)
 
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):

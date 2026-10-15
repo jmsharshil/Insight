@@ -11,6 +11,8 @@ from .views import (
     FacultyTimetableView, StudentTimetableView,
     CourseLevelListView, CourseLevelDetailView,
     SyllabusListView, SyllabusDetailView,
+    SyllabusModuleListView, SyllabusModuleDetailView,
+    SyllabusChapterListView, SyllabusModuleChapterListView,
     ChapterListView, ChapterDetailView,
     AcademicDropdownsView, TimetablePublishView, TimetableExportExcelView
 )
@@ -26,6 +28,12 @@ urlpatterns = [
     path('courses/<uuid:course_id>/levels/<uuid:level_id>/', CourseLevelDetailView.as_view(), name='course-level-detail'),
     path('courses/<uuid:course_id>/levels/<uuid:level_id>/syllabuses/', SyllabusListView.as_view(), name='syllabus-list'),
     path('courses/<uuid:course_id>/levels/<uuid:level_id>/syllabuses/<uuid:pk>/', SyllabusDetailView.as_view(), name='syllabus-detail'),
+
+    # ── Syllabus Modules & Chapters ─────────────────────────────────────────
+    path('syllabuses/<uuid:syllabus_id>/modules/', SyllabusModuleListView.as_view(), name='syllabus-module-list'),
+    path('syllabuses/<uuid:syllabus_id>/modules/<uuid:module_id>/', SyllabusModuleDetailView.as_view(), name='syllabus-module-detail'),
+    path('syllabuses/<uuid:syllabus_id>/modules/<uuid:module_id>/chapters/', SyllabusModuleChapterListView.as_view(), name='syllabus-module-chapter-list'),
+    path('syllabuses/<uuid:syllabus_id>/chapters/', SyllabusChapterListView.as_view(), name='syllabus-chapter-list'),
 
     # ── Subjects ────────────────────────────────────────────────────────────
     path('subjects/', SubjectListView.as_view(), name='subject-list'),

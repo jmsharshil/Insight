@@ -14,7 +14,7 @@ from django.db import models
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
     Classroom, TimetableSlot,
-    CourseLevel, Chapter, Syllabus,
+    CourseLevel, Chapter, Syllabus, SyllabusModule,
 )
 from .serializers import (
     CourseListSerializer, CourseDetailSerializer, CourseCreateUpdateSerializer,
@@ -25,7 +25,7 @@ from .serializers import (
     ClassroomListSerializer, ClassroomCreateUpdateSerializer,
     TimetableSlotListSerializer, TimetableSlotCreateUpdateSerializer,
     FacultyTimetableSerializer, StudentTimetableSerializer,
-    CourseLevelSerializer, ChapterSerializer, SyllabusSerializer,
+    CourseLevelSerializer, ChapterSerializer, SyllabusSerializer, SyllabusModuleSerializer,
 )
 from .validators import check_faculty_clash, check_classroom_clash, check_batch_clash
 
@@ -231,6 +231,158 @@ class SyllabusDetailView(APIView):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Syllabus Module Views
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SyllabusModuleListView(APIView):
+    """List & create modules under a specific syllabus."""
+
+    def _get_syllabus(self, syllabus_id, request):
+        qs = Syllabus.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(organization=request.user.organization)
+        try:
+            return qs.get(pk=syllabus_id)
+        except Syllabus.DoesNotExist:
+            return None
+
+    def get(self, request, syllabus_id):
+        syllabus = self._get_syllabus(syllabus_id, request)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        modules = syllabus.modules.filter(is_active=True)
+        return Response({'success': True, 'data': SyllabusModuleSerializer(modules, many=True, context={'request': request}).data})
+
+    def post(self, request, syllabus_id):
+        syllabus = self._get_syllabus(syllabus_id, request)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data.copy()
+        data['syllabus'] = str(syllabus_id)
+        if getattr(request.user, 'organization', None):
+            data['organization'] = str(request.user.organization.id)
+        serializer = SyllabusModuleSerializer(data=data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'success': True, 'message': 'Module created.', 'data': serializer.data}, status=status.HTTP_201_CREATED)
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SyllabusModuleDetailView(APIView):
+    """Retrieve / update / delete a specific module."""
+
+    def _get_module(self, syllabus_id, module_id):
+        try:
+            qs = SyllabusModule.objects.filter(syllabus_id=syllabus_id)
+            if getattr(self.request.user, 'organization', None):
+                qs = qs.filter(organization=self.request.user.organization)
+            return qs.get(pk=module_id)
+        except SyllabusModule.DoesNotExist:
+            return None
+
+    def get(self, request, syllabus_id, module_id):
+        module = self._get_module(syllabus_id, module_id)
+        if not module:
+            return Response({'success': False, 'message': 'Module not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': True, 'data': SyllabusModuleSerializer(module, context={'request': request}).data})
+
+    def patch(self, request, syllabus_id, module_id):
+        module = self._get_module(syllabus_id, module_id)
+        if not module:
+            return Response({'success': False, 'message': 'Module not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = SyllabusModuleSerializer(module, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'success': True, 'message': 'Module updated.', 'data': serializer.data})
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, syllabus_id, module_id):
+        module = self._get_module(syllabus_id, module_id)
+        if not module:
+            return Response({'success': False, 'message': 'Module not found.'}, status=status.HTTP_404_NOT_FOUND)
+        module.delete()
+        return Response({'success': True, 'message': 'Module deleted.'})
+
+
+class SyllabusChapterListView(APIView):
+    """List & create chapters directly under a syllabus (with or without a module)."""
+
+    def _get_syllabus(self, syllabus_id, request):
+        qs = Syllabus.objects.all()
+        if getattr(request.user, 'organization', None):
+            qs = qs.filter(organization=request.user.organization)
+        try:
+            return qs.get(pk=syllabus_id)
+        except Syllabus.DoesNotExist:
+            return None
+
+    def get(self, request, syllabus_id):
+        syllabus = self._get_syllabus(syllabus_id, request)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        module_id = request.GET.get('module_id')
+        only_without_module = request.GET.get('without_module') == 'true'
+
+        chapters = Chapter.objects.filter(is_active=True).filter(
+            models.Q(syllabus=syllabus) | models.Q(subject__syllabus=syllabus)
+        )
+        if module_id:
+            chapters = chapters.filter(module_id=module_id)
+        elif only_without_module:
+            chapters = chapters.filter(module__isnull=True)
+
+        chapters = chapters.prefetch_related('faculties').order_by('order', 'name').distinct()
+        return Response({'success': True, 'data': ChapterSerializer(chapters, many=True, context={'request': request}).data})
+
+    def post(self, request, syllabus_id):
+        syllabus = self._get_syllabus(syllabus_id, request)
+        if not syllabus:
+            return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data.copy()
+        data['syllabus'] = str(syllabus_id)
+        serializer = ChapterSerializer(data=data, context={'syllabus': syllabus, 'request': request})
+        if serializer.is_valid():
+            chapter = serializer.save(syllabus=syllabus)
+            return Response({'success': True, 'message': 'Chapter created.', 'data': ChapterSerializer(chapter, context={'request': request}).data}, status=status.HTTP_201_CREATED)
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SyllabusModuleChapterListView(APIView):
+    """List & create chapters inside a specific module of a syllabus."""
+
+    def _get_module(self, syllabus_id, module_id, request):
+        try:
+            qs = SyllabusModule.objects.filter(syllabus_id=syllabus_id)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(organization=request.user.organization)
+            return qs.get(pk=module_id)
+        except SyllabusModule.DoesNotExist:
+            return None
+
+    def get(self, request, syllabus_id, module_id):
+        module = self._get_module(syllabus_id, module_id, request)
+        if not module:
+            return Response({'success': False, 'message': 'Module not found.'}, status=status.HTTP_404_NOT_FOUND)
+        chapters = module.chapters.filter(is_active=True).prefetch_related('faculties').order_by('order', 'name')
+        return Response({'success': True, 'data': ChapterSerializer(chapters, many=True, context={'request': request}).data})
+
+    def post(self, request, syllabus_id, module_id):
+        module = self._get_module(syllabus_id, module_id, request)
+        if not module:
+            return Response({'success': False, 'message': 'Module not found.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data.copy()
+        data['module'] = str(module_id)
+        data['syllabus'] = str(syllabus_id)
+        serializer = ChapterSerializer(data=data, context={'module': module, 'syllabus': module.syllabus, 'request': request})
+        if serializer.is_valid():
+            chapter = serializer.save(module=module, syllabus=module.syllabus)
+            return Response({'success': True, 'message': 'Chapter created in module.', 'data': ChapterSerializer(chapter, context={'request': request}).data}, status=status.HTTP_201_CREATED)
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Subject Views
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -325,6 +477,9 @@ class ChapterListView(APIView):
         faculty_id = request.GET.get('faculty_id') or request.GET.get('faculty')
         if faculty_id:
             chapters = chapters.filter(faculties__id=faculty_id).distinct()
+        module_id = request.GET.get('module_id')
+        if module_id:
+            chapters = chapters.filter(module_id=module_id)
         return Response({'success': True, 'data': ChapterSerializer(chapters, many=True, context={'request': request}).data})
 
     def post(self, request, subject_id):
@@ -1627,6 +1782,8 @@ class AcademicDropdownsView(APIView):
         chapters_by_subject = {}
         for chapter in chapters_qs.prefetch_related('faculties'):
             subj_id = chapter.subject_id
+            if not subj_id:
+                continue
             if subj_id not in chapters_by_subject:
                 chapters_by_subject[subj_id] = []
             # faculties is M2M to User — values_list('id') gives User IDs directly
