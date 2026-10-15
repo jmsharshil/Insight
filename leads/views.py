@@ -2063,7 +2063,7 @@ class LeadStatusUpdateView(APIView):
                                         "parameters": [
                                             {"type": "text", "text": student_name},
                                             {"type": "text", "text": org_name},
-                                            {"type": "text", "text": lead.id}
+                                            {"type": "text", "text": str(lead.id)},
                                         ],
                                     },
                                     {
