@@ -85,7 +85,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     organization = models.ForeignKey(Organization,on_delete=models.CASCADE,related_name='users',null=True,blank=True)
     username = models.CharField(max_length=100,unique=True)
     email = models.EmailField()
-    phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
+    phone = models.CharField(max_length=15, null=True, blank=True)
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=50,choices=ROLE_CHOICES,default='student')
     branch = models.ForeignKey('branch.Branch', null=True, blank=True, on_delete=models.SET_NULL, related_name='users',)
@@ -143,11 +143,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         super().clean()
         if self.phone:
             self.phone = self.phone.strip()
-            qs = User.objects.filter(phone=self.phone)
-            if self.pk:
-                qs = qs.exclude(pk=self.pk)
-            if qs.exists():
-                raise ValidationError({'phone': 'User with this phone number already exists.'})
+            # Uniqueness check disabled (existing data has duplicate phones)
+            # qs = User.objects.filter(phone=self.phone)
+            # if self.pk:
+            #     qs = qs.exclude(pk=self.pk)
+            # if qs.exists():
+            #     raise ValidationError({'phone': 'User with this phone number already exists.'})
 
     def save(self, *args, **kwargs):
         # Auto-generate employee_id if not set, mirroring FacultyProfile logic
