@@ -217,14 +217,14 @@ class FeeStructure(models.Model):
             base_parts = [branch_prefix, ct_upper, attempt_upper, year_str, gm_upper]
             base_prefix = '_'.join(p for p in base_parts if p)
 
-            # Sequence determination starting from 101, matching Batch sequence format
-            existing_count = FeeStructure.objects.filter(name__startswith=base_prefix).exclude(pk=self.pk).count() if base_prefix else FeeStructure.objects.exclude(pk=self.pk).count()
-            seq = 101 + existing_count
-
-            candidate_name = f"{base_prefix}_{seq}" if base_prefix else str(seq)
-            while FeeStructure.objects.filter(name=candidate_name).exclude(pk=self.pk).exists():
-                seq += 1
-                candidate_name = f"{base_prefix}_{seq}" if base_prefix else str(seq)
+            # Use base_prefix directly as the name (no sequence number suffix).
+            # Only add a numeric suffix (_2, _3, ...) if the name already exists.
+            candidate_name = base_prefix if base_prefix else 'FEE'
+            if FeeStructure.objects.filter(name=candidate_name).exclude(pk=self.pk).exists():
+                suffix = 2
+                while FeeStructure.objects.filter(name=f"{candidate_name}_{suffix}").exclude(pk=self.pk).exists():
+                    suffix += 1
+                candidate_name = f"{candidate_name}_{suffix}"
 
             self.name = candidate_name
 
