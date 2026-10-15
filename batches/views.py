@@ -10,6 +10,7 @@ from core.utils import apply_filters
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from .models import (
     Course, Subject, Batch, BatchStudent, BatchFaculty,
@@ -181,29 +182,32 @@ class CourseLevelDetailView(APIView):
 class SyllabusListView(APIView):
     def get(self, request, course_id, level_id):
         syllabuses = Syllabus.objects.filter(level_id=level_id)
-        if getattr(request.user, 'organization', None):
-            syllabuses = syllabuses.filter(organization=request.user.organization)
+        if getattr(request.user, 'organization', None) and not getattr(request.user, 'is_superuser', False):
+            syllabuses = syllabuses.filter(Q(organization=request.user.organization) | Q(organization__isnull=True))
         return Response({'success': True, 'data': SyllabusSerializer(syllabuses, many=True).data})
 
     def post(self, request, course_id, level_id):
         data = request.data.copy()
         data['level'] = level_id
-        if getattr(request.user, 'organization', None):
-            data['organization'] = request.user.organization.id
+        org = getattr(request.user, 'organization', None)
+        if org:
+            data['organization'] = str(org.id)
         serializer = SyllabusSerializer(data=data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(organization=org)
             return Response({'success': True, 'message': 'Syllabus created.', 'data': serializer.data}, status=status.HTTP_201_CREATED)
         return Response({'success': False, 'message': 'Please fix the errors below.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 class SyllabusDetailView(APIView):
     def _get_syllabus(self, level_id, pk):
         try:
-            qs = Syllabus.objects.filter(level_id=level_id)
-            if getattr(self.request.user, 'organization', None):
-                qs = qs.filter(organization=self.request.user.organization)
-            return qs.get(pk=pk)
-        except Syllabus.DoesNotExist:
+            syllabus = Syllabus.objects.filter(level_id=level_id).get(pk=pk)
+            user = getattr(self.request, 'user', None)
+            if user and getattr(user, 'organization', None) and not getattr(user, 'is_superuser', False):
+                if syllabus.organization_id and syllabus.organization_id != user.organization_id:
+                    return None
+            return syllabus
+        except (Syllabus.DoesNotExist, ValueError):
             return None
 
     def get(self, request, course_id, level_id, pk):
@@ -238,8 +242,9 @@ class SyllabusGeneralListView(APIView):
     """
     def get(self, request):
         qs = Syllabus.objects.filter(is_active=True).select_related('level', 'level__course').prefetch_related('modules')
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(organization=request.user.organization)
+        user = getattr(request, 'user', None)
+        if user and getattr(user, 'organization', None) and not getattr(user, 'is_superuser', False):
+            qs = qs.filter(Q(organization=user.organization) | Q(organization__isnull=True))
 
         course_id = request.GET.get('course_id') or request.GET.get('course')
         level_id = request.GET.get('level_id') or request.GET.get('level')
@@ -265,11 +270,14 @@ class SyllabusGeneralDetailView(APIView):
     """
     def get(self, request, pk):
         try:
-            qs = Syllabus.objects.select_related('level', 'level__course').prefetch_related('modules')
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(organization=request.user.organization)
-            syllabus = qs.get(pk=pk)
-        except Syllabus.DoesNotExist:
+            syllabus = Syllabus.objects.select_related('level', 'level__course').prefetch_related('modules').get(pk=pk)
+            user = getattr(request, 'user', None)
+            if user and getattr(user, 'organization', None) and not getattr(user, 'is_superuser', False):
+                if syllabus.organization_id and syllabus.organization_id != user.organization_id:
+                    course_org_id = getattr(syllabus.level.course, 'organization_id', None) if (syllabus.level and syllabus.level.course) else None
+                    if course_org_id and course_org_id != user.organization_id:
+                        return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except (Syllabus.DoesNotExist, ValueError):
             return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({
             'success': True,
@@ -285,13 +293,19 @@ class SyllabusModuleListView(APIView):
     """List & create modules under a specific syllabus."""
 
     def _get_syllabus(self, syllabus_id, request):
-        qs = Syllabus.objects.all()
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(organization=request.user.organization)
         try:
-            return qs.get(pk=syllabus_id)
-        except Syllabus.DoesNotExist:
+            syllabus = Syllabus.objects.select_related('level', 'level__course').get(pk=syllabus_id)
+        except (Syllabus.DoesNotExist, ValueError):
             return None
+
+        user = getattr(request, 'user', None)
+        if user and getattr(user, 'organization', None) and not getattr(user, 'is_superuser', False):
+            user_org_id = user.organization_id
+            if syllabus.organization_id and syllabus.organization_id != user_org_id:
+                course_org_id = getattr(syllabus.level.course, 'organization_id', None) if (syllabus.level and syllabus.level.course) else None
+                if course_org_id and course_org_id != user_org_id:
+                    return None
+        return syllabus
 
     def get(self, request, syllabus_id):
         syllabus = self._get_syllabus(syllabus_id, request)
@@ -311,12 +325,13 @@ class SyllabusModuleListView(APIView):
         if not syllabus:
             return Response({'success': False, 'message': 'Syllabus not found.'}, status=status.HTTP_404_NOT_FOUND)
         data = request.data.copy()
-        data['syllabus'] = str(syllabus_id)
-        if getattr(request.user, 'organization', None):
-            data['organization'] = str(request.user.organization.id)
+        data['syllabus'] = str(syllabus.id)
+        org = syllabus.organization or getattr(request.user, 'organization', None)
+        if org:
+            data['organization'] = str(org.id)
         serializer = SyllabusModuleSerializer(data=data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(organization=org)
             return Response({'success': True, 'message': 'Module created.', 'data': serializer.data}, status=status.HTTP_201_CREATED)
         return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -327,10 +342,11 @@ class SyllabusModuleDetailView(APIView):
     def _get_module(self, syllabus_id, module_id):
         try:
             qs = SyllabusModule.objects.filter(syllabus_id=syllabus_id)
-            if getattr(self.request.user, 'organization', None):
-                qs = qs.filter(organization=self.request.user.organization)
+            user = getattr(self.request, 'user', None)
+            if user and getattr(user, 'organization', None) and not getattr(user, 'is_superuser', False):
+                qs = qs.filter(Q(organization=user.organization) | Q(organization__isnull=True))
             return qs.get(pk=module_id)
-        except SyllabusModule.DoesNotExist:
+        except (SyllabusModule.DoesNotExist, ValueError):
             return None
 
     def get(self, request, syllabus_id, module_id):

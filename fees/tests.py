@@ -804,6 +804,21 @@ class FeeStructureAPITest(TestCase):
         self.assertIsNotNone(matched_syl)
         self.assertEqual(matched_syl['modules_count'], 2)
 
+        # 7. POST /api/v1/syllabuses/<syllabus_id>/modules/ to create a module
+        create_mod_res = self.client.post(
+            f'/api/v1/syllabuses/{syllabus.id}/modules/',
+            data=json.dumps({
+                "name": "Module 3",
+                "order": 3,
+                "description": "Third Module",
+                "is_active": True,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(create_mod_res.status_code, 201)
+        self.assertEqual(create_mod_res.json()['data']['name'], 'Module 3')
+        self.assertEqual(SyllabusModule.objects.filter(syllabus=syllabus).count(), 3)
+
 
 
 

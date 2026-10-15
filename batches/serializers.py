@@ -28,9 +28,10 @@ class SyllabusModuleSerializer(serializers.ModelSerializer):
         model = SyllabusModule
         fields = [
             'id', 'syllabus', 'name', 'order', 'description',
-            'is_active', 'created_at', 'subjects', 'chapters',
+            'is_active', 'created_at', 'subjects', 'chapters', 'organization',
         ]
         read_only_fields = ['id', 'created_at']
+        extra_kwargs = {'organization': {'required': False, 'allow_null': True}}
 
     def get_subjects(self, obj):
         qs = Subject.objects.filter(module=obj, is_active=True)
@@ -68,9 +69,17 @@ class SyllabusSerializer(serializers.ModelSerializer):
             'id', 'level', 'level_name', 'course_id', 'course_name', 'name', 'year', 'description',
             'start_date', 'end_date',
             'is_active', 'created_at',
-            'modules_count', 'modules', 'subjects', 'chapters',
+            'modules_count', 'modules', 'subjects', 'chapters', 'organization',
         ]
         read_only_fields = ['id', 'created_at']
+        extra_kwargs = {'organization': {'required': False, 'allow_null': True}}
+
+    def create(self, validated_data):
+        if 'organization' not in validated_data or validated_data.get('organization') is None:
+            request = self.context.get('request')
+            if request and getattr(request.user, 'organization', None):
+                validated_data['organization'] = request.user.organization
+        return super().create(validated_data)
 
     def get_modules_count(self, obj):
         return obj.modules.filter(is_active=True).count()
