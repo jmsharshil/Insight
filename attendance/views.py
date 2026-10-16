@@ -352,13 +352,22 @@ class QRScanView(APIView):
                         late_mins = 0
                         early_mins = 0
                         # Prefer slot times if available (more precise for class timetable vs general shift)
+                        fp_start = faculty_profile.work_start_time
+                        fp_end = faculty_profile.work_end_time
+                        if faculty_profile.user and hasattr(faculty_profile.user, 'get_shift_timings_for_date'):
+                            day_s, day_e = faculty_profile.user.get_shift_timings_for_date(today)
+                            if day_s:
+                                fp_start = day_s
+                            if day_e:
+                                fp_end = day_e
+
                         if timetable_slot_obj and hasattr(timetable_slot_obj, 'start_time') and scan_type == 'check_in':
                             s_dt = datetime.datetime.combine(today, timetable_slot_obj.start_time)
                             diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
                             if diff > 0:
                                 late_mins = int(diff)
-                        elif faculty_profile.work_start_time and scan_type == 'check_in':
-                            s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
+                        elif fp_start and scan_type == 'check_in':
+                            s_dt = datetime.datetime.combine(today, fp_start)
                             diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
                             if diff > 0:
                                 late_mins = int(diff)
@@ -366,14 +375,14 @@ class QRScanView(APIView):
                         if timetable_slot_obj and hasattr(timetable_slot_obj, 'end_time') and scan_type == 'check_out':
                             e_dt = datetime.datetime.combine(today, timetable_slot_obj.end_time)
                             if (timetable_slot_obj.start_time and timetable_slot_obj.end_time < timetable_slot_obj.start_time) or \
-                               (faculty_profile.work_start_time and faculty_profile.work_end_time and faculty_profile.work_end_time < faculty_profile.work_start_time):
+                               (fp_start and fp_end and fp_end < fp_start):
                                 e_dt += timedelta(days=1)
                             diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
                             if diff > 0:
                                 early_mins = int(diff)
-                        elif faculty_profile.work_end_time and scan_type == 'check_out':
-                            e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
-                            if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
+                        elif fp_end and scan_type == 'check_out':
+                            e_dt = datetime.datetime.combine(today, fp_end)
+                            if fp_start and fp_end < fp_start:
                                 e_dt += timedelta(days=1)
                             diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
                             if diff > 0:
@@ -1733,14 +1742,23 @@ class EmployeeCheckInOutView(APIView):
                 if faculty_profile:
                     late_mins = 0
                     early_mins = 0
+                    fp_start = faculty_profile.work_start_time
+                    fp_end = faculty_profile.work_end_time
+                    if faculty_profile.user and hasattr(faculty_profile.user, 'get_shift_timings_for_date'):
+                        day_s, day_e = faculty_profile.user.get_shift_timings_for_date(today)
+                        if day_s:
+                            fp_start = day_s
+                        if day_e:
+                            fp_end = day_e
+
                     # Prefer slot times if provided (more accurate for class-specific late/early)
                     if timetable_slot_obj and hasattr(timetable_slot_obj, 'start_time') and scan_type == 'check_in':
                         s_dt = datetime.datetime.combine(today, timetable_slot_obj.start_time)
                         diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
                         if diff > 0:
                             late_mins = int(diff)
-                    elif faculty_profile.work_start_time and scan_type == 'check_in':
-                        s_dt = datetime.datetime.combine(today, faculty_profile.work_start_time)
+                    elif fp_start and scan_type == 'check_in':
+                        s_dt = datetime.datetime.combine(today, fp_start)
                         diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
                         if diff > 0:
                             late_mins = int(diff)
@@ -1752,9 +1770,9 @@ class EmployeeCheckInOutView(APIView):
                         diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
                         if diff > 0:
                             early_mins = int(diff)
-                    elif faculty_profile.work_end_time and scan_type == 'check_out':
-                        e_dt = datetime.datetime.combine(today, faculty_profile.work_end_time)
-                        if faculty_profile.work_start_time and faculty_profile.work_end_time < faculty_profile.work_start_time:
+                    elif fp_end and scan_type == 'check_out':
+                        e_dt = datetime.datetime.combine(today, fp_end)
+                        if fp_start and fp_end < fp_start:
                             e_dt += timedelta(days=1)
                         diff = (e_dt - now.replace(tzinfo=None)).total_seconds() / 60
                         if diff > 0:

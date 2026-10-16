@@ -114,6 +114,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     work_start_time = models.TimeField(null=True, blank=True)
     work_end_time = models.TimeField(null=True, blank=True)
     working_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Total working hours")
+    weekly_schedule = models.JSONField(
+        null=True, blank=True, default=dict,
+        help_text="Day-wise shift timings and auto-calculated working hours for Sunday to Saturday."
+    )
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     salary_retention_percentage = models.DecimalField(
@@ -159,6 +163,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         elif self.phone == '':
             self.phone = None
 
+        if self.weekly_schedule:
+            from auth_user.utils import process_weekly_schedule
+            processed_sched, avg_hours = process_weekly_schedule(self.weekly_schedule)
+            self.weekly_schedule = processed_sched
+            if kwargs.get('update_fields') is not None:
+                update_fields = set(kwargs['update_fields'])
+                update_fields.add('weekly_schedule')
+                if (self.working_hours is None or Decimal(str(self.working_hours)) == 0) and avg_hours > 0:
+                    self.working_hours = avg_hours
+                    update_fields.add('working_hours')
+                kwargs['update_fields'] = update_fields
+            elif (self.working_hours is None or Decimal(str(self.working_hours)) == 0) and avg_hours > 0:
+                self.working_hours = avg_hours
+
         if (self.working_hours is None or Decimal(str(self.working_hours)) == 0) and self.work_start_time and self.work_end_time:
             from auth_user.utils import calculate_working_hours
             calculated_hours = calculate_working_hours(self.work_start_time, self.work_end_time)
@@ -170,6 +188,135 @@ class User(AbstractBaseUser, PermissionsMixin):
                     kwargs['update_fields'] = update_fields
 
         super().save(*args, **kwargs)
+
+    def get_shift_timings_for_date(self, target_date=None):
+        """
+        Returns (start_time, end_time) as datetime.time objects (or None) for the given date/datetime or today.
+        Falls back to (self.work_start_time, self.work_end_time).
+        """
+        from django.utils import timezone
+        from datetime import datetime, date, time
+        from auth_user.utils import normalize_day_name
+
+        if target_date is None:
+            target_date = timezone.localdate()
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+
+        day_name = target_date.strftime('%A').lower() if isinstance(target_date, date) else normalize_day_name(target_date)
+
+        if self.weekly_schedule and isinstance(self.weekly_schedule, dict) and day_name in self.weekly_schedule:
+            day_data = self.weekly_schedule[day_name]
+            if isinstance(day_data, dict):
+                s_t = day_data.get('start_time')
+                e_t = day_data.get('end_time')
+
+                def _to_time(t):
+                    if not t:
+                        return None
+                    if isinstance(t, time):
+                        return t
+                    t_str = str(t).strip()
+                    for fmt in ('%H:%M:%S', '%H:%M'):
+                        try:
+                            return datetime.strptime(t_str, fmt).time()
+                        except ValueError:
+                            pass
+                    return None
+
+                parsed_s = _to_time(s_t)
+                parsed_e = _to_time(e_t)
+                if parsed_s or parsed_e:
+                    return parsed_s or self.work_start_time, parsed_e or self.work_end_time
+
+        return self.work_start_time, self.work_end_time
+
+    def get_working_hours_for_date(self, target_date=None):
+        """
+        Returns Decimal working hours for the given date/datetime or today.
+        Evaluates day-specific hours from weekly_schedule if available,
+        otherwise falls back to self.working_hours or work_start_time/work_end_time.
+        """
+        from django.utils import timezone
+        from datetime import datetime, date
+        from auth_user.utils import normalize_day_name, calculate_working_hours
+
+        if target_date is None:
+            target_date = timezone.localdate()
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+
+        day_name = target_date.strftime('%A').lower() if isinstance(target_date, date) else normalize_day_name(target_date)
+
+        if self.weekly_schedule and isinstance(self.weekly_schedule, dict) and day_name in self.weekly_schedule:
+            day_data = self.weekly_schedule[day_name]
+            if isinstance(day_data, dict):
+                if day_data.get('is_off'):
+                    return Decimal('0.00')
+                wh = day_data.get('working_hours')
+                if wh not in [None, '', 'null', 'undefined']:
+                    try:
+                        wh_dec = Decimal(str(wh))
+                        if wh_dec > 0:
+                            return wh_dec
+                    except Exception:
+                        pass
+                s_t = day_data.get('start_time')
+                e_t = day_data.get('end_time')
+                if s_t and e_t:
+                    return calculate_working_hours(s_t, e_t)
+
+        if self.working_hours is not None and Decimal(str(self.working_hours)) > 0:
+            return Decimal(str(self.working_hours))
+
+        if self.work_start_time and self.work_end_time:
+            return calculate_working_hours(self.work_start_time, self.work_end_time)
+
+        return Decimal('0.00')
+
+    def is_day_off(self, target_date=None):
+        """
+        Returns True if target_date is an off day for this user based on weekly_schedule.
+        If is_off is explicitly set to True for this day, returns True.
+        If weekly_schedule is configured and is_off is False, returns False.
+        Falls back to Sunday (weekday 6) being off if no weekly_schedule is configured.
+        """
+        from django.utils import timezone
+        from datetime import datetime, date
+        from auth_user.utils import normalize_day_name
+
+        if target_date is None:
+            target_date = timezone.localdate()
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+
+        if isinstance(target_date, date):
+            day_name = target_date.strftime('%A').lower()
+            dow = target_date.weekday()
+        else:
+            day_name = normalize_day_name(target_date)
+            dow = None
+
+        if self.weekly_schedule and isinstance(self.weekly_schedule, dict) and day_name in self.weekly_schedule:
+            day_data = self.weekly_schedule[day_name]
+            if isinstance(day_data, dict):
+                return bool(day_data.get('is_off', False))
+
+        return dow == 6 if dow is not None else False
+
+    def update_today_working_hours(self, save=True):
+        """
+        Calculates and updates user.working_hours to today's working hours
+        if day-specific schedule exists.
+        """
+        today_hours = self.get_working_hours_for_date()
+        if today_hours > 0:
+            self.working_hours = today_hours
+            if save and self.pk:
+                self.save(update_fields=['working_hours'])
+        return self.working_hours
+
+
 
     def get_all_roles(self):
         """Return a set of all roles for this user (primary role + additional_roles)."""

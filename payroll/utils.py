@@ -608,12 +608,16 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     unpaid_leave_days = Decimal(0)
     leave_dates = []
     
+    fac_user = faculty_profile.user
+    has_custom_sched = bool(getattr(fac_user, 'weekly_schedule', None))
+
     for l in approved_leaves:
         overlap_start = max(l.from_date, month_start)
         overlap_end = min(l.to_date, month_end)
         curr = overlap_start
         while curr <= overlap_end:
-            if curr.weekday() < 5:  # Only count weekdays for leaves
+            is_off_day = fac_user.is_day_off(curr) if has_custom_sched else (curr.weekday() >= 5)
+            if not is_off_day:  # Only count scheduled working days for leaves
                 leave_dates_in_month.add(curr)
                 if l.leave_type in ['unpaid', 'casual']:
                     unpaid_leave_days += Decimal(1)
@@ -626,13 +630,20 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     leave_deductions = unpaid_leave_days * daily_rate
 
     # 7. Working days
-    working_days = sum(1 for d in range(1, last_day_of_month + 1)
-                       if calendar.weekday(year, month, d) < 5)
+    if has_custom_sched:
+        working_days = sum(1 for d in range(1, last_day_of_month + 1)
+                           if not fac_user.is_day_off(date(year, month, d)))
+    else:
+        working_days = sum(1 for d in range(1, last_day_of_month + 1)
+                           if calendar.weekday(year, month, d) < 5)
 
     # 8. Absence deductions
     attended_dates = session_dates | set(qr_by_date.keys())
-    attended_weekdays = {d for d in attended_dates if d.weekday() < 5}
-    days_with_attendance = len(attended_weekdays)
+    if has_custom_sched:
+        attended_working_days = {d for d in attended_dates if not fac_user.is_day_off(d)}
+    else:
+        attended_working_days = {d for d in attended_dates if d.weekday() < 5}
+    days_with_attendance = len(attended_working_days)
     
     absent_dates = []
     from attendance.models import EmployeeAttendanceRecord
@@ -649,25 +660,34 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         last_day = last_day_of_month
     elif year == today.year and month == today.month:
         last_day = min(today.day, last_day_of_month)
-        working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
+        if has_custom_sched:
+            working_days_passed = sum(1 for d in range(1, last_day + 1) if not fac_user.is_day_off(date(year, month, d)))
+        else:
+            working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
         working_days_passed = 0
         last_day = 0
         
-    # Subtract attended weekdays AND approved leave weekdays from working days passed
+    # Subtract attended working days AND approved leave working days from working days passed
     if faculty_profile.employment_type == 'full_time':
         absent_days = Decimal(max(0, working_days_passed - days_with_attendance - len(leave_dates_in_month)))
         
         for d in range(1, last_day + 1):
-            if calendar.weekday(year, month, d) < 5:
-                curr_date = date(year, month, d)
-                if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
-                    absent_dates.append(curr_date.strftime('%Y-%m-%d'))
-                elif curr_date in half_day_dates:
-                    absent_dates.append(curr_date.strftime('%Y-%m-%d') + " (Half Day - Missing Checkout)")
+            curr_date = date(year, month, d)
+            is_off_day = fac_user.is_day_off(curr_date) if has_custom_sched else (calendar.weekday(year, month, d) >= 5)
+            if is_off_day:
+                continue  # Scheduled off day: no absence, no salary deduction!
+            if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
+                absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+            elif curr_date in half_day_dates:
+                absent_dates.append(curr_date.strftime('%Y-%m-%d') + " (Half Day - Missing Checkout)")
 
         # Add late half days and missing checkout half days
-        late_half_days += len({d for d in half_day_dates if d.weekday() < 5})
+        if has_custom_sched:
+            half_days_count = len({d for d in half_day_dates if not fac_user.is_day_off(d)})
+        else:
+            half_days_count = len({d for d in half_day_dates if d.weekday() < 5})
+        late_half_days += half_days_count
         absent_days += Decimal(late_half_days) * Decimal('0.5')
         
         absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
@@ -1046,12 +1066,16 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     unpaid_leave_days = Decimal(0)
     leave_dates = []
     
+    fac_user = faculty_profile.user
+    has_custom_sched = bool(getattr(fac_user, 'weekly_schedule', None))
+
     for l in approved_leaves:
         overlap_start = max(l.from_date, month_start)
         overlap_end = min(l.to_date, month_end)
         curr = overlap_start
         while curr <= overlap_end:
-            if curr.weekday() < 5:  # Only count weekdays for leaves
+            is_off_day = fac_user.is_day_off(curr) if has_custom_sched else (curr.weekday() >= 5)
+            if not is_off_day:  # Only count scheduled working days for leaves
                 leave_dates_in_month.add(curr)
                 if l.leave_type in ['unpaid', 'casual']:
                     unpaid_leave_days += Decimal(1)
@@ -1063,8 +1087,12 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = unpaid_leave_days * daily_rate
 
-    working_days = sum(1 for d in range(1, last_day_of_month + 1)
-                       if calendar.weekday(year, month, d) < 5)
+    if has_custom_sched:
+        working_days = sum(1 for d in range(1, last_day_of_month + 1)
+                           if not fac_user.is_day_off(date(year, month, d)))
+    else:
+        working_days = sum(1 for d in range(1, last_day_of_month + 1)
+                           if calendar.weekday(year, month, d) < 5)
 
     # 5. Compute deduction rates and late penalty
     if faculty_profile.employment_type == 'full_time':
@@ -1220,8 +1248,11 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     late_half_days += (days_late_15_mins // 3)
 
     attended_dates = session_dates | set(qr_by_date.keys())
-    attended_weekdays = {d for d in attended_dates if d.weekday() < 5}
-    days_with_attendance = len(attended_weekdays)
+    if has_custom_sched:
+        attended_working_days = {d for d in attended_dates if not fac_user.is_day_off(d)}
+    else:
+        attended_working_days = {d for d in attended_dates if d.weekday() < 5}
+    days_with_attendance = len(attended_working_days)
     
     from datetime import date
     today = date.today()
@@ -1229,7 +1260,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         working_days_passed = working_days
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
-        working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
+        if has_custom_sched:
+            working_days_passed = sum(1 for d in range(1, last_day + 1) if not fac_user.is_day_off(date(year, month, d)))
+        else:
+            working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
         working_days_passed = 0
         
@@ -1334,6 +1368,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     from .models import PaySlip, LateEntryPolicy
     from leave.models import LeaveApplication
     from attendance.models import EmployeeAttendanceRecord
+    from datetime import date, datetime, timedelta, time
 
     role = getattr(user, 'role', '')
 
@@ -1421,9 +1456,16 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
         return payslip
 
-    # 1. Working days in month (Mon-Fri for most; Sundays excluded from pay for HK/security)
-    working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
-                       if calendar.weekday(year, month, d) < 5)
+    has_custom_sched = bool(getattr(user, 'weekly_schedule', None))
+    # 1. Working days in month (Mon-Fri for most; non-off days for users with weekly_schedule)
+    if has_custom_sched:
+        working_days = sum(
+            1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+            if not user.is_day_off(date(year, month, d))
+        )
+    else:
+        working_days = sum(1 for d in range(1, calendar.monthrange(year, month)[1] + 1)
+                           if calendar.weekday(year, month, d) < 5)
 
     # 2. Daily rate
     if user.salary and user.salary > 0:
@@ -1502,7 +1544,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         overlap_end = min(l.to_date, month_end)
         curr = overlap_start
         while curr <= overlap_end:
-            if curr.weekday() < 5:  # Only count weekdays for leaves
+            is_off_day = user.is_day_off(curr) if has_custom_sched else (curr.weekday() >= 5)
+            if not is_off_day:  # Only count scheduled working days for leaves
                 leave_dates_in_month.add(curr)
                 if l.leave_type in ['unpaid', 'casual']:
                     unpaid_leave_days += Decimal(1)
@@ -1558,7 +1601,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     for entry in late_entries:
         daily_delays[entry.date] += entry.late_minutes
 
-    # Calculate per-day shortfall from 9-hour requirement
+    # Calculate per-day shortfall from 9-hour requirement (or day-specific required hours)
     if role not in NINE_HOUR_EXEMPT_ROLES:
         for rec in attendance_records:
             if rec.checked_in_at and rec.checked_out_at:
@@ -1566,15 +1609,28 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                 local_checkin = timezone.localtime(rec.checked_in_at)
                 local_checkout = timezone.localtime(rec.checked_out_at)
                 actual_minutes = int((local_checkout - local_checkin).total_seconds() / 60)
-                day_shortfall = max(0, REQUIRED_SHIFT_MINUTES - actual_minutes)
+                if hasattr(user, 'get_working_hours_for_date'):
+                    day_req_hours = user.get_working_hours_for_date(rec.date)
+                    day_required_mins = int(Decimal(str(day_req_hours)) * 60) if day_req_hours > 0 else REQUIRED_SHIFT_MINUTES
+                else:
+                    day_required_mins = REQUIRED_SHIFT_MINUTES
+                day_shortfall = max(0, day_required_mins - actual_minutes)
                 if day_shortfall > daily_delays.get(rec.date, 0):
                     daily_delays[rec.date] = day_shortfall
     else:
-        # For exempt roles, keep the existing late-in / early-out logic
+        # For exempt roles, keep the existing late-in / early-out logic with day-specific shift timings
         for rec in attendance_records:
             day_diff = 0
-            if rec.checked_in_at and user.work_start_time:
-                s_time = user.work_start_time
+            s_time = user.work_start_time
+            e_time = user.work_end_time
+            if hasattr(user, 'get_shift_timings_for_date'):
+                day_s, day_e = user.get_shift_timings_for_date(rec.date)
+                if day_s:
+                    s_time = day_s
+                if day_e:
+                    e_time = day_e
+
+            if rec.checked_in_at and s_time:
                 from django.utils import timezone
                 local_checkin = timezone.localtime(rec.checked_in_at)
                 s_dt = datetime.combine(rec.date, s_time)
@@ -1582,12 +1638,11 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                     diff = (local_checkin.replace(tzinfo=None) - s_dt).total_seconds() / 60
                     day_diff += int(diff)
 
-            if rec.checked_out_at and user.work_end_time:
-                e_time = user.work_end_time
+            if rec.checked_out_at and e_time:
                 from django.utils import timezone
                 local_checkout = timezone.localtime(rec.checked_out_at)
                 e_dt = datetime.combine(rec.date, e_time)
-                if user.work_start_time and user.work_end_time < user.work_start_time:
+                if s_time and e_time < s_time:
                     e_dt += timedelta(days=1)
 
                 if local_checkout.replace(tzinfo=None) < e_dt:
@@ -1600,6 +1655,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     late_dates = []
     total_shortfall_penalty_minutes = 0
     for d_date, d_delay in daily_delays.items():
+        if has_custom_sched and user.is_day_off(d_date):
+            continue  # Scheduled off day: no shortfall deduction or penalty
         if d_date.weekday() == 6:
             continue
         if d_date in _half_day_dates_early:
@@ -1619,35 +1676,47 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     from datetime import date
     today = date.today()
     if year < today.year or (year == today.year and month < today.month):
-        working_days_passed = working_days
         last_day = calendar.monthrange(year, month)[1]
+        working_days_passed = working_days
     elif year == today.year and month == today.month:
         last_day = min(today.day, calendar.monthrange(year, month)[1])
-        working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
+        if has_custom_sched:
+            working_days_passed = sum(1 for d in range(1, last_day + 1) if not user.is_day_off(date(year, month, d)))
+        else:
+            working_days_passed = sum(1 for d in range(1, last_day + 1) if calendar.weekday(year, month, d) < 5)
     else:
         working_days_passed = 0
         last_day = 0
 
     attended_dates = set(attendance_records.values_list('date', flat=True))
-    attended_weekdays = {d for d in attended_dates if d.weekday() < 5}
-    days_attended_weekdays = len(attended_weekdays)
+    if has_custom_sched:
+        attended_working_days = {d for d in attended_dates if not user.is_day_off(d)}
+    else:
+        attended_working_days = {d for d in attended_dates if d.weekday() < 5}
+    days_attended_working = len(attended_working_days)
     
     absent_dates = []
     half_day_dates = set(attendance_records.filter(status='half_day').values_list('date', flat=True))
     
     for d in range(1, last_day + 1):
-        if calendar.weekday(year, month, d) < 5:
-            curr_date = date(year, month, d)
-            if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
-                absent_dates.append(curr_date.strftime('%Y-%m-%d'))
-            elif curr_date in half_day_dates:
-                absent_dates.append(curr_date.strftime('%Y-%m-%d') + " (Half Day - Missing Checkout)")
+        curr_date = date(year, month, d)
+        is_off_day = user.is_day_off(curr_date) if has_custom_sched else (calendar.weekday(year, month, d) >= 5)
+        if is_off_day:
+            continue  # Scheduled off day: NOT counted as absent, NO salary deduction!
+
+        if curr_date not in attended_dates and curr_date not in leave_dates_in_month:
+            absent_dates.append(curr_date.strftime('%Y-%m-%d'))
+        elif curr_date in half_day_dates:
+            absent_dates.append(curr_date.strftime('%Y-%m-%d') + " (Half Day - Missing Checkout)")
 
     if user.employment_type == 'full_time':
-        absent_days = Decimal(max(0, working_days_passed - days_attended_weekdays - len(leave_dates_in_month)))
+        absent_days = Decimal(max(0, working_days_passed - days_attended_working - len(leave_dates_in_month)))
         
-        # Add 0.5 days absence for every half day
-        half_days_count = len({d for d in half_day_dates if d.weekday() < 5})
+        # Add 0.5 days absence for every half day on scheduled working days
+        if has_custom_sched:
+            half_days_count = len({d for d in half_day_dates if not user.is_day_off(d)})
+        else:
+            half_days_count = len({d for d in half_day_dates if d.weekday() < 5})
         absent_days += Decimal(half_days_count) * Decimal('0.5')
         
         absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate

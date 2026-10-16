@@ -498,4 +498,154 @@ def calculate_working_hours(start_time, end_time):
 
     diff_seconds = (e_dt - s_dt).total_seconds()
     hours = Decimal(str(diff_seconds)) / Decimal('3600')
-    return hours.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return hours.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+WEEKDAY_NAMES = [
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
+]
+
+WEEKDAY_MAP = {
+    0: 'monday',
+    1: 'tuesday',
+    2: 'wednesday',
+    3: 'thursday',
+    4: 'friday',
+    5: 'saturday',
+    6: 'sunday',
+    'mon': 'monday',
+    'monday': 'monday',
+    'tue': 'tuesday',
+    'tues': 'tuesday',
+    'tuesday': 'tuesday',
+    'wed': 'wednesday',
+    'wednesday': 'wednesday',
+    'thu': 'thursday',
+    'thur': 'thursday',
+    'thurs': 'thursday',
+    'thursday': 'thursday',
+    'fri': 'friday',
+    'friday': 'friday',
+    'sat': 'saturday',
+    'saturday': 'saturday',
+    'sun': 'sunday',
+    'sunday': 'sunday',
+}
+
+
+def normalize_day_name(day_val):
+    """
+    Normalizes a day representation (int 0-6, string day name or abbreviation)
+    to lowercase day name ('monday' .. 'sunday').
+    """
+    if day_val is None:
+        return None
+    if isinstance(day_val, int):
+        return WEEKDAY_MAP.get(day_val)
+    val_str = str(day_val).strip().lower()
+    if val_str.isdigit():
+        return WEEKDAY_MAP.get(int(val_str))
+    return WEEKDAY_MAP.get(val_str, val_str)
+
+
+def process_weekly_schedule(schedule_data):
+    """
+    Validates, normalizes, and auto-calculates working hours for a day-wise weekly schedule.
+    
+    Accepts:
+      - dict: {'monday': {'start_time': '10:00', 'end_time': '19:00'}, 'tuesday': ...}
+      - list: [{'day': 'monday', 'start_time': '10:00', 'end_time': '19:00'}, ...]
+      - JSON string of the above
+      
+    For each day:
+      - If start_time and end_time are present and working_hours is not explicitly provided (or 0),
+        automatically computes working_hours between start_time and end_time.
+      - If is_off is True, working_hours is set to 0.00.
+      
+    Returns:
+      (normalized_schedule_dict, average_daily_hours)
+    """
+    if not schedule_data:
+        return {}, Decimal('0.00')
+
+    if isinstance(schedule_data, str):
+        import json
+        try:
+            schedule_data = json.loads(schedule_data)
+        except Exception:
+            return {}, Decimal('0.00')
+
+    normalized = {}
+    day_entries = []
+
+    if isinstance(schedule_data, dict):
+        for k, v in schedule_data.items():
+            if isinstance(v, dict):
+                entry = dict(v)
+                entry['day'] = k
+                day_entries.append(entry)
+    elif isinstance(schedule_data, (list, tuple)):
+        for item in schedule_data:
+            if isinstance(item, dict):
+                day_entries.append(dict(item))
+
+    active_working_hours = []
+
+    for entry in day_entries:
+        raw_day = entry.get('day')
+        day_key = normalize_day_name(raw_day)
+        if not day_key or day_key not in WEEKDAY_NAMES:
+            continue
+
+        start_time = entry.get('start_time')
+        end_time = entry.get('end_time')
+        raw_off = entry.get('is_off', False)
+        if isinstance(raw_off, str):
+            is_off = raw_off.strip().lower() in ('true', '1', 'yes', 't')
+        else:
+            is_off = bool(raw_off)
+        raw_wh = entry.get('working_hours')
+
+        def _fmt_time(t):
+            if not t:
+                return None
+            if hasattr(t, 'strftime'):
+                return t.strftime('%H:%M:%S')
+            t_str = str(t).strip()
+            return t_str if t_str else None
+
+        clean_start = _fmt_time(start_time)
+        clean_end = _fmt_time(end_time)
+
+        wh_val = None
+        if raw_wh not in [None, '', 'null', 'undefined']:
+            try:
+                wh_val = Decimal(str(raw_wh))
+            except Exception:
+                wh_val = None
+
+        if wh_val is not None and wh_val > 0:
+            calc_wh = wh_val
+        elif clean_start and clean_end:
+            calc_wh = calculate_working_hours(clean_start, clean_end)
+        else:
+            calc_wh = Decimal('0.00')
+
+        if calc_wh > 0 and not is_off:
+            active_working_hours.append(calc_wh)
+
+        normalized[day_key] = {
+            'start_time': clean_start,
+            'end_time': clean_end,
+            'working_hours': float(calc_wh),
+            'is_off': is_off,
+        }
+
+    avg_hours = Decimal('0.00')
+    if active_working_hours:
+        avg_hours = (sum(active_working_hours) / Decimal(len(active_working_hours))).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+    return normalized, avg_hours
+

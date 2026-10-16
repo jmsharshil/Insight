@@ -435,6 +435,7 @@ class AddUserAPIView(APIView):
                 "message": "User created successfully. Password setup email sent.",
                 "user_id": str(user.id),
                 "working_hours": str(user.working_hours),
+                "weekly_schedule": user.weekly_schedule,
                 "branch": str(user.branch.id) if user.branch else None,
                 "branches": [str(b.id) for b in user.branches.all()],
             }, status=status.HTTP_201_CREATED)

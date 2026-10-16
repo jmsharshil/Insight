@@ -9,7 +9,7 @@ EMPLOYEE_FIELDS = [
     'employee_id', 'qualification', 'specialization', 'subject_expertise', 'level', 'levels',
     'employment_type', 'joining_date', 'hourly_rate', 'session_hours', 'salary', 
     'bank_account', 'ifsc_code', 'pan_number', 'aadhar_number', 'work_start_time', 'work_end_time', 
-    'working_hours', 'salary_retention_percentage', 'per_paper_rate'
+    'working_hours', 'weekly_schedule', 'salary_retention_percentage', 'per_paper_rate'
 ]
 
 
@@ -184,6 +184,61 @@ class EmployeeFieldsMixin:
             elif roles_val in (None, '', [], ['']):
                 mutable_data['additional_roles'] = []
 
+        # Convert flat day fields (e.g. monday_start_time, monday_end_time) into weekly_schedule
+        flat_schedule = {}
+        for day in ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']:
+            st_key = f"{day}_start_time"
+            et_key = f"{day}_end_time"
+            wh_key = f"{day}_working_hours"
+            off_key = f"{day}_is_off"
+            if st_key in mutable_data or et_key in mutable_data or wh_key in mutable_data or off_key in mutable_data:
+                raw_off = mutable_data.pop(off_key, False)
+                if isinstance(raw_off, str):
+                    is_off_val = raw_off.strip().lower() in ('true', '1', 'yes', 't')
+                else:
+                    is_off_val = bool(raw_off)
+                flat_schedule[day] = {
+                    'start_time': mutable_data.pop(st_key, None),
+                    'end_time': mutable_data.pop(et_key, None),
+                    'working_hours': mutable_data.pop(wh_key, None),
+                    'is_off': is_off_val,
+                }
+        if flat_schedule:
+            existing_sched = mutable_data.get('weekly_schedule') or (
+                getattr(self.instance, 'weekly_schedule', None) if self.instance else None
+            )
+            if isinstance(existing_sched, dict):
+                merged = dict(existing_sched)
+                for d_k, d_v in flat_schedule.items():
+                    if d_k in merged and isinstance(merged[d_k], dict):
+                        merged_day = dict(merged[d_k])
+                        for prop, val in d_v.items():
+                            if val is not None:
+                                merged_day[prop] = val
+                        merged[d_k] = merged_day
+                    else:
+                        merged[d_k] = d_v
+                mutable_data['weekly_schedule'] = merged
+            elif isinstance(existing_sched, str):
+                import json
+                try:
+                    parsed = json.loads(existing_sched)
+                    if isinstance(parsed, dict):
+                        parsed.update(flat_schedule)
+                        mutable_data['weekly_schedule'] = parsed
+                    else:
+                        mutable_data['weekly_schedule'] = flat_schedule
+                except Exception:
+                    mutable_data['weekly_schedule'] = flat_schedule
+            else:
+                mutable_data['weekly_schedule'] = flat_schedule
+        elif isinstance(mutable_data.get('weekly_schedule'), str):
+            import json
+            try:
+                mutable_data['weekly_schedule'] = json.loads(mutable_data['weekly_schedule'])
+            except Exception:
+                pass
+
         choice_fields_defaults = {
             'level': 'executive',
             'employment_type': 'full_time'
@@ -258,11 +313,12 @@ class EmployeeFieldsMixin:
             if not is_paper_checker:
                 attrs.pop('per_paper_rate', None)
 
-            # Auto-calculate working_hours if not provided and work start/end times are present
-            start_time = attrs.get('work_start_time') or getattr(self.instance, 'work_start_time', None)
-            end_time = attrs.get('work_end_time') or getattr(self.instance, 'work_end_time', None)
-            working_hours_val = attrs.get('working_hours')
+            # Auto-calculate and process weekly_schedule if present
+            weekly_sched = attrs.get('weekly_schedule')
+            if weekly_sched is None and hasattr(self, 'initial_data') and hasattr(self.initial_data, 'get'):
+                weekly_sched = self.initial_data.get('weekly_schedule')
 
+            working_hours_val = attrs.get('working_hours')
             initial_wh = None
             if hasattr(self, 'initial_data') and hasattr(self.initial_data, 'get'):
                 initial_wh = self.initial_data.get('working_hours')
@@ -272,6 +328,18 @@ class EmployeeFieldsMixin:
                 or (isinstance(working_hours_val, (int, float, Decimal)) and Decimal(str(working_hours_val)) == 0)
                 or initial_wh in ['', 'null', 'undefined', None, 0, '0', '0.0', '0.00']
             )
+
+            if weekly_sched:
+                from auth_user.utils import process_weekly_schedule
+                processed_sched, avg_hours = process_weekly_schedule(weekly_sched)
+                attrs['weekly_schedule'] = processed_sched
+                if wh_not_added and avg_hours > 0:
+                    attrs['working_hours'] = avg_hours
+                    wh_not_added = False
+
+            # Auto-calculate working_hours if not provided and work start/end times are present
+            start_time = attrs.get('work_start_time') or getattr(self.instance, 'work_start_time', None)
+            end_time = attrs.get('work_end_time') or getattr(self.instance, 'work_end_time', None)
 
             is_new = self.instance is None
             time_changed = ('work_start_time' in attrs or 'work_end_time' in attrs)
@@ -421,6 +489,7 @@ class AddUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     )
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    weekly_schedule = serializers.JSONField(required=False, allow_null=True)
     levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True, write_only=True)
     additional_roles = serializers.ListField(
         child=serializers.CharField(max_length=50),
@@ -685,6 +754,7 @@ class UpdateUserSerializer(EmployeeFieldsMixin, serializers.ModelSerializer):
     profile_pic = serializers.ImageField(required=False, allow_null=True)
     work_start_time = serializers.TimeField(required=False, allow_null=True)
     work_end_time = serializers.TimeField(required=False, allow_null=True)
+    weekly_schedule = serializers.JSONField(required=False, allow_null=True)
     levels = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True, write_only=True)
     additional_roles = serializers.ListField(
         child=serializers.CharField(max_length=50),

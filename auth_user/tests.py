@@ -384,3 +384,276 @@ class AuthUserAPITestCase(TestCase):
         updated_user = serializer.save()
         self.assertEqual(updated_user.working_hours, Decimal('10.00'))
 
+    def test_process_weekly_schedule_auto_calculates_each_day(self):
+        from .utils import process_weekly_schedule
+        sched = {
+            'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+            'tuesday': {'start_time': '13:00:00', 'end_time': '19:00:00', 'is_off': False},
+            'wednesday': {'start_time': '10:00:00', 'end_time': '20:00:00', 'working_hours': 10.0, 'is_off': False},
+            'sunday': {'start_time': '10:00:00', 'end_time': '18:00:00', 'is_off': True},
+        }
+        processed, avg_hours = process_weekly_schedule(sched)
+        self.assertEqual(processed['monday']['working_hours'], 9.0)
+        self.assertEqual(processed['monday']['is_off'], False)
+        self.assertEqual(processed['tuesday']['working_hours'], 6.0)
+        self.assertEqual(processed['tuesday']['is_off'], False)
+        self.assertEqual(processed['wednesday']['working_hours'], 10.0)
+        self.assertEqual(processed['wednesday']['is_off'], False)
+        # Sunday has start and end times, so working_hours is calculated as 8.0, and is_off is True
+        self.assertEqual(processed['sunday']['working_hours'], 8.0)
+        self.assertEqual(processed['sunday']['is_off'], True)
+        self.assertEqual(processed['sunday']['start_time'], '10:00:00')
+        self.assertEqual(processed['sunday']['end_time'], '18:00:00')
+        # avg of non-off days (9, 6, 10) is 25 / 3 = 8.33
+        self.assertEqual(avg_hours, Decimal('8.33'))
+
+    def test_user_get_working_hours_for_date(self):
+        from datetime import date
+        user = User.objects.create_user(
+            username='sched_user',
+            email='sched_user@test.org',
+            password='Password123!',
+            phone='9111111118',
+            name='Schedule User',
+            role='admin_executive',
+            weekly_schedule={
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'tuesday': {'start_time': '13:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'sunday': {'start_time': '10:00:00', 'end_time': '18:00:00', 'is_off': True},
+            }
+        )
+        # Monday (2026-10-12 was Monday)
+        monday_date = date(2026, 10, 12)
+        self.assertEqual(monday_date.strftime('%A').lower(), 'monday')
+        self.assertEqual(user.get_working_hours_for_date(monday_date), Decimal('9.00'))
+        self.assertFalse(user.is_day_off(monday_date))
+
+        # Tuesday (2026-10-13 was Tuesday)
+        tuesday_date = date(2026, 10, 13)
+        self.assertEqual(user.get_working_hours_for_date(tuesday_date), Decimal('6.00'))
+        self.assertFalse(user.is_day_off(tuesday_date))
+
+        # Sunday (2026-10-18 is Sunday) - is_off=True so required working hours is 0.00
+        sunday_date = date(2026, 10, 18)
+        self.assertEqual(user.get_working_hours_for_date(sunday_date), Decimal('0.00'))
+        self.assertTrue(user.is_day_off(sunday_date))
+
+        # Shift timings on Sunday still resolved
+        sun_s, sun_e = user.get_shift_timings_for_date(sunday_date)
+        self.assertEqual(sun_s, time(10, 0))
+        self.assertEqual(sun_e, time(18, 0))
+
+        # Shift timings on Monday
+        mon_s, mon_e = user.get_shift_timings_for_date(monday_date)
+        self.assertEqual(mon_s, time(10, 0))
+        self.assertEqual(mon_e, time(19, 0))
+
+    def test_payroll_does_not_deduct_for_is_off_day(self):
+        from decimal import Decimal
+        from datetime import date
+        org = Organization.objects.create(name='Payroll Off Org')
+        user = User.objects.create_user(
+            username='payroll_off_user',
+            email='payroll_off@test.org',
+            password='Password123!',
+            phone='9111111129',
+            name='Payroll Off User',
+            role='counsellor',
+            salary=Decimal('30000.00'),
+            employment_type='full_time',
+            organization=org,
+            weekly_schedule={
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'tuesday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'wednesday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': True},
+                'thursday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'friday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'saturday': {'start_time': '10:00:00', 'end_time': '14:00:00', 'is_off': False},
+                'sunday': {'start_time': '10:00:00', 'end_time': '18:00:00', 'is_off': True},
+            }
+        )
+        wednesday_date = date(2026, 5, 6) # Wednesday
+        thursday_date = date(2026, 5, 7)  # Thursday
+        self.assertTrue(user.is_day_off(wednesday_date))
+        self.assertFalse(user.is_day_off(thursday_date))
+        # Wednesday is an off day: required hours is 0
+        self.assertEqual(user.get_working_hours_for_date(wednesday_date), Decimal('0.00'))
+        # Thursday is a working day: required hours is 9.00
+        self.assertEqual(user.get_working_hours_for_date(thursday_date), Decimal('9.00'))
+
+    def test_add_user_with_weekly_schedule_calculates_daily_and_average_working_hours(self):
+        org = Organization.objects.create(name='Weekly Sched Org')
+        serializer = AddUserSerializer(data={
+            'email': 'weekly_user@test.org',
+            'phone': '9111111119',
+            'name': 'Weekly User',
+            'role': 'counsellor',
+            'organization': str(org.id),
+            'weekly_schedule': {
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00'},
+                'tuesday': {'start_time': '13:00:00', 'end_time': '19:00:00'},
+            }
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        user = serializer.save()
+        self.assertEqual(user.weekly_schedule['monday']['working_hours'], 9.0)
+        self.assertEqual(user.weekly_schedule['tuesday']['working_hours'], 6.0)
+        # Average of 9.0 and 6.0 = 7.50
+        self.assertEqual(user.working_hours, Decimal('7.50'))
+
+    def test_add_user_with_flat_day_fields(self):
+        org = Organization.objects.create(name='Flat Day Org')
+        serializer = AddUserSerializer(data={
+            'email': 'flat_day_user@test.org',
+            'phone': '9111111120',
+            'name': 'Flat Day User',
+            'role': 'counsellor',
+            'organization': str(org.id),
+            'monday_start_time': '10:00:00',
+            'monday_end_time': '19:00:00',
+            'tuesday_start_time': '13:00:00',
+            'tuesday_end_time': '19:00:00',
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        user = serializer.save()
+        self.assertIn('monday', user.weekly_schedule)
+        self.assertEqual(user.weekly_schedule['monday']['working_hours'], 9.0)
+        self.assertEqual(user.weekly_schedule['tuesday']['working_hours'], 6.0)
+        self.assertEqual(user.working_hours, Decimal('7.50'))
+
+    def test_add_user_api_endpoint_with_weekly_schedule(self):
+        org = Organization.objects.create(name='API Weekly Org')
+        admin = User.objects.create_superuser(
+            username='api_weekly_admin',
+            email='api_weekly_admin@test.org',
+            password='Password123!',
+            organization=org,
+            phone='9111111121',
+        )
+        self.client.force_authenticate(user=admin)
+        url = reverse('add-user')
+        payload = {
+            'email': 'api_weekly_employee@test.org',
+            'phone': '9111111122',
+            'name': 'API Weekly Employee',
+            'role': 'admin_executive',
+            'organization': str(org.id),
+            'weekly_schedule': {
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00'},
+                'tuesday': {'start_time': '13:00:00', 'end_time': '19:00:00'},
+            }
+        }
+        response = self.client.post(url, payload, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data.get('working_hours'), '7.50')
+        self.assertIn('weekly_schedule', response.data)
+        self.assertEqual(response.data['weekly_schedule']['monday']['working_hours'], 9.0)
+        self.assertEqual(response.data['weekly_schedule']['tuesday']['working_hours'], 6.0)
+
+    def test_sunday_start_and_end_time_with_is_off_and_working_hours(self):
+        org = Organization.objects.create(name='Sunday Org')
+        user = User.objects.create_user(
+            username='sunday_worker',
+            email='sunday@test.org',
+            password='Password123!',
+            phone='9111111123',
+            name='Sunday Worker',
+            role='counsellor',
+            organization=org,
+            weekly_schedule={
+                'sunday': {'start_time': '10:00:00', 'end_time': '14:00:00', 'is_off': True},
+                'monday': {'start_time': '09:00:00', 'end_time': '18:00:00', 'is_off': False},
+            }
+        )
+        # Sunday has working_hours auto-calculated in schedule
+        self.assertIn('sunday', user.weekly_schedule)
+        self.assertEqual(user.weekly_schedule['sunday']['start_time'], '10:00:00')
+        self.assertEqual(user.weekly_schedule['sunday']['end_time'], '14:00:00')
+        self.assertEqual(user.weekly_schedule['sunday']['working_hours'], 4.0)
+        self.assertTrue(user.weekly_schedule['sunday']['is_off'])
+
+        # Since Sunday is is_off=True, user.working_hours average only counts active days (Monday: 9.00)
+        self.assertEqual(user.working_hours, Decimal('9.00'))
+
+        # On Sunday: is_day_off is True and required hours is 0.00
+        from datetime import date, time
+        sun_date = date(2026, 10, 18)  # Sunday
+        self.assertTrue(user.is_day_off(sun_date))
+        self.assertEqual(user.get_working_hours_for_date(sun_date), Decimal('0.00'))
+        # But shift timings are preserved
+        s_time, e_time = user.get_shift_timings_for_date(sun_date)
+        self.assertEqual(s_time, time(10, 0))
+        self.assertEqual(e_time, time(14, 0))
+
+    def test_payroll_zero_deduction_for_custom_off_days(self):
+        from decimal import Decimal
+        from datetime import date, time, datetime
+        import calendar
+        from payroll.models import PayrollRun
+        from attendance.models import EmployeeAttendanceRecord
+        from payroll.utils import compute_payslip_for_user
+
+        org = Organization.objects.create(name='Off Day Payroll Org')
+        user = User.objects.create_user(
+            username='off_day_employee',
+            email='offday@test.org',
+            password='Password123!',
+            phone='9111111124',
+            name='Off Day Employee',
+            role='counsellor',
+            salary=Decimal('30000.00'),
+            employment_type='full_time',
+            organization=org,
+            weekly_schedule={
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'tuesday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'wednesday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': True},
+                'thursday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'friday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'saturday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'sunday': {'start_time': '10:00:00', 'end_time': '14:00:00', 'is_off': True},
+            }
+        )
+
+        from branch.models import Branch
+        branch = Branch.objects.create(name='Off Day Branch', organization=org)
+        user.branch = branch
+        user.save()
+
+        month = 5
+        year = 2026
+        payroll_run = PayrollRun.objects.create(
+            branch=branch,
+            month=month,
+            year=year,
+            generated_by=user,
+        )
+
+        # Mark attendance on every non-off day (skip Wednesday and Sunday)
+        num_days = calendar.monthrange(year, month)[1]
+        for d in range(1, num_days + 1):
+            cur_date = date(year, month, d)
+            if not user.is_day_off(cur_date):
+                from django.utils import timezone as dj_timezone
+                tz = dj_timezone.get_current_timezone()
+                in_dt = dj_timezone.make_aware(datetime.combine(cur_date, time(10, 0)), tz)
+                out_dt = dj_timezone.make_aware(datetime.combine(cur_date, time(19, 0)), tz)
+                EmployeeAttendanceRecord.objects.create(
+                    user=user,
+                    branch=branch,
+                    date=cur_date,
+                    status='present',
+                    checked_in_at=in_dt,
+                    checked_out_at=out_dt,
+                )
+
+        payslip = compute_payslip_for_user(user, month, year, payroll_run)
+        # Wednesday & Sunday were off days, so absence deduction is 0 and full salary is preserved without deduction
+        self.assertEqual(payslip.absence_deductions, Decimal('0.00'))
+        self.assertEqual(payslip.leave_deductions, Decimal('0.00'))
+        self.assertEqual(payslip.basic_salary, Decimal('30000.00'))
+        self.assertEqual(payslip.attendance_bonus, Decimal('1000.00'))
+        self.assertEqual(payslip.net_salary, Decimal('31000.00'))
+
+
+

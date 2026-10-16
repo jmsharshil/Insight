@@ -803,11 +803,19 @@ def apply_half_day_rule(record, user, checkout_time=None):
     from decimal import Decimal
     from auth_user.utils import calculate_working_hours
 
-    required = Decimal(str(getattr(user, 'working_hours', 0) or 0))
+    target_date = getattr(record, 'date', None)
+    if hasattr(user, 'get_working_hours_for_date') and target_date:
+        required = user.get_working_hours_for_date(target_date)
+    else:
+        required = Decimal(str(getattr(user, 'working_hours', 0) or 0))
+
     if required <= 0:
-        required = calculate_working_hours(
-            getattr(user, 'work_start_time', None), getattr(user, 'work_end_time', None)
-        )
+        if hasattr(user, 'get_shift_timings_for_date') and target_date:
+            st, et = user.get_shift_timings_for_date(target_date)
+        else:
+            st, et = getattr(user, 'work_start_time', None), getattr(user, 'work_end_time', None)
+        required = calculate_working_hours(st, et)
+
     checkout_time = checkout_time or record.checked_out_at
     if required <= 0 or not record.checked_in_at or not checkout_time:
         return ''
