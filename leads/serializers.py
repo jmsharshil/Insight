@@ -493,14 +493,40 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         reminders_data = validated_data.pop('custom_reminders', [])
         plan = super().create(validated_data)
         
-        # Auto-create the linked SalesDailyActivity container
-        SalesDailyActivity.objects.create(
-            user=plan.user,
-            plan=plan,
-            activity_date=plan.plan_date,
-            status='pending',
-            name=plan.type if plan.type else 'Sales Activity'
-        )
+        # Auto-create the linked SalesDailyActivity container with nested/initial attributes if provided
+        initial = getattr(self, 'initial_data', {}) if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else {}
+        raw_acts = initial.get('activities')
+        act_data = {}
+        if isinstance(raw_acts, list) and raw_acts and isinstance(raw_acts[0], dict):
+            act_data = raw_acts[0]
+        elif isinstance(raw_acts, dict):
+            act_data = raw_acts
+
+        act_kwargs = {
+            'user': plan.user,
+            'plan': plan,
+            'activity_date': plan.plan_date,
+            'status': act_data.get('status') or ('cancelled' if plan.status == 'cancelled' else 'pending'),
+            'name': act_data.get('name') or act_data.get('activity_name') or (plan.type if plan.type else 'Sales Activity'),
+        }
+        for field in ['standard', 'board', 'medium', 'seminar_reference_by', 'seminar_given_by', 'target_name', 'target_number', 'location_link']:
+            val = act_data.get(field) if field in act_data else initial.get(field)
+            if val is not None and val not in ('null', 'undefined'):
+                act_kwargs[field] = val
+        for num_field in ['students_expected', 'students_attended']:
+            val = act_data.get(num_field) if num_field in act_data else initial.get(num_field)
+            if val not in ('', None, 'null', 'undefined'):
+                act_kwargs[num_field] = val
+        for date_field in ['from_date', 'to_date']:
+            val = act_data.get(date_field) if date_field in act_data else initial.get(date_field)
+            if val not in ('', None, 'null', 'undefined'):
+                act_kwargs[date_field] = val
+        if 'self_vehicle' in act_data or 'self_vehicle' in initial:
+            v = act_data.get('self_vehicle') if 'self_vehicle' in act_data else initial.get('self_vehicle')
+            if isinstance(v, str): v = v.lower() in ('true', 'yes', '1')
+            act_kwargs['self_vehicle'] = bool(v)
+
+        SalesDailyActivity.objects.create(**act_kwargs)
         
         for reminder_data in reminders_data:
             SalesPlanReminder.objects.create(
@@ -516,6 +542,10 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         old_date = instance.plan_date
         plan = super().update(instance, validated_data)
         
+        # Cascade plan status updates (e.g. cancellation)
+        if 'status' in validated_data and validated_data['status'] == 'cancelled':
+            plan.activities.exclude(status='cancelled').update(status='cancelled')
+
         # Sync updates to linked pending activities
         if old_date != plan.plan_date or 'type' in validated_data:
             pending_activities = plan.activities.filter(status='pending')

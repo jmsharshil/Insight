@@ -448,148 +448,167 @@ class SalesDailyPlanView(APIView):
         # Link day's activity container to the plan (create default activity only for new plans
         # or if none exists for this plan; supports multiple activities per day via name)
         
+        # Extract nested activities if provided (supports list of dicts, or single dict)
+        raw_activities = request.data.get('activities')
+        activities_list = []
+        if isinstance(raw_activities, list) and raw_activities:
+            activities_list = [a for a in raw_activities if isinstance(a, dict)]
+        elif isinstance(raw_activities, dict):
+            activities_list = [raw_activities]
+
         if created or not plan.activities.exists():
-            name = request.data.get('activity_name', '') or request.data.get('name', '')
-            
-            s_exp = request.data.get('students_expected')
-            s_att = request.data.get('students_attended')
-            standard = request.data.get('standard')
-            board = request.data.get('board')
-            medium = request.data.get('medium')
-            seminar_reference_by = request.data.get('seminar_reference_by')
-            seminar_given_by = request.data.get('seminar_given_by')
-            target_name = request.data.get('target_name')
-            target_number = request.data.get('target_number')
-            location_link = request.data.get('location_link')
-            from_date = request.data.get('from_date')
-            to_date = request.data.get('to_date')
-            
-            act_kwargs = {
-                'user': request.user,
-                'activity_date': plan_date,
-                'name': name or f"Activity for {plan.type or 'Plan'}",
-                'notes': '',
-                'plan': plan,
-                'students_expected': None if s_exp in ('', 'null', 'undefined') else s_exp,
-                'students_attended': None if s_att in ('', 'null', 'undefined') else s_att,
-            }
-            if standard: act_kwargs['standard'] = standard
-            if board: act_kwargs['board'] = board
-            if medium: act_kwargs['medium'] = medium
-            if seminar_reference_by: act_kwargs['seminar_reference_by'] = seminar_reference_by
-            if seminar_given_by: act_kwargs['seminar_given_by'] = seminar_given_by
-            if target_name: act_kwargs['target_name'] = target_name
-            if target_number: act_kwargs['target_number'] = target_number
-            if location_link: act_kwargs['location_link'] = location_link
-            if from_date: act_kwargs['from_date'] = from_date
-            if to_date: act_kwargs['to_date'] = to_date
-            act_kwargs['self_vehicle'] = self_vehicle
-            
-            activity = SalesDailyActivity.objects.create(**act_kwargs)
-            timings_data = request.data.get('timings', [])
-            if isinstance(timings_data, list):
-                for t in timings_data:
-                    SalesDailyActivityTiming.objects.create(
-                        activity=activity,
-                        date=t.get('date'),
-                        start_time=t.get('start_time'),
-                        end_time=t.get('end_time')
-                    )
+            payloads = activities_list if activities_list else [{}]
+            activity = None
+            for act_data in payloads:
+                name = act_data.get('activity_name') or act_data.get('name') or request.data.get('activity_name', '') or request.data.get('name', '')
+                
+                s_exp = act_data.get('students_expected') if 'students_expected' in act_data else request.data.get('students_expected')
+                s_att = act_data.get('students_attended') if 'students_attended' in act_data else request.data.get('students_attended')
+                standard = act_data.get('standard') if 'standard' in act_data else request.data.get('standard')
+                board = act_data.get('board') if 'board' in act_data else request.data.get('board')
+                medium = act_data.get('medium') if 'medium' in act_data else request.data.get('medium')
+                seminar_reference_by = act_data.get('seminar_reference_by') if 'seminar_reference_by' in act_data else request.data.get('seminar_reference_by')
+                seminar_given_by = act_data.get('seminar_given_by') if 'seminar_given_by' in act_data else request.data.get('seminar_given_by')
+                target_name = act_data.get('target_name') if 'target_name' in act_data else request.data.get('target_name')
+                target_number = act_data.get('target_number') if 'target_number' in act_data else request.data.get('target_number')
+                location_link = act_data.get('location_link') if 'location_link' in act_data else request.data.get('location_link')
+                from_date = act_data.get('from_date') if 'from_date' in act_data else request.data.get('from_date')
+                to_date = act_data.get('to_date') if 'to_date' in act_data else request.data.get('to_date')
+                
+                act_self_veh = act_data.get('self_vehicle') if 'self_vehicle' in act_data else self_vehicle
+                if isinstance(act_self_veh, str):
+                    act_self_veh = act_self_veh.lower() in ('true', 'yes', '1')
+
+                act_kwargs = {
+                    'user': request.user,
+                    'activity_date': plan_date,
+                    'name': name or f"Activity for {plan.type or 'Plan'}",
+                    'notes': act_data.get('notes') or request.data.get('notes', ''),
+                    'plan': plan,
+                    'status': act_data.get('status') or ('cancelled' if plan.status == 'cancelled' else 'pending'),
+                    'students_expected': None if s_exp in ('', None, 'null', 'undefined') else s_exp,
+                    'students_attended': None if s_att in ('', None, 'null', 'undefined') else s_att,
+                    'self_vehicle': bool(act_self_veh),
+                }
+                if standard is not None and standard not in ('null', 'undefined'):
+                    act_kwargs['standard'] = standard
+                if board is not None and board not in ('null', 'undefined'):
+                    act_kwargs['board'] = board
+                if medium is not None and medium not in ('null', 'undefined'):
+                    act_kwargs['medium'] = medium
+                if seminar_reference_by is not None and seminar_reference_by not in ('null', 'undefined'):
+                    act_kwargs['seminar_reference_by'] = seminar_reference_by
+                if seminar_given_by is not None and seminar_given_by not in ('null', 'undefined'):
+                    act_kwargs['seminar_given_by'] = seminar_given_by
+                if target_name is not None and target_name not in ('null', 'undefined'):
+                    act_kwargs['target_name'] = target_name
+                if target_number is not None and target_number not in ('null', 'undefined'):
+                    act_kwargs['target_number'] = target_number
+                if location_link is not None and location_link not in ('null', 'undefined'):
+                    act_kwargs['location_link'] = location_link
+                if from_date not in ('', None, 'null', 'undefined'):
+                    act_kwargs['from_date'] = from_date
+                if to_date not in ('', None, 'null', 'undefined'):
+                    act_kwargs['to_date'] = to_date
+                
+                activity = SalesDailyActivity.objects.create(**act_kwargs)
+
+                timings_data = act_data.get('timings') if 'timings' in act_data else request.data.get('timings', [])
+                if isinstance(timings_data, list):
+                    for t in timings_data:
+                        SalesDailyActivityTiming.objects.create(
+                            activity=activity,
+                            date=t.get('date'),
+                            start_time=t.get('start_time'),
+                            end_time=t.get('end_time')
+                        )
+                inv_items = act_data.get('inventory_items') if 'inventory_items' in act_data else request.data.get('inventory_items')
+                if inv_items:
+                    handle_inventory_allocations(activity, inv_items)
         else:
             activity = plan.activities.first()
             if activity:
+                act_data = activities_list[0] if activities_list else {}
                 updated = False
                 update_fields = ['updated_at']
-                
-                # Check for self_vehicle in request to allow independent updates
-                if 'self_vehicle' in request.data:
-                    val = request.data.get('self_vehicle')
+
+                def get_field_val(f_name):
+                    if f_name in act_data:
+                        return True, act_data[f_name]
+                    if f_name in request.data:
+                        return True, request.data[f_name]
+                    return False, None
+
+                has_veh, val = get_field_val('self_vehicle')
+                if has_veh:
                     if isinstance(val, str):
                         val = val.lower() in ('true', 'yes', '1')
                     activity.self_vehicle = bool(val)
                     update_fields.append('self_vehicle')
                     updated = True
                 else:
-                    # Sync from plan
                     if activity.self_vehicle != self_vehicle:
                         activity.self_vehicle = self_vehicle
                         update_fields.append('self_vehicle')
                         updated = True
 
-                if 'students_expected' in request.data:
-                    val = request.data.get('students_expected')
-                    activity.students_expected = None if val in ('', 'null', 'undefined') else val
+                has_exp, val = get_field_val('students_expected')
+                if has_exp:
+                    activity.students_expected = None if val in ('', None, 'null', 'undefined') else val
                     update_fields.append('students_expected')
                     updated = True
-                if 'students_attended' in request.data:
-                    val = request.data.get('students_attended')
-                    activity.students_attended = None if val in ('', 'null', 'undefined') else val
+
+                has_att, val = get_field_val('students_attended')
+                if has_att:
+                    activity.students_attended = None if val in ('', None, 'null', 'undefined') else val
                     update_fields.append('students_attended')
                     updated = True
-                if 'standard' in request.data:
-                    val = request.data.get('standard')
-                    activity.standard = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('standard')
+
+                for str_field in ['standard', 'board', 'medium', 'seminar_reference_by', 'seminar_given_by', 'target_name', 'target_number', 'location_link']:
+                    has_f, val = get_field_val(str_field)
+                    if has_f:
+                        setattr(activity, str_field, '' if val in (None, 'null', 'undefined') else val)
+                        update_fields.append(str_field)
+                        updated = True
+
+                for date_field in ['from_date', 'to_date']:
+                    has_d, val = get_field_val(date_field)
+                    if has_d:
+                        setattr(activity, date_field, None if val in ('', None, 'null', 'undefined') else val)
+                        update_fields.append(date_field)
+                        updated = True
+
+                has_status, val = get_field_val('status')
+                if has_status and val:
+                    activity.status = val
+                    update_fields.append('status')
                     updated = True
-                if 'board' in request.data:
-                    val = request.data.get('board')
-                    activity.board = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('board')
+                elif plan.status == 'cancelled' and activity.status != 'cancelled':
+                    activity.status = 'cancelled'
+                    update_fields.append('status')
                     updated = True
-                if 'medium' in request.data:
-                    val = request.data.get('medium')
-                    activity.medium = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('medium')
-                    updated = True
-                if 'seminar_reference_by' in request.data:
-                    
-                    val = request.data.get('seminar_reference_by')
-                    activity.seminar_reference_by = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('seminar_reference_by')
-                    updated = True
-                if 'seminar_given_by' in request.data:
-                    val = request.data.get('seminar_given_by')
-                    activity.seminar_given_by = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('seminar_given_by')
-                    updated = True
-                if 'target_name' in request.data:
-                    val = request.data.get('target_name')
-                    activity.target_name = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('target_name')
-                    updated = True
-                if 'target_number' in request.data:
-                    val = request.data.get('target_number')
-                    activity.target_number = '' if val in (None, 'null', 'undefined') else val
-                    update_fields.append('target_number')
-                    updated = True
-                if 'from_date' in request.data:
-                    val = request.data.get('from_date')
-                    activity.from_date = None if val in ('', 'null', 'undefined') else val
-                    update_fields.append('from_date')
-                    updated = True
-                if 'to_date' in request.data:
-                    val = request.data.get('to_date')
-                    activity.to_date = None if val in ('', 'null', 'undefined') else val
-                    update_fields.append('to_date')
-                    updated = True
+
                 if updated:
                     activity.save(update_fields=update_fields)
 
-                if 'timings' in request.data:
-                    timings_data = request.data.get('timings')
-                    if isinstance(timings_data, list):
-                        activity.timings.all().delete()
-                        for t in timings_data:
-                            SalesDailyActivityTiming.objects.create(
-                                activity=activity,
-                                date=t.get('date'),
-                                start_time=t.get('start_time'),
-                                end_time=t.get('end_time')
-                            )
+                has_timings, timings_data = get_field_val('timings')
+                if has_timings and isinstance(timings_data, list):
+                    activity.timings.all().delete()
+                    for t in timings_data:
+                        SalesDailyActivityTiming.objects.create(
+                            activity=activity,
+                            date=t.get('date'),
+                            start_time=t.get('start_time'),
+                            end_time=t.get('end_time')
+                        )
 
-        # Handle inventory mapping
-        if 'inventory_items' in request.data:
-            handle_inventory_allocations(activity, request.data.get('inventory_items', []))
+                has_inv, inv_items = get_field_val('inventory_items')
+                if has_inv and isinstance(inv_items, list):
+                    handle_inventory_allocations(activity, inv_items)
+
+        # Cascade plan status if plan was created/updated as cancelled
+        if plan.status == 'cancelled':
+            plan.activities.exclude(status='cancelled').update(status='cancelled')
 
         # Refresh from DB to include newly created nested activity in response
         plan = SalesDailyPlan.objects.prefetch_related('activities', 'activities__photos', 'activities__odometer_reading').get(pk=plan.pk)
@@ -636,89 +655,80 @@ class SalesDailyPlanDetailView(APIView):
         serializer = SalesDailyPlanSerializer(plan, data=request.data, partial=True, context={'request': request})
         serializer.is_valid(raise_exception=True)
         updated_plan = serializer.save()
+
+        # Cascade plan cancellation to all activities
+        if updated_plan.status == 'cancelled' or request.data.get('status') == 'cancelled':
+            updated_plan.activities.exclude(status='cancelled').update(status='cancelled')
+
+        raw_acts = request.data.get('activities')
+        act_data = {}
+        if isinstance(raw_acts, list) and raw_acts and isinstance(raw_acts[0], dict):
+            act_data = raw_acts[0]
+        elif isinstance(raw_acts, dict):
+            act_data = raw_acts
+
+        def get_patch_val(f_name):
+            if f_name in act_data:
+                return True, act_data[f_name]
+            if f_name in request.data:
+                return True, request.data[f_name]
+            return False, None
         
         activity = updated_plan.activities.first()
         if activity:
             updated = False
             update_fields = ['updated_at']
-            if 'students_expected' in request.data:
-                val = request.data.get('students_expected')
-                activity.students_expected = None if val in ('', 'null', 'undefined') else val
+
+            has_exp, val = get_patch_val('students_expected')
+            if has_exp:
+                activity.students_expected = None if val in ('', None, 'null', 'undefined') else val
                 update_fields.append('students_expected')
                 updated = True
-            if 'students_attended' in request.data:
-                val = request.data.get('students_attended')
-                activity.students_attended = None if val in ('', 'null', 'undefined') else val
+
+            has_att, val = get_patch_val('students_attended')
+            if has_att:
+                activity.students_attended = None if val in ('', None, 'null', 'undefined') else val
                 update_fields.append('students_attended')
                 updated = True
-            if 'standard' in request.data:
-                val = request.data.get('standard')
-                activity.standard = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('standard')
+
+            for str_field in ['standard', 'board', 'medium', 'seminar_reference_by', 'seminar_given_by', 'target_name', 'target_number', 'location_link']:
+                has_f, val = get_patch_val(str_field)
+                if has_f:
+                    setattr(activity, str_field, '' if val in (None, 'null', 'undefined') else val)
+                    update_fields.append(str_field)
+                    updated = True
+
+            for date_field in ['from_date', 'to_date']:
+                has_d, val = get_patch_val(date_field)
+                if has_d:
+                    setattr(activity, date_field, None if val in ('', None, 'null', 'undefined') else val)
+                    update_fields.append(date_field)
+                    updated = True
+
+            has_status, val = get_patch_val('status')
+            if has_status and val:
+                activity.status = val
+                update_fields.append('status')
                 updated = True
-            if 'board' in request.data:
-                val = request.data.get('board')
-                activity.board = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('board')
-                updated = True
-            if 'medium' in request.data:
-                val = request.data.get('medium')
-                activity.medium = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('medium')
-                updated = True
-            if 'seminar_reference_by' in request.data:
-                val = request.data.get('seminar_reference_by')
-                activity.seminar_reference_by = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('seminar_reference_by')
-                updated = True
-            if 'seminar_given_by' in request.data:
-                val = request.data.get('seminar_given_by')
-                activity.seminar_given_by = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('seminar_given_by')
-                updated = True
-            if 'target_name' in request.data:
-                val = request.data.get('target_name')
-                activity.target_name = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('target_name')
-                updated = True
-            if 'target_number' in request.data:
-                val = request.data.get('target_number')
-                activity.target_number = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('target_number')
-                updated = True
-            if 'location_link' in request.data:
-                val = request.data.get('location_link')
-                activity.location_link = '' if val in (None, 'null', 'undefined') else val
-                update_fields.append('location_link')
-                updated = True
-            if 'from_date' in request.data:
-                val = request.data.get('from_date')
-                activity.from_date = None if val in ('', 'null', 'undefined') else val
-                update_fields.append('from_date')
-                updated = True
-            if 'to_date' in request.data:
-                val = request.data.get('to_date')
-                activity.to_date = None if val in ('', 'null', 'undefined') else val
-                update_fields.append('to_date')
-                updated = True
+
             if updated:
                 activity.save(update_fields=update_fields)
 
-            if 'timings' in request.data:
-                timings_data = request.data.get('timings')
-                if isinstance(timings_data, list):
-                    activity.timings.all().delete()
-                    for t in timings_data:
-                        SalesDailyActivityTiming.objects.create(
-                            activity=activity,
-                            date=t.get('date'),
-                            start_time=t.get('start_time'),
-                            end_time=t.get('end_time')
-                        )
+            has_timings, timings_data = get_patch_val('timings')
+            if has_timings and isinstance(timings_data, list):
+                activity.timings.all().delete()
+                for t in timings_data:
+                    SalesDailyActivityTiming.objects.create(
+                        activity=activity,
+                        date=t.get('date'),
+                        start_time=t.get('start_time'),
+                        end_time=t.get('end_time')
+                    )
 
             # Handle inventory mapping
-            if 'inventory_items' in request.data:
-                handle_inventory_allocations(activity, request.data.get('inventory_items', []))
+            has_inv, inv_items = get_patch_val('inventory_items')
+            if has_inv and isinstance(inv_items, list):
+                handle_inventory_allocations(activity, inv_items)
 
         # Refresh to include updated nested activity in response
         updated_plan = self.get_object(updated_plan.pk, request.user)
