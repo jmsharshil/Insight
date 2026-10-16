@@ -1,7 +1,7 @@
 import logging
 from core.pagination import paginate_queryset
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date, time, timedelta
 from django.db import models
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -123,14 +123,13 @@ class LeaveListCreateView(APIView):
 
         # Peak months restriction (April, May, June) for paid/sick leave, except for faculty
         if role != 'faculty' and d.get('leave_type') in ['paid', 'sick']:
-            import datetime
             curr = d['from_date']
             has_restricted = False
             while curr <= d.get('to_date', d['from_date']):
                 if curr.month in [4, 5, 6]:
                     has_restricted = True
                     break
-                curr += datetime.timedelta(days=1)
+                curr += timedelta(days=1)
                 
             if has_restricted:
                 return Response({
@@ -141,7 +140,6 @@ class LeaveListCreateView(APIView):
         # Friday 12 PM deadline — only blocks leaves for the strictly NEXT calendar week
         # (Mon–Sun). Current-week and 2+ week-out leaves are not affected.
         if role not in ['student', 'parents'] and d['leave_type'] != 'sick':
-            from datetime import time, timedelta
             now = timezone.now()
             today_local = timezone.localtime(now).date()
             leave_start = d['from_date']
