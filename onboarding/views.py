@@ -233,8 +233,17 @@ def _setup_payment_bank_and_notify(admission):
     print("Amount to pay..........", amount_to_pay)
     razorpay_link_url = ""
     
-    # Generate Razorpay link if student opted for full payment OR token payment
-    if amount_to_pay > 0 and admission.payment_type in ('full_payment', 'token'):
+    # Check if student selected 'online' payment choice
+    # If user selected 'online', generate & send Razorpay payment link.
+    # If user selected 'cash' or 'check', do NOT generate Razorpay link.
+    # Backwards compatibility: if payment_choice is not set, generate if payment_type in ('full_payment', 'token')
+    is_online_choice = False
+    if admission.payment_choice:
+        is_online_choice = (admission.payment_choice.lower() == 'online')
+    else:
+        is_online_choice = (admission.payment_type in ('full_payment', 'token'))
+
+    if amount_to_pay > 0 and is_online_choice:
         try:
             # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
             import time
@@ -260,6 +269,15 @@ def _setup_payment_bank_and_notify(admission):
                     admission.razorpay_payment_link = razorpay_link_url
                     admission.razorpay_payment_link_id = rp_link.get('id')
                     admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+                    
+                    # Record payment link generation event in payment_history
+                    admission.add_payment_history_entry('payment_link_created', {
+                        'payment_choice': 'online',
+                        'amount': float(amount_to_pay),
+                        'razorpay_payment_link': razorpay_link_url,
+                        'razorpay_payment_link_id': rp_link.get('id'),
+                        'status': 'pending',
+                    })
                     print(f"Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
                 else:
                     print(f"Razorpay response missing short_url: {rp_link}")
@@ -269,7 +287,33 @@ def _setup_payment_bank_and_notify(admission):
         except Exception as e:
             print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
     else:
-        print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
+        if not is_online_choice:
+            from django.utils import timezone
+            proof_url = None
+            if admission.payment_screenshot:
+                try:
+                    proof_url = admission.payment_screenshot.url
+                except Exception:
+                    proof_url = str(admission.payment_screenshot)
+            admission.add_payment_history_entry('offline_payment_selected', {
+                'payment_choice': admission.payment_choice,
+                'payment_choice_display': admission.get_payment_choice_display(),
+                'payment_type': admission.payment_type,
+                'payment_type_display': admission.get_payment_type_display(),
+                'amount_to_pay': float(amount_to_pay),
+                'total_fees': float(admission.total_fees),
+                'token_amount': float(getattr(admission.fee_structure, 'token_amount', 0) or 0),
+                'remaining_fees': float(admission.remaining_fees),
+                'fee_terms_note': admission.token_payment_terms_note,
+                'payment_screenshot': proof_url,
+                'payment_proof': proof_url,
+                'transaction_id': admission.transaction_id or None,
+                'status': 'payment_pending',
+                'date': timezone.now().date().isoformat(),
+            })
+            print(f"Skipping Razorpay link generation for admission {admission.id} because payment choice is '{admission.payment_choice}'.")
+        else:
+            print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
 
     if admission.email and assigned_bank:
         try:
@@ -443,10 +487,21 @@ class AdmissionListView(APIView):
                     'Please check your inbox to complete the process.'
                 ),
                 'data': {
-                    'admission_id':       admission.id,
-                    'status':             admission.status,
-                    'name':               f"{admission.first_name} {admission.surname}".strip(),
-                    'assigned_counsellor': counsellor_data,
+                    'admission_id':            admission.id,
+                    'status':                  admission.status,
+                    'status_display':          admission.get_status_display(),
+                    'name':                    f"{admission.first_name} {admission.surname}".strip(),
+                    'payment_type':            admission.payment_type,
+                    'payment_choice':          admission.payment_choice,
+                    'payment_choice_display':  admission.get_payment_choice_display(),
+                    'total_fees':              admission.total_fees,
+                    'remaining_fees':          admission.remaining_fees,
+                    'is_paid':                 admission.is_paid,
+                    'is_razorpay_paid':        admission.is_razorpay_paid,
+                    'razorpay_payment_status': admission.razorpay_payment_status,
+                    'razorpay_payment_link':   admission.razorpay_payment_link,
+                    'payment_history':         admission.get_payment_history_list(),
+                    'assigned_counsellor':     counsellor_data,
                 },
             },
             status=status.HTTP_201_CREATED,
@@ -681,8 +736,11 @@ class AdmissionApproveView(APIView):
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # STEP 2: Second Approval (payment_submitted / approval_pending → enrolled)
         #   → Verify payment, create user accounts + student profile
+        #   → For cash/check, payment arrives in Student Fees for accountant approval
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if admission.status in ['payment_submitted', 'approval_pending']:
+        if admission.status in ['payment_submitted', 'approval_pending'] or (
+            admission.status == 'payment_pending' and admission.payment_choice in ('cash', 'check', 'cheque')
+        ):
             try:
                 AdmissionService.update_status(
                     admission  = admission,
@@ -908,6 +966,13 @@ class AdmissionPaymentSubmitView(APIView):
             note=f"Payment proof submitted by student. Transaction ID: {admission.transaction_id}",
         )
 
+        admission.add_payment_history_entry('payment_submitted', {
+            'payment_choice': admission.payment_choice or 'offline',
+            'amount': float(admission.payment_amount or 0),
+            'transaction_id': admission.transaction_id,
+            'status': 'approval_pending',
+        })
+
         logger.info(
             f"Payment proof submitted for admission {admission.id} — "
             f"Transaction ID: {admission.transaction_id}"
@@ -922,10 +987,17 @@ class AdmissionPaymentSubmitView(APIView):
                     'You will receive your login credentials via email once approved.'
                 ),
                 'data': {
-                    'admission_id':   admission.id,
-                    'status':         admission.status,
-                    'status_display': admission.get_status_display(),
-                    'transaction_id': admission.transaction_id,
+                    'admission_id':            admission.id,
+                    'status':                  admission.status,
+                    'status_display':          admission.get_status_display(),
+                    'transaction_id':          admission.transaction_id,
+                    'payment_choice':          admission.payment_choice,
+                    'total_fees':              admission.total_fees,
+                    'remaining_fees':          admission.remaining_fees,
+                    'is_paid':                 admission.is_paid,
+                    'is_razorpay_paid':        admission.is_razorpay_paid,
+                    'razorpay_payment_status': admission.razorpay_payment_status,
+                    'payment_history':         admission.get_payment_history_list(),
                 },
             },
             status=status.HTTP_200_OK,
@@ -1071,12 +1143,13 @@ class RazorpayWebhookView(APIView):
                         transaction_id = payment_details.get('id', '') or payment_link.get('id', '')
                         
                         admission.transaction_id = transaction_id
+                        admission.razorpay_payment_id = transaction_id
                         admission.payment_note = f"Paid via Razorpay: {payment_link.get('id')}"
                         admission.payment_submitted_at = timezone.now()
                         admission.payment_amount = amount_paid
                         admission.status = 'approval_pending'
                         admission.save(update_fields=[
-                            'transaction_id', 'payment_note',
+                            'transaction_id', 'razorpay_payment_id', 'payment_note',
                             'payment_submitted_at', 'status', 'payment_amount', 'updated_at'
                         ])
                         
@@ -1086,6 +1159,13 @@ class RazorpayWebhookView(APIView):
                             changed_by=None,
                             note=f"Payment received via Razorpay webhook. Transaction ID: {transaction_id}",
                         )
+                        admission.add_payment_history_entry('payment_received', {
+                            'payment_choice': 'online',
+                            'amount': float(amount_paid),
+                            'transaction_id': transaction_id,
+                            'razorpay_payment_id': transaction_id,
+                            'status': 'paid',
+                        })
                         logger.info(f"Admission {admission.id} payment verified automatically via Razorpay webhook.")
             
             return Response({'success': True})

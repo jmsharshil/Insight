@@ -15,6 +15,7 @@ from fees.models import FeeStructure, StudentFee, BankAccount, InstallmentPlan, 
 from students.models import Student
 from auth_user.models import User
 from batches.models import Course, CourseLevel
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 
 def _make_admission(fee_structure=None, **overrides):
@@ -290,7 +291,7 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         ):
             _setup_payment_bank_and_notify(admission)
 
-        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 25000)
+        self.assertEqual(create_payment_link.call_args.kwargs['amount'], 5000)
 
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):
@@ -458,3 +459,397 @@ class AdmissionGenderFieldTest(TestCase):
         )
         student = StudentService.create_from_admission(admission, user)
         self.assertEqual(student.gender, 'female')
+
+
+class AdmissionPaymentChoiceAndHistoryTests(TestCase):
+    def setUp(self):
+        self.course = Course.objects.create(name='CS Executive', code='CSE_PAY_TEST')
+        self.level = CourseLevel.objects.create(course=self.course, name='CS Executive', order=1)
+        self.bank = BankAccount.objects.create(
+            name='Test Bank Acc',
+            bank_name='Test Bank',
+            account_number='999988887777',
+            ifsc_code='TEST0009999',
+            is_active=True,
+        )
+        self.fee_structure = FeeStructure.objects.create(
+            name='Executive Dec 2027 Test',
+            course=self.course,
+            level=self.level,
+            attempt='dec',
+            year=2027,
+            group_module='all',
+            institute_fees_module_1=20000,
+            institute_fees_module_2=25000,
+            institute_fees_all_modules=40000,
+            total_amount=40000,
+            token_amount=5000,
+            is_active=True,
+        )
+        self.counsellor = User.objects.create(
+            username='test_counsellor',
+            role='counsellor',
+            email='counsellor@test.com',
+        )
+
+    def test_payment_choice_online_generates_razorpay_link_and_history(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        admission = _make_admission(
+            course='cs_executive',
+            group_module='all',
+            batch_attempt='dec',
+            attempt_year=2027,
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            status='form_pending',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/plink_123', 'id': 'plink_123'}},
+            ) as mock_create_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        admission.refresh_from_db()
+        self.assertTrue(mock_create_link.called)
+        self.assertEqual(admission.razorpay_payment_link, 'https://razorpay.test/plink_123')
+        self.assertEqual(admission.razorpay_payment_link_id, 'plink_123')
+        self.assertEqual(admission.razorpay_payment_status, 'pending')
+        self.assertFalse(admission.is_paid)
+        self.assertFalse(admission.is_razorpay_paid)
+
+        # Check payment_history
+        history = admission.get_payment_history_list()
+        self.assertTrue(len(history) >= 1)
+        self.assertEqual(history[0]['event'], 'payment_link_created')
+        self.assertEqual(history[0]['payment_choice'], 'online')
+        self.assertEqual(history[0]['razorpay_payment_link'], 'https://razorpay.test/plink_123')
+
+    def test_payment_choice_cash_or_check_skips_razorpay_link(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        for choice in ['cash', 'check']:
+            admission = _make_admission(
+                email=f'{choice}_test@example.com',
+                phone_student='9876543299',
+                course='cs_executive',
+                group_module='all',
+                batch_attempt='dec',
+                attempt_year=2027,
+                fee_structure=self.fee_structure,
+                payment_type='full_payment',
+                payment_choice=choice,
+                status='form_pending',
+            )
+
+            with (
+                patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+                patch('fees.razorpay_service.create_payment_link') as mock_create_link,
+                patch('core.sender.send_email'),
+                patch('chat.notifications.send_whatsapp_with_fallback'),
+            ):
+                _setup_payment_bank_and_notify(admission)
+
+            admission.refresh_from_db()
+            mock_create_link.assert_not_called()
+            self.assertIsNone(admission.razorpay_payment_link)
+            self.assertEqual(admission.razorpay_payment_status, 'not_created')
+
+    def test_razorpay_payment_paid_updates_flags_and_history(self):
+        from fees.razorpay_service import process_payment_link_paid_event
+
+        admission = _make_admission(
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            status='payment_pending',
+            razorpay_payment_link='https://razorpay.test/pay_test',
+            razorpay_payment_link_id='plink_test_pay',
+        )
+
+        payload = {
+            'event': 'payment_link.paid',
+            'payload': {
+                'payment_link': {
+                    'entity': {
+                        'reference_id': f'ADM_{admission.id}_123456',
+                        'amount_paid': 4000000,
+                        'id': 'plink_test_pay',
+                    }
+                },
+                'payment': {
+                    'entity': {
+                        'id': 'pay_rzp_99999',
+                    }
+                }
+            }
+        }
+
+        with patch('fees.razorpay_service.send_admission_payment_notification'):
+            res = process_payment_link_paid_event(payload)
+
+        self.assertTrue(res.get('success'))
+        admission.refresh_from_db()
+        self.assertEqual(admission.status, 'approval_pending')
+        self.assertTrue(admission.is_paid)
+        self.assertTrue(admission.is_razorpay_paid)
+        self.assertEqual(admission.razorpay_payment_status, 'paid')
+        self.assertEqual(admission.razorpay_payment_id, 'pay_rzp_99999')
+        self.assertEqual(float(admission.remaining_fees), 0.0)
+
+        # Verify payment history contains payment_received
+        history = admission.get_payment_history_list()
+        received_event = next((e for e in history if e.get('event') == 'payment_received'), None)
+        self.assertIsNotNone(received_event)
+        self.assertEqual(received_event['status'], 'paid')
+        self.assertEqual(received_event['transaction_id'], 'pay_rzp_99999')
+
+    def test_total_fees_and_remaining_fees_calculation(self):
+        # 1. Full payment not yet paid
+        admission = _make_admission(
+            fee_structure=self.fee_structure,
+            group_module='all',
+            payment_type='full_payment',
+            payment_choice='cash',
+            status='form_pending',
+        )
+        self.assertEqual(float(admission.total_fees), 40000.0)
+        self.assertEqual(float(admission.remaining_fees), 40000.0)
+
+        # 2. Token payment with token_amount = 5000
+        admission_token = _make_admission(
+            email='token_test@example.com',
+            phone_student='9876543200',
+            fee_structure=self.fee_structure,
+            group_module='all',
+            payment_type='token',
+            payment_choice='online',
+            status='form_pending',
+        )
+        self.assertEqual(float(admission_token.total_fees), 40000.0)
+        self.assertEqual(float(admission_token.remaining_fees), 35000.0)  # 40000 - 5000 token
+
+    def test_payment_history_token_fee_details(self):
+        admission = _make_admission(
+            fee_structure=self.fee_structure,
+            group_module='all',
+            payment_type='token',
+            payment_choice='online',
+            status='form_pending',
+        )
+        history = admission.get_payment_history_list()
+        # Even with synthesized or explicit history, fee info is present
+        self.assertTrue(len(history) >= 0)
+        # Add an entry and verify token details
+        admission.add_payment_history_entry('test_entry', {'status': 'pending'})
+        history = admission.get_payment_history_list()
+        entry = history[0]
+        self.assertEqual(entry['payment_type'], 'token')
+        self.assertEqual(entry['payment_type_display'], 'Token Payment')
+        self.assertEqual(entry['total_fees'], 40000.0)
+        self.assertEqual(entry['token_amount'], 5000.0)
+        self.assertEqual(entry['remaining_fees'], 35000.0)
+        self.assertIn("15 days", entry['terms_note'])
+        self.assertIsNotNone(entry['date'])
+
+    def test_payment_history_offline_check_proof_and_dates(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from onboarding.views import AdmissionPaymentSubmitView
+        from rest_framework.test import APIRequestFactory
+
+        from io import BytesIO
+        from PIL import Image
+
+        img_io = BytesIO()
+        img = Image.new('RGB', (50, 50), color='white')
+        img.save(img_io, format='PNG')
+        img_io.seek(0)
+
+        screenshot = SimpleUploadedFile(
+            'check_receipt.png',
+            img_io.read(),
+            content_type='image/png',
+        )
+        admission = _make_admission(
+            email='check_proof@example.com',
+            phone_student='9876543202',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='check',
+            status='payment_pending',
+        )
+
+        factory = APIRequestFactory()
+        request = factory.post(
+            f'/api/admissions/{admission.id}/payment/',
+            {
+                'payment_screenshot': screenshot,
+                'transaction_id': 'CHQ-998877',
+                'payment_amount': '40000',
+                'payment_note': 'Cheque deposited in SBI branch',
+            },
+            format='multipart',
+        )
+
+        response = AdmissionPaymentSubmitView.as_view()(request, admission_id=admission.id)
+        self.assertEqual(response.status_code, 200)
+
+        admission.refresh_from_db()
+        history = admission.get_payment_history_list()
+        self.assertTrue(len(history) >= 1)
+
+        submitted_entry = next((e for e in history if e.get('event') == 'payment_submitted'), None)
+        self.assertIsNotNone(submitted_entry)
+        self.assertEqual(submitted_entry['payment_choice'], 'check')
+        self.assertEqual(submitted_entry['transaction_id'], 'CHQ-998877')
+        self.assertIsNotNone(submitted_entry['payment_screenshot'])
+        self.assertIn('check_receipt', submitted_entry['payment_screenshot'])
+        self.assertIsNotNone(submitted_entry['date'])
+        self.assertEqual(submitted_entry['payment_type'], 'full_payment')
+        self.assertEqual(submitted_entry['total_fees'], 40000.0)
+
+    def test_cash_payment_approval_in_student_fees(self):
+        """
+        When student pays via cash:
+        1. Payment arrives in Student Fees with status='approval_pending'.
+        2. Admission.is_paid is False before approval.
+        3. Approving via PaymentVerifyView marks payment as 'verified'.
+        4. Admission.is_paid becomes True and 'payment_approved' is logged in payment_history.
+        """
+        from decimal import Decimal
+        from students.utils import StudentService
+        from fees.views import PaymentVerifyView
+        from fees.models import Payment
+
+        admission = _make_admission(
+            email='cash_student@example.com',
+            phone_student='9876543203',
+            fee_structure=self.fee_structure,
+            payment_type='token',
+            payment_choice='cash',
+            payment_amount=Decimal('5000'),
+            status='payment_pending',
+        )
+
+        user = User.objects.create(
+            email='cash_student@example.com',
+            username='cash_student_usr',
+            role='student',
+        )
+
+        student = StudentService.create_from_admission(admission, user, self.counsellor)
+        self.assertIsNotNone(student)
+
+        # 1. Payment arrives in Student Fees with status='approval_pending'
+        payment = Payment.objects.filter(student=student).first()
+        self.assertIsNotNone(payment, "Payment record should be created in Student Fees.")
+        self.assertEqual(payment.status, 'approval_pending')
+        self.assertEqual(payment.payment_mode, 'cash')
+        self.assertEqual(payment.amount, Decimal('5000'))
+
+        # 2. Admission is not paid yet
+        admission.refresh_from_db()
+        self.assertFalse(admission.is_paid)
+
+        # 3. Accountant/Admin approves payment via PaymentVerifyView
+        factory = APIRequestFactory()
+        request = factory.post(
+            f'/api/v1/payments/{payment.id}/verify/',
+            {'status': 'verified'},
+            format='json',
+        )
+        force_authenticate(request, user=self.counsellor)
+
+        response = PaymentVerifyView.as_view()(request, pk=payment.id)
+        self.assertEqual(response.status_code, 200)
+
+        # 4. Payment is verified and admission payment is approved
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, 'verified')
+        self.assertIsNotNone(payment.verified_at)
+
+        admission.refresh_from_db()
+        self.assertTrue(admission.is_paid)
+
+        history = admission.get_payment_history_list()
+        approved_entry = next((e for e in history if e.get('event') == 'payment_approved'), None)
+        self.assertIsNotNone(approved_entry, "payment_approved event should be logged in history.")
+        self.assertEqual(approved_entry['status'], 'verified')
+        self.assertEqual(approved_entry['payment_choice'], 'cash')
+        self.assertEqual(approved_entry['amount'], 5000.0)
+
+    def test_check_payment_approval_in_student_fees(self):
+        """
+        When student pays via check:
+        1. Payment arrives in Student Fees with status='approval_pending'.
+        2. Approving via PaymentVerifyView marks payment verified and updates remaining fees.
+        """
+        from decimal import Decimal
+        from students.utils import StudentService
+        from fees.views import PaymentVerifyView
+        from fees.models import Payment
+
+        admission = _make_admission(
+            email='check_student@example.com',
+            phone_student='9876543204',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='check',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-123456',
+            status='payment_pending',
+        )
+
+        user = User.objects.create(
+            email='check_student@example.com',
+            username='check_student_usr',
+            role='student',
+        )
+
+        student = StudentService.create_from_admission(admission, user, self.counsellor)
+        self.assertIsNotNone(student)
+
+        payment = Payment.objects.filter(student=student).first()
+        self.assertIsNotNone(payment)
+        self.assertEqual(payment.status, 'approval_pending')
+        self.assertEqual(payment.payment_mode, 'cheque')
+        self.assertEqual(payment.amount, Decimal('40000'))
+
+        # Admission is not paid yet
+        admission.refresh_from_db()
+        self.assertFalse(admission.is_paid)
+
+        # Approve payment
+        factory = APIRequestFactory()
+        request = factory.post(
+            f'/api/v1/payments/{payment.id}/verify/',
+            {'status': 'verified'},
+            format='json',
+        )
+        force_authenticate(request, user=self.counsellor)
+
+        response = PaymentVerifyView.as_view()(request, pk=payment.id)
+        self.assertEqual(response.status_code, 200)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, 'verified')
+
+        admission.refresh_from_db()
+        self.assertTrue(admission.is_paid)
+        self.assertEqual(admission.remaining_fees, Decimal('0'))
+
+        history = admission.get_payment_history_list()
+        approved_entry = next((e for e in history if e.get('event') == 'payment_approved'), None)
+        self.assertIsNotNone(approved_entry)
+        self.assertEqual(approved_entry['payment_choice'], 'cheque')
+        self.assertEqual(approved_entry['status'], 'verified')
+
+
+

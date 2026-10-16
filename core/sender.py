@@ -250,11 +250,25 @@ class WhatsAppSender:
         )
 
     @staticmethod
+    def clean_phone(phone: str) -> str:
+        if not phone:
+            return ""
+        p = str(phone).strip().replace(" ", "").replace("-", "")
+        if p.startswith("+"):
+            p = p[1:]
+        if len(p) == 10 and p.isdigit():
+            p = f"91{p}"
+        elif len(p) == 11 and p.startswith("0") and p[1:].isdigit():
+            p = f"91{p[1:]}"
+        return p
+
+    @staticmethod
     def _base_payload(to: str, msg_type: str, reply_to: Optional[str] = None) -> Dict[str, Any]:
+        clean_to = WhatsAppSender.clean_phone(to)
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
-            "to": to,
+            "to": clean_to,
             "type": msg_type,
         }
         if reply_to:

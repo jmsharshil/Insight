@@ -592,6 +592,13 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 changed_by = None,
                 note       = history_note,
             )
+            admission.add_payment_history_entry('payment_received', {
+                'payment_choice': 'online',
+                'amount': float(amount_paid),
+                'transaction_id': rp_payment_id,
+                'razorpay_payment_id': rp_payment_id,
+                'status': 'paid',
+            })
             logger.info(f"[Razorpay] Admission {adm_id} moved to approval_pending.")
 
             # ── Auto-send payment confirmation (email + WhatsApp) ─────────

@@ -98,33 +98,115 @@ def create_student_fee(student, acting_user=None):
         is_paid=False,
     )
 
-    if payment_amount > 0 or admission.payment_screenshot or admission.transaction_id:
-        payment = Payment.objects.create(
-            student=student,
-            student_fee=student_fee,
-            installment_item=item,
-            amount=payment_amount or student_fee.total_amount,
-            payment_mode='online',
-            transaction_ref=admission.transaction_id or f'AUTO-ADM-{admission.id}',
-            payment_proof=admission.payment_screenshot,
-            status='verified',
-            recorded_by=acting_user,
-            verified_by=acting_user,
-            verified_at=timezone.now(),
-            payment_date=timezone.now().date(),
-            note=f'Auto-verified from admission #{admission.id}. Tx: {admission.transaction_id or "N/A"}',
-        )
-        # Hook will trigger update_student_fee_status + mark_installment_paid
-        logger.info(f"Auto-created verified Payment {payment.receipt_number} for admission {admission.id}")
+    # Create Payment if admission has payment info or offline choice
+    if payment_amount <= Decimal('0'):
+        if getattr(admission, 'payment_type', None) == 'token' and getattr(admission, 'fee_structure', None):
+            payment_amount = getattr(admission.fee_structure, 'token_amount', Decimal('0')) or Decimal('0')
 
-        send_payment_receipt(payment)
+    has_payment_info = (
+        payment_amount > 0
+        or admission.payment_screenshot
+        or admission.transaction_id
+        or getattr(admission, 'payment_choice', None) in ('cash', 'check', 'cheque')
+    )
 
-        # Auto-approve plan if it was pending
-        if plan.status == 'pending_approval':
-            plan.status = 'approved'
-            plan.approved_by = acting_user
-            plan.approved_at = timezone.now()
-            plan.save(update_fields=['status', 'approved_by', 'approved_at'])
+    if has_payment_info:
+        mapped_mode = 'online'
+        if getattr(admission, 'payment_choice', None):
+            pc = str(admission.payment_choice).lower()
+            if pc in ('check', 'cheque'):
+                mapped_mode = 'cheque'
+            elif pc == 'cash':
+                mapped_mode = 'cash'
+            else:
+                mapped_mode = 'online'
+
+        is_offline = mapped_mode in ('cash', 'cheque') or getattr(admission, 'payment_choice', None) in ('cash', 'check', 'cheque')
+        is_rp_paid = bool(getattr(admission, 'is_razorpay_paid', False))
+
+        if is_offline or not is_rp_paid:
+            # Offline payments (cash/check) must arrive in Student Fees pending approval
+            payment = Payment.objects.create(
+                student=student,
+                student_fee=student_fee,
+                installment_item=item,
+                amount=payment_amount or student_fee.total_amount,
+                payment_mode=mapped_mode,
+                transaction_ref=admission.transaction_id or f'{mapped_mode.upper()}-ADM-{admission.id}',
+                payment_proof=admission.payment_screenshot,
+                status='approval_pending',
+                recorded_by=acting_user,
+                verified_by=None,
+                verified_at=None,
+                payment_date=timezone.now().date(),
+                note=f'Offline ({mapped_mode.capitalize()}) payment from admission #{admission.id}. Pending approval in Student Fees.',
+            )
+            logger.info(f"Created pending approval Payment {payment.receipt_number} ({mapped_mode}) for admission {admission.id}")
+
+            try:
+                from core.utils import notify_users_by_role
+                notify_users_by_role(
+                    roles=['super_admin', 'branch_manager'],
+                    title='Payment Approval Required',
+                    body=f"A new {mapped_mode} payment of ₹{payment.amount} by {student.first_name} requires approval in Student Fees.",
+                    organization=student.branch.organization if getattr(student, 'branch', None) else None,
+                    branch=student.branch if getattr(student, 'branch', None) else None,
+                    email_subject='Pending Payment Approval'
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify admins of pending payment: {e}")
+
+            proof_url = None
+            if admission.payment_screenshot:
+                try:
+                    proof_url = admission.payment_screenshot.url
+                except Exception:
+                    proof_url = str(admission.payment_screenshot)
+
+            admission.add_payment_history_entry('payment_approval_pending', {
+                'payment_choice': mapped_mode,
+                'payment_type': admission.payment_type,
+                'payment_type_display': admission.get_payment_type_display(),
+                'amount': float(payment.amount),
+                'total_fees': float(admission.total_fees),
+                'remaining_fees': float(admission.remaining_fees),
+                'transaction_id': payment.transaction_ref,
+                'receipt_number': payment.receipt_number,
+                'status': 'approval_pending',
+                'payment_screenshot': proof_url,
+                'payment_proof': proof_url,
+                'date': timezone.now().date().isoformat(),
+                'note': f"Payment submitted via {mapped_mode}. Awaiting approval in Student Fees.",
+            })
+
+        else:
+            # Verified online Razorpay payment
+            payment = Payment.objects.create(
+                student=student,
+                student_fee=student_fee,
+                installment_item=item,
+                amount=payment_amount or student_fee.total_amount,
+                payment_mode='online',
+                transaction_ref=admission.transaction_id or f'AUTO-ADM-{admission.id}',
+                payment_proof=admission.payment_screenshot,
+                status='verified',
+                recorded_by=acting_user,
+                verified_by=acting_user,
+                verified_at=timezone.now(),
+                payment_date=timezone.now().date(),
+                note=f'Auto-verified from admission #{admission.id}. Tx: {admission.transaction_id or "N/A"}',
+            )
+            # Hook will trigger update_student_fee_status + mark_installment_paid
+            logger.info(f"Auto-created verified Payment {payment.receipt_number} for admission {admission.id}")
+
+            send_payment_receipt(payment)
+
+            # Auto-approve plan if it was pending
+            if plan.status == 'pending_approval':
+                plan.status = 'approved'
+                plan.approved_by = acting_user
+                plan.approved_at = timezone.now()
+                plan.save(update_fields=['status', 'approved_by', 'approved_at'])
 
     logger.info(
         f"StudentFee (with InstallmentPlan) created for {student.admission_number} "

@@ -117,28 +117,54 @@ class ReimbursementListCreateAPIView(APIView):
 
         reimbursement = serializer.save()
 
-        # Notify admins / approvers
+        # Notify admins / approvers (Super Admin, Branch Manager, Accountant)
         try:
-            from core.utils import notify_users_by_role
+            from django.contrib.auth import get_user_model
+            from chat.notifications import send_system_notification
+            from core.utils import get_role_filter_q
+            User = get_user_model()
+
             applicant_name = request.user.name or request.user.email
-            # Global approver notifications (roles from User.ROLE_CHOICES)
-            notify_users_by_role(
-                roles=['super_admin', 'admin_senior_executive', 'accountant'],
-                title='New Reimbursement Claim',
-                body=f"{applicant_name} submitted a reimbursement claim '{reimbursement.title}' for ₹{reimbursement.amount}.",
-                metadata={'reimbursement_id': str(reimbursement.id), 'type': 'reimbursement_claim', 'route': f"/reimbursements/{reimbursement.id}"},
-                notification_type='payroll',
+            notif_body = f"{applicant_name} submitted a reimbursement claim '{reimbursement.title}' for ₹{reimbursement.amount}."
+            notif_meta = {
+                'reimbursement_id': str(reimbursement.id),
+                'type': 'reimbursement_claim',
+                'route': f"/reimbursements/{reimbursement.id}",
+                'skip_whatsapp': True,
+            }
+
+            # 1. Global / Org-level approvers: super_admin, admin_senior_executive, accountant
+            target_users_qs = User.objects.filter(
+                get_role_filter_q(['super_admin', 'admin_senior_executive', 'accountant']),
+                is_active=True
             )
-            # Branch manager notification
+
+            # 2. Branch-level approvers: branch_manager and branch-assigned accountants
             if reimbursement.branch:
-                notify_users_by_role(
-                    roles=['branch_manager'],
-                    branch=reimbursement.branch,
-                    title='New Branch Reimbursement Claim',
-                    body=f"{applicant_name} submitted a reimbursement claim '{reimbursement.title}' for ₹{reimbursement.amount}.",
-                    metadata={'reimbursement_id': str(reimbursement.id), 'type': 'reimbursement_claim', 'route': f"/reimbursements/{reimbursement.id}"},
+                branch_approvers = User.objects.filter(
+                    get_role_filter_q(['branch_manager', 'accountant']),
+                    is_active=True
+                ).filter(
+                    Q(branch=reimbursement.branch) | Q(branches=reimbursement.branch)
+                )
+                target_users_qs = target_users_qs | branch_approvers
+
+            from .utils import send_reimbursement_whatsapp_notification
+
+            for u in target_users_qs.distinct():
+                # In-app push / email notification
+                send_system_notification(
+                    user_id=str(u.id),
+                    title='New Reimbursement Claim',
+                    body=notif_body,
+                    metadata=notif_meta,
                     notification_type='payroll',
                 )
+                # WhatsApp: reimbursement_claim_ template with [Approve] & [Reject] buttons
+                try:
+                    send_reimbursement_whatsapp_notification(reimbursement, u)
+                except Exception as wa_err:
+                    logger.error(f"[Reimbursement Claim] WhatsApp to approver {u.id} failed: {wa_err}")
         except Exception as e:
             logger.error(f"Failed to send notification for reimbursement {reimbursement.id}: {e}")
 

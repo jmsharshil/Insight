@@ -3,6 +3,7 @@ from .models import (
     Admission,
     ADMISSION_STATUS_CHOICES,
     PAYMENT_TYPE_CHOICES,
+    PAYMENT_CHOICE_CHOICES,
     ICSI_FEES_PAYMENT_CHOICES,
     GENDER_CHOICES,
 )
@@ -90,6 +91,7 @@ class AdmissionSerializer(serializers.Serializer):
         allow_null=True,
     )
     payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
+    payment_choice = serializers.ChoiceField(choices=PAYMENT_CHOICE_CHOICES + [('cheque', 'Cheque')], required=False, allow_null=True, allow_blank=True)
     icsi_fees_payment = serializers.ChoiceField(choices=ICSI_FEES_PAYMENT_CHOICES, required=False, allow_null=True)
 
     # ── Qualification & Reference ─────────────────────────────────────────────
@@ -136,6 +138,14 @@ class AdmissionSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("You must agree to the consent to proceed.")
         return value
+
+    def validate_payment_choice(self, value):
+        if not value:
+            return value
+        val = str(value).strip().lower()
+        if val in ('cheque', 'check'):
+            return 'check'
+        return val
 
     def validate_branch(self, value):
         if not value:
@@ -269,7 +279,6 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
-
     category_display = serializers.CharField(source="get_category_display", read_only=True)
     gender_display = serializers.CharField(source="get_gender_display", read_only=True)
     course_display = serializers.CharField(source="get_course_display", read_only=True)
@@ -279,28 +288,37 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     reference_display = serializers.CharField(source="get_reference_display", read_only=True)
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
     payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
+    payment_choice_display = serializers.CharField(source="get_payment_choice_display", read_only=True)
     icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
+    total_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     remaining_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    is_paid = serializers.BooleanField(read_only=True)
+    is_razorpay_paid = serializers.BooleanField(read_only=True)
+    razorpay_payment_status = serializers.CharField(read_only=True)
+    payment_history = serializers.SerializerMethodField()
     token_payment_terms_note = serializers.CharField(read_only=True)
+
+    def get_payment_history(self, obj):
+        request = self.context.get('request')
+        return obj.get_payment_history_list(request=request)
 
     class Meta:
         model = Admission
         fields = [
             'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
             'gender', 'gender_display',
-            'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'icsi_fees_payment', 'status', 'status_display', 'location',
+            'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'payment_choice', 'payment_choice_display', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
-            'remaining_fees', 'token_payment_terms_note',
-            'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'status_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display']
+            'total_fees', 'remaining_fees', 'is_paid', 'is_razorpay_paid', 'razorpay_payment_status', 'payment_history', 'token_payment_terms_note',
+            'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display'
+        ]
 
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
-
 
     category_display = serializers.CharField(source="get_category_display", read_only=True)
     gender_display = serializers.CharField(source="get_gender_display", read_only=True)
@@ -314,9 +332,19 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
     payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
+    payment_choice_display = serializers.CharField(source="get_payment_choice_display", read_only=True)
     icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
+    total_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     remaining_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    is_paid = serializers.BooleanField(read_only=True)
+    is_razorpay_paid = serializers.BooleanField(read_only=True)
+    razorpay_payment_status = serializers.CharField(read_only=True)
+    payment_history = serializers.SerializerMethodField()
     token_payment_terms_note = serializers.CharField(read_only=True)
+
+    def get_payment_history(self, obj):
+        request = self.context.get('request')
+        return obj.get_payment_history_list(request=request)
 
     class Meta:
         model = Admission

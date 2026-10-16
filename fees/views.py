@@ -496,6 +496,21 @@ class PaymentListView(APIView):
                 branch=payment.student.branch if getattr(payment.student, 'branch', None) else None,
                 email_subject='Pending Payment Approval'
             )
+            admission = getattr(payment.student, 'admission', None)
+            if admission:
+                admission.add_payment_history_entry('payment_approval_pending', {
+                    'payment_choice': payment.payment_mode,
+                    'payment_type': admission.payment_type,
+                    'payment_type_display': admission.get_payment_type_display(),
+                    'amount': float(payment.amount),
+                    'total_fees': float(admission.total_fees),
+                    'remaining_fees': float(admission.remaining_fees),
+                    'transaction_id': payment.transaction_ref,
+                    'receipt_number': payment.receipt_number,
+                    'status': 'approval_pending',
+                    'date': timezone.now().date().isoformat(),
+                    'note': f"Manual {payment.payment_mode} payment recorded in Student Fees. Pending approval.",
+                })
 
         return Response(
             {'success': True, 'message': 'Payment recorded.',
@@ -580,7 +595,64 @@ class PaymentVerifyView(APIView):
         # Send emails on verification/rejection using centralized sender (with HTML fallback)
         if new_status == 'verified':
             send_payment_receipt(payment)
-        elif new_status == 'rejected':
+
+        # Sync with Admission and its payment_history if student was enrolled from an admission
+        admission = getattr(payment.student, 'admission', None)
+        if admission:
+            proof_url = None
+            if payment.payment_proof:
+                try:
+                    proof_url = request.build_absolute_uri(payment.payment_proof.url) if request else payment.payment_proof.url
+                except Exception:
+                    proof_url = str(payment.payment_proof)
+
+            verifier_name = (
+                getattr(request.user, 'name', None) or getattr(request.user, 'email', None) or getattr(request.user, 'username', None)
+                if (request.user and request.user.is_authenticated)
+                else 'Admin/Accountant'
+            )
+
+            if new_status == 'verified':
+                admission.add_payment_history_entry('payment_approved', {
+                    'payment_choice': payment.payment_mode,
+                    'payment_type': admission.payment_type,
+                    'payment_type_display': admission.get_payment_type_display(),
+                    'amount': float(payment.amount),
+                    'total_fees': float(admission.total_fees),
+                    'remaining_fees': float(admission.remaining_fees),
+                    'transaction_id': payment.transaction_ref,
+                    'receipt_number': payment.receipt_number,
+                    'status': 'verified',
+                    'verified_by': verifier_name,
+                    'verified_at': timezone.now().isoformat(),
+                    'date': timezone.now().date().isoformat(),
+                    'payment_screenshot': proof_url,
+                    'payment_proof': proof_url,
+                    'note': f"Payment approved in Student Fees (Receipt: {payment.receipt_number}).",
+                })
+                if admission.status in ('approval_pending', 'payment_submitted'):
+                    admission.status = 'enrolled'
+                    admission.save(update_fields=['status', 'updated_at'])
+
+            elif new_status == 'rejected':
+                admission.add_payment_history_entry('payment_rejected', {
+                    'payment_choice': payment.payment_mode,
+                    'payment_type': admission.payment_type,
+                    'payment_type_display': admission.get_payment_type_display(),
+                    'amount': float(payment.amount),
+                    'total_fees': float(admission.total_fees),
+                    'remaining_fees': float(admission.remaining_fees),
+                    'transaction_id': payment.transaction_ref,
+                    'receipt_number': payment.receipt_number,
+                    'status': 'rejected',
+                    'rejected_by': verifier_name,
+                    'date': timezone.now().date().isoformat(),
+                    'payment_screenshot': proof_url,
+                    'payment_proof': proof_url,
+                    'note': payment.note or 'Payment rejected in Student Fees.',
+                })
+
+        if new_status == 'rejected':
             recipients = get_recipient_emails(payment.student)
             if recipients:
                 from core.sender import send_email
