@@ -41,27 +41,35 @@ def send_reimbursement_whatsapp_notification(reimbursement, approver):
     Sends WhatsApp notification with template quick-reply buttons (Approve / Reject)
     using the approved Meta template 'reimbursement_claim_' to an authorized approver (Super Admin or Accountant).
     Includes the uploaded document/receipt URL in parameter {{5}} (Description).
+    Parameters are sanitized to ensure no newlines exist, strictly preventing Meta Error 132018.
     """
     if not approver or not getattr(approver, 'phone', None):
         return
 
     from chat.notifications import send_whatsapp_with_fallback
 
-    applicant_name = getattr(reimbursement.user, 'name', None) or getattr(reimbursement.user, 'email', 'Staff Member')
-    title_text = str(reimbursement.title or 'Expense Claim')[:100]
+    raw_applicant_name = getattr(reimbursement.user, 'name', None) or getattr(reimbursement.user, 'email', 'Staff Member')
+    applicant_name = " ".join(str(raw_applicant_name).split())[:60]
+
+    raw_title = reimbursement.title or 'Expense Claim'
+    title_text = " ".join(str(raw_title).split())[:60]
+
     amount_str = f"{reimbursement.amount:.2f}" if reimbursement.amount is not None else "0.00"
     expense_date_str = str(reimbursement.expense_date or timezone.now().date())
 
-    raw_desc = (reimbursement.description or '').strip()
+    raw_desc = " ".join(str(reimbursement.description or '').split())
     proof_url = get_reimbursement_proof_url(reimbursement)
 
     if proof_url:
         if raw_desc:
-            description_text = f"{raw_desc[:250]}\nDoc: {proof_url}"
+            description_text = f"{raw_desc[:200]} | Doc: {proof_url}"
         else:
             description_text = f"Doc: {proof_url}"
     else:
-        description_text = (raw_desc or 'No description provided')[:300]
+        description_text = raw_desc[:300] if raw_desc else 'No description provided'
+
+    # Ensure strictly single line for Meta template body parameters
+    description_text = " ".join(description_text.split())
 
     notif_body = (
         f"Reimbursement Claim: {applicant_name} submitted a claim for '{title_text}' (₹{amount_str}) on {expense_date_str}. "
@@ -109,34 +117,56 @@ def send_reimbursement_whatsapp_notification(reimbursement, approver):
 
 def send_reimbursement_status_whatsapp_to_applicant(reimbursement, status_action, reviewer_name="Admin"):
     """
-    Sends WhatsApp message to the claim applicant when their reimbursement claim is approved or rejected.
+    Sends WhatsApp notification to the claim applicant using the approved 'reimbursement_status_update_' template.
     """
     applicant = getattr(reimbursement, 'user', None)
     if not applicant or not getattr(applicant, 'phone', None):
         return
 
-    from chat.notifications import send_whatsapp_text
+    from chat.notifications import send_whatsapp_with_fallback
 
-    applicant_display = getattr(applicant, 'name', None) or 'Staff Member'
-    title = str(reimbursement.title or 'Expense Claim')
+    applicant_display = " ".join(str(getattr(applicant, 'name', None) or 'Staff Member').split())[:60]
+    title = " ".join(str(reimbursement.title or 'Expense Claim').split())[:60]
     amount = f"{reimbursement.amount:.2f}" if reimbursement.amount is not None else "0.00"
+    status_str = "approved" if status_action == "approved" else "rejected"
+    reviewer = " ".join(str(reviewer_name or 'Admin').split())[:60]
 
     if status_action == 'approved':
-        body = (
-            f"Hello {applicant_display},\n\n"
-            f"✅ Your reimbursement claim for *{title}* (₹{amount}) has been *APPROVED* by {reviewer_name}.\n\n"
-            f"The approved amount will be credited in your upcoming monthly payroll."
-        )
+        remarks = "Amount will be credited in monthly payroll"
     else:
-        reason_text = f"\nReason: {reimbursement.rejection_reason}" if reimbursement.rejection_reason else ""
-        body = (
-            f"Hello {applicant_display},\n\n"
-            f"❌ Your reimbursement claim for *{title}* (₹{amount}) has been *REJECTED* by {reviewer_name}.{reason_text}"
-        )
+        raw_reason = str(reimbursement.rejection_reason or 'No reason provided')
+        remarks = " ".join(raw_reason.split())[:150] or "No reason provided"
+
+    fallback_body = (
+        f"Hello {applicant_display},\n\n"
+        f"Your reimbursement claim for *{title}* (₹{amount}) has been *{status_str.upper()}* by {reviewer}.\n"
+        f"Remarks: {remarks}\n\nThank You!"
+    )
+
+    components = [
+        {
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": applicant_display},
+                {"type": "text", "text": title},
+                {"type": "text", "text": str(amount)},
+                {"type": "text", "text": status_str},
+                {"type": "text", "text": reviewer},
+                {"type": "text", "text": remarks},
+            ]
+        }
+    ]
 
     try:
-        send_whatsapp_text(to=applicant.phone, body=body, user_id=str(applicant.id))
-        logger.info("[WA REIMB] Sent status update (%s) to applicant %s (%s)", status_action, applicant_display, applicant.phone)
+        send_whatsapp_with_fallback(
+            to=applicant.phone,
+            template_name="reimbursement_status_update_",
+            language_code="en",
+            components=components,
+            fallback_body=fallback_body,
+            user_id=str(applicant.id),
+        )
+        logger.info("[WA REIMB] Sent reimbursement_status_update_ (%s) to applicant %s (%s)", status_str, applicant_display, applicant.phone)
     except Exception as e:
         logger.error("[WA REIMB] Failed to send status update to applicant %s: %s", applicant.id, e)
 

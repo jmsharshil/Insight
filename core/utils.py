@@ -323,6 +323,7 @@ PERMANENT_ERROR_CODES = {
     132001,  # template missing / not approved
     132005,  # template param format mismatch
     131009,  # invalid parameter value
+    132018,  # issue with template parameters (e.g. newline or format mismatch)
     133010,  # phone_number_id wrong / not registered
     190,     # bad/expired access token
 }

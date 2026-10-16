@@ -155,8 +155,12 @@ class ReimbursementListCreateAPIView(APIView):
                 )
                 target_users_qs = target_users_qs | branch_accountants
 
-            # Exclude the claimant themselves
-            target_users = target_users_qs.exclude(id=request.user.id).distinct()
+            # Exclude claimant if other approvers exist; keep if testing with single admin account
+            all_approvers = list(target_users_qs.distinct())
+            other_approvers = [u for u in all_approvers if u.id != request.user.id]
+            target_users = other_approvers if other_approvers else all_approvers
+
+            logger.info("[Reimbursement] Found %d target approvers for claim %s", len(target_users), reimbursement.id)
 
             for u in target_users:
                 # In-app push / email notification
