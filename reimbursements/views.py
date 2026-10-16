@@ -20,14 +20,14 @@ from .serializers import (
 
 logger = logging.getLogger(__name__)
 
-# Roles allowed to approve / reject claims across all branches (strictly from User.ROLE_CHOICES)
-GLOBAL_ADMIN_ROLES = {'super_admin', 'admin_senior_executive', 'admin_executive', 'accountant'}
+# Roles allowed to review (approve / reject) reimbursement claims strictly limited to super_admin and accountant
+GLOBAL_ADMIN_ROLES = {'super_admin', 'accountant'}
 
-# Roles allowed to approve / reject claims for their assigned branch(es) (strictly from User.ROLE_CHOICES)
-BRANCH_APPROVER_ROLES = {'branch_manager'}
+# Branch approver roles (empty since only super admin and accountant are authorized)
+BRANCH_APPROVER_ROLES = set()
 
 # All roles authorized to review (approve/reject) claims
-APPROVER_ROLES = GLOBAL_ADMIN_ROLES | BRANCH_APPROVER_ROLES
+APPROVER_ROLES = GLOBAL_ADMIN_ROLES
 
 # Non-staff roles that cannot submit reimbursement claims (strictly from User.ROLE_CHOICES)
 NON_STAFF_ROLES = {'student', 'parents', 'printers'}
@@ -35,7 +35,10 @@ NON_STAFF_ROLES = {'student', 'parents', 'printers'}
 
 def _is_approver(user):
     user_role = get_user_role(user)
-    return any(user_role == r for r in APPROVER_ROLES)
+    if user_role in APPROVER_ROLES:
+        return True
+    add_roles = getattr(user, 'additional_roles', None) or []
+    return any(r in APPROVER_ROLES for r in add_roles)
 
 
 class ReimbursementListCreateAPIView(APIView):
@@ -117,41 +120,45 @@ class ReimbursementListCreateAPIView(APIView):
 
         reimbursement = serializer.save()
 
-        # Notify admins / approvers (Super Admin, Branch Manager, Accountant)
+        # Notify approvers (strictly Super Admin and Accountant)
         try:
             from django.contrib.auth import get_user_model
             from chat.notifications import send_system_notification
             from core.utils import get_role_filter_q
+            from .utils import send_reimbursement_whatsapp_notification, get_reimbursement_proof_url
             User = get_user_model()
 
             applicant_name = request.user.name or request.user.email
+            proof_url = get_reimbursement_proof_url(reimbursement)
             notif_body = f"{applicant_name} submitted a reimbursement claim '{reimbursement.title}' for ₹{reimbursement.amount}."
             notif_meta = {
                 'reimbursement_id': str(reimbursement.id),
                 'type': 'reimbursement_claim',
                 'route': f"/reimbursements/{reimbursement.id}",
+                'proof_url': proof_url,
                 'skip_whatsapp': True,
             }
 
-            # 1. Global / Org-level approvers: super_admin, admin_senior_executive, accountant
+            # Only super_admin and accountant receive approval notifications
             target_users_qs = User.objects.filter(
-                get_role_filter_q(['super_admin', 'admin_senior_executive', 'accountant']),
+                get_role_filter_q(['super_admin', 'accountant']),
                 is_active=True
             )
 
-            # 2. Branch-level approvers: branch_manager and branch-assigned accountants
+            # If reimbursement has a branch, also include branch-assigned accountants
             if reimbursement.branch:
-                branch_approvers = User.objects.filter(
-                    get_role_filter_q(['branch_manager', 'accountant']),
+                branch_accountants = User.objects.filter(
+                    get_role_filter_q(['accountant']),
                     is_active=True
                 ).filter(
                     Q(branch=reimbursement.branch) | Q(branches=reimbursement.branch)
                 )
-                target_users_qs = target_users_qs | branch_approvers
+                target_users_qs = target_users_qs | branch_accountants
 
-            from .utils import send_reimbursement_whatsapp_notification
+            # Exclude the claimant themselves
+            target_users = target_users_qs.exclude(id=request.user.id).distinct()
 
-            for u in target_users_qs.distinct():
+            for u in target_users:
                 # In-app push / email notification
                 send_system_notification(
                     user_id=str(u.id),
@@ -239,17 +246,15 @@ class ReimbursementApproveAPIView(APIView):
 
     def post(self, request, pk):
         if not _is_approver(request.user):
-            return Response({'success': False, 'message': 'Permission denied. Only admins or branch managers can approve.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'success': False, 'message': 'Permission denied. Only Super Admin and Accountant can approve reimbursement claims.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             reimb = Reimbursement.objects.select_related('user', 'branch').get(pk=pk)
         except Reimbursement.DoesNotExist:
             return Response({'success': False, 'message': 'Reimbursement not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        role = get_user_role(request.user)
-        if role in BRANCH_APPROVER_ROLES and role not in GLOBAL_ADMIN_ROLES:
-            if not reimb.branch_id or not has_user_branch_access(request.user, reimb.branch_id):
-                return Response({'success': False, 'message': 'Permission denied. Branch managers can only approve claims for their branch.'}, status=status.HTTP_403_FORBIDDEN)
+        if reimb.user == request.user:
+            return Response({'success': False, 'message': 'You cannot approve your own reimbursement claim.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if reimb.status == 'approved':
             return Response({'success': False, 'message': 'Claim is already approved.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -277,6 +282,14 @@ class ReimbursementApproveAPIView(APIView):
         except Exception as e:
             logger.error(f"Failed to notify user for approved reimbursement {reimb.id}: {e}")
 
+        # Send WhatsApp message to claimer
+        try:
+            from .utils import send_reimbursement_status_whatsapp_to_applicant
+            reviewer_name = request.user.name or 'Admin'
+            send_reimbursement_status_whatsapp_to_applicant(reimb, 'approved', reviewer_name=reviewer_name)
+        except Exception as e:
+            logger.error(f"Failed to send approval WhatsApp to claimer {reimb.user_id}: {e}")
+
         return Response({
             'success': True,
             'message': f"Reimbursement '{reimb.title}' approved successfully. Amount will be added to monthly pay.",
@@ -289,17 +302,15 @@ class ReimbursementRejectAPIView(APIView):
 
     def post(self, request, pk):
         if not _is_approver(request.user):
-            return Response({'success': False, 'message': 'Permission denied. Only admins or branch managers can reject.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'success': False, 'message': 'Permission denied. Only Super Admin and Accountant can reject reimbursement claims.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             reimb = Reimbursement.objects.select_related('user', 'branch').get(pk=pk)
         except Reimbursement.DoesNotExist:
             return Response({'success': False, 'message': 'Reimbursement not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        role = get_user_role(request.user)
-        if role in BRANCH_APPROVER_ROLES and role not in GLOBAL_ADMIN_ROLES:
-            if not reimb.branch_id or not has_user_branch_access(request.user, reimb.branch_id):
-                return Response({'success': False, 'message': 'Permission denied. Branch managers can only reject claims for their branch.'}, status=status.HTTP_403_FORBIDDEN)
+        if reimb.user == request.user:
+            return Response({'success': False, 'message': 'You cannot reject your own reimbursement claim.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if reimb.is_paid:
             return Response({'success': False, 'message': 'Cannot reject a claim that has already been paid.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -327,6 +338,14 @@ class ReimbursementRejectAPIView(APIView):
             )
         except Exception as e:
             logger.error(f"Failed to notify user for rejected reimbursement {reimb.id}: {e}")
+
+        # Send WhatsApp message to claimer
+        try:
+            from .utils import send_reimbursement_status_whatsapp_to_applicant
+            reviewer_name = request.user.name or 'Admin'
+            send_reimbursement_status_whatsapp_to_applicant(reimb, 'rejected', reviewer_name=reviewer_name)
+        except Exception as e:
+            logger.error(f"Failed to send rejection WhatsApp to claimer {reimb.user_id}: {e}")
 
         return Response({
             'success': True,

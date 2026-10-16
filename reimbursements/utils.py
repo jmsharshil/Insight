@@ -1,14 +1,46 @@
 import logging
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+# Strictly authorized roles for reimbursement approvals
+REIMBURSEMENT_APPROVER_ROLES = {'super_admin', 'accountant'}
+
+
+def get_reimbursement_proof_url(reimbursement):
+    """
+    Returns an absolute, publicly accessible URL for the uploaded proof document.
+    Handles Azure Blob Storage, full URLs, and relative MEDIA_URL paths.
+    """
+    if not reimbursement or not getattr(reimbursement, 'proof', None):
+        return ""
+    try:
+        url = str(reimbursement.proof.url)
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+
+        media_url = getattr(settings, 'MEDIA_URL', '')
+        if media_url.startswith("http://") or media_url.startswith("https://"):
+            return f"{media_url.rstrip('/')}/{url.lstrip('/')}"
+
+        base_domain = getattr(
+            settings,
+            'BACKEND_BASE_URL',
+            'https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net'
+        ).rstrip('/')
+        return f"{base_domain}/{url.lstrip('/')}"
+    except Exception as e:
+        logger.warning("[WA REIMB] Could not resolve proof url for claim %s: %s", getattr(reimbursement, 'id', None), e)
+        return ""
 
 
 def send_reimbursement_whatsapp_notification(reimbursement, approver):
     """
     Sends WhatsApp notification with template quick-reply buttons (Approve / Reject)
-    using the approved Meta template 'reimbursement_claim_' to an authorized approver.
+    using the approved Meta template 'reimbursement_claim_' to an authorized approver (Super Admin or Accountant).
+    Includes the uploaded document/receipt URL in parameter {{5}} (Description).
     """
     if not approver or not getattr(approver, 'phone', None):
         return
@@ -19,7 +51,17 @@ def send_reimbursement_whatsapp_notification(reimbursement, approver):
     title_text = str(reimbursement.title or 'Expense Claim')[:100]
     amount_str = f"{reimbursement.amount:.2f}" if reimbursement.amount is not None else "0.00"
     expense_date_str = str(reimbursement.expense_date or timezone.now().date())
-    description_text = (reimbursement.description or 'No description provided')[:100]
+
+    raw_desc = (reimbursement.description or '').strip()
+    proof_url = get_reimbursement_proof_url(reimbursement)
+
+    if proof_url:
+        if raw_desc:
+            description_text = f"{raw_desc[:250]}\nDoc: {proof_url}"
+        else:
+            description_text = f"Doc: {proof_url}"
+    else:
+        description_text = (raw_desc or 'No description provided')[:300]
 
     notif_body = (
         f"Reimbursement Claim: {applicant_name} submitted a claim for '{title_text}' (₹{amount_str}) on {expense_date_str}. "
@@ -63,6 +105,40 @@ def send_reimbursement_whatsapp_notification(reimbursement, approver):
         logger.info("[WA REIMB] Sent reimbursement_claim_ to %s (%s) for claim %s", approver.name, approver.phone, reimbursement.id)
     except Exception as e:
         logger.error("[WA REIMB] Failed to send reimbursement_claim_ to %s: %s", approver.id, e)
+
+
+def send_reimbursement_status_whatsapp_to_applicant(reimbursement, status_action, reviewer_name="Admin"):
+    """
+    Sends WhatsApp message to the claim applicant when their reimbursement claim is approved or rejected.
+    """
+    applicant = getattr(reimbursement, 'user', None)
+    if not applicant or not getattr(applicant, 'phone', None):
+        return
+
+    from chat.notifications import send_whatsapp_text
+
+    applicant_display = getattr(applicant, 'name', None) or 'Staff Member'
+    title = str(reimbursement.title or 'Expense Claim')
+    amount = f"{reimbursement.amount:.2f}" if reimbursement.amount is not None else "0.00"
+
+    if status_action == 'approved':
+        body = (
+            f"Hello {applicant_display},\n\n"
+            f"✅ Your reimbursement claim for *{title}* (₹{amount}) has been *APPROVED* by {reviewer_name}.\n\n"
+            f"The approved amount will be credited in your upcoming monthly payroll."
+        )
+    else:
+        reason_text = f"\nReason: {reimbursement.rejection_reason}" if reimbursement.rejection_reason else ""
+        body = (
+            f"Hello {applicant_display},\n\n"
+            f"❌ Your reimbursement claim for *{title}* (₹{amount}) has been *REJECTED* by {reviewer_name}.{reason_text}"
+        )
+
+    try:
+        send_whatsapp_text(to=applicant.phone, body=body, user_id=str(applicant.id))
+        logger.info("[WA REIMB] Sent status update (%s) to applicant %s (%s)", status_action, applicant_display, applicant.phone)
+    except Exception as e:
+        logger.error("[WA REIMB] Failed to send status update to applicant %s: %s", applicant.id, e)
 
 
 def parse_reimbursement_payload(payload_str, text_str=""):
@@ -120,9 +196,10 @@ def parse_reimbursement_payload(payload_str, text_str=""):
 
 def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str=""):
     """
-    Handles staff/approver action (Approve or Reject) for a Reimbursement claim
+    Handles approver action (Approve or Reject) for a Reimbursement claim
     triggered via WhatsApp template Quick Reply buttons.
-    Returns True if handled as a reimbursement action, False otherwise.
+    Strictly restricts approval/rejection to Super Admin and Accountant.
+    Sends WhatsApp confirmation to the claimer upon completion.
     """
     action, reimb_id = parse_reimbursement_payload(payload_str, text_str)
     if not action or not reimb_id:
@@ -131,7 +208,7 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
     from .models import Reimbursement
     from django.contrib.auth import get_user_model
     from chat.notifications import send_whatsapp_text, send_system_notification
-    from core.utils import get_user_role, has_user_branch_access
+    from core.utils import get_user_role
 
     try:
         reimb = Reimbursement.objects.select_related('user', 'branch').get(id=reimb_id)
@@ -186,15 +263,13 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
     # Filter out claimant if other candidates exist with the same phone
     eligible_candidates = [u for u in candidates if u.id != reimb.user_id] or candidates
 
-    from .views import GLOBAL_ADMIN_ROLES, BRANCH_APPROVER_ROLES
-
     def is_user_approver(u):
         u_role = get_user_role(u)
-        if any(u_role == r for r in GLOBAL_ADMIN_ROLES):
+        if u_role in REIMBURSEMENT_APPROVER_ROLES:
             return True
-        if any(u_role == r for r in BRANCH_APPROVER_ROLES):
-            if reimb.branch_id and has_user_branch_access(u, reimb.branch_id):
-                return True
+        add_roles = getattr(u, 'additional_roles', None) or []
+        if any(r in REIMBURSEMENT_APPROVER_ROLES for r in add_roles):
+            return True
         return False
 
     approver = None
@@ -216,7 +291,7 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
     if not is_user_approver(approver):
         send_whatsapp_text(
             to=sender_wa_id,
-            body="Permission denied: You are not authorized to review this reimbursement claim."
+            body="Permission denied: Only Super Admin and Accountant are authorized to review reimbursement claims."
         )
         return True
 
@@ -248,6 +323,9 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
         except Exception as e:
             logger.error("[WA REIMB] Failed notifying applicant of rejection: %s", e)
 
+        # Notify claimant via WhatsApp
+        send_reimbursement_status_whatsapp_to_applicant(reimb, 'rejected', reviewer_name=approver.name)
+
         return True
 
     # ── Action: APPROVE ─────────────────────────────────────────────
@@ -275,6 +353,9 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             )
         except Exception as e:
             logger.error("[WA REIMB] Failed notifying applicant of approval: %s", e)
+
+        # Notify claimant via WhatsApp
+        send_reimbursement_status_whatsapp_to_applicant(reimb, 'approved', reviewer_name=approver.name)
 
         return True
 
