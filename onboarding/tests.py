@@ -8,7 +8,7 @@ Tests verify that enrolling an Admission automatically creates:
 """
 from django.test import TestCase
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from onboarding.models import Admission
 from fees.models import FeeStructure, StudentFee, BankAccount, InstallmentPlan, InstallmentItem
@@ -491,6 +491,16 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             role='counsellor',
             email='counsellor@test.com',
         )
+        self.super_admin = User.objects.create(
+            username='test_super_admin',
+            role='super_admin',
+            email='super_admin@test.com',
+        )
+        self.accountant = User.objects.create(
+            username='test_accountant',
+            role='accountant',
+            email='accountant@test.com',
+        )
 
     def test_payment_choice_online_generates_razorpay_link_and_history(self):
         from onboarding.views import _setup_payment_bank_and_notify
@@ -532,10 +542,10 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertEqual(history[0]['payment_choice'], 'online')
         self.assertEqual(history[0]['razorpay_payment_link'], 'https://razorpay.test/plink_123')
 
-    def test_payment_choice_cash_or_check_skips_razorpay_link(self):
+    def test_payment_choice_cash_or_cheque_skips_razorpay_link(self):
         from onboarding.views import _setup_payment_bank_and_notify
 
-        for choice in ['cash', 'check']:
+        for choice in ['cash', 'cheque']:
             admission = _make_admission(
                 email=f'{choice}_test@example.com',
                 phone_student='9876543299',
@@ -673,16 +683,16 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         img_io.seek(0)
 
         screenshot = SimpleUploadedFile(
-            'check_receipt.png',
+            'cheque_receipt.png',
             img_io.read(),
             content_type='image/png',
         )
         admission = _make_admission(
-            email='check_proof@example.com',
+            email='cheque_proof@example.com',
             phone_student='9876543202',
             fee_structure=self.fee_structure,
             payment_type='full_payment',
-            payment_choice='check',
+            payment_choice='cheque',
             status='payment_pending',
         )
 
@@ -707,10 +717,10 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
 
         submitted_entry = next((e for e in history if e.get('event') == 'payment_submitted'), None)
         self.assertIsNotNone(submitted_entry)
-        self.assertEqual(submitted_entry['payment_choice'], 'check')
+        self.assertEqual(submitted_entry['payment_choice'], 'cheque')
         self.assertEqual(submitted_entry['transaction_id'], 'CHQ-998877')
         self.assertIsNotNone(submitted_entry['payment_screenshot'])
-        self.assertIn('check_receipt', submitted_entry['payment_screenshot'])
+        self.assertIn('cheque_receipt', submitted_entry['payment_screenshot'])
         self.assertIsNotNone(submitted_entry['date'])
         self.assertEqual(submitted_entry['payment_type'], 'full_payment')
         self.assertEqual(submitted_entry['total_fees'], 40000.0)
@@ -765,7 +775,7 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             {'status': 'verified'},
             format='json',
         )
-        force_authenticate(request, user=self.counsellor)
+        force_authenticate(request, user=self.super_admin)
 
         response = PaymentVerifyView.as_view()(request, pk=payment.id)
         self.assertEqual(response.status_code, 200)
@@ -785,9 +795,9 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertEqual(approved_entry['payment_choice'], 'cash')
         self.assertEqual(approved_entry['amount'], 5000.0)
 
-    def test_check_payment_approval_in_student_fees(self):
+    def test_cheque_payment_approval_in_student_fees(self):
         """
-        When student pays via check:
+        When student pays via cheque:
         1. Payment arrives in Student Fees with status='approval_pending'.
         2. Approving via PaymentVerifyView marks payment verified and updates remaining fees.
         """
@@ -797,19 +807,19 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         from fees.models import Payment
 
         admission = _make_admission(
-            email='check_student@example.com',
+            email='cheque_student@example.com',
             phone_student='9876543204',
             fee_structure=self.fee_structure,
             payment_type='full_payment',
-            payment_choice='check',
+            payment_choice='cheque',
             payment_amount=Decimal('40000'),
             transaction_id='CHQ-123456',
             status='payment_pending',
         )
 
         user = User.objects.create(
-            email='check_student@example.com',
-            username='check_student_usr',
+            email='cheque_student@example.com',
+            username='cheque_student_usr',
             role='student',
         )
 
@@ -833,7 +843,7 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             {'status': 'verified'},
             format='json',
         )
-        force_authenticate(request, user=self.counsellor)
+        force_authenticate(request, user=self.super_admin)
 
         response = PaymentVerifyView.as_view()(request, pk=payment.id)
         self.assertEqual(response.status_code, 200)
@@ -850,6 +860,227 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertIsNotNone(approved_entry)
         self.assertEqual(approved_entry['payment_choice'], 'cheque')
         self.assertEqual(approved_entry['status'], 'verified')
+
+    def test_two_level_payment_approval_workflow(self):
+        """
+        Tests the 2-level admission payment approval:
+          Level 1: Accountant approves -> status becomes 'approved' (payment_verified)
+          Level 2: Super Admin approves -> status becomes 'enrolled' (payment_approved)
+        """
+        from onboarding.views import AdmissionApproveView
+
+        admission = _make_admission(
+            email='twolevel@example.com',
+            phone_student='9876543205',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cheque',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-2LEVEL-1',
+            status='approval_pending',
+        )
+
+        factory = APIRequestFactory()
+
+        # Step 0: Unauthorized role (counsellor) should get 403 Forbidden
+        req_counsellor = factory.post(f'/api/admissions/{admission.id}/approve/', {}, format='json')
+        force_authenticate(req_counsellor, user=self.counsellor)
+        res_counsellor = AdmissionApproveView.as_view()(req_counsellor, admission_id=admission.id)
+        self.assertEqual(res_counsellor.status_code, 403)
+
+        # Step 1: Super Admin attempting approval before Accountant gets 400 (requires Level 1 first)
+        req_sa_early = factory.post(f'/api/admissions/{admission.id}/approve/', {}, format='json')
+        force_authenticate(req_sa_early, user=self.super_admin)
+        res_sa_early = AdmissionApproveView.as_view()(req_sa_early, admission_id=admission.id)
+        self.assertEqual(res_sa_early.status_code, 400)
+        self.assertIn('Level 1 approval by an Accountant is required', res_sa_early.data['message'])
+
+        # Step 2: Accountant performs Level 1 approval -> status becomes 'approved'
+        req_acct = factory.post(f'/api/admissions/{admission.id}/approve/', {'note': 'Cheque verified by Accountant'}, format='json')
+        force_authenticate(req_acct, user=self.accountant)
+        with patch('core.utils.notify_users_by_role'):
+            res_acct = AdmissionApproveView.as_view()(req_acct, admission_id=admission.id)
+        self.assertEqual(res_acct.status_code, 200)
+
+        admission.refresh_from_db()
+        self.assertEqual(admission.status, 'approved')
+        history = admission.get_payment_history_list()
+        l1_entry = next((e for e in history if e.get('event') == 'payment_verified'), None)
+        self.assertIsNotNone(l1_entry)
+        self.assertEqual(l1_entry['level'], 1)
+        self.assertEqual(l1_entry['approver_role'], 'accountant')
+        self.assertEqual(l1_entry['payment_choice'], 'cheque')
+
+        # Step 3: Accountant cannot perform Level 2 approval -> 403 Forbidden
+        req_acct_l2 = factory.post(f'/api/admissions/{admission.id}/approve/', {}, format='json')
+        force_authenticate(req_acct_l2, user=self.accountant)
+        res_acct_l2 = AdmissionApproveView.as_view()(req_acct_l2, admission_id=admission.id)
+        self.assertEqual(res_acct_l2.status_code, 403)
+        self.assertIn('Super Admin', res_acct_l2.data['message'])
+
+        # Step 4: Super Admin performs Level 2 approval -> status becomes 'enrolled'
+        req_sa_final = factory.post(f'/api/admissions/{admission.id}/approve/', {'note': 'Final admission approval'}, format='json')
+        force_authenticate(req_sa_final, user=self.super_admin)
+        with (
+            patch('onboarding.services.AdmissionService.update_status') as mock_update_status,
+            patch('students.utils.StudentService.create_from_admission') as mock_create_student,
+        ):
+            mock_student = MagicMock()
+            mock_student.admission_number = 'ADM-2027-001'
+            mock_create_student.return_value = mock_student
+
+            # Mock student user account lookup
+            with patch('auth_user.models.User.objects.filter') as mock_user_filter:
+                mock_user_filter.return_value.first.return_value = MagicMock()
+                res_sa_final = AdmissionApproveView.as_view()(req_sa_final, admission_id=admission.id)
+
+        self.assertEqual(res_sa_final.status_code, 200)
+        self.assertIn('Level 2 final approval completed by Super Admin', res_sa_final.data['message'])
+
+    def test_payment_approve_reject_template_components(self):
+        """
+        Validates that build_payment_approve_reject_components produces:
+          - Header: IMAGE with screenshot URL
+          - Body: 10 parameters (Student Name, Admission ID, Course Type, Module, Attempt,
+                                Payment Type, Payment Mode, Payment Amount, Transaction ID / Cheque No.,
+                                Payment Submitted At)
+          - 2 Quick Reply Buttons: Approve (adm_pay_approve:<id>), Reject (adm_pay_reject:<id>)
+        """
+        from onboarding.notifications import build_payment_approve_reject_components
+
+        admission = _make_admission(
+            first_name='Kavita',
+            surname='Sharma',
+            email='kavita@example.com',
+            phone_student='9876543290',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cheque',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-KAVITA-01',
+            status='approval_pending',
+        )
+
+        components, fallback_body = build_payment_approve_reject_components(admission)
+
+        # Header component verification
+        header = next((c for c in components if c.get('type') == 'header'), None)
+        self.assertIsNotNone(header, "Header component must be present")
+        self.assertEqual(header['parameters'][0]['type'], 'image')
+        self.assertIn('image', header['parameters'][0])
+
+        # Body component verification (10 parameters)
+        body = next((c for c in components if c.get('type') == 'body'), None)
+        self.assertIsNotNone(body, "Body component must be present")
+        params = body['parameters']
+        self.assertEqual(len(params), 10, "Body must have exactly 10 parameters")
+
+        self.assertIn('Kavita Sharma', params[0]['text'])       # {{1}} Student Name
+        self.assertEqual(str(admission.id), params[1]['text'])  # {{2}} Admission ID
+        self.assertTrue(len(params[2]['text']) > 0)             # {{3}} Course Type
+        self.assertTrue(len(params[3]['text']) > 0)             # {{4}} Module
+        self.assertTrue(len(params[4]['text']) > 0)             # {{5}} Attempt
+        self.assertTrue(len(params[5]['text']) > 0)             # {{6}} Payment Type
+        self.assertIn('Cheque', params[6]['text'])              # {{7}} Payment Mode (Cheque)
+        self.assertIn('40,000', params[7]['text'])              # {{8}} Payment Amount
+        self.assertIn('CHQ-KAVITA-01', params[8]['text'])       # {{9}} Transaction ID / Cheque No.
+        self.assertTrue(len(params[9]['text']) > 0)             # {{10}} Submitted At
+
+        # Buttons verification (Approve and Reject)
+        buttons = [c for c in components if c.get('type') == 'button']
+        self.assertEqual(len(buttons), 2, "Must have exactly 2 buttons")
+        self.assertEqual(buttons[0]['sub_type'], 'quick_reply')
+        self.assertEqual(buttons[0]['index'], '0')
+        self.assertEqual(buttons[0]['parameters'][0]['payload'], f"adm_pay_approve:{admission.id}")
+
+        self.assertEqual(buttons[1]['sub_type'], 'quick_reply')
+        self.assertEqual(buttons[1]['index'], '1')
+        self.assertEqual(buttons[1]['parameters'][0]['payload'], f"adm_pay_reject:{admission.id}")
+
+        # Fallback body verification
+        self.assertIn("FEE PAYMENT VERIFICATION", fallback_body)
+        self.assertIn("Student Name: Kavita Sharma", fallback_body)
+        self.assertIn(f"Admission ID: {admission.id}", fallback_body)
+        self.assertIn("Payment Mode: Cheque", fallback_body)
+        self.assertIn("APPROVE", fallback_body)
+        self.assertIn("REJECT", fallback_body)
+
+    def test_payment_approve_reject_whatsapp_webhook_flow(self):
+        """
+        Tests the complete 2-level approval webhook flow triggered via WhatsApp button replies:
+          1. Accountant clicks Approve -> Level 1 approved
+          2. Super Admin clicks Approve -> Level 2 approved & student enrolled
+          3. Unauthorized user receives rejection message
+        """
+        from onboarding.notifications import handle_admission_payment_whatsapp_approval
+
+        admission = _make_admission(
+            first_name='Rohan',
+            surname='Mehta',
+            email='rohan@example.com',
+            phone_student='9876543291',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cheque',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-ROHAN-01',
+            status='approval_pending',
+        )
+
+        # Set phone numbers on test users
+        self.accountant.phone = '919876543210'
+        self.accountant.save()
+        self.super_admin.phone = '919876543211'
+        self.super_admin.save()
+        self.counsellor.phone = '919876543212'
+        self.counsellor.save()
+
+        # Step 0: Unauthorized role (counsellor) clicks Approve
+        with patch('chat.notifications.send_whatsapp_text') as mock_send_wa:
+            handled = handle_admission_payment_whatsapp_approval(
+                sender_wa_id='919876543212',
+                payload_str=f'adm_pay_approve:{admission.id}',
+            )
+            self.assertTrue(handled)
+            mock_send_wa.assert_called_once()
+            self.assertIn("Unauthorized", mock_send_wa.call_args[1]['body'])
+
+        # Step 1: Accountant clicks Approve -> Level 1 approved
+        with (
+            patch('chat.notifications.send_whatsapp_text') as mock_send_wa,
+            patch('onboarding.notifications.send_payment_verification_whatsapp') as mock_send_l2,
+        ):
+            handled = handle_admission_payment_whatsapp_approval(
+                sender_wa_id='919876543210',
+                payload_str=f'adm_pay_approve:{admission.id}',
+            )
+            self.assertTrue(handled)
+            admission.refresh_from_db()
+            self.assertEqual(admission.status, 'approved')
+            mock_send_wa.assert_called_once()
+            self.assertIn("Level 1 payment approval completed", mock_send_wa.call_args[1]['body'])
+            mock_send_l2.assert_called_once_with(admission, level=2)
+
+        # Step 2: Super Admin clicks Approve -> Level 2 approved & student enrolled
+        with (
+            patch('chat.notifications.send_whatsapp_text') as mock_send_wa,
+            patch('students.utils.StudentService.create_from_admission') as mock_create_student,
+            patch('auth_user.models.User.objects.filter') as mock_user_filter,
+        ):
+            mock_student = MagicMock()
+            mock_student.admission_number = 'ADM-2027-099'
+            mock_create_student.return_value = mock_student
+            mock_user_filter.return_value.first.return_value = MagicMock()
+
+            handled = handle_admission_payment_whatsapp_approval(
+                sender_wa_id='919876543211',
+                payload_str=f'adm_pay_approve:{admission.id}',
+            )
+            self.assertTrue(handled)
+            admission.refresh_from_db()
+            self.assertEqual(admission.status, 'enrolled')
+            mock_send_wa.assert_called_once()
+            self.assertIn("enrolled", mock_send_wa.call_args[1]['body'])
 
 
 

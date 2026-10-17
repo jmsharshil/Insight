@@ -180,21 +180,17 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="admission_process",
+            template_name="login_cred",
             language_code="en",
             components=[
                 {
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": user.name},
-                        {"type": "text", "text": user.organization.name if user.organization else 'Insight ERP'}
+                        {"type": "text", "text": user.organization.name if user.organization else 'Insight ERP'},
+                        {"type": "text", "text": user.email},
+                        {"type": "text", "text": password}
                     ],
-                },
-                {
-                    "type": "button",
-                    "sub_type": "url",
-                    "index": 0,
-                    "parameters": [{"type": "text", "text": "login"}],
                 }
             ],
             fallback_body=text_content,
@@ -252,21 +248,17 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=parent_user.phone,
-            template_name="admission_process",
+            template_name="login_cred",
             language_code="en",
             components=[
                 {
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": parent_user.name},
-                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'}
+                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'},
+                        {"type": "text", "text": parent_user.email},
+                        {"type": "text", "text": password}
                     ],
-                },
-                {
-                    "type": "button",
-                    "sub_type": "url",
-                    "index": 0,
-                    "parameters": [{"type": "text", "text": "login"}],
                 }
             ],
             fallback_body=text_content,
@@ -648,4 +640,4 @@ def process_weekly_schedule(schedule_data):
         )
 
     return normalized, avg_hours
-
+

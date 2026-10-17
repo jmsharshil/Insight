@@ -91,7 +91,7 @@ class AdmissionSerializer(serializers.Serializer):
         allow_null=True,
     )
     payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
-    payment_choice = serializers.ChoiceField(choices=PAYMENT_CHOICE_CHOICES + [('cheque', 'Cheque')], required=False, allow_null=True, allow_blank=True)
+    payment_choice = serializers.ChoiceField(choices=PAYMENT_CHOICE_CHOICES + [('check', 'Cheque')], required=False, allow_null=True, allow_blank=True)
     icsi_fees_payment = serializers.ChoiceField(choices=ICSI_FEES_PAYMENT_CHOICES, required=False, allow_null=True)
 
     # ── Qualification & Reference ─────────────────────────────────────────────
@@ -144,7 +144,7 @@ class AdmissionSerializer(serializers.Serializer):
             return value
         val = str(value).strip().lower()
         if val in ('cheque', 'check'):
-            return 'check'
+            return 'cheque'
         return val
 
     def validate_branch(self, value):
@@ -362,6 +362,14 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.required = False
+
+    def validate_payment_choice(self, value):
+        if not value:
+            return value
+        val = str(value).strip().lower()
+        if val in ('cheque', 'check'):
+            return 'cheque'
+        return val
 
 # ── Admission Document Upload Serializer ──────────────────────────────────────
 

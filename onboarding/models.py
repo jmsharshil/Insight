@@ -33,7 +33,7 @@ PAYMENT_TYPE_CHOICES = [
 PAYMENT_CHOICE_CHOICES = [
     ('online', 'Online'),
     ('cash',   'Cash'),
-    ('check',  'Cheque'),
+    ('cheque', 'Cheque'),
 ]
 
 ICSI_FEES_PAYMENT_CHOICES = [
@@ -201,7 +201,7 @@ class Admission(models.Model):
     
     # ── Payment Options ───────────────────────────────────────────────────────
     payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPE_CHOICES, blank=True, null=True)
-    payment_choice = models.CharField(max_length=20, choices=PAYMENT_CHOICE_CHOICES, blank=True, null=True, help_text="Choice of payment method: online, cash, or check.")
+    payment_choice = models.CharField(max_length=20, choices=PAYMENT_CHOICE_CHOICES, blank=True, null=True, help_text="Choice of payment method: online, cash, or cheque.")
     icsi_fees_payment = models.CharField(max_length=30, choices=ICSI_FEES_PAYMENT_CHOICES, blank=True, null=True)
 
     # ── Status & Timestamps ───────────────────────────────────────────────────
@@ -244,6 +244,17 @@ class Admission(models.Model):
     def __str__(self):
         return f"{self.first_name} {self.surname} | {self.course} | {self.status}"
 
+    def save(self, *args, **kwargs):
+        if self.payment_choice == 'check':
+            self.payment_choice = 'cheque'
+        super().save(*args, **kwargs)
+
+    def get_payment_choice_display(self):
+        pc = self.payment_choice
+        if pc in ('cheque', 'check'):
+            return 'Cheque'
+        return dict(PAYMENT_CHOICE_CHOICES).get(pc, str(pc).title() if pc else 'N/A')
+
     def assign_payment_bank_account(self, bank_account, *, status='payment_pending', note='Form submitted. Waiting for fee payment.'):
         """Assign a bank account only once so subsequent updates keep the original selection."""
         if self.bank_account:
@@ -269,9 +280,9 @@ class Admission(models.Model):
                     return False
             except Exception:
                 pass
-        if self.payment_choice in ('cash', 'check', 'cheque'):
+        if self.payment_choice in ('cash', 'cheque', 'check'):
             history = self.payment_history or []
-            return any(entry.get('event') == 'payment_approved' for entry in history)
+            return any(entry.get('event') in ('payment_approved', 'payment_verified') for entry in history)
         if self.status in ('enrolled', 'approved') and (self.payment_amount or self.payment_submitted_at or self.transaction_id):
             return True
         return False
@@ -389,7 +400,7 @@ class Admission(models.Model):
             })
 
         # If offline choice was made without link, synthesize offline_payment_selected if history is empty
-        if not history and self.payment_choice in ('cash', 'check', 'cheque'):
+        if not history and self.payment_choice in ('cash', 'cheque', 'check'):
             history.append({
                 'event': 'offline_payment_selected',
                 'payment_choice': self.payment_choice,
@@ -481,9 +492,9 @@ class Admission(models.Model):
             # Proof / screenshots for offline or submitted payments
             choice = item.get('payment_choice') or self.payment_choice
             item['payment_choice'] = choice
-            item['payment_choice_display'] = dict(PAYMENT_CHOICE_CHOICES).get(choice, str(choice).title() if choice else 'N/A')
+            item['payment_choice_display'] = 'Cheque' if choice in ('cheque', 'check') else dict(PAYMENT_CHOICE_CHOICES).get(choice, str(choice).title() if choice else 'N/A')
 
-            if proof_url and (choice in ('cash', 'check', 'cheque', 'offline') or item.get('event') in ('payment_submitted', 'offline_payment_selected') or not item.get('payment_screenshot')):
+            if proof_url and (choice in ('cash', 'cheque', 'check', 'offline') or item.get('event') in ('payment_submitted', 'offline_payment_selected') or not item.get('payment_screenshot')):
                 item.setdefault('payment_screenshot', proof_url)
                 item.setdefault('payment_proof', proof_url)
             else:

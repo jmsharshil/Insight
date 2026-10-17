@@ -1,5 +1,6 @@
 from onboarding.models import AdmissionStatusHistory
 from django.shortcuts import render
+from django.utils import timezone
 
 # Create your views here.
 import logging
@@ -235,7 +236,7 @@ def _setup_payment_bank_and_notify(admission):
     
     # Check if student selected 'online' payment choice
     # If user selected 'online', generate & send Razorpay payment link.
-    # If user selected 'cash' or 'check', do NOT generate Razorpay link.
+    # If user selected 'cash' or 'cheque', do NOT generate Razorpay link.
     # Backwards compatibility: if payment_choice is not set, generate if payment_type in ('full_payment', 'token')
     is_online_choice = False
     if admission.payment_choice:
@@ -653,6 +654,27 @@ class AdmissionStatusUpdateView(APIView):
         new_status = serializer.validated_data['status']
         note       = serializer.validated_data.get('note', '')
 
+        role = getattr(request.user, 'role', '') if (request.user and request.user.is_authenticated) else ''
+        is_superuser = getattr(request.user, 'is_superuser', False) if request.user else False
+
+        if new_status == 'approved' and role not in ('accountant', 'super_admin') and not is_superuser:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Permission denied. Only Accountant or Super Admin can mark admission as approved (Level 1).',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if new_status == 'enrolled' and role != 'super_admin' and not is_superuser:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Permission denied. Only Super Admin can complete enrollment (Level 2).',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         AdmissionService.update_status(
             admission=admission,
             new_status=new_status,
@@ -689,9 +711,9 @@ class AdmissionUpdateView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
- 
+
         serializer.save()
- 
+
         return Response(
             {
                 'success': True,
@@ -700,23 +722,28 @@ class AdmissionUpdateView(APIView):
             },
             status=status.HTTP_200_OK,
         )
- 
- 
+
+
 # ── POST /api/admissions/<id>/approve/ ───────────────────────────────────────
- 
+
 class AdmissionApproveView(APIView):
- 
+    """
+    2-level approval for admission fee payment:
+      Level 1: Accountant reviews & approves payment (moves status to 'approved').
+      Level 2: Super Admin gives final approval (moves status to 'enrolled', creates student & dispatches credentials).
+    """
+
     def post(self, request, admission_id):
         admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
- 
+
         if admission.status == 'enrolled':
             return Response(
                 {'success': False, 'message': 'Admission is already enrolled.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
- 
+
         if admission.status == 'rejected':
             return Response(
                 {
@@ -728,25 +755,168 @@ class AdmissionApproveView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
- 
-        note        = request.data.get('note', 'Approved by counsellor.').strip()
-        acting_user = request.user if request.user.is_authenticated else None
 
+        acting_user = request.user if (request.user and request.user.is_authenticated) else None
+        role = getattr(acting_user, 'role', '') if acting_user else ''
+        is_superuser = getattr(acting_user, 'is_superuser', False) if acting_user else False
+
+        # Role-based guard: only accountant (Level 1) and super_admin (Level 2) are authorized
+        if role not in ('accountant', 'super_admin') and not is_superuser:
+            return Response(
+                {
+                    'success': False,
+                    'message': (
+                        'Permission denied. Payment approval from admission requires a 2-level process: '
+                        'Accountant (Level 1) and Super Admin (Level 2).'
+                    ),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        note = request.data.get('note', '').strip()
+        force_override = bool(request.data.get('override') or request.data.get('force'))
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # STEP 2: Second Approval (payment_submitted / approval_pending → enrolled)
-        #   → Verify payment, create user accounts + student profile
-        #   → For cash/check, payment arrives in Student Fees for accountant approval
+        # LEVEL 1: Accountant Approval
+        #   Admission is in 'payment_submitted', 'approval_pending', or
+        #   offline 'payment_pending' with cash or cheque choice.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if admission.status in ['payment_submitted', 'approval_pending'] or (
-            admission.status == 'payment_pending' and admission.payment_choice in ('cash', 'check', 'cheque')
-        ):
+        is_pending_level1 = (
+            admission.status in ['payment_submitted', 'approval_pending'] or (
+                admission.status == 'payment_pending' and admission.payment_choice in ('cash', 'cheque', 'check')
+            )
+        )
+
+        if is_pending_level1:
+            # If a super_admin attempts approval before accountant approval:
+            # Require accountant approval first, unless override/force flag is explicitly passed.
+            if (role == 'super_admin' or is_superuser) and not force_override:
+                return Response(
+                    {
+                        'success': False,
+                        'message': (
+                            'Level 1 approval by an Accountant is required before Super Admin can give final approval. '
+                            'Please have an Accountant verify the payment first (or pass override=true if Accountant is unavailable).'
+                        ),
+                        'data': {
+                            'admission_id': admission.id,
+                            'admission_status': admission.status,
+                            'status_display': admission.get_status_display(),
+                            'required_role': 'accountant',
+                            'approval_level': 1,
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # If acting user is accountant (or super_admin with override):
+            if role == 'accountant' and not force_override:
+                level1_note = note or 'Level 1 payment approval completed by Accountant.'
+                AdmissionService.update_status(
+                    admission=admission,
+                    new_status='approved',
+                    note=level1_note,
+                    user=acting_user,
+                )
+
+                admission.add_payment_history_entry('payment_verified', {
+                    'payment_choice': admission.payment_choice,
+                    'amount': float(admission.payment_amount or admission.total_fees or 0),
+                    'transaction_id': admission.transaction_id,
+                    'status': 'level_1_approved',
+                    'level': 1,
+                    'approver_role': 'accountant',
+                    'verified_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Accountant'),
+                    'verified_at': timezone.now().isoformat(),
+                    'date': timezone.now().date().isoformat(),
+                    'note': level1_note,
+                })
+
+                # Notify super_admins that Level 1 is complete and Level 2 approval is required
+                try:
+                    from core.utils import notify_users_by_role
+                    notify_users_by_role(
+                        roles=['super_admin'],
+                        title='Admission Payment Ready for Final Approval',
+                        body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified by Accountant and requires Super Admin final approval.",
+                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                        branch=admission.branch if getattr(admission, 'branch', None) else None,
+                        email_subject=f'Final Approval Required: Admission #{admission.id}',
+                    )
+                except Exception as exc:
+                    logger.error(f"Failed to notify super_admin of level 1 approval for admission {admission.id}: {exc}")
+
+                # Dispatch WhatsApp template (payment_approve_reject) to Super Admins for Level 2 final approval
+                try:
+                    from .notifications import send_payment_verification_whatsapp
+                    send_payment_verification_whatsapp(admission, level=2)
+                except Exception as exc:
+                    logger.error(f"Failed to dispatch Level 2 WhatsApp notification for admission {admission.id}: {exc}")
+
+                return Response(
+                    {
+                        'success': True,
+                        'message': 'Level 1 payment approval completed by Accountant. Pending Level 2 (final) approval by Super Admin.',
+                        'data': {
+                            'admission_id': admission.id,
+                            'admission_status': admission.status,
+                            'status_display': admission.get_status_display(),
+                            'approval_level': 1,
+                            'approved_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Accountant'),
+                            'next_step': 'super_admin_approval',
+                        },
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            # If super_admin with override on pending level 1:
+            level1_note = note or 'Level 1 payment approval completed by Super Admin (override).'
+            admission.add_payment_history_entry('payment_verified', {
+                'payment_choice': admission.payment_choice,
+                'amount': float(admission.payment_amount or admission.total_fees or 0),
+                'transaction_id': admission.transaction_id,
+                'status': 'level_1_approved',
+                'level': 1,
+                'approver_role': 'super_admin',
+                'verified_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Super Admin'),
+                'verified_at': timezone.now().isoformat(),
+                'date': timezone.now().date().isoformat(),
+                'note': level1_note,
+            })
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # LEVEL 2: Super Admin Final Approval
+        #   Admission is in 'approved' status (Level 1 completed by Accountant),
+        #   or super_admin with force_override.
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if admission.status == 'approved' or force_override:
+            if role != 'super_admin' and not is_superuser:
+                return Response(
+                    {
+                        'success': False,
+                        'message': (
+                            'Level 1 approval is already completed by Accountant. '
+                            'Level 2 (final) approval must be performed by a Super Admin.'
+                        ),
+                        'data': {
+                            'admission_id': admission.id,
+                            'admission_status': admission.status,
+                            'status_display': admission.get_status_display(),
+                            'required_role': 'super_admin',
+                            'approval_level': 2,
+                        },
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            final_note = note or 'Level 2 final approval completed by Super Admin.'
+
             try:
                 AdmissionService.update_status(
-                    admission  = admission,
-                    new_status = 'enrolled',
-                    note       = note,
-                    user       = acting_user,
+                    admission=admission,
+                    new_status='enrolled',
+                    note=final_note,
+                    user=acting_user,
                 )
             except Exception as exc:
                 logger.error(f"AdmissionService.update_status failed for {admission_id}: {exc}")
@@ -754,12 +924,12 @@ class AdmissionApproveView(APIView):
                     {'success': False, 'message': f'Enrolment failed: {exc}'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
- 
+
             from auth_user.models import User
             student_user = User.objects.filter(
                 email__iexact=admission.email, role='student'
             ).first()
- 
+
             if not student_user:
                 logger.error(
                     f"Student user account missing for admission {admission_id} "
@@ -773,20 +943,20 @@ class AdmissionApproveView(APIView):
                             'was not found. Please check server logs.'
                         ),
                         'data': {
-                            'admission_id'    : admission.id,
+                            'admission_id': admission.id,
                             'admission_status': admission.status,
-                            'status_display'  : admission.get_status_display(),
+                            'status_display': admission.get_status_display(),
                         },
                     },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
- 
+
             try:
                 from students.utils import StudentService
                 student = StudentService.create_from_admission(
-                    admission   = admission,
-                    user        = student_user,
-                    acting_user = acting_user,
+                    admission=admission,
+                    user=student_user,
+                    acting_user=acting_user,
                 )
             except Exception as exc:
                 logger.error(
@@ -801,14 +971,14 @@ class AdmissionApproveView(APIView):
                             f'profile creation failed: {exc}'
                         ),
                         'data': {
-                            'admission_id'    : admission.id,
+                            'admission_id': admission.id,
                             'admission_status': admission.status,
-                            'status_display'  : admission.get_status_display(),
+                            'status_display': admission.get_status_display(),
                         },
                     },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
- 
+             
             # # ── Auto-create StudentFee + Payment from admission ────────────
             # try:
             #     from fees.models import StudentFee, Payment, FeeStructure
@@ -862,13 +1032,26 @@ class AdmissionApproveView(APIView):
             #         f"Auto StudentFee/Payment creation failed for admission "
             #         f"{admission_id}: {exc}"
             #     )
-            #     # Non-fatal: student is already created, fee can be added manually
- 
+            #     # Non-fatal: student is already created, fee can be added manually 
+            admission.add_payment_history_entry('payment_approved', {
+                'payment_choice': admission.payment_choice,
+                'amount': float(admission.payment_amount or admission.total_fees or 0),
+                'transaction_id': admission.transaction_id,
+                'status': 'verified',
+                'level': 2,
+                'approver_role': 'super_admin',
+                'verified_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Super Admin'),
+                'verified_at': timezone.now().isoformat(),
+                'date': timezone.now().date().isoformat(),
+                'note': final_note,
+            })
+
             return Response(
                 {
                     'success': True,
                     'message': (
-                        f"Payment verified. Admission approved and student enrolled. "
+                        f"Level 2 final approval completed by Super Admin. "
+                        f"Payment verified, admission approved and student enrolled. "
                         f"Admission number: {student.admission_number}. "
                         f"Login credentials dispatched to student and parent."
                     ),
@@ -878,7 +1061,8 @@ class AdmissionApproveView(APIView):
                         'status_display'  : admission.get_status_display(),
                         'student_id'      : str(student.id),
                         'admission_number': student.admission_number,
-                        'student_status'  : student.status,
+                        'student_status' : student.status,
+                        'approval_level': 2,
                     },
                 },
                 status=status.HTTP_200_OK,
@@ -977,6 +1161,26 @@ class AdmissionPaymentSubmitView(APIView):
             f"Payment proof submitted for admission {admission.id} — "
             f"Transaction ID: {admission.transaction_id}"
         )
+
+        # Dispatch Level 1 WhatsApp payment verification notification (Accountant)
+        try:
+            from .notifications import send_payment_verification_whatsapp
+            send_payment_verification_whatsapp(admission, level=1)
+        except Exception as exc:
+            logger.error(f"Failed to dispatch Level 1 WhatsApp payment notification for admission {admission.id}: {exc}")
+
+        # Send system notification to accountants
+        try:
+            from core.utils import notify_users_by_role
+            notify_users_by_role(
+                roles=['accountant'],
+                title='Admission Payment Proof Submitted',
+                body=f"Payment proof submitted for admission #{admission.id} ({admission.first_name} {admission.surname}). Level 1 approval required.",
+                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                branch=admission.branch if getattr(admission, 'branch', None) else None,
+            )
+        except Exception as exc:
+            logger.error(f"Failed to dispatch accountant system notification for admission {admission.id}: {exc}")
 
         return Response(
             {

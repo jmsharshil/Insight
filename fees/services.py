@@ -107,25 +107,32 @@ def create_student_fee(student, acting_user=None):
         payment_amount > 0
         or admission.payment_screenshot
         or admission.transaction_id
-        or getattr(admission, 'payment_choice', None) in ('cash', 'check', 'cheque')
+        or getattr(admission, 'payment_choice', None) in ('cash', 'cheque', 'check')
     )
 
     if has_payment_info:
         mapped_mode = 'online'
         if getattr(admission, 'payment_choice', None):
             pc = str(admission.payment_choice).lower()
-            if pc in ('check', 'cheque'):
+            if pc in ('cheque', 'check'):
                 mapped_mode = 'cheque'
             elif pc == 'cash':
                 mapped_mode = 'cash'
             else:
                 mapped_mode = 'online'
 
-        is_offline = mapped_mode in ('cash', 'cheque') or getattr(admission, 'payment_choice', None) in ('cash', 'check', 'cheque')
+        is_offline = mapped_mode in ('cash', 'cheque') or getattr(admission, 'payment_choice', None) in ('cash', 'cheque', 'check')
         is_rp_paid = bool(getattr(admission, 'is_razorpay_paid', False))
+        is_admission_approved = (
+            getattr(admission, 'status', None) == 'enrolled'
+            or any(
+                isinstance(h, dict) and h.get('event') in ('payment_approved', 'payment_verified')
+                for h in (getattr(admission, 'payment_history', []) or [])
+            )
+        )
 
-        if is_offline or not is_rp_paid:
-            # Offline payments (cash/check) must arrive in Student Fees pending approval
+        if is_offline and not is_admission_approved:
+            # Offline payments (cash/cheque) that haven't completed 2-level admission approval must arrive pending approval
             payment = Payment.objects.create(
                 student=student,
                 student_fee=student_fee,
@@ -180,24 +187,28 @@ def create_student_fee(student, acting_user=None):
             })
 
         else:
-            # Verified online Razorpay payment
+            # Verified payment (either Razorpay paid or 2-level approved at admission)
             payment = Payment.objects.create(
                 student=student,
                 student_fee=student_fee,
                 installment_item=item,
                 amount=payment_amount or student_fee.total_amount,
-                payment_mode='online',
-                transaction_ref=admission.transaction_id or f'AUTO-ADM-{admission.id}',
+                payment_mode=mapped_mode,
+                transaction_ref=admission.transaction_id or f'{"ADM" if is_offline else "AUTO"}-{mapped_mode.upper()}-{admission.id}',
                 payment_proof=admission.payment_screenshot,
                 status='verified',
                 recorded_by=acting_user,
                 verified_by=acting_user,
                 verified_at=timezone.now(),
                 payment_date=timezone.now().date(),
-                note=f'Auto-verified from admission #{admission.id}. Tx: {admission.transaction_id or "N/A"}',
+                note=(
+                    f'Auto-verified from admission #{admission.id} (2-level payment approval completed). Mode: {mapped_mode}.'
+                    if is_offline
+                    else f'Auto-verified from admission #{admission.id}. Tx: {admission.transaction_id or "N/A"}'
+                ),
             )
             # Hook will trigger update_student_fee_status + mark_installment_paid
-            logger.info(f"Auto-created verified Payment {payment.receipt_number} for admission {admission.id}")
+            logger.info(f"Auto-created verified Payment {payment.receipt_number} ({mapped_mode}) for admission {admission.id}")
 
             send_payment_receipt(payment)
 

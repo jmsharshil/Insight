@@ -82,6 +82,45 @@ def test_all_meta_templates():
                 {"type": "text", "text": "Test Candidate"}
             ]}]
         },
+        {
+            "name": "payment_approve_reject",
+            "components": [
+                {
+                    "type": "header",
+                    "parameters": [{
+                        "type": "image",
+                        "image": {"link": "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net/static/images/payment_receipt_placeholder.png"}
+                    }]
+                },
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": "Test Student"},
+                        {"type": "text", "text": "1001"},
+                        {"type": "text", "text": "CS Executive"},
+                        {"type": "text", "text": "Module 1"},
+                        {"type": "text", "text": "Dec 2026"},
+                        {"type": "text", "text": "Full Payment"},
+                        {"type": "text", "text": "Cheque"},
+                        {"type": "text", "text": "40,000"},
+                        {"type": "text", "text": "CHQ-123456"},
+                        {"type": "text", "text": "17-Oct-2026 12:15 PM"},
+                    ]
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": [{"type": "payload", "payload": "adm_pay_approve:1001"}]
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "1",
+                    "parameters": [{"type": "payload", "payload": "adm_pay_reject:1001"}]
+                }
+            ]
+        },
     ]
 
     print(f"Testing {len(templates_to_test)} Meta/WhatsApp templates live on number {TARGET_NUMBER}...")

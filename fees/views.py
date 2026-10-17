@@ -540,6 +540,17 @@ class PaymentDetailView(APIView):
 class PaymentVerifyView(APIView):
 
     def post(self, request, pk):
+        role = getattr(request.user, 'role', '') if (request.user and request.user.is_authenticated) else ''
+        is_superuser = getattr(request.user, 'is_superuser', False) if request.user else False
+        if role not in ('accountant', 'super_admin') and not is_superuser:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Permission denied. Only Accountant or Super Admin can verify payments.',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         try:
             queryset = Payment.objects.select_related(
                 'installment_item__plan', 'student_fee', 'student'
@@ -613,7 +624,8 @@ class PaymentVerifyView(APIView):
             )
 
             if new_status == 'verified':
-                admission.add_payment_history_entry('payment_approved', {
+                is_level1 = (role == 'accountant' and not is_superuser)
+                admission.add_payment_history_entry('payment_verified' if is_level1 else 'payment_approved', {
                     'payment_choice': payment.payment_mode,
                     'payment_type': admission.payment_type,
                     'payment_type_display': admission.get_payment_type_display(),
@@ -622,17 +634,24 @@ class PaymentVerifyView(APIView):
                     'remaining_fees': float(admission.remaining_fees),
                     'transaction_id': payment.transaction_ref,
                     'receipt_number': payment.receipt_number,
-                    'status': 'verified',
+                    'status': 'level_1_approved' if is_level1 else 'verified',
+                    'level': 1 if is_level1 else 2,
+                    'approver_role': 'accountant' if is_level1 else 'super_admin',
                     'verified_by': verifier_name,
                     'verified_at': timezone.now().isoformat(),
                     'date': timezone.now().date().isoformat(),
                     'payment_screenshot': proof_url,
                     'payment_proof': proof_url,
-                    'note': f"Payment approved in Student Fees (Receipt: {payment.receipt_number}).",
+                    'note': f"Payment {'verified by Accountant (Level 1)' if is_level1 else 'approved (Level 2)'} in Student Fees (Receipt: {payment.receipt_number}).",
                 })
-                if admission.status in ('approval_pending', 'payment_submitted'):
-                    admission.status = 'enrolled'
-                    admission.save(update_fields=['status', 'updated_at'])
+                if is_level1:
+                    if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending'):
+                        admission.status = 'approved'
+                        admission.save(update_fields=['status', 'updated_at'])
+                else:
+                    if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending', 'approved'):
+                        admission.status = 'enrolled'
+                        admission.save(update_fields=['status', 'updated_at'])
 
             elif new_status == 'rejected':
                 admission.add_payment_history_entry('payment_rejected', {
