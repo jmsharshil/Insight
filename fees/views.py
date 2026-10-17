@@ -635,7 +635,7 @@ class PaymentVerifyView(APIView):
                 payment.verified_at = timezone.now()
                 payment.save(update_fields=['status', 'verified_by', 'verified_at'])
 
-                from onboarding.services import AdmissionService
+                from onboarding.utils import AdmissionService
                 level1_note = note or 'Level 1 payment approval completed by Accountant via Payment Tab.'
                 if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending'):
                     AdmissionService.update_status(
@@ -700,7 +700,7 @@ class PaymentVerifyView(APIView):
                 payment.save(update_fields=['status', 'verified_by', 'verified_at'])
 
                 if admission:
-                    from onboarding.services import AdmissionService
+                    from onboarding.utils import AdmissionService
                     final_note = note or 'Level 2 final payment approval completed by Super Admin via Payment Tab.'
                     if admission.status != 'enrolled':
                         AdmissionService.update_status(
@@ -775,7 +775,7 @@ class PaymentVerifyView(APIView):
             payment.save(update_fields=['status', 'note', 'verified_by', 'verified_at'])
 
             if admission:
-                from onboarding.services import AdmissionService
+                from onboarding.utils import AdmissionService
                 AdmissionService.update_status(
                     admission=admission,
                     new_status='rejected',
