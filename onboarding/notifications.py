@@ -393,6 +393,11 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             note=reject_note,
             user=approver,
         )
+        from fees.models import Payment
+        Payment.objects.filter(admission=admission).exclude(status__in=['verified', 'refunded']).update(
+            status='rejected',
+            note=reject_note,
+        )
         admission.add_payment_history_entry('payment_rejected', {
             'payment_choice': admission.payment_choice,
             'amount': float(admission.payment_amount or admission.total_fees or 0),
@@ -450,6 +455,28 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     'note': level1_note,
                 })
 
+                # Synchronize Payment status to level_1_approved
+                from fees.models import Payment
+                payment = Payment.objects.filter(admission=admission).first()
+                if payment:
+                    payment.status = 'level_1_approved'
+                    payment.verified_by = approver
+                    payment.note = level1_note
+                    payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
+                else:
+                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                    Payment.objects.create(
+                        admission=admission,
+                        amount=admission.payment_amount or admission.total_fees or 0,
+                        payment_mode=mapped_mode,
+                        transaction_ref=admission.transaction_id or '',
+                        payment_proof=admission.payment_screenshot,
+                        status='level_1_approved',
+                        verified_by=approver,
+                        payment_date=timezone.now().date(),
+                        note=level1_note,
+                    )
+
                 send_whatsapp_text(
                     to=sender_wa_id,
                     body=(
@@ -500,6 +527,43 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     'date': timezone.now().date().isoformat(),
                     'note': super_note,
                 })
+
+                # Synchronize Payment status to verified and link student
+                from fees.models import Payment
+                from fees.signals import send_payment_receipt
+                payment = Payment.objects.filter(admission=admission).first()
+                if payment:
+                    payment.status = 'verified'
+                    if student_user and 'student' in locals() and student:
+                        payment.student = student
+                    payment.verified_by = approver
+                    payment.verified_at = timezone.now()
+                    payment.note = super_note
+                    payment.save(update_fields=['status', 'student', 'verified_by', 'verified_at', 'note', 'updated_at'])
+                    try:
+                        send_payment_receipt(payment)
+                    except Exception as exc:
+                        logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
+                else:
+                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                    payment = Payment.objects.create(
+                        admission=admission,
+                        student=student if ('student' in locals() and student) else None,
+                        amount=admission.payment_amount or admission.total_fees or 0,
+                        payment_mode=mapped_mode,
+                        transaction_ref=admission.transaction_id or '',
+                        payment_proof=admission.payment_screenshot,
+                        status='verified',
+                        recorded_by=approver,
+                        verified_by=approver,
+                        verified_at=timezone.now(),
+                        payment_date=timezone.now().date(),
+                        note=super_note,
+                    )
+                    try:
+                        send_payment_receipt(payment)
+                    except Exception as exc:
+                        logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
 
                 send_whatsapp_text(
                     to=sender_wa_id,
@@ -555,6 +619,43 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 'date': timezone.now().date().isoformat(),
                 'note': final_note,
             })
+
+            # Synchronize Payment status to verified and link student
+            from fees.models import Payment
+            from fees.signals import send_payment_receipt
+            payment = Payment.objects.filter(admission=admission).first()
+            if payment:
+                payment.status = 'verified'
+                if student_user and 'student' in locals() and student:
+                    payment.student = student
+                payment.verified_by = approver
+                payment.verified_at = timezone.now()
+                payment.note = final_note
+                payment.save(update_fields=['status', 'student', 'verified_by', 'verified_at', 'note', 'updated_at'])
+                try:
+                    send_payment_receipt(payment)
+                except Exception as exc:
+                    logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
+            else:
+                mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                payment = Payment.objects.create(
+                    admission=admission,
+                    student=student if ('student' in locals() and student) else None,
+                    amount=admission.payment_amount or admission.total_fees or 0,
+                    payment_mode=mapped_mode,
+                    transaction_ref=admission.transaction_id or '',
+                    payment_proof=admission.payment_screenshot,
+                    status='verified',
+                    recorded_by=approver,
+                    verified_by=approver,
+                    verified_at=timezone.now(),
+                    payment_date=timezone.now().date(),
+                    note=final_note,
+                )
+                try:
+                    send_payment_receipt(payment)
+                except Exception as exc:
+                    logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
 
             send_whatsapp_text(
                 to=sender_wa_id,

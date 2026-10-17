@@ -383,53 +383,133 @@ class InstallmentPlanApproveSerializer(serializers.Serializer):
 class PaymentListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     student_name = serializers.SerializerMethodField()
-
+    student_email = serializers.SerializerMethodField()
+    student_phone = serializers.SerializerMethodField()
+    admission_id = serializers.SerializerMethodField()
     course_name = serializers.SerializerMethodField()
     batch_name = serializers.SerializerMethodField()
     payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
     fee_structure_name = serializers.SerializerMethodField()
 
     def get_student_name(self, obj):
-        return obj.student.full_name if obj.student else ''
+        if obj.student:
+            return obj.student.full_name
+        if obj.admission:
+            return f"{obj.admission.first_name} {obj.admission.surname}".strip()
+        return ''
+
+    def get_student_email(self, obj):
+        if obj.student and getattr(obj.student, 'email', None):
+            return obj.student.email
+        if obj.admission:
+            return obj.admission.email or ''
+        return ''
+
+    def get_student_phone(self, obj):
+        if obj.student and getattr(obj.student, 'phone_student', None):
+            return obj.student.phone_student
+        if obj.admission:
+            return obj.admission.phone_student or ''
+        return ''
+
+    def get_admission_id(self, obj):
+        if obj.admission_id:
+            return obj.admission_id
+        if obj.student and getattr(obj.student, 'admission_id', None):
+            return obj.student.admission_id
+        return None
 
     def get_course_name(self, obj):
         if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
             fs_course = obj.student_fee.fee_structure.course
-            return fs_course.name if fs_course else None
+            if fs_course and fs_course.name:
+                return fs_course.name
+        if obj.admission and obj.admission.course:
+            return obj.admission.get_course_display() if hasattr(obj.admission, 'get_course_display') else str(obj.admission.course)
         return None
 
     def get_batch_name(self, obj):
         if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
             fs_batch = obj.student_fee.fee_structure.batch
-            return fs_batch.name if fs_batch else None
+            if fs_batch and fs_batch.name:
+                return fs_batch.name
+        if obj.admission and obj.admission.batch:
+            return getattr(obj.admission.batch, 'name', None) or str(obj.admission.batch)
         return None
 
     def get_fee_structure_name(self, obj):
         if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
             return obj.student_fee.fee_structure.name
+        if obj.admission and obj.admission.fee_structure:
+            return obj.admission.fee_structure.name
         return None
 
     class Meta:
         model = Payment
-        fields = ['id', 'student', 'student_name', 'student_fee',
+        fields = ['id', 'student', 'student_name', 'student_email', 'student_phone',
+                  'admission', 'admission_id', 'student_fee',
                   'installment_item', 'amount', 'payment_mode',
                   'transaction_ref', 'payment_proof', 'payment_document',
                   'status', 'status_display', 'receipt_number',
-                  'payment_date', 'created_at','payment_mode_display',
-                  'course_name','batch_name', 'fee_structure_name']
-                 
+                  'payment_date', 'created_at', 'payment_mode_display',
+                  'course_name', 'batch_name', 'fee_structure_name']
 
 
 class PaymentDetailSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
-    student_email = serializers.CharField(source='student.email', read_only=True)
+    student_email = serializers.SerializerMethodField()
+    student_phone = serializers.SerializerMethodField()
+    course_name = serializers.SerializerMethodField()
+    batch_name = serializers.SerializerMethodField()
+    fee_structure_name = serializers.SerializerMethodField()
     refunds = serializers.SerializerMethodField()
-
-
     payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
 
     def get_student_name(self, obj):
-        return obj.student.full_name if obj.student else ''
+        if obj.student:
+            return obj.student.full_name
+        if obj.admission:
+            return f"{obj.admission.first_name} {obj.admission.surname}".strip()
+        return ''
+
+    def get_student_email(self, obj):
+        if obj.student and getattr(obj.student, 'email', None):
+            return obj.student.email
+        if obj.admission:
+            return obj.admission.email or ''
+        return ''
+
+    def get_student_phone(self, obj):
+        if obj.student and getattr(obj.student, 'phone_student', None):
+            return obj.student.phone_student
+        if obj.admission:
+            return obj.admission.phone_student or ''
+        return ''
+
+    def get_course_name(self, obj):
+        if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
+            fs_course = obj.student_fee.fee_structure.course
+            if fs_course and fs_course.name:
+                return fs_course.name
+        if obj.admission and obj.admission.course:
+            return obj.admission.get_course_display() if hasattr(obj.admission, 'get_course_display') else str(obj.admission.course)
+        return None
+
+    def get_batch_name(self, obj):
+        if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
+            fs_batch = obj.student_fee.fee_structure.batch
+            if fs_batch and fs_batch.name:
+                return fs_batch.name
+        if obj.admission and obj.admission.batch:
+            return getattr(obj.admission.batch, 'name', None) or str(obj.admission.batch)
+        return None
+
+    def get_fee_structure_name(self, obj):
+        if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
+            return obj.student_fee.fee_structure.name
+        if obj.admission and obj.admission.fee_structure:
+            return obj.admission.fee_structure.name
+        return None
 
     class Meta:
         model = Payment
@@ -441,9 +521,22 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
 
 
 class PaymentCreateSerializer(serializers.ModelSerializer):
+    student = serializers.PrimaryKeyRelatedField(
+        queryset=Payment._meta.get_field('student').related_model.objects.all(),
+        required=False, allow_null=True,
+    )
+    student_fee = serializers.PrimaryKeyRelatedField(
+        queryset=Payment._meta.get_field('student_fee').related_model.objects.all(),
+        required=False, allow_null=True,
+    )
+    admission = serializers.PrimaryKeyRelatedField(
+        queryset=Payment._meta.get_field('admission').related_model.objects.all(),
+        required=False, allow_null=True,
+    )
+
     class Meta:
         model = Payment
-        fields = ['student', 'student_fee', 'installment_item',
+        fields = ['student', 'admission', 'student_fee', 'installment_item',
                   'amount', 'payment_mode', 'transaction_ref',
                   'payment_proof', 'payment_document', 'payment_date', 'note']
 

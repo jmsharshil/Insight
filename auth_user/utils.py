@@ -180,7 +180,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="login_cred",
+            template_name="login_cred_",
             language_code="en",
             components=[
                 {
@@ -248,7 +248,7 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=parent_user.phone,
-            template_name="login_cred",
+            template_name="login_cred_",
             language_code="en",
             components=[
                 {

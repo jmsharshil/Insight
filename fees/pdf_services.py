@@ -240,10 +240,12 @@ def generate_payment_receipt_pdf(payment):
         
         # Determine payment type (token vs full vs installment)
         payment_type = 'installment'
-        try:
-            admission = getattr(payment.student, 'admission', None)
-        except Exception:
-            admission = None
+        admission = getattr(payment, 'admission', None)
+        if not admission and payment.student:
+            try:
+                admission = getattr(payment.student, 'admission', None)
+            except Exception:
+                admission = None
 
         try:
             student_fee_total = payment.student_fee.total_amount if payment.student_fee else None
@@ -262,6 +264,8 @@ def generate_payment_receipt_pdf(payment):
                     payment_type = 'full'
             except TypeError:
                 pass  # leave as 'installment' if comparison fails
+        elif admission and getattr(admission, 'payment_type', None):
+            payment_type = admission.payment_type
 
         # Safe date fallback
         from django.utils import timezone as tz
@@ -275,13 +279,18 @@ def generate_payment_receipt_pdf(payment):
 
         # Safe batch name
         try:
-            batch_name = (
-                payment.student_fee.fee_structure.batch.name
-                if payment.student_fee
+            if (
+                payment.student_fee
                 and getattr(payment.student_fee, 'fee_structure', None)
                 and getattr(payment.student_fee.fee_structure, 'batch', None)
-                else 'N/A'
-            )
+            ):
+                batch_name = payment.student_fee.fee_structure.batch.name
+            elif admission and getattr(admission, 'batch', None):
+                batch_name = admission.batch.name
+            elif admission and getattr(admission, 'course', None):
+                batch_name = str(admission.course)
+            else:
+                batch_name = 'N/A'
         except Exception:
             batch_name = 'N/A'
 
@@ -322,7 +331,7 @@ def generate_payment_receipt_pdf(payment):
         context = {
             'receipt_no': payment.receipt_number or f"REC-{payment.id}",
             'receipt_date': receipt_date_str,
-            'student_name': getattr(payment.student, 'full_name', 'N/A'),
+            'student_name': getattr(payment.student, 'full_name', None) or (f"{payment.admission.first_name} {payment.admission.surname}".strip() if getattr(payment, 'admission', None) else 'N/A'),
             'amount': f"\u20b9{payment.amount:,.2f}",
             'amount_words': num2words(payment.amount),
             'batch_name': batch_name,

@@ -269,6 +269,14 @@ class Admission(models.Model):
     @property
     def is_paid(self):
         """Returns True if user has paid fee (via Razorpay or verified payment in Student Fees)."""
+        try:
+            from fees.models import Payment
+            if Payment.objects.filter(admission=self, status='verified').exists():
+                return True
+            if Payment.objects.filter(admission=self).exists():
+                return False
+        except Exception:
+            pass
         if bool(self.razorpay_payment_id):
             return True
         if hasattr(self, 'student_profile') and self.student_profile:
@@ -320,17 +328,17 @@ class Admission(models.Model):
         from onboarding.views import _get_module_fee
         total_fee = _get_module_fee(self.fee_structure, self.group_module)
 
-        if hasattr(self, 'student_profile') and self.student_profile:
-            try:
-                from fees.models import Payment
-                from django.db.models import Sum
-                total_verified = Payment.objects.filter(
-                    student=self.student_profile, status='verified'
-                ).aggregate(total=Sum('amount'))['total']
-                if total_verified is not None:
-                    return max(Decimal('0'), total_fee - Decimal(str(total_verified)))
-            except Exception:
-                pass
+        try:
+            from fees.models import Payment
+            from django.db.models import Sum, Q
+            q_filter = Q(admission=self, status='verified')
+            if hasattr(self, 'student_profile') and self.student_profile:
+                q_filter |= Q(student=self.student_profile, status='verified')
+            total_verified = Payment.objects.filter(q_filter).aggregate(total=Sum('amount'))['total']
+            if total_verified is not None:
+                return max(Decimal('0'), total_fee - Decimal(str(total_verified)))
+        except Exception:
+            pass
 
         if self.payment_type == 'token':
             token_paid = Decimal(str(self.payment_amount or self.fee_structure.token_amount or 0))

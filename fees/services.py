@@ -98,6 +98,27 @@ def create_student_fee(student, acting_user=None):
         is_paid=False,
     )
 
+    # Link existing Payment if admission already has a payment record
+    existing_payment = Payment.objects.filter(admission=admission).first()
+    if existing_payment:
+        existing_payment.student = student
+        existing_payment.student_fee = student_fee
+        if not existing_payment.installment_item:
+            existing_payment.installment_item = item
+        existing_payment.save(update_fields=['student', 'student_fee', 'installment_item', 'updated_at'])
+
+        if existing_payment.status == 'verified':
+            if plan.status == 'pending_approval':
+                plan.status = 'approved'
+                plan.approved_by = acting_user
+                plan.approved_at = timezone.now()
+                plan.save(update_fields=['status', 'approved_by', 'approved_at'])
+            try:
+                send_payment_receipt(existing_payment)
+            except Exception as e:
+                logger.error(f"Receipt dispatch error: {e}")
+        return student_fee
+
     # Create Payment if admission has payment info or offline choice
     if payment_amount <= Decimal('0'):
         if getattr(admission, 'payment_type', None) == 'token' and getattr(admission, 'fee_structure', None):
@@ -135,6 +156,7 @@ def create_student_fee(student, acting_user=None):
             # Offline payments (cash/cheque) that haven't completed 2-level admission approval must arrive pending approval
             payment = Payment.objects.create(
                 student=student,
+                admission=admission,
                 student_fee=student_fee,
                 installment_item=item,
                 amount=payment_amount or student_fee.total_amount,
@@ -190,6 +212,7 @@ def create_student_fee(student, acting_user=None):
             # Verified payment (either Razorpay paid or 2-level approved at admission)
             payment = Payment.objects.create(
                 student=student,
+                admission=admission,
                 student_fee=student_fee,
                 installment_item=item,
                 amount=payment_amount or student_fee.total_amount,
@@ -298,30 +321,43 @@ def send_payment_receipt(payment):
 
         # --- Build recipient list first so we can always send at least a text email ---
         recipients = set()
-        parent_email = getattr(payment.student, 'email_parent', None)
-        if parent_email:
-            recipients.add(parent_email)
+        if payment.student:
+            parent_email = getattr(payment.student, 'email_parent', None)
+            if parent_email:
+                recipients.add(parent_email)
             
-        student_email = getattr(payment.student, 'email', None)
-        if student_email:
-            recipients.add(student_email)
+            student_email = getattr(payment.student, 'email', None)
+            if student_email:
+                recipients.add(student_email)
             
+            if not recipients:
+                recipients = set(get_recipient_emails(payment.student))
+        elif getattr(payment, 'admission', None):
+            if getattr(payment.admission, 'email', None):
+                recipients.add(payment.admission.email)
+            if getattr(payment.admission, 'email_parent', None):
+                recipients.add(payment.admission.email_parent)
+
         recipients = list(recipients)
-        if not recipients:
-            recipients = get_recipient_emails(payment.student)
         if not recipients:
             logger.warning(
                 f"No email recipients found for payment {payment.id} "
-                f"(student: {getattr(payment.student, 'id', 'N/A')}). "
-                "Ensure student.email or student.user.email is set."
+                f"(student: {getattr(payment.student, 'id', 'N/A')}, admission: {getattr(payment.admission, 'id', 'N/A')}). "
+                "Ensure student.email, student.user.email, or admission.email is set."
             )
             return
 
-        student_name = (
-            getattr(payment.student, 'first_name', '')
-            or getattr(payment.student, 'name', '')
-            or getattr(payment.student, 'full_name', 'Student')
-        )
+        student_name = ''
+        if payment.student:
+            student_name = (
+                getattr(payment.student, 'first_name', '')
+                or getattr(payment.student, 'name', '')
+                or getattr(payment.student, 'full_name', '')
+            )
+        elif getattr(payment, 'admission', None):
+            student_name = f"{payment.admission.first_name} {payment.admission.surname}".strip()
+        if not student_name:
+            student_name = 'Student'
         subject = f"Payment Receipt - {payment.receipt_number or payment.id}"
         text_body = (
             f"Dear Parent / Student ({student_name}),\n\n"

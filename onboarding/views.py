@@ -312,6 +312,27 @@ def _setup_payment_bank_and_notify(admission):
                 'status': 'payment_pending',
                 'date': timezone.now().date().isoformat(),
             })
+
+            # If payment screenshot or transaction ID was provided upfront, record pending Payment
+            if admission.payment_screenshot or admission.transaction_id:
+                try:
+                    from fees.models import Payment
+                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                    Payment.objects.get_or_create(
+                        admission=admission,
+                        defaults={
+                            'amount': amount_to_pay,
+                            'payment_mode': mapped_mode,
+                            'transaction_ref': admission.transaction_id or '',
+                            'payment_proof': admission.payment_screenshot,
+                            'status': 'approval_pending',
+                            'payment_date': timezone.now().date(),
+                            'note': f"Offline payment ({mapped_mode}) submitted for admission #{admission.id}.",
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating Payment in _setup_payment_bank_and_notify: {e}")
+
             print(f"Skipping Razorpay link generation for admission {admission.id} because payment choice is '{admission.payment_choice}'.")
         else:
             print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
@@ -832,6 +853,28 @@ class AdmissionApproveView(APIView):
                     'note': level1_note,
                 })
 
+                # Synchronize linked Payment record to level_1_approved
+                from fees.models import Payment
+                payment = Payment.objects.filter(admission=admission).first()
+                if payment:
+                    payment.status = 'level_1_approved'
+                    payment.verified_by = acting_user
+                    payment.note = level1_note
+                    payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
+                else:
+                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                    Payment.objects.create(
+                        admission=admission,
+                        amount=admission.payment_amount or admission.total_fees or 0,
+                        payment_mode=mapped_mode,
+                        transaction_ref=admission.transaction_id or '',
+                        payment_proof=admission.payment_screenshot,
+                        status='level_1_approved',
+                        verified_by=acting_user,
+                        payment_date=timezone.now().date(),
+                        note=level1_note,
+                    )
+
                 # Notify super_admins that Level 1 is complete and Level 2 approval is required
                 try:
                     from core.utils import notify_users_by_role
@@ -883,6 +926,13 @@ class AdmissionApproveView(APIView):
                 'date': timezone.now().date().isoformat(),
                 'note': level1_note,
             })
+            from fees.models import Payment
+            payment = Payment.objects.filter(admission=admission).first()
+            if payment:
+                payment.status = 'level_1_approved'
+                payment.verified_by = acting_user
+                payment.note = level1_note
+                payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # LEVEL 2: Super Admin Final Approval
@@ -1046,6 +1096,42 @@ class AdmissionApproveView(APIView):
                 'note': final_note,
             })
 
+            # Synchronize linked Payment record to verified and link student
+            from fees.models import Payment
+            from fees.signals import send_payment_receipt
+            payment = Payment.objects.filter(admission=admission).first()
+            if payment:
+                payment.status = 'verified'
+                payment.student = student
+                payment.verified_by = acting_user
+                payment.verified_at = timezone.now()
+                payment.note = final_note
+                payment.save(update_fields=['status', 'student', 'verified_by', 'verified_at', 'note', 'updated_at'])
+                try:
+                    send_payment_receipt(payment)
+                except Exception as exc:
+                    logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
+            else:
+                mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                payment = Payment.objects.create(
+                    admission=admission,
+                    student=student,
+                    amount=admission.payment_amount or admission.total_fees or 0,
+                    payment_mode=mapped_mode,
+                    transaction_ref=admission.transaction_id or '',
+                    payment_proof=admission.payment_screenshot,
+                    status='verified',
+                    recorded_by=acting_user,
+                    verified_by=acting_user,
+                    verified_at=timezone.now(),
+                    payment_date=timezone.now().date(),
+                    note=final_note,
+                )
+                try:
+                    send_payment_receipt(payment)
+                except Exception as exc:
+                    logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
+
             return Response(
                 {
                     'success': True,
@@ -1157,6 +1243,47 @@ class AdmissionPaymentSubmitView(APIView):
             'status': 'approval_pending',
         })
 
+        # Create or update Payment record linked to admission for UI Payment Tab approval
+        from fees.models import Payment
+        mapped_mode = 'online'
+        if admission.payment_choice:
+            pc = str(admission.payment_choice).lower()
+            if pc in ('cheque', 'check'):
+                mapped_mode = 'cheque'
+            elif pc == 'cash':
+                mapped_mode = 'cash'
+            else:
+                mapped_mode = 'online'
+        
+        pay_amount = admission.payment_amount
+        if not pay_amount or pay_amount <= 0:
+            pay_amount = admission.total_fees or 0
+
+        payment = Payment.objects.filter(admission=admission).first()
+        if not payment:
+            payment = Payment.objects.create(
+                admission=admission,
+                amount=pay_amount,
+                payment_mode=mapped_mode,
+                transaction_ref=admission.transaction_id or '',
+                payment_proof=admission.payment_screenshot,
+                status='approval_pending',
+                payment_date=timezone.now().date(),
+                note=f"Payment proof submitted by student for admission #{admission.id}. Tx: {admission.transaction_id or 'N/A'}",
+            )
+            logger.info(f"Created pending Payment {payment.receipt_number} for admission {admission.id}")
+        else:
+            payment.amount = pay_amount
+            payment.payment_mode = mapped_mode
+            payment.transaction_ref = admission.transaction_id or payment.transaction_ref
+            if admission.payment_screenshot:
+                payment.payment_proof = admission.payment_screenshot
+            payment.status = 'approval_pending'
+            payment.payment_date = timezone.now().date()
+            payment.note = f"Payment proof updated by student for admission #{admission.id}. Tx: {admission.transaction_id or 'N/A'}"
+            payment.save()
+            logger.info(f"Updated pending Payment {payment.receipt_number} for admission {admission.id}")
+
         logger.info(
             f"Payment proof submitted for admission {admission.id} — "
             f"Transaction ID: {admission.transaction_id}"
@@ -1244,6 +1371,12 @@ class AdmissionRejectView(APIView):
             new_status = 'rejected',
             note       = reason,
             user       = request.user if request.user.is_authenticated else None,
+        )
+
+        from fees.models import Payment
+        Payment.objects.filter(admission=admission).exclude(status__in=['verified', 'refunded']).update(
+            status='rejected',
+            note=f"Admission rejected: {reason}",
         )
  
         return Response(
@@ -1340,7 +1473,7 @@ class RazorpayWebhookView(APIView):
                 if reference_id.startswith('ADM_'):
                     admission_id = reference_id.split('_')[1]
                     admission = Admission.objects.filter(id=admission_id).first()
-                    if admission and admission.status == 'payment_pending':
+                    if admission and admission.status != 'enrolled':
                         from django.utils import timezone
                         amount_paid = payment_link.get('amount_paid', 0) / 100
                         payment_details = payload.get('payload', {}).get('payment', {}).get('entity', {})
@@ -1351,26 +1484,102 @@ class RazorpayWebhookView(APIView):
                         admission.payment_note = f"Paid via Razorpay: {payment_link.get('id')}"
                         admission.payment_submitted_at = timezone.now()
                         admission.payment_amount = amount_paid
-                        admission.status = 'approval_pending'
                         admission.save(update_fields=[
                             'transaction_id', 'razorpay_payment_id', 'payment_note',
-                            'payment_submitted_at', 'status', 'payment_amount', 'updated_at'
+                            'payment_submitted_at', 'payment_amount', 'updated_at'
                         ])
                         
-                        AdmissionStatusHistory.objects.create(
+                        # Auto-enroll student directly — Razorpay payment is directly deposited into bank, no approval needed
+                        from .utils import AdmissionService
+                        enroll_note = f"Payment auto-verified directly via Razorpay (no approval needed). Transaction ID: {transaction_id}"
+                        AdmissionService.update_status(
                             admission=admission,
-                            status='approval_pending',
-                            changed_by=None,
-                            note=f"Payment received via Razorpay webhook. Transaction ID: {transaction_id}",
+                            new_status='enrolled',
+                            note=enroll_note,
+                            user=None,
                         )
-                        admission.add_payment_history_entry('payment_received', {
+
+                        # Create Student profile
+                        from auth_user.models import User
+                        student_user = User.objects.filter(
+                            email__iexact=admission.email, role='student'
+                        ).first()
+
+                        student = None
+                        if student_user:
+                            try:
+                                from students.utils import StudentService
+                                student = StudentService.create_from_admission(
+                                    admission=admission,
+                                    user=student_user,
+                                    acting_user=None,
+                                )
+                            except Exception as exc:
+                                logger.error(f"Failed to auto-create student profile for admission {admission.id}: {exc}")
+
+                        # Create or update verified Payment record linked to admission and student
+                        from fees.models import Payment
+                        from fees.signals import send_payment_receipt
+
+                        payment = Payment.objects.filter(admission=admission).first()
+                        if not payment:
+                            payment = Payment.objects.create(
+                                admission=admission,
+                                student=student,
+                                amount=amount_paid,
+                                payment_mode='online',
+                                transaction_ref=transaction_id,
+                                status='verified',
+                                verified_at=timezone.now(),
+                                payment_date=timezone.now().date(),
+                                note=f"Auto-verified via Razorpay: {payment_link.get('id')}",
+                            )
+                        else:
+                            payment.amount = amount_paid
+                            if student:
+                                payment.student = student
+                            payment.payment_mode = 'online'
+                            payment.transaction_ref = transaction_id
+                            payment.status = 'verified'
+                            payment.verified_at = timezone.now()
+                            payment.payment_date = timezone.now().date()
+                            payment.note = f"Auto-verified via Razorpay: {payment_link.get('id')}"
+                            payment.save()
+
+                        # Dispatch official payment receipt
+                        try:
+                            send_payment_receipt(payment)
+                        except Exception as exc:
+                            logger.error(f"Failed to dispatch payment receipt for Razorpay payment {payment.id}: {exc}")
+
+                        admission.add_payment_history_entry('payment_approved', {
                             'payment_choice': 'online',
                             'amount': float(amount_paid),
                             'transaction_id': transaction_id,
                             'razorpay_payment_id': transaction_id,
-                            'status': 'paid',
+                            'status': 'verified',
+                            'level': 'auto',
+                            'approver_role': 'system_razorpay',
+                            'verified_by': 'Razorpay (Direct to Bank)',
+                            'verified_at': timezone.now().isoformat(),
+                            'date': timezone.now().date().isoformat(),
+                            'note': enroll_note,
                         })
-                        logger.info(f"Admission {admission.id} payment verified automatically via Razorpay webhook.")
+
+                        # Informational notification only (no manual approval required)
+                        try:
+                            from core.utils import notify_users_by_role
+                            notify_users_by_role(
+                                roles=['accountant', 'super_admin'],
+                                title='Admission Payment Received (Razorpay)',
+                                body=f"Online payment of ₹{amount_paid} received directly to bank for admission #{admission.id} ({admission.first_name} {admission.surname}). Student enrolled.",
+                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                                branch=admission.branch if getattr(admission, 'branch', None) else None,
+                            )
+                        except Exception as exc:
+                            logger.error(f"Failed to dispatch notification for admission {admission.id}: {exc}")
+
+                        logger.info(f"Admission {admission.id} auto-verified and enrolled successfully via Razorpay webhook.")
             
             return Response({'success': True})
         except Exception as e:

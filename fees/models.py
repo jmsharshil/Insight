@@ -14,6 +14,7 @@ PAYMENT_MODE_CHOICES = [
 
 PAYMENT_STATUS_CHOICES = [
     ('approval_pending', 'Approval Pending'),
+    ('level_1_approved', 'Level 1 Approved'),
     ('verified', 'Verified'),
     ('rejected', 'Rejected'),
 ]
@@ -386,10 +387,16 @@ class Payment(models.Model):
     student           = models.ForeignKey(
         'students.Student', on_delete=models.CASCADE,
         related_name='payments',
+        null=True, blank=True,
+    )
+    admission         = models.ForeignKey(
+        'onboarding.Admission', on_delete=models.CASCADE,
+        null=True, blank=True, related_name='payments',
     )
     student_fee       = models.ForeignKey(
         StudentFee, on_delete=models.CASCADE,
         related_name='payments',
+        null=True, blank=True,
     )
     installment_item  = models.ForeignKey(
         InstallmentItem, on_delete=models.SET_NULL,
@@ -429,6 +436,7 @@ class Payment(models.Model):
         ordering  = ['-created_at']
         indexes   = [
             models.Index(fields=['student', 'status']),
+            models.Index(fields=['admission', 'status']),
             models.Index(fields=['payment_date']),
             models.Index(fields=['receipt_number']),
             models.Index(fields=['status', 'payment_date']),
@@ -436,7 +444,8 @@ class Payment(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.receipt_number} — {self.student.full_name} — ₹{self.amount}"
+        name = self.student.full_name if self.student else (f"{self.admission.first_name} {self.admission.surname}".strip() if self.admission else "Applicant")
+        return f"{self.receipt_number} — {name} — ₹{self.amount}"
 
     def save(self, *args, **kwargs):
         is_new = self._state.adding

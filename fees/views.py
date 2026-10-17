@@ -432,17 +432,23 @@ class InstallmentPlanApproveView(APIView):
 
 class PaymentListView(APIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['student', 'status', 'payment_mode']
-    search_fields = ['student__first_name', 'student__surname', 'transaction_ref', 'receipt_number']
+    filterset_fields = ['student', 'admission', 'status', 'payment_mode']
+    search_fields = ['student__first_name', 'student__surname', 'admission__first_name', 'admission__surname', 'transaction_ref', 'receipt_number']
     ordering_fields = '__all__'
 
     def get(self, request):
-        # Optimized: select_related for foreign keys
-        queryset = Payment.objects.select_related('student', 'student_fee').prefetch_related('refunds').all()
+        queryset = Payment.objects.select_related(
+            'student', 'student_fee', 'admission', 'admission__branch', 'admission__fee_structure'
+        ).prefetch_related('refunds').all()
+
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(student__branch__organization=request.user.organization)
+            queryset = queryset.filter(
+                Q(student__branch__organization=request.user.organization) |
+                Q(admission__branch__organization=request.user.organization)
+            )
 
         student_id = request.GET.get('student_id')
+        admission_id = request.GET.get('admission_id') or request.GET.get('admission')
         payment_status = request.GET.get('status')
         payment_mode = request.GET.get('payment_mode')
         date_from = request.GET.get('date_from')
@@ -450,6 +456,8 @@ class PaymentListView(APIView):
 
         if student_id:
             queryset = queryset.filter(student_id=student_id)
+        if admission_id:
+            queryset = queryset.filter(admission_id=admission_id)
         if payment_status:
             queryset = queryset.filter(status=payment_status)
         if payment_mode:
@@ -523,9 +531,12 @@ class PaymentDetailView(APIView):
 
     def _get(self, request, pk):
         try:
-            queryset = Payment.objects.select_related('student', 'student_fee').all()
+            queryset = Payment.objects.select_related('student', 'student_fee', 'admission').all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(student__branch__organization=request.user.organization)
+                queryset = queryset.filter(
+                    Q(student__branch__organization=request.user.organization) |
+                    Q(admission__branch__organization=request.user.organization)
+                )
             return queryset.get(pk=pk)
         except Payment.DoesNotExist:
             return None
@@ -553,23 +564,38 @@ class PaymentVerifyView(APIView):
 
         try:
             queryset = Payment.objects.select_related(
-                'installment_item__plan', 'student_fee', 'student'
+                'installment_item__plan', 'student_fee', 'student', 'admission', 'admission__branch'
             ).all()
             if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(student__branch__organization=request.user.organization)
+                queryset = queryset.filter(
+                    Q(student__branch__organization=request.user.organization) |
+                    Q(admission__branch__organization=request.user.organization)
+                )
             payment = queryset.get(pk=pk)
         except Payment.DoesNotExist:
             return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if payment.status != 'approval_pending':
+        if payment.status not in ('approval_pending', 'level_1_approved'):
             return Response(
                 {'success': False, 'message': f'Payment is already {payment.status}.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        admission = payment.admission or (
+            payment.student.admission if getattr(payment, 'student', None) and hasattr(payment.student, 'admission') else None
+        )
+        is_level1_role = (role == 'accountant' and not is_superuser)
+
+        if admission and is_level1_role and payment.status == 'level_1_approved':
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Level 1 approval is already completed by Accountant. Pending Level 2 (final) approval by Super Admin.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Prevent approving/verifying payments linked to pending_approval installment plans.
-        # This enforces the conditional approval workflow from InstallmentPlanCreateView
-        # (status based on course_type and # of items; uses approved_by/approved_at).
         if payment.installment_item and payment.installment_item.plan.status == 'pending_approval':
             plan = payment.installment_item.plan
             return Response(
@@ -586,81 +612,183 @@ class PaymentVerifyView(APIView):
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         new_status = serializer.validated_data['status']
-        payment.status = new_status
-        payment.verified_by = request.user if request.user.is_authenticated else None
-        payment.verified_at = timezone.now()
-        if new_status == 'rejected':
-            payment.note = serializer.validated_data.get('note', '')
-        payment.save()
+        note = serializer.validated_data.get('note', '')
 
-        # Recalculate student fee status
-        update_student_fee_status(payment.student_fee_id)
-
-        # If linked to installment item, check if paid
-        if payment.installment_item_id:
+        proof_url = None
+        if payment.payment_proof:
             try:
-                mark_installment_paid(payment.installment_item_id)
-            except Exception as e:
-                logger.error(f'Failed to mark installment paid: {e}')
+                proof_url = request.build_absolute_uri(payment.payment_proof.url) if request else payment.payment_proof.url
+            except Exception:
+                proof_url = str(payment.payment_proof)
 
-        # Send emails on verification/rejection using centralized sender (with HTML fallback)
+        verifier_name = (
+            getattr(request.user, 'name', None) or getattr(request.user, 'email', None) or getattr(request.user, 'username', None)
+            if (request.user and request.user.is_authenticated)
+            else 'Admin/Accountant'
+        )
+
         if new_status == 'verified':
-            send_payment_receipt(payment)
+            if admission and is_level1_role:
+                # ── LEVEL 1 APPROVAL (Accountant) ─────────────────────────────
+                payment.status = 'level_1_approved'
+                payment.verified_by = request.user if request.user.is_authenticated else None
+                payment.verified_at = timezone.now()
+                payment.save(update_fields=['status', 'verified_by', 'verified_at'])
 
-        # Sync with Admission and its payment_history if student was enrolled from an admission
-        admission = getattr(payment.student, 'admission', None)
-        if admission:
-            proof_url = None
-            if payment.payment_proof:
-                try:
-                    proof_url = request.build_absolute_uri(payment.payment_proof.url) if request else payment.payment_proof.url
-                except Exception:
-                    proof_url = str(payment.payment_proof)
+                from onboarding.services import AdmissionService
+                level1_note = note or 'Level 1 payment approval completed by Accountant via Payment Tab.'
+                if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending'):
+                    AdmissionService.update_status(
+                        admission=admission,
+                        new_status='approved',
+                        note=level1_note,
+                        user=request.user,
+                    )
 
-            verifier_name = (
-                getattr(request.user, 'name', None) or getattr(request.user, 'email', None) or getattr(request.user, 'username', None)
-                if (request.user and request.user.is_authenticated)
-                else 'Admin/Accountant'
-            )
-
-            if new_status == 'verified':
-                is_level1 = (role == 'accountant' and not is_superuser)
-                admission.add_payment_history_entry('payment_verified' if is_level1 else 'payment_approved', {
+                admission.add_payment_history_entry('payment_verified', {
                     'payment_choice': payment.payment_mode,
-                    'payment_type': admission.payment_type,
-                    'payment_type_display': admission.get_payment_type_display(),
+                    'payment_type': getattr(admission, 'payment_type', 'full'),
+                    'payment_type_display': admission.get_payment_type_display() if hasattr(admission, 'get_payment_type_display') else '',
                     'amount': float(payment.amount),
-                    'total_fees': float(admission.total_fees),
-                    'remaining_fees': float(admission.remaining_fees),
+                    'total_fees': float(getattr(admission, 'total_fees', 0) or 0),
+                    'remaining_fees': float(getattr(admission, 'remaining_fees', 0) or 0),
                     'transaction_id': payment.transaction_ref,
                     'receipt_number': payment.receipt_number,
-                    'status': 'level_1_approved' if is_level1 else 'verified',
-                    'level': 1 if is_level1 else 2,
-                    'approver_role': 'accountant' if is_level1 else 'super_admin',
+                    'status': 'level_1_approved',
+                    'level': 1,
+                    'approver_role': 'accountant',
                     'verified_by': verifier_name,
                     'verified_at': timezone.now().isoformat(),
                     'date': timezone.now().date().isoformat(),
                     'payment_screenshot': proof_url,
                     'payment_proof': proof_url,
-                    'note': f"Payment {'verified by Accountant (Level 1)' if is_level1 else 'approved (Level 2)'} in Student Fees (Receipt: {payment.receipt_number}).",
+                    'note': level1_note,
                 })
-                if is_level1:
-                    if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending'):
-                        admission.status = 'approved'
-                        admission.save(update_fields=['status', 'updated_at'])
-                else:
-                    if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending', 'approved'):
-                        admission.status = 'enrolled'
-                        admission.save(update_fields=['status', 'updated_at'])
 
-            elif new_status == 'rejected':
+                # Dispatch Level 2 WhatsApp notification to Super Admins
+                try:
+                    from onboarding.notifications import send_payment_verification_whatsapp
+                    send_payment_verification_whatsapp(admission, level=2)
+                except Exception as exc:
+                    logger.error(f"Failed to dispatch Level 2 WhatsApp: {exc}")
+
+                # Notify Super Admins via in-app/email
+                try:
+                    from core.utils import notify_users_by_role
+                    notify_users_by_role(
+                        roles=['super_admin'],
+                        title='Admission Payment Ready for Final Approval',
+                        body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified by Accountant and requires Super Admin final approval.",
+                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                        branch=admission.branch if getattr(admission, 'branch', None) else None,
+                        email_subject=f'Final Approval Required: Admission #{admission.id}',
+                    )
+                except Exception as exc:
+                    logger.error(f"Failed to notify super_admin: {exc}")
+
+                return Response({
+                    'success': True,
+                    'message': 'Level 1 payment approval completed by Accountant. Pending Level 2 (final) approval by Super Admin.',
+                    'data': PaymentDetailSerializer(payment).data,
+                }, status=status.HTTP_200_OK)
+
+            else:
+                # ── LEVEL 2 (FINAL) APPROVAL (Super Admin) ────────────────────
+                payment.status = 'verified'
+                payment.verified_by = request.user if request.user.is_authenticated else None
+                payment.verified_at = timezone.now()
+                payment.save(update_fields=['status', 'verified_by', 'verified_at'])
+
+                if admission:
+                    from onboarding.services import AdmissionService
+                    final_note = note or 'Level 2 final payment approval completed by Super Admin via Payment Tab.'
+                    if admission.status != 'enrolled':
+                        AdmissionService.update_status(
+                            admission=admission,
+                            new_status='enrolled',
+                            note=final_note,
+                            user=request.user,
+                        )
+
+                        from auth_user.models import User
+                        student_user = User.objects.filter(
+                            email__iexact=admission.email, role='student'
+                        ).first()
+
+                        if student_user and not payment.student:
+                            try:
+                                from students.utils import StudentService
+                                student = StudentService.create_from_admission(
+                                    admission=admission,
+                                    user=student_user,
+                                    acting_user=request.user,
+                                )
+                                payment.student = student
+                                payment.save(update_fields=['student'])
+                            except Exception as exc:
+                                logger.error(f"Failed to auto-create student from admission in PaymentVerifyView: {exc}")
+
+                    admission.add_payment_history_entry('payment_approved', {
+                        'payment_choice': payment.payment_mode,
+                        'payment_type': getattr(admission, 'payment_type', 'full'),
+                        'payment_type_display': admission.get_payment_type_display() if hasattr(admission, 'get_payment_type_display') else '',
+                        'amount': float(payment.amount),
+                        'total_fees': float(getattr(admission, 'total_fees', 0) or 0),
+                        'remaining_fees': float(getattr(admission, 'remaining_fees', 0) or 0),
+                        'transaction_id': payment.transaction_ref,
+                        'receipt_number': payment.receipt_number,
+                        'status': 'verified',
+                        'level': 2,
+                        'approver_role': 'super_admin',
+                        'verified_by': verifier_name,
+                        'verified_at': timezone.now().isoformat(),
+                        'date': timezone.now().date().isoformat(),
+                        'payment_screenshot': proof_url,
+                        'payment_proof': proof_url,
+                        'note': final_note,
+                    })
+
+                # Recalculate student fee status if student_fee exists
+                if payment.student_fee_id:
+                    update_student_fee_status(payment.student_fee_id)
+
+                # If linked to installment item, check if paid
+                if payment.installment_item_id:
+                    try:
+                        mark_installment_paid(payment.installment_item_id)
+                    except Exception as e:
+                        logger.error(f'Failed to mark installment paid: {e}')
+
+                send_payment_receipt(payment)
+
+                return Response({
+                    'success': True,
+                    'message': 'Payment verified and approved successfully.',
+                    'data': PaymentDetailSerializer(payment).data,
+                }, status=status.HTTP_200_OK)
+
+        elif new_status == 'rejected':
+            payment.status = 'rejected'
+            payment.note = note
+            payment.verified_by = request.user if request.user.is_authenticated else None
+            payment.verified_at = timezone.now()
+            payment.save(update_fields=['status', 'note', 'verified_by', 'verified_at'])
+
+            if admission:
+                from onboarding.services import AdmissionService
+                AdmissionService.update_status(
+                    admission=admission,
+                    new_status='rejected',
+                    note=note or 'Payment rejected via Payment Tab.',
+                    user=request.user,
+                )
                 admission.add_payment_history_entry('payment_rejected', {
                     'payment_choice': payment.payment_mode,
-                    'payment_type': admission.payment_type,
-                    'payment_type_display': admission.get_payment_type_display(),
+                    'payment_type': getattr(admission, 'payment_type', 'full'),
+                    'payment_type_display': admission.get_payment_type_display() if hasattr(admission, 'get_payment_type_display') else '',
                     'amount': float(payment.amount),
-                    'total_fees': float(admission.total_fees),
-                    'remaining_fees': float(admission.remaining_fees),
+                    'total_fees': float(getattr(admission, 'total_fees', 0) or 0),
+                    'remaining_fees': float(getattr(admission, 'remaining_fees', 0) or 0),
                     'transaction_id': payment.transaction_ref,
                     'receipt_number': payment.receipt_number,
                     'status': 'rejected',
@@ -671,24 +799,34 @@ class PaymentVerifyView(APIView):
                     'note': payment.note or 'Payment rejected in Student Fees.',
                 })
 
-        if new_status == 'rejected':
-            recipients = get_recipient_emails(payment.student)
+            recipients = []
+            if payment.student:
+                recipients = get_recipient_emails(payment.student)
+            elif payment.admission and getattr(payment.admission, 'email', None):
+                recipients = [payment.admission.email]
+
+            student_name = (
+                getattr(payment.student, 'first_name', None) or
+                (payment.admission.first_name if payment.admission else 'Student')
+            )
+            amount_str = f"{float(payment.amount):,.2f}"
+            rejection_reason = payment.note if getattr(payment, 'note', None) else 'No reason provided'
+
             if recipients:
                 from core.sender import send_email
                 subject = f"Payment Rejected - {payment.transaction_ref or payment.id}"
                 text_body = (
-                    f"Dear {getattr(payment.student, 'first_name', 'Student')},\n\n"
+                    f"Dear {student_name},\n\n"
                     f"Unfortunately, your payment of ₹{payment.amount} has been rejected.\n\n"
                 )
                 if getattr(payment, 'note', None):
                     text_body += f"Reason: {payment.note}\n\n"
                 text_body += "Please contact the administration for more details.\n\nInsight Institute of Professional Studies"
 
-                # Use dedicated template (text unchanged = used as alt/plaintext fallback)
                 template_context = {
-                    'student_name': getattr(payment.student, 'first_name', 'Student'),
+                    'student_name': student_name,
                     'amount': payment.amount,
-                    'reason': payment.note if getattr(payment, 'note', None) else '',
+                    'reason': rejection_reason,
                     'primary_color': '#ed7c31',
                     'org_name': 'Insight Institute of Professional Studies',
                 }
@@ -706,52 +844,60 @@ class PaymentVerifyView(APIView):
                     except Exception as e:
                         logger.error(f"Failed to send rejection email to {recipient}: {e}")
 
-                # WhatsApp: notify student + parent phones
-                try:
-                    from chat.notifications import send_whatsapp_with_fallback
-                    rejection_reason = payment.note if getattr(payment, 'note', None) else 'No reason provided'
-                    student_name = getattr(payment.student, 'first_name', 'Student')
-                    amount_str = f"{float(payment.amount):,.2f}"
-                    wa_fallback = (
-                        f"Dear {student_name},\n\n"
-                        f"Unfortunately your payment of \u20b9{amount_str} has been rejected.\n"
-                        f"Reason: {rejection_reason}\n\n"
-                        f"Please contact administration immediately for resolution."
-                    )
-                    wa_phones = set()
-                    try:
-                        admission = payment.student.admission
-                        if getattr(admission, 'phone_student', None):
-                            wa_phones.add(admission.phone_student)
-                        if getattr(admission, 'phone_father', None):
-                            wa_phones.add(admission.phone_father)
-                    except Exception:
-                        pass
+            # WhatsApp: notify student + parent phones
+            try:
+                from chat.notifications import send_whatsapp_with_fallback
+                wa_fallback = (
+                    f"Dear {student_name},\n\n"
+                    f"Unfortunately your payment of ₹{amount_str} has been rejected.\n"
+                    f"Reason: {rejection_reason}\n\n"
+                    f"Please contact administration immediately for resolution."
+                )
+                wa_phones = set()
+                if payment.admission:
+                    if getattr(payment.admission, 'phone_student', None):
+                        wa_phones.add(payment.admission.phone_student)
+                    if getattr(payment.admission, 'phone_father', None):
+                        wa_phones.add(payment.admission.phone_father)
+                if payment.student:
+                    if getattr(payment.student, 'phone_student', None):
+                        wa_phones.add(payment.student.phone_student)
+                    if getattr(payment.student, 'phone_father', None):
+                        wa_phones.add(payment.student.phone_father)
                     student_user = getattr(payment.student, 'user', None)
                     if student_user and getattr(student_user, 'phone', None):
                         wa_phones.add(student_user.phone)
 
-                    for phone in filter(None, wa_phones):
-                        try:
-                            send_whatsapp_with_fallback(
-                                to=phone,
-                                template_name="payment_rejected_",
-                                language_code="en",
-                                components=[{
-                                    "type": "body",
-                                    "parameters": [
-                                        {"type": "text", "text": student_name},
-                                        {"type": "text", "text": amount_str},
-                                        {"type": "text", "text": rejection_reason},
-                                    ]
-                                }],
-                                fallback_body=wa_fallback,
-                            )
-                            logger.info(f"[Payment Rejected] WhatsApp sent to {phone}")
-                        except Exception as wa_err:
-                            logger.error(f"[Payment Rejected] WhatsApp to {phone} failed: {wa_err}")
-                except Exception as wa_import_err:
-                    logger.error(f"[Payment Rejected] WhatsApp block failed: {wa_import_err}")
+                for phone in filter(None, wa_phones):
+                    try:
+                        send_whatsapp_with_fallback(
+                            to=phone,
+                            template_name="payment_rejected_",
+                            language_code="en",
+                            components=[{
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": student_name},
+                                    {"type": "text", "text": amount_str},
+                                    {"type": "text", "text": rejection_reason},
+                                ]
+                            }],
+                            fallback_body=wa_fallback,
+                        )
+                        logger.info(f"[Payment Rejected] WhatsApp sent to {phone}")
+                    except Exception as wa_err:
+                        logger.error(f"[Payment Rejected] WhatsApp to {phone} failed: {wa_err}")
+            except Exception as wa_import_err:
+                logger.error(f"[Payment Rejected] WhatsApp block failed: {wa_import_err}")
+
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Payment rejected successfully.',
+                    'data': PaymentDetailSerializer(payment).data,
+                },
+                status=status.HTTP_200_OK,
+            )
 
         return Response(
             {'success': True, 'message': f'Payment {new_status}.',

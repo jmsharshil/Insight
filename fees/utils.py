@@ -56,6 +56,8 @@ def update_student_fee_status(student_fee_id):
     Recalculates amount_paid and status for a StudentFee
     based on all verified payments and completed refunds.
     """
+    if not student_fee_id:
+        return None
     try:
         student_fee = StudentFee.objects.select_related('fee_structure').get(id=student_fee_id)
     except StudentFee.DoesNotExist:

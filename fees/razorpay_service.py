@@ -562,12 +562,12 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             admission = Admission.objects.filter(id=adm_id).first()
             if not admission:
                 return {"success": False, "error": f"Admission {adm_id} not found."}
-            if admission.status != 'payment_pending':
-                return {"success": True, "processed": "ADM", "note": "Already processed."}
+            if admission.status == 'enrolled':
+                return {"success": True, "processed": "ADM", "note": "Already enrolled."}
 
             token_note = getattr(admission, 'token_payment_terms_note', None)
             payment_note = f"Paid via Razorpay: {link_entity.get('id')}"
-            history_note = f"Payment auto-verified via Razorpay. Txn: {rp_payment_id}"
+            history_note = f"Payment auto-verified directly via Razorpay (no approval needed). Txn: {rp_payment_id}"
             if token_note:
                 payment_note += f". {token_note}"
                 history_note += f". {token_note}"
@@ -581,40 +581,103 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             admission.payment_submitted_at = timezone.now()
             admission.payment_amount       = amount_paid
             admission.razorpay_payment_id  = rp_payment_id
-            admission.status               = 'approval_pending'
             admission.save(update_fields=[
                 'transaction_id', 'payment_note', 'payment_submitted_at',
-                'payment_amount', 'razorpay_payment_id', 'status', 'updated_at', 'note',
+                'payment_amount', 'razorpay_payment_id', 'updated_at', 'note',
             ])
-            AdmissionStatusHistory.objects.create(
-                admission  = admission,
-                status     = 'approval_pending',
-                changed_by = None,
-                note       = history_note,
+
+            # Auto-enroll student directly — Razorpay payment is directly deposited into bank, no approval needed
+            from onboarding.utils import AdmissionService
+            AdmissionService.update_status(
+                admission=admission,
+                new_status='enrolled',
+                note=history_note,
+                user=None,
             )
-            admission.add_payment_history_entry('payment_received', {
+
+            # Auto-create Student profile
+            from auth_user.models import User as AuthUser
+            student_user = AuthUser.objects.filter(
+                email__iexact=admission.email, role='student'
+            ).first()
+
+            student = None
+            if student_user:
+                try:
+                    from students.utils import StudentService
+                    student = StudentService.create_from_admission(
+                        admission=admission,
+                        user=student_user,
+                        acting_user=None,
+                    )
+                except Exception as exc:
+                    logger.error(f"[Razorpay] StudentService.create_from_admission error for {adm_id}: {exc}")
+
+            # Create or update verified Payment record linked to admission and student
+            from .models import Payment
+            from .services import send_payment_receipt
+
+            payment = Payment.objects.filter(admission=admission).first()
+            if not payment:
+                payment = Payment.objects.create(
+                    admission=admission,
+                    student=student,
+                    amount=amount_paid,
+                    payment_mode='online',
+                    transaction_ref=rp_payment_id,
+                    status='verified',
+                    verified_at=timezone.now(),
+                    payment_date=timezone.now().date(),
+                    note=f"Auto-verified via Razorpay: {rp_payment_id}",
+                )
+            else:
+                payment.amount = amount_paid
+                if student:
+                    payment.student = student
+                payment.payment_mode = 'online'
+                payment.transaction_ref = rp_payment_id
+                payment.status = 'verified'
+                payment.verified_at = timezone.now()
+                payment.payment_date = timezone.now().date()
+                payment.note = f"Auto-verified via Razorpay: {rp_payment_id}"
+                payment.save()
+
+            # Record in payment_history
+            admission.add_payment_history_entry('payment_approved', {
                 'payment_choice': 'online',
                 'amount': float(amount_paid),
                 'transaction_id': rp_payment_id,
                 'razorpay_payment_id': rp_payment_id,
-                'status': 'paid',
+                'status': 'verified',
+                'level': 'auto',
+                'approver_role': 'system_razorpay',
+                'verified_by': 'Razorpay (Direct to Bank)',
+                'verified_at': timezone.now().isoformat(),
+                'date': timezone.now().date().isoformat(),
+                'note': history_note,
             })
-            logger.info(f"[Razorpay] Admission {adm_id} moved to approval_pending.")
 
-            # ── Auto-send payment confirmation (email + WhatsApp) ─────────
+            # Send official PDF payment receipt
+            try:
+                send_payment_receipt(payment)
+            except Exception as e:
+                logger.error(f"[Razorpay] Receipt dispatch failed: {e}")
+
+            # Auto-send payment confirmation
             try:
                 send_admission_payment_notification(admission, amount_paid, rp_payment_id)
             except Exception as notify_err:
                 logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
 
-            # ── Route Transfer ───────────────────────────────────────────────
+            # Route Transfer if configured
             try:
                 if admission.bank_account and admission.bank_account.razorpay_account_id:
                     transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
             except Exception as e:
                 logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {e}")
 
-            return {"success": True, "processed": "ADM"}
+            logger.info(f"[Razorpay] Admission {adm_id} auto-verified and enrolled successfully.")
+            return {"success": True, "processed": "ADM", "payment_id": str(payment.id)}
 
         return {"success": True, "processed": "unknown", "reference_id": reference_id}
 
