@@ -44,6 +44,23 @@ def _user_role(user):
     return get_user_role(user)
 
 
+def _get_required_shift_minutes(user, target_date=None):
+    """
+    Computes required shift duration in minutes for an employee on a given date.
+    Respects day-specific schedule (e.g. Saturday 4-hour half day) from get_working_hours_for_date,
+    falling back to user.working_hours or default 9-hour (540 min) shift.
+    """
+    from decimal import Decimal
+    if hasattr(user, 'get_working_hours_for_date') and target_date:
+        day_req_hours = user.get_working_hours_for_date(target_date)
+        if day_req_hours > 0:
+            return int(Decimal(str(day_req_hours)) * 60)
+    wh = getattr(user, 'working_hours', None)
+    if wh is not None and Decimal(str(wh)) > 0:
+        return int(Decimal(str(wh)) * 60)
+    return 9 * 60
+
+
 def _user_batch_ids(user):
     if hasattr(user, 'faculty_profile'):
         return list(user.faculty_profile.batch_assignments.values_list('batch_id', flat=True))
@@ -482,17 +499,17 @@ class QRScanView(APIView):
                 from attendance.utils import apply_half_day_rule
                 message += apply_half_day_rule(record, user, now)
 
-                # ── 9-hour shift violation for non-exempt roles ──
+                # ── Shift shortfall violation for non-exempt roles ──
                 if role not in NINE_HOUR_EXEMPT_ROLES and record.checked_in_at:
                     duration_minutes = int((now - record.checked_in_at).total_seconds() / 60)
-                    required_minutes = 9 * 60  # 540 minutes
+                    required_minutes = _get_required_shift_minutes(user, record.date or today)
                     shortfall = max(0, required_minutes - duration_minutes)
                     if shortfall > 0:
                         record.shortfall_minutes = shortfall
                         record.save(update_fields=['shortfall_minutes'])
                         logger.warning(
-                            f'9-hour shift violation: {user.name or user.email} '
-                            f'worked {duration_minutes}min, shortfall {shortfall}min'
+                            f'Shift shortfall violation: {user.name or user.email} '
+                            f'worked {duration_minutes}min, shortfall {shortfall}min (required {required_minutes}min)'
                         )
                         message += f' Warning: Shift shortfall of {shortfall} minutes detected.'
             
@@ -1717,17 +1734,17 @@ class EmployeeCheckInOutView(APIView):
             from attendance.utils import apply_half_day_rule
             message += apply_half_day_rule(record, user, now)
 
-            # ── 9-hour shift violation for non-exempt roles ──
+            # ── Shift shortfall violation for non-exempt roles ──
             if role not in NINE_HOUR_EXEMPT_ROLES and record.checked_in_at:
                 duration_minutes = int((now - record.checked_in_at).total_seconds() / 60)
-                required_minutes = 9 * 60  # 540 minutes
+                required_minutes = _get_required_shift_minutes(user, record.date or today)
                 shortfall = max(0, required_minutes - duration_minutes)
                 if shortfall > 0:
                     record.shortfall_minutes = shortfall
                     record.save(update_fields=['shortfall_minutes'])
                     logger.warning(
-                        f'9-hour shift violation: {user.name or user.email} '
-                        f'worked {duration_minutes}min, shortfall {shortfall}min'
+                        f'Shift shortfall violation: {user.name or user.email} '
+                        f'worked {duration_minutes}min, shortfall {shortfall}min (required {required_minutes}min)'
                     )
                     message += f' Warning: Shift shortfall of {shortfall} minutes detected.'
 

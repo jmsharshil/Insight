@@ -1045,8 +1045,17 @@ class SalesActivityPhotoView(APIView):
                     open_rec.check_out_method = 'selfie'
                     role = getattr(activity.user, 'role', '')
                     if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
+                        from decimal import Decimal
                         duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
-                        shortfall = max(0, 540 - duration_mins)
+                        req_mins = 540
+                        target_dt = getattr(open_rec, 'date', None) or checkout_time.date()
+                        if hasattr(activity.user, 'get_working_hours_for_date'):
+                            dwh = activity.user.get_working_hours_for_date(target_dt)
+                            if dwh > 0:
+                                req_mins = int(Decimal(str(dwh)) * 60)
+                        elif getattr(activity.user, 'working_hours', None) and activity.user.working_hours > 0:
+                            req_mins = int(Decimal(str(activity.user.working_hours)) * 60)
+                        shortfall = max(0, req_mins - duration_mins)
                         open_rec.shortfall_minutes = shortfall
                     open_rec.save()
                     attendance_info = {

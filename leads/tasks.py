@@ -427,8 +427,16 @@ def auto_mark_sales_attendance(target_date=None):
         exempt_roles = {'faculty', 'sweeper', 'maid', 'driver'}
         role = getattr(user, 'role', '')
         if role not in exempt_roles and checkin_time and checkout_time:
+            from decimal import Decimal
             duration_mins = int((checkout_time - checkin_time).total_seconds() / 60)
-            shortfall = max(0, 540 - duration_mins)
+            req_mins = 540
+            if hasattr(user, 'get_working_hours_for_date'):
+                dwh = user.get_working_hours_for_date(date)
+                if dwh > 0:
+                    req_mins = int(Decimal(str(dwh)) * 60)
+            elif getattr(user, 'working_hours', None) and user.working_hours > 0:
+                req_mins = int(Decimal(str(user.working_hours)) * 60)
+            shortfall = max(0, req_mins - duration_mins)
 
         attendance_status = 'present' if checkout_time else 'checkout_pending'
 
