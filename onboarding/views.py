@@ -185,6 +185,11 @@ def _setup_payment_bank_and_notify(admission):
     from fees.razorpay_service import create_payment_link
 
     if getattr(admission, 'bank_account', None):
+        try:
+            from .utils import sync_admission_payment
+            sync_admission_payment(admission)
+        except Exception as e:
+            logger.error(f"Error syncing payment for admission {admission.id}: {e}")
         return  # already assigned
 
     from decimal import Decimal
@@ -313,25 +318,12 @@ def _setup_payment_bank_and_notify(admission):
                 'date': timezone.now().date().isoformat(),
             })
 
-            # If payment screenshot or transaction ID was provided upfront, record pending Payment
-            if admission.payment_screenshot or admission.transaction_id:
-                try:
-                    from fees.models import Payment
-                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
-                    Payment.objects.get_or_create(
-                        admission=admission,
-                        defaults={
-                            'amount': amount_to_pay,
-                            'payment_mode': mapped_mode,
-                            'transaction_ref': admission.transaction_id or '',
-                            'payment_proof': admission.payment_screenshot,
-                            'status': 'approval_pending',
-                            'payment_date': timezone.now().date(),
-                            'note': f"Offline payment ({mapped_mode}) submitted for admission #{admission.id}.",
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Error creating Payment in _setup_payment_bank_and_notify: {e}")
+            # If payment screenshot or transaction ID or offline choice was provided upfront, record pending Payment
+            try:
+                from .utils import sync_admission_payment
+                sync_admission_payment(admission)
+            except Exception as e:
+                logger.error(f"Error creating Payment in _setup_payment_bank_and_notify: {e}")
 
             print(f"Skipping Razorpay link generation for admission {admission.id} because payment choice is '{admission.payment_choice}'.")
         else:
@@ -484,6 +476,11 @@ class AdmissionListView(APIView):
             _assign_fee_structure(admission)
             # Cleaned: rely on shared helper (removes ~40 lines of duplication)
             _setup_payment_bank_and_notify(admission)
+            try:
+                from .utils import sync_admission_payment
+                sync_admission_payment(admission, request=request)
+            except Exception as e:
+                logger.error(f"Error syncing admission payment in AdmissionListView.post: {e}")
 
         except Exception as e:
             logger.error(f"Admission update error: {e}")
@@ -621,6 +618,12 @@ class AdmissionDetailView(APIView):
         if is_student_form_submit and admission.status == 'form_pending':
             _setup_payment_bank_and_notify(admission)
 
+        try:
+            from .utils import sync_admission_payment
+            sync_admission_payment(admission, request=request)
+        except Exception as e:
+            logger.error(f"Error syncing admission payment in AdmissionDetailView._update: {e}")
+
         return Response(
             {'success': True, 'message': 'Admission updated successfully.',
              'data': AdmissionDetailSerializer(admission).data},
@@ -734,6 +737,11 @@ class AdmissionUpdateView(APIView):
             )
 
         serializer.save()
+        try:
+            from .utils import sync_admission_payment
+            sync_admission_payment(admission, request=request)
+        except Exception as e:
+            logger.error(f"Error syncing admission payment in AdmissionUpdateView.patch: {e}")
 
         return Response(
             {
@@ -1199,7 +1207,7 @@ class AdmissionPaymentSubmitView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if admission.status != 'payment_pending':
+        if admission.status not in ('payment_pending', 'form_pending', 'approval_pending'):
             return Response(
                 {
                     'success': False,
@@ -1228,86 +1236,8 @@ class AdmissionPaymentSubmitView(APIView):
             'payment_submitted_at', 'status', 'updated_at', 'payment_amount',
         ])
 
-        from .models import AdmissionStatusHistory
-        AdmissionStatusHistory.objects.create(
-            admission=admission,
-            status='approval_pending',
-            changed_by=None,
-            note=f"Payment proof submitted by student. Transaction ID: {admission.transaction_id}",
-        )
-
-        admission.add_payment_history_entry('payment_submitted', {
-            'payment_choice': admission.payment_choice or 'offline',
-            'amount': float(admission.payment_amount or 0),
-            'transaction_id': admission.transaction_id,
-            'status': 'approval_pending',
-        })
-
-        # Create or update Payment record linked to admission for UI Payment Tab approval
-        from fees.models import Payment
-        mapped_mode = 'online'
-        if admission.payment_choice:
-            pc = str(admission.payment_choice).lower()
-            if pc in ('cheque', 'check'):
-                mapped_mode = 'cheque'
-            elif pc == 'cash':
-                mapped_mode = 'cash'
-            else:
-                mapped_mode = 'online'
-        
-        pay_amount = admission.payment_amount
-        if not pay_amount or pay_amount <= 0:
-            pay_amount = admission.total_fees or 0
-
-        payment = Payment.objects.filter(admission=admission).first()
-        if not payment:
-            payment = Payment.objects.create(
-                admission=admission,
-                amount=pay_amount,
-                payment_mode=mapped_mode,
-                transaction_ref=admission.transaction_id or '',
-                payment_proof=admission.payment_screenshot,
-                status='approval_pending',
-                payment_date=timezone.now().date(),
-                note=f"Payment proof submitted by student for admission #{admission.id}. Tx: {admission.transaction_id or 'N/A'}",
-            )
-            logger.info(f"Created pending Payment {payment.receipt_number} for admission {admission.id}")
-        else:
-            payment.amount = pay_amount
-            payment.payment_mode = mapped_mode
-            payment.transaction_ref = admission.transaction_id or payment.transaction_ref
-            if admission.payment_screenshot:
-                payment.payment_proof = admission.payment_screenshot
-            payment.status = 'approval_pending'
-            payment.payment_date = timezone.now().date()
-            payment.note = f"Payment proof updated by student for admission #{admission.id}. Tx: {admission.transaction_id or 'N/A'}"
-            payment.save()
-            logger.info(f"Updated pending Payment {payment.receipt_number} for admission {admission.id}")
-
-        logger.info(
-            f"Payment proof submitted for admission {admission.id} — "
-            f"Transaction ID: {admission.transaction_id}"
-        )
-
-        # Dispatch Level 1 WhatsApp payment verification notification (Accountant)
-        try:
-            from .notifications import send_payment_verification_whatsapp
-            send_payment_verification_whatsapp(admission, level=1)
-        except Exception as exc:
-            logger.error(f"Failed to dispatch Level 1 WhatsApp payment notification for admission {admission.id}: {exc}")
-
-        # Send system notification to accountants
-        try:
-            from core.utils import notify_users_by_role
-            notify_users_by_role(
-                roles=['accountant'],
-                title='Admission Payment Proof Submitted',
-                body=f"Payment proof submitted for admission #{admission.id} ({admission.first_name} {admission.surname}). Level 1 approval required.",
-                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                branch=admission.branch if getattr(admission, 'branch', None) else None,
-            )
-        except Exception as exc:
-            logger.error(f"Failed to dispatch accountant system notification for admission {admission.id}: {exc}")
+        from .utils import sync_admission_payment
+        sync_admission_payment(admission, request=request, force=True)
 
         return Response(
             {
@@ -1420,6 +1350,13 @@ class AdmissionDocumentUploadView(APIView):
         # Direct save — no service indirection needed for a simple field swap
         setattr(admission, field_name, file)
         admission.save(update_fields=[field_name, 'updated_at'])
+
+        if field_name == 'payment_screenshot':
+            try:
+                from .utils import sync_admission_payment
+                sync_admission_payment(admission, request=request)
+            except Exception as e:
+                logger.error(f"Error syncing admission payment after screenshot upload for admission {admission_id}: {e}")
  
         logger.info(
             f"Document '{field_name}' uploaded for admission {admission_id} "

@@ -433,8 +433,11 @@ class PaymentListSerializer(serializers.ModelSerializer):
             fs_batch = obj.student_fee.fee_structure.batch
             if fs_batch and fs_batch.name:
                 return fs_batch.name
-        if obj.admission and obj.admission.batch:
-            return getattr(obj.admission.batch, 'name', None) or str(obj.admission.batch)
+        if obj.admission:
+            if hasattr(obj.admission, 'get_batch_attempt_display') and obj.admission.batch_attempt:
+                return f"{obj.admission.get_batch_attempt_display()} {obj.admission.attempt_year or ''}".strip()
+            if getattr(obj.admission, 'batch_attempt', None):
+                return str(obj.admission.batch_attempt)
         return None
 
     def get_fee_structure_name(self, obj):
@@ -500,8 +503,11 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
             fs_batch = obj.student_fee.fee_structure.batch
             if fs_batch and fs_batch.name:
                 return fs_batch.name
-        if obj.admission and obj.admission.batch:
-            return getattr(obj.admission.batch, 'name', None) or str(obj.admission.batch)
+        if obj.admission:
+            if hasattr(obj.admission, 'get_batch_attempt_display') and obj.admission.batch_attempt:
+                return f"{obj.admission.get_batch_attempt_display()} {obj.admission.attempt_year or ''}".strip()
+            if getattr(obj.admission, 'batch_attempt', None):
+                return str(obj.admission.batch_attempt)
         return None
 
     def get_fee_structure_name(self, obj):

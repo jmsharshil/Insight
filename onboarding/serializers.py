@@ -373,7 +373,7 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
 
 # ── Admission Document Upload Serializer ──────────────────────────────────────
 
-ADMISSION_DOCUMENT_FIELDS = ['doc_signature','doc_photo','doc_dob_certificate','doc_id_card','doc_tenth_marksheet','doc_twelfth_receipt','doc_twelfth_marksheet','doc_category_cert','doc_pan_card',]
+ADMISSION_DOCUMENT_FIELDS = ['doc_signature','doc_photo','doc_dob_certificate','doc_id_card','doc_tenth_marksheet','doc_twelfth_receipt','doc_twelfth_marksheet','doc_category_cert','doc_pan_card','payment_screenshot',]
 
 class AdmissionDocumentUploadSerializer(serializers.Serializer):
     field_name = serializers.ChoiceField(
@@ -391,15 +391,15 @@ class AdmissionDocumentUploadSerializer(serializers.Serializer):
         # doc_photo only allows images; all other fields also allow PDF
         if self.initial_data.get('field_name') == 'doc_photo':
             return _validate_file(value, allowed_types=['image/jpeg', 'image/png'])
-        return _validate_file(value, allowed_types=['image/jpeg', 'image/png', 'application/pdf'])
+        return _validate_file(value, allowed_types=['image/jpeg', 'image/png', 'application/pdf', 'image/webp'])
 
 
 # ── Payment Submit Serializer (student uploads payment proof) ─────────────────
 
 class PaymentSubmitSerializer(serializers.Serializer):
-    payment_screenshot = serializers.ImageField(
+    payment_screenshot = serializers.FileField(
         required=True,
-        help_text="Upload a screenshot of the payment transaction.",
+        help_text="Upload a screenshot or PDF receipt of the payment transaction.",
     )
     transaction_id = serializers.CharField(
         max_length=100,

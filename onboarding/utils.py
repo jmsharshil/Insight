@@ -347,3 +347,162 @@ def create_razorpay_refund(payment_id, amount, reason=""):
             logger.error(f"Razorpay refund request exception: {e}")
             return None
     return None
+
+
+def get_module_fee(fee_structure, group_module):
+    """
+    Resolves the fee component from the fee structure matching the student's group_module selection.
+    Falls back to institute_fees_all_modules or total_amount if specific module fee is not set.
+    """
+    from decimal import Decimal
+    if not fee_structure:
+        return Decimal('0')
+
+    gm = (group_module or '').strip().lower()
+    if gm == 'module_1' and fee_structure.institute_fees_module_1:
+        return Decimal(str(fee_structure.institute_fees_module_1))
+    elif gm == 'module_2' and fee_structure.institute_fees_module_2:
+        return Decimal(str(fee_structure.institute_fees_module_2))
+    elif gm == 'module_3' and fee_structure.institute_fees_module_3:
+        return Decimal(str(fee_structure.institute_fees_module_3))
+    elif gm == 'module_4' and fee_structure.institute_fees_module_4:
+        return Decimal(str(fee_structure.institute_fees_module_4))
+    elif gm == 'module_5' and fee_structure.institute_fees_module_5:
+        return Decimal(str(fee_structure.institute_fees_module_5))
+    elif gm in ('all', 'both', 'full') and fee_structure.institute_fees_all_modules:
+        return Decimal(str(fee_structure.institute_fees_all_modules))
+
+    if fee_structure.institute_fees_all_modules:
+        return Decimal(str(fee_structure.institute_fees_all_modules))
+    return Decimal(str(fee_structure.total_amount or 0))
+
+
+def sync_admission_payment(admission, request=None, force=False):
+    """
+    Ensures that when payment details (screenshot, transaction_id, payment_amount, or offline payment choice)
+    are submitted for an admission, a corresponding fees.Payment record is created or updated in 'approval_pending'
+    status, and the admission status is synchronized.
+    """
+    from decimal import Decimal
+    from django.utils import timezone
+    from fees.models import Payment
+    from .models import AdmissionStatusHistory
+
+    # Determine payment mode
+    pc = str(admission.payment_choice or '').strip().lower()
+    if pc in ('cheque', 'check'):
+        mapped_mode = 'cheque'
+    elif pc == 'cash':
+        mapped_mode = 'cash'
+    else:
+        mapped_mode = 'online'
+
+    # Determine amount
+    pay_amount = admission.payment_amount
+    if not pay_amount or Decimal(str(pay_amount)) <= 0:
+        if getattr(admission, 'fee_structure', None):
+            fs = admission.fee_structure
+            if admission.payment_type == 'token':
+                pay_amount = Decimal(str(fs.token_amount or 0))
+            elif admission.payment_type == 'full_payment':
+                pay_amount = get_module_fee(fs, admission.group_module)
+            else:
+                pay_amount = Decimal(str(admission.total_fees or 0))
+        else:
+            pay_amount = Decimal(str(admission.total_fees or 0))
+
+    if not pay_amount or Decimal(str(pay_amount)) <= 0:
+        default_course_fees = {
+            'cseet': Decimal('1000'),
+            'cs_executive': Decimal('2000'),
+            'cs_professional': Decimal('5000'),
+        }
+        pay_amount = default_course_fees.get(admission.course, Decimal('0'))
+
+    # Has payment details?
+    has_payment_data = bool(
+        admission.payment_screenshot or
+        admission.transaction_id or
+        (admission.payment_amount and Decimal(str(admission.payment_amount)) > 0) or
+        pc in ('cash', 'cheque')
+    )
+
+    if not has_payment_data and not force:
+        return None
+
+    # Find or create Payment
+    payment = Payment.objects.filter(admission=admission).first()
+    created = False
+    if not payment:
+        payment = Payment.objects.create(
+            admission=admission,
+            amount=pay_amount or Decimal('0'),
+            payment_mode=mapped_mode,
+            transaction_ref=admission.transaction_id or '',
+            payment_proof=admission.payment_screenshot if admission.payment_screenshot else None,
+            status='approval_pending',
+            payment_date=timezone.now().date(),
+            note=f"Payment submitted for admission #{admission.id}. Tx: {admission.transaction_id or 'N/A'}",
+        )
+        created = True
+        logger.info(f"Created pending Payment {payment.receipt_number} for admission #{admission.id}")
+    else:
+        if payment.status in ('pending', 'approval_pending', 'level_1_approved'):
+            if pay_amount and Decimal(str(pay_amount)) > 0:
+                payment.amount = pay_amount
+            payment.payment_mode = mapped_mode
+            if admission.transaction_id:
+                payment.transaction_ref = admission.transaction_id
+            if admission.payment_screenshot:
+                payment.payment_proof = admission.payment_screenshot
+            if payment.status == 'pending':
+                payment.status = 'approval_pending'
+            payment.payment_date = timezone.now().date()
+            payment.note = f"Payment updated for admission #{admission.id}. Tx: {admission.transaction_id or 'N/A'}"
+            payment.save()
+            logger.info(f"Updated pending Payment {payment.receipt_number} for admission #{admission.id}")
+
+    # Synchronize admission status to 'approval_pending' if proof / transaction ref is provided or offline payment
+    status_changed = False
+    if (admission.payment_screenshot or admission.transaction_id or pc in ('cash', 'cheque')) and admission.status in ('payment_pending', 'form_pending'):
+        admission.status = 'approval_pending'
+        if not admission.payment_submitted_at:
+            admission.payment_submitted_at = timezone.now()
+        admission.save(update_fields=['status', 'payment_submitted_at', 'updated_at'])
+        status_changed = True
+
+        AdmissionStatusHistory.objects.create(
+            admission=admission,
+            status='approval_pending',
+            changed_by=getattr(request, 'user', None) if request and getattr(request, 'user', None) and request.user.is_authenticated else None,
+            note=f"Payment details recorded. Transaction ID: {admission.transaction_id or 'N/A'}",
+        )
+
+        admission.add_payment_history_entry('payment_submitted', {
+            'payment_choice': admission.payment_choice or mapped_mode,
+            'amount': float(pay_amount or 0),
+            'transaction_id': admission.transaction_id or '',
+            'status': 'approval_pending',
+        })
+
+    # Dispatch Level 1 WhatsApp approval notification if newly created with proof or status changed
+    if status_changed or (created and (admission.payment_screenshot or admission.transaction_id)):
+        try:
+            from .notifications import send_payment_verification_whatsapp
+            send_payment_verification_whatsapp(admission, level=1)
+        except Exception as exc:
+            logger.error(f"Failed to dispatch Level 1 WhatsApp payment notification for admission {admission.id}: {exc}")
+
+        try:
+            from core.utils import notify_users_by_role
+            notify_users_by_role(
+                roles=['accountant'],
+                title='Admission Payment Proof Submitted',
+                body=f"Payment details submitted for admission #{admission.id} ({admission.first_name} {admission.surname}). Level 1 approval required.",
+                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                branch=admission.branch if getattr(admission, 'branch', None) else None,
+            )
+        except Exception as exc:
+            logger.error(f"Failed to dispatch accountant system notification for admission {admission.id}: {exc}")
+
+    return payment
