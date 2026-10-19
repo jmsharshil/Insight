@@ -797,13 +797,25 @@ def evaluate_daily_slots_attendance(
 
 def apply_half_day_rule(record, user, checkout_time=None):
     """
-    If the employee checks out >= 1 hour before their required working_hours,
-    mark the record as 'half_day'. Returns a message to append to the response.
+    Evaluates attendance status upon checkout:
+      - If the hours worked for the day on checkout is less than 5 hours: mark as 'absent'.
+      - If worked is 5 hours or more, but employee checks out >= 1 hour before their
+        required working_hours (shortfall >= 1 hour): mark as 'half_day'.
+      - Otherwise: remains as 'present' (full day worked).
+    Returns a message to append to the checkout response.
     """
     from decimal import Decimal
     from auth_user.utils import calculate_working_hours
 
-    target_date = getattr(record, 'date', None)
+    checkout_time = checkout_time or record.checked_out_at
+    if not record.checked_in_at or not checkout_time:
+        return ''
+
+    # Class-specific faculty slot sessions are exempt from general 5h/daily shift rules
+    if getattr(record, 'timetable_slot', None):
+        return ''
+
+    target_date = getattr(record, 'date', None) or checkout_time.date()
     if hasattr(user, 'get_working_hours_for_date') and target_date:
         required = user.get_working_hours_for_date(target_date)
     else:
@@ -816,11 +828,32 @@ def apply_half_day_rule(record, user, checkout_time=None):
             st, et = getattr(user, 'work_start_time', None), getattr(user, 'work_end_time', None)
         required = calculate_working_hours(st, et)
 
-    checkout_time = checkout_time or record.checked_out_at
-    if required <= 0 or not record.checked_in_at or not checkout_time:
-        return ''
+    if required <= 0:
+        required = Decimal('9.00')
 
     worked = Decimal(str((checkout_time - record.checked_in_at).total_seconds())) / Decimal(3600)
+
+    # Accumulate any other completed records for this user on the same date
+    try:
+        from attendance.models import EmployeeAttendanceRecord
+        other_records = EmployeeAttendanceRecord.objects.filter(
+            user=user, date=target_date, checked_in_at__isnull=False, checked_out_at__isnull=False
+        ).exclude(id=record.id)
+        for other in other_records:
+            worked += Decimal(str((other.checked_out_at - other.checked_in_at).total_seconds())) / Decimal(3600)
+    except Exception:
+        pass
+
+    # 1. Less than 5 hours -> Absent
+    if worked < Decimal('5'):
+        record.status = 'absent'
+        record.save(update_fields=['status'])
+        return (
+            f" You worked {worked.quantize(Decimal('0.01'))} hours today, which is less than 5 hours, "
+            f"so this day is considered as absent."
+        )
+
+    # 2. 5 hours or more, but shortfall >= 1 hour from required working hours -> Half Day
     shortfall = required - worked
     if shortfall >= Decimal('1'):
         record.status = 'half_day'

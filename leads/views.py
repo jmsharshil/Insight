@@ -1058,6 +1058,8 @@ class SalesActivityPhotoView(APIView):
                         shortfall = max(0, req_mins - duration_mins)
                         open_rec.shortfall_minutes = shortfall
                     open_rec.save()
+                    from attendance.utils import apply_half_day_rule
+                    apply_half_day_rule(open_rec, activity.user, checkout_time)
                     attendance_info = {
                         'action': 'check_out',
                         'record_id': str(open_rec.id),
