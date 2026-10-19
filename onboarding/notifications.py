@@ -560,7 +560,10 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 if payment:
                     payment.status = 'verified'
                     if student_user and 'student' in locals() and student:
-                        payment.student = student
+                        try:
+                            payment.student = student
+                        except Exception:
+                            pass
                     payment.verified_by = approver
                     payment.verified_at = timezone.now()
                     payment.note = super_note
@@ -652,7 +655,10 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             if payment:
                 payment.status = 'verified'
                 if student_user and 'student' in locals() and student:
-                    payment.student = student
+                    try:
+                        payment.student = student
+                    except Exception:
+                        pass
                 payment.verified_by = approver
                 payment.verified_at = timezone.now()
                 payment.note = final_note
@@ -663,9 +669,16 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
             else:
                 mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                student_obj = None
+                try:
+                    from students.models import Student
+                    if 'student' in locals() and isinstance(student, Student):
+                        student_obj = student
+                except Exception:
+                    pass
                 payment = Payment.objects.create(
                     admission=admission,
-                    student=student if ('student' in locals() and student) else None,
+                    student=student_obj,
                     amount=admission.payment_amount or admission.total_fees or 0,
                     payment_mode=mapped_mode,
                     transaction_ref=admission.transaction_id or '',

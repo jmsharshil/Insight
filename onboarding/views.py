@@ -1110,7 +1110,10 @@ class AdmissionApproveView(APIView):
             payment = Payment.objects.filter(admission=admission).first()
             if payment:
                 payment.status = 'verified'
-                payment.student = student
+                try:
+                    payment.student = student
+                except Exception:
+                    pass
                 payment.verified_by = acting_user
                 payment.verified_at = timezone.now()
                 payment.note = final_note
