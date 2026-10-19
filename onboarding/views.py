@@ -1106,7 +1106,7 @@ class AdmissionApproveView(APIView):
 
             # Synchronize linked Payment record to verified and link student
             from fees.models import Payment
-            from fees.signals import send_payment_receipt
+            from fees.services import send_payment_receipt
             payment = Payment.objects.filter(admission=admission).first()
             if payment:
                 payment.status = 'verified'
@@ -1354,7 +1354,7 @@ class AdmissionDocumentUploadView(APIView):
         if field_name == 'payment_screenshot':
             try:
                 from .utils import sync_admission_payment
-                sync_admission_payment(admission, request=request)
+                sync_admission_payment(admission, request=request, force=True)
             except Exception as e:
                 logger.error(f"Error syncing admission payment after screenshot upload for admission {admission_id}: {e}")
  
@@ -1456,7 +1456,7 @@ class RazorpayWebhookView(APIView):
 
                         # Create or update verified Payment record linked to admission and student
                         from fees.models import Payment
-                        from fees.signals import send_payment_receipt
+                        from fees.services import send_payment_receipt
 
                         payment = Payment.objects.filter(admission=admission).first()
                         if not payment:

@@ -6,6 +6,7 @@ Tests verify that enrolling an Admission automatically creates:
   2. A Student profile linked to the admission
   3. A StudentFee record linked to the student (via fees.services.create_student_fee)
 """
+from decimal import Decimal
 from django.test import TestCase
 from django.utils import timezone
 from unittest.mock import patch, MagicMock
@@ -607,7 +608,7 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
 
         self.assertTrue(res.get('success'))
         admission.refresh_from_db()
-        self.assertEqual(admission.status, 'approval_pending')
+        self.assertEqual(admission.status, 'enrolled')
         self.assertTrue(admission.is_paid)
         self.assertTrue(admission.is_razorpay_paid)
         self.assertEqual(admission.razorpay_payment_status, 'paid')
@@ -1081,6 +1082,78 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             self.assertEqual(admission.status, 'enrolled')
             mock_send_wa.assert_called_once()
             self.assertIn("enrolled", mock_send_wa.call_args[1]['body'])
+
+    def test_payment_approve_reject_with_image_screenshot(self):
+        """Validates that build_payment_approve_reject_components keeps valid image URLs in header."""
+        from onboarding.notifications import build_payment_approve_reject_components
+
+        admission = _make_admission(
+            first_name='Sunita',
+            surname='Patel',
+            email='sunita@example.com',
+            phone_student='9876543291',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cheque',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-SUNITA-01',
+            status='approval_pending',
+        )
+        admission.payment_screenshot = 'https://example.com/receipt.jpeg'
+
+        components, fallback_body = build_payment_approve_reject_components(admission)
+        header = next((c for c in components if c.get('type') == 'header'), None)
+        self.assertIsNotNone(header)
+        self.assertEqual(header['parameters'][0]['image']['link'], 'https://example.com/receipt.jpeg')
+        self.assertIn('https://example.com/receipt.jpeg', fallback_body)
+
+    def test_payment_approve_reject_with_pdf_screenshot_falls_back_to_placeholder_image(self):
+        """Validates that build_payment_approve_reject_components falls back to placeholder image for PDF in header."""
+        from onboarding.notifications import build_payment_approve_reject_components
+
+        admission = _make_admission(
+            first_name='Vikas',
+            surname='Kumar',
+            email='vikas@example.com',
+            phone_student='9876543292',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cheque',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-VIKAS-01',
+            status='approval_pending',
+        )
+        admission.payment_screenshot = 'https://example.com/receipt.pdf'
+
+        components, fallback_body = build_payment_approve_reject_components(admission)
+        header = next((c for c in components if c.get('type') == 'header'), None)
+        self.assertIsNotNone(header)
+        self.assertIn('payment_receipt_placeholder.png', header['parameters'][0]['image']['link'])
+        self.assertIn('https://example.com/receipt.pdf', fallback_body)
+
+    def test_sync_admission_payment_triggers_whatsapp_when_screenshot_submitted_even_if_already_pending(self):
+        """Validates that sync_admission_payment dispatches Level 1 notification when payment proof is submitted with force=True."""
+        from onboarding.utils import sync_admission_payment
+
+        admission = _make_admission(
+            first_name='Rahul',
+            surname='Verma',
+            email='rahul@example.com',
+            phone_student='9876543293',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cheque',
+            payment_amount=Decimal('40000'),
+            transaction_id='CHQ-RAHUL-01',
+            status='approval_pending',
+        )
+        admission.payment_screenshot = 'https://example.com/rahul_receipt.png'
+        admission.save()
+
+        with patch('onboarding.notifications.send_payment_verification_whatsapp') as mock_send_l1:
+            sync_admission_payment(admission, force=True)
+            mock_send_l1.assert_called_once_with(admission, level=1)
+
 
 
 

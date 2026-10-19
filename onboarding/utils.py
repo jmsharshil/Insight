@@ -464,7 +464,13 @@ def sync_admission_payment(admission, request=None, force=False):
 
     # Synchronize admission status to 'approval_pending' if proof / transaction ref is provided or offline payment
     status_changed = False
-    if (admission.payment_screenshot or admission.transaction_id or pc in ('cash', 'cheque')) and admission.status in ('payment_pending', 'form_pending'):
+    has_proof_or_offline = bool(
+        admission.payment_screenshot or
+        admission.transaction_id or
+        pc in ('cash', 'cheque')
+    )
+
+    if has_proof_or_offline and admission.status in ('payment_pending', 'form_pending'):
         admission.status = 'approval_pending'
         if not admission.payment_submitted_at:
             admission.payment_submitted_at = timezone.now()
@@ -484,9 +490,33 @@ def sync_admission_payment(admission, request=None, force=False):
             'transaction_id': admission.transaction_id or '',
             'status': 'approval_pending',
         })
+    elif force and has_proof_or_offline:
+        if not admission.payment_submitted_at:
+            admission.payment_submitted_at = timezone.now()
+            admission.save(update_fields=['payment_submitted_at', 'updated_at'])
 
-    # Dispatch Level 1 WhatsApp approval notification if newly created with proof or status changed
-    if status_changed or (created and (admission.payment_screenshot or admission.transaction_id)):
+        AdmissionStatusHistory.objects.create(
+            admission=admission,
+            status='approval_pending',
+            changed_by=getattr(request, 'user', None) if request and getattr(request, 'user', None) and request.user.is_authenticated else None,
+            note=f"Payment proof submitted. Transaction ID: {admission.transaction_id or 'N/A'}",
+        )
+
+        admission.add_payment_history_entry('payment_submitted', {
+            'payment_choice': admission.payment_choice or mapped_mode,
+            'amount': float(pay_amount or 0),
+            'transaction_id': admission.transaction_id or '',
+            'status': 'approval_pending',
+        })
+
+    # Dispatch Level 1 WhatsApp approval notification if newly created with proof, status changed, or forced submission
+    should_dispatch_l1 = (
+        status_changed or
+        (force and has_proof_or_offline) or
+        (created and (admission.payment_screenshot or admission.transaction_id))
+    )
+
+    if should_dispatch_l1:
         try:
             from .notifications import send_payment_verification_whatsapp
             send_payment_verification_whatsapp(admission, level=1)

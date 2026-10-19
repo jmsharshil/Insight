@@ -47,7 +47,18 @@ def get_payment_screenshot_url(admission) -> str:
     if not admission or not getattr(admission, 'payment_screenshot', None):
         return ""
     try:
-        url = str(admission.payment_screenshot.url)
+        raw_val = str(getattr(admission.payment_screenshot, 'name', admission.payment_screenshot) or '')
+        if raw_val.startswith("http://") or raw_val.startswith("https://"):
+            return raw_val
+
+        if hasattr(admission.payment_screenshot, 'url'):
+            url = str(admission.payment_screenshot.url)
+        else:
+            url = str(admission.payment_screenshot)
+
+        if not url:
+            return ""
+
         if url.startswith("http://") or url.startswith("https://"):
             return url
 
@@ -121,10 +132,24 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         submitted_at = str(sub_dt)[:19]
     submitted_at = " ".join(submitted_at.split())[:60]
 
-    # Fallback image if screenshot not present
+    PLACEHOLDER_RECEIPT_URL = (
+        "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net"
+        "/static/images/payment_receipt_placeholder.png"
+    )
+
+    # Resolve screenshot URL
     screenshot_url = get_payment_screenshot_url(admission)
-    if not screenshot_url:
-        screenshot_url = "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net/static/images/payment_receipt_placeholder.png"
+
+    # WhatsApp Cloud API template headers of type IMAGE only accept JPEG and PNG.
+    # PDFs and other formats must fall back to the placeholder image in the header,
+    # with the actual proof URL included in the body/fallback text.
+    header_image_url = screenshot_url
+    if not header_image_url:
+        header_image_url = PLACEHOLDER_RECEIPT_URL
+    else:
+        clean_path = header_image_url.split('?')[0].lower()
+        if not (clean_path.endswith('.jpg') or clean_path.endswith('.jpeg') or clean_path.endswith('.png')):
+            header_image_url = PLACEHOLDER_RECEIPT_URL
 
     components: List[Dict[str, Any]] = [
         {
@@ -133,7 +158,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
                 {
                     "type": "image",
                     "image": {
-                        "link": screenshot_url
+                        "link": header_image_url
                     }
                 }
             ]
@@ -181,7 +206,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         f"• Payment Amount: ₹{amt_str}\n"
         f"• Transaction ID / Cheque No.: {txn_id}\n"
         f"• Payment Submitted At: {submitted_at}\n\n"
-        f"Proof Screenshot: {screenshot_url}\n\n"
+        f"Proof Screenshot: {screenshot_url or 'N/A'}\n\n"
         f"Reply with:\n"
         f"- APPROVE {admission_id_str} to approve\n"
         f"- REJECT {admission_id_str} to reject\n\n"
@@ -530,7 +555,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
 
                 # Synchronize Payment status to verified and link student
                 from fees.models import Payment
-                from fees.signals import send_payment_receipt
+                from fees.services import send_payment_receipt
                 payment = Payment.objects.filter(admission=admission).first()
                 if payment:
                     payment.status = 'verified'
@@ -622,7 +647,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
 
             # Synchronize Payment status to verified and link student
             from fees.models import Payment
-            from fees.signals import send_payment_receipt
+            from fees.services import send_payment_receipt
             payment = Payment.objects.filter(admission=admission).first()
             if payment:
                 payment.status = 'verified'

@@ -319,6 +319,7 @@ PERMANENT_ERROR_CODES = {
     131026,  # undeliverable / invalid number
     131047,  # outside 24h window, needs a template
     131051,  # unsupported message type
+    131053,  # media upload / download error (e.g. invalid media format or unreachable link)
     132000,  # template param count mismatch
     132001,  # template missing / not approved
     132005,  # template param format mismatch
