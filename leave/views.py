@@ -81,15 +81,16 @@ class LeaveListCreateView(APIView):
             if getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             if role != 'super_admin':
-                branch_ids = get_user_branch_ids(request.user)
-                if branch_ids:
-                    qs = qs.filter(branch_id__in=branch_ids)
+                if role != 'cmo':
+                    branch_ids = get_user_branch_ids(request.user)
+                    if branch_ids:
+                        qs = qs.filter(branch_id__in=branch_ids)
                 
-                sales_roles = ['counsellor', 'sales_senior_executive', 'sales_executive']
+                from .utils import SALES_ROLES
                 if role == 'cmo':
-                    qs = qs.filter(applied_by__role__in=sales_roles)
-                elif role in ['head_coordinator', 'branch_manager']:
-                    qs = qs.exclude(applied_by__role__in=sales_roles)
+                    qs = qs.filter(applied_by__role__in=SALES_ROLES)
+                elif role in ['head_coordinator', 'branch_manager', 'admin_senior_executive']:
+                    qs = qs.exclude(applied_by__role__in=SALES_ROLES)
         else:
             qs = LeaveApplication.objects.filter(applied_by=request.user)
 
@@ -293,24 +294,32 @@ class LeaveListCreateView(APIView):
         }
 
         applicant_primary_role = getattr(request.user, 'role', '')
-        from .utils import get_leave_approver_roles, get_approvers_for_step, send_employee_leave_whatsapp_notification
-        step1_role, step2_role = get_leave_approver_roles(applicant_primary_role)
-        step1_approvers = get_approvers_for_step(app, step1_role)
+        from .utils import (
+            get_initial_approver_roles,
+            get_approvers_for_step,
+            send_employee_leave_whatsapp_notification,
+        )
+        initial_roles = get_initial_approver_roles(applicant_primary_role)
 
-        for approver in step1_approvers:
-            notify(
-                str(approver.id),
-                title="Leave request pending approval",
-                body=notif_body,
-                metadata={"leave_id": str(app.id), "approval_step": 1},
-                email_template='emails/leave_applied.html',
-                email_context=notif_ctx,
-            )
-            # WhatsApp: leave_applied_ with [Approve] & [Reject] buttons to Step 1 approver
-            try:
-                send_employee_leave_whatsapp_notification(app, approver, approval_step=1)
-            except Exception as wa_err:
-                logger.error(f"[Leave Applied] WhatsApp to approver {approver.id} failed: {wa_err}")
+        notified_user_ids = set()
+        for init_role in initial_roles:
+            approvers = get_approvers_for_step(app, init_role)
+            for approver in approvers:
+                if approver.id == request.user.id or approver.id in notified_user_ids:
+                    continue
+                notified_user_ids.add(approver.id)
+                notify(
+                    str(approver.id),
+                    title="Leave request pending approval",
+                    body=notif_body,
+                    metadata={"leave_id": str(app.id), "approval_step": 1},
+                    email_template='emails/leave_applied.html',
+                    email_context=notif_ctx,
+                )
+                try:
+                    send_employee_leave_whatsapp_notification(app, approver, approval_step=1)
+                except Exception as wa_err:
+                    logger.error(f"[Leave Applied] WhatsApp to approver {approver.id} failed: {wa_err}")
 
         return Response({
             'success': True, 'message': 'Leave application submitted.',
@@ -428,7 +437,7 @@ class LeaveApproveView(APIView):
 
     def post(self, request, leave_id):
         role = _user_role(request.user)
-        if role not in LEAVE_APPROVE_ROLES + ['super_admin']:
+        if role not in LEAVE_APPROVE_ROLES + ['super_admin', 'admin_senior_executive']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -447,102 +456,14 @@ class LeaveApproveView(APIView):
 
         now = timezone.now()
         applicant_role = getattr(app.applied_by, 'role', '')
+        from .utils import SALES_ROLES
+        is_sales = applicant_role in SALES_ROLES
 
-        # ── One-step approval: leave applied by branch_manager ──────────
-        # Only super_admin can approve a branch_manager's leave (single step).
-        if applicant_role == 'branch_manager':
-            if role != 'super_admin':
-                return Response(
-                    {'success': False, 'message': 'Only super_admin can approve a branch manager\'s leave.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            app.first_approver = request.user
-            app.first_approved_at = now
-            app.status = 'approved'
-            app.reviewed_by = request.user
-            app.reviewed_at = now
-            app.save()
-            self._finalise_approval(app, request.user, now)
-            return Response({'success': True, 'message': 'Leave approved (branch manager leave — super_admin).'})
-
-
-        # ── Two-step approval ────────────────────────────
-        is_sales = applicant_role in ['counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller', 'associate_bdm', 'senior_tele_caller', 'deputy_bdm', 'senior_bdm']
-        is_head_coordinator = applicant_role == 'head_coordinator'
-        
-        if is_sales:
-            step1_role, step2_role = 'cmo', 'super_admin'
-        elif is_head_coordinator:
-            step1_role, step2_role = 'branch_manager', 'super_admin'
-        else:
-            step1_role, step2_role = 'head_coordinator', 'branch_manager'
-
-        # Step 1 Approval
-        if role == step1_role:
-            if app.first_approver:
-                return Response({'success': False, 'message': 'First approval already done.'}, status=status.HTTP_400_BAD_REQUEST)
-            app.first_approver = request.user
-            app.first_approved_at = now
-            
-            app.save(update_fields=['first_approver', 'first_approved_at'])
-
-            # Push notification to Step 2 Approvers
-            from .utils import get_approvers_for_step
-            step2_users = get_approvers_for_step(app, step2_role)
-
-            if not step2_users.exists():
-                # Auto-approve if no step 2 user exists
-                app.status = 'approved'
-                app.reviewed_by = request.user
-                app.reviewed_at = now
-                app.save()
-                self._finalise_approval(app, request.user, now)
-                return Response({'success': True, 'message': f'Leave approved successfully (no {step2_role} found).'})
-
-            for u in step2_users:
-                notify(
-                    str(u.id),
-                    title="Leave awaiting your approval",
-                    body=f"{app.applied_by.name} leave approved by {role}. Your approval needed.",
-                    metadata={"leave_id": str(app.id), "approval_step": 2},
-                    email_template='emails/leave_applied.html',
-                    email_context={
-                        'applicant_name': app.applied_by.name,
-                        'leave_type': app.leave_type,
-                        'from_date': app.from_date,
-                        'to_date': app.to_date,
-                        'reason': app.reason
-                    }
-                )
-                try:
-                    from .utils import send_employee_leave_whatsapp_notification
-                    send_employee_leave_whatsapp_notification(app, u, approval_step=2)
-                except Exception as wa_err:
-                    logger.error(f"[Leave Step 2] WhatsApp to approver {u.id} failed: {wa_err}")
-
-            return Response({'success': True, 'message': f'First approval done. Awaiting {step2_role}.'})
-
-        # Step 2 Approval
-        if role == step2_role:
+        # ── 1. Super Admin: immediate full approval for any role at any point ──
+        if role == 'super_admin':
             if not app.first_approver:
-                if request.user.role == 'super_admin':
-                    app.first_approver = request.user
-                    app.first_approved_at = now
-                else:
-                    return Response({'success': False, 'message': f'First approval by {step1_role} is required.'}, status=status.HTTP_400_BAD_REQUEST)
-            app.second_approver = request.user
-            app.second_approved_at = now
-            app.status = 'approved'
-            app.reviewed_by = request.user
-            app.reviewed_at = now
-            app.save()
-            self._finalise_approval(app, request.user, now)
-            return Response({'success': True, 'message': 'Leave approved.'})
-
-        # super_admin can do both steps at once (if not already Step 2 above)
-        if request.user.role == 'super_admin' and role != step2_role:
-            app.first_approver = app.first_approver or request.user
-            app.first_approved_at = app.first_approved_at or now
+                app.first_approver = request.user
+                app.first_approved_at = now
             app.second_approver = request.user
             app.second_approved_at = now
             app.status = 'approved'
@@ -551,6 +472,87 @@ class LeaveApproveView(APIView):
             app.save()
             self._finalise_approval(app, request.user, now)
             return Response({'success': True, 'message': 'Leave approved (super_admin).'})
+
+        # ── 2. Sales Employee: CMO -> Step 1 ──
+        if is_sales:
+            if role == 'cmo':
+                if app.first_approver:
+                    return Response({'success': False, 'message': 'First approval already done.'}, status=status.HTTP_400_BAD_REQUEST)
+                app.first_approver = request.user
+                app.first_approved_at = now
+                app.save(update_fields=['first_approver', 'first_approved_at'])
+                return Response({'success': True, 'message': 'First approval done by CMO. Awaiting Super Admin final approval.'})
+            else:
+                return Response({'success': False, 'message': 'Only CMO or Super Admin can approve leave for sales staff.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # ── 3. Branch Manager Applicant (single step by super_admin) ──
+        if applicant_role == 'branch_manager':
+            return Response({'success': False, 'message': "Only super_admin can approve a branch manager's leave."}, status=status.HTTP_403_FORBIDDEN)
+
+        # ── 4. Head Coordinator Applicant ──
+        if applicant_role == 'head_coordinator':
+            if role in ['branch_manager', 'admin_senior_executive']:
+                if app.first_approver:
+                    return Response({'success': False, 'message': 'First approval already done.'}, status=status.HTTP_400_BAD_REQUEST)
+                app.first_approver = request.user
+                app.first_approved_at = now
+                app.save(update_fields=['first_approver', 'first_approved_at'])
+                return Response({'success': True, 'message': 'First approval done. Awaiting Super Admin final approval.'})
+            else:
+                return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # ── 5. Other Staff (Faculty, Front Desk, Housekeeping, etc.) ──
+        if role == 'head_coordinator':
+            if app.first_approver:
+                return Response({'success': False, 'message': 'First approval already done.'}, status=status.HTTP_400_BAD_REQUEST)
+            app.first_approver = request.user
+            app.first_approved_at = now
+            app.save(update_fields=['first_approver', 'first_approved_at'])
+
+            from .utils import get_approvers_for_step, send_employee_leave_whatsapp_notification
+            bm_users = get_approvers_for_step(app, 'branch_manager')
+
+            if not bm_users.exists():
+                app.status = 'approved'
+                app.reviewed_by = request.user
+                app.reviewed_at = now
+                app.save()
+                self._finalise_approval(app, request.user, now)
+                return Response({'success': True, 'message': 'Leave approved successfully (no branch_manager found).'})
+
+            for bm in bm_users:
+                notify(
+                    str(bm.id),
+                    title="Leave awaiting your approval",
+                    body=f"{app.applied_by.name} leave approved by Head Coordinator. Your approval needed.",
+                    metadata={"leave_id": str(app.id), "approval_step": 2, "skip_whatsapp": True},
+                    email_template='emails/leave_applied.html',
+                    email_context={
+                        'applicant_name': app.applied_by.name,
+                        'leave_type': app.leave_type,
+                        'from_date': app.from_date,
+                        'to_date': app.to_date,
+                        'reason': app.reason,
+                    }
+                )
+                try:
+                    send_employee_leave_whatsapp_notification(app, bm, approval_step=2)
+                except Exception as wa_err:
+                    logger.error(f"[Leave Step 2] WhatsApp to branch_manager {bm.id} failed: {wa_err}")
+
+            return Response({'success': True, 'message': 'First approval done. Notification forwarded to Branch Manager.'})
+
+        elif role in ['branch_manager', 'admin_senior_executive']:
+            if not app.first_approver:
+                return Response({'success': False, 'message': 'First approval by Head Coordinator is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            app.second_approver = request.user
+            app.second_approved_at = now
+            app.status = 'approved'
+            app.reviewed_by = request.user
+            app.reviewed_at = now
+            app.save()
+            self._finalise_approval(app, request.user, now)
+            return Response({'success': True, 'message': 'Leave approved.'})
 
         return Response({'success': False, 'message': 'Invalid role for approval.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -564,7 +566,7 @@ class LeaveRejectView(APIView):
 
     def post(self, request, leave_id):
         role = _user_role(request.user)
-        if role not in LEAVE_APPROVE_ROLES + ['super_admin']:
+        if role not in LEAVE_APPROVE_ROLES + ['super_admin', 'admin_senior_executive']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -575,6 +577,31 @@ class LeaveRejectView(APIView):
         except LeaveApplication.DoesNotExist:
             return Response({'success': False, 'message': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        if app.applied_by == request.user:
+            return Response({'success': False, 'message': 'Cannot reject your own leave.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if app.status != 'approval_pending':
+            return Response({'success': False, 'message': 'Only pending leaves can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        applicant_role = getattr(app.applied_by, 'role', '')
+        from .utils import SALES_ROLES
+        is_sales = applicant_role in SALES_ROLES
+
+        is_authorized = False
+        if role == 'super_admin':
+            is_authorized = True
+        elif is_sales:
+            is_authorized = (role == 'cmo')
+        elif applicant_role == 'branch_manager':
+            is_authorized = (role == 'super_admin')
+        elif applicant_role == 'head_coordinator':
+            is_authorized = (role in ['branch_manager', 'admin_senior_executive'])
+        else:
+            is_authorized = (role in ['head_coordinator', 'branch_manager', 'admin_senior_executive'])
+
+        if not is_authorized:
+            return Response({'success': False, 'message': 'Permission denied for this leave application.'}, status=status.HTTP_403_FORBIDDEN)
+
         reason = request.data.get('reason', '')
         app.status = 'rejected'
         app.rejection_reason = reason
@@ -582,7 +609,7 @@ class LeaveRejectView(APIView):
         app.reviewed_at = timezone.now()
         app.save()
 
-        # FRD §4.9.2: Push notification to applicant WITH reason
+        # Push notification to applicant WITH reason
         notify(
             str(app.applied_by.id),
             title="Leave Rejected",
