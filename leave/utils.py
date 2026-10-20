@@ -658,16 +658,18 @@ def send_student_leave_whatsapp_request(parent_user, student, app):
 
 # ── WhatsApp Employee Leave Multi-Step Approval Handlers ──────────────────────
 
+SALES_ROLES = [
+    'counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller',
+    'senior_tele_caller', 'telecaller', 'associate_bdm', 'deputy_bdm', 'senior_bdm', 'sales'
+]
+
+
 def get_leave_approver_roles(applicant_role):
     """
     Returns (step1_role, step2_role) for a given applicant role.
     For branch_manager, step2_role is None (single-step approval by super_admin).
     """
-    sales_roles = [
-        'counsellor', 'sales_senior_executive', 'sales_executive', 'tele_caller',
-        'associate_bdm', 'senior_tele_caller', 'deputy_bdm', 'senior_bdm'
-    ]
-    if applicant_role in sales_roles:
+    if applicant_role in SALES_ROLES:
         return 'cmo', 'super_admin'
     elif applicant_role == 'branch_manager':
         return 'super_admin', None
@@ -675,6 +677,25 @@ def get_leave_approver_roles(applicant_role):
         return 'branch_manager', 'super_admin'
     else:
         return 'head_coordinator', 'branch_manager'
+
+
+def get_initial_approver_roles(applicant_role):
+    """
+    Returns a list of roles that must receive approval notifications simultaneously
+    when a leave application is created.
+    - Sales: CMO and Super Admin at the same time.
+    - Branch Manager: Super Admin.
+    - Head Coordinator: Branch Manager and Super Admin.
+    - Other Employees (Faculty, Front Desk, etc.): Head Coordinator and Super Admin at the same time.
+    """
+    if applicant_role in SALES_ROLES:
+        return ['cmo', 'super_admin']
+    elif applicant_role == 'branch_manager':
+        return ['super_admin']
+    elif applicant_role == 'head_coordinator':
+        return ['branch_manager', 'super_admin']
+    else:
+        return ['head_coordinator', 'super_admin']
 
 
 def get_approvers_for_step(app, step_role):
@@ -703,7 +724,8 @@ def get_approvers_for_step(app, step_role):
     if org:
         qs = qs.filter(organization=org)
 
-    if app.branch_id and step_role != 'super_admin':
+    # super_admin and cmo are organization-level roles, not branch-restricted
+    if app.branch_id and step_role not in ['super_admin', 'cmo']:
         qs = qs.filter(
             models.Q(branch_id=app.branch_id) |
             models.Q(branch_id__isnull=True) |
@@ -865,6 +887,18 @@ def parse_employee_leave_payload(payload_str, text_str=""):
                 action = "reject"
                 leave_id = parts[-1]
 
+    if not action:
+        for prefix, act in [("approve", "approve"), ("reject", "reject")]:
+            for check_str in [s, t]:
+                if check_str.lower().startswith(prefix):
+                    remainder = check_str[len(prefix):].strip(" :_-#")
+                    if remainder:
+                        action = act
+                        leave_id = remainder
+                        break
+            if action:
+                break
+
     # Validate leave_id as UUID if present
     if leave_id:
         try:
@@ -881,7 +915,13 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
     """
     Handles staff/approver action (Approve or Reject) for an employee LeaveApplication
     triggered via WhatsApp template Quick Reply buttons.
-    Returns True if handled as an employee leave action, False otherwise.
+    - Sales user: CMO and Super Admin receive notifications simultaneously.
+      Super Admin approval at any time immediately fully approves the leave.
+      CMO approval records Step 1, then Super Admin approval finalizes.
+    - Other staff: Head Coordinator and Super Admin receive notifications simultaneously.
+      Super Admin approval at any time immediately fully approves the leave.
+      Head Coordinator approval records Step 1 and forwards to Branch Manager.
+      Branch Manager approval (or Super Admin approval) finalizes.
     """
     action, leave_id = parse_employee_leave_payload(payload_str, text_str)
     if not action or not leave_id:
@@ -889,10 +929,8 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
 
     from .models import LeaveApplication
     from django.contrib.auth import get_user_model
-    from django.db import models
     from django.db.models import Q
     from chat.notifications import send_whatsapp_text, send_whatsapp_with_fallback, send_system_notification
-    from core.utils import get_user_role
 
     try:
         app = LeaveApplication.objects.select_related('applied_by', 'branch').get(id=leave_id)
@@ -912,7 +950,6 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         return True
 
     applicant_role = getattr(app.applied_by, 'role', '')
-    step1_role, step2_role = get_leave_approver_roles(applicant_role)
 
     # Resolve approver user by sender phone number.
     User = get_user_model()
@@ -939,47 +976,37 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         )
         return True
 
-    # Smart candidate selection:
-    # 1. Filter out the applicant if other candidates exist with the same phone
+    # Filter out applicant if other candidates exist with the same phone
     eligible_candidates = [u for u in candidates if u.id != app.applied_by_id] or candidates
 
-    def matches_step2(u):
-        if not step2_role:
+    def user_has_role(u, r):
+        if not u or not r:
             return False
-        if u.role == step2_role or u.role == 'super_admin':
+        if u.role == r:
             return True
-        if step2_role == 'branch_manager' and u.role in ('branch_manager', 'admin_senior_executive'):
+        if r == 'branch_manager' and u.role in ('branch_manager', 'admin_senior_executive'):
             return True
         add_roles = getattr(u, 'additional_roles', None) or []
-        return step2_role in add_roles
+        return r in add_roles
 
-    def matches_step1(u):
-        if not step1_role:
-            return False
-        if u.role == step1_role or u.role == 'super_admin':
-            return True
-        add_roles = getattr(u, 'additional_roles', None) or []
-        return step1_role in add_roles
+    sa_candidate = next((u for u in eligible_candidates if user_has_role(u, 'super_admin')), None)
+    cmo_candidate = next((u for u in eligible_candidates if user_has_role(u, 'cmo')), None)
+    hc_candidate = next((u for u in eligible_candidates if user_has_role(u, 'head_coordinator')), None)
+    bm_candidate = next((u for u in eligible_candidates if user_has_role(u, 'branch_manager')), None)
 
-    approver = None
-    if app.first_approver:
-        # Step 1 is already completed; find Step 2 approver first
-        for u in eligible_candidates:
-            if matches_step2(u):
-                approver = u
-                break
+    # Pick the most appropriate user profile for this application
+    if applicant_role in SALES_ROLES:
+        approver = cmo_candidate or sa_candidate
+    elif applicant_role == 'branch_manager':
+        approver = sa_candidate
+    elif applicant_role == 'head_coordinator':
+        approver = bm_candidate or sa_candidate
     else:
-        # Step 1 is pending; find Step 1 approver first
-        for u in eligible_candidates:
-            if matches_step1(u):
-                approver = u
-                break
-
-    if not approver:
-        for u in eligible_candidates:
-            if matches_step2(u) or u.role in ('super_admin', 'branch_manager', 'admin_senior_executive'):
-                approver = u
-                break
+        # Other employees (faculty, front desk, etc.)
+        if app.first_approver:
+            approver = bm_candidate or sa_candidate or hc_candidate
+        else:
+            approver = hc_candidate or sa_candidate or bm_candidate
 
     if not approver:
         approver = eligible_candidates[0]
@@ -991,18 +1018,27 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         )
         return True
 
-    now = timezone.now()
-    approver_role = get_user_role(approver)
+    is_super_admin = user_has_role(approver, 'super_admin')
+    is_cmo = user_has_role(approver, 'cmo')
+    is_head_coordinator = user_has_role(approver, 'head_coordinator')
+    is_branch_manager = user_has_role(approver, 'branch_manager')
 
-    is_step1_auth = matches_step1(approver) or (approver_role == step1_role)
-    is_step2_auth = matches_step2(approver) or (approver_role == step2_role)
+    now = timezone.now()
 
     # ── Action: REJECT ──────────────────────────────────────────────
     if action == 'reject':
-        is_authorized = (
-            is_step1_auth or is_step2_auth or
-            approver.role in ('super_admin', 'branch_manager', 'admin_senior_executive')
-        )
+        is_authorized = False
+        if is_super_admin:
+            is_authorized = True
+        elif applicant_role in SALES_ROLES:
+            is_authorized = is_cmo
+        elif applicant_role == 'branch_manager':
+            is_authorized = is_super_admin
+        elif applicant_role == 'head_coordinator':
+            is_authorized = is_branch_manager
+        else:
+            is_authorized = is_head_coordinator or is_branch_manager
+
         if not is_authorized:
             send_whatsapp_text(
                 to=sender_wa_id,
@@ -1052,17 +1088,13 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         return True
 
     # ── Action: APPROVE ─────────────────────────────────────────────
-    # Case A: Single-step approval (e.g. branch_manager's leave approved by super_admin)
-    if applicant_role == 'branch_manager' or (approver.role == 'super_admin' and not step2_role):
-        if approver.role != 'super_admin':
-            send_whatsapp_text(
-                to=sender_wa_id,
-                body="Only super_admin can approve a branch manager's leave."
-            )
-            return True
-
-        app.first_approver = approver
-        app.first_approved_at = now
+    # Case 1: Super Admin Approves (Immediate full approval at any point)
+    if is_super_admin:
+        if not app.first_approver:
+            app.first_approver = approver
+            app.first_approved_at = now
+        app.second_approver = approver
+        app.second_approved_at = now
         app.status = 'approved'
         app.reviewed_by = approver
         app.reviewed_at = now
@@ -1072,13 +1104,74 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
 
         send_whatsapp_text(
             to=sender_wa_id,
-            body=f"✅ You have APPROVED the leave request for {applicant_name} ({app.from_date} to {app.to_date})."
+            body=f"✅ Leave application for {applicant_name} ({app.from_date} to {app.to_date}) is now fully APPROVED."
         )
         return True
 
-    # Case B: If Step 1 has already been approved, proceed to Step 2 if authorized!
+    # Case 2: Applicant is Sales User
+    if applicant_role in SALES_ROLES:
+        if is_cmo:
+            if app.first_approver:
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body=f"Step 1 approval for {applicant_name}'s leave has already been completed."
+                )
+                return True
+
+            app.first_approver = approver
+            app.first_approved_at = now
+            app.save(update_fields=['first_approver', 'first_approved_at'])
+
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body=f"✅ Step 1 approval recorded for {applicant_name}. Awaiting Super Admin final approval."
+            )
+            return True
+        else:
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body="Permission denied: Only CMO or Super Admin can approve leave for sales staff."
+            )
+            return True
+
+    # Case 3: Applicant is Branch Manager (Super Admin was handled in Case 1)
+    if applicant_role == 'branch_manager':
+        send_whatsapp_text(
+            to=sender_wa_id,
+            body="Only Super Admin can approve a Branch Manager's leave."
+        )
+        return True
+
+    # Case 4: Applicant is Head Coordinator
+    if applicant_role == 'head_coordinator':
+        if is_branch_manager:
+            if app.first_approver:
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body=f"Step 1 approval for {applicant_name}'s leave has already been completed."
+                )
+                return True
+
+            app.first_approver = approver
+            app.first_approved_at = now
+            app.save(update_fields=['first_approver', 'first_approved_at'])
+
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body=f"✅ Step 1 approval recorded for {applicant_name}. Awaiting Super Admin final approval."
+            )
+            return True
+        else:
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body="Permission denied: You are not authorized to approve this leave request."
+            )
+            return True
+
+    # Case 5: Other Staff (Faculty, Front Desk, Housekeeping, etc.)
+    # 5a. If Step 1 has already been approved by Head Coordinator
     if app.first_approver:
-        if is_step2_auth:
+        if is_branch_manager:
             app.second_approver = approver
             app.second_approved_at = now
             app.status = 'approved'
@@ -1093,32 +1186,32 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
                 body=f"✅ Leave application for {applicant_name} is now fully APPROVED."
             )
             return True
+        elif is_head_coordinator:
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body=f"Step 1 approval for {applicant_name}'s leave has already been completed. Awaiting Branch Manager or Super Admin approval."
+            )
+            return True
         else:
-            if is_step1_auth:
-                send_whatsapp_text(
-                    to=sender_wa_id,
-                    body=f"Step 1 approval for {applicant_name}'s leave has already been completed."
-                )
-            else:
-                send_whatsapp_text(
-                    to=sender_wa_id,
-                    body="Permission denied: You are not authorized to approve this leave request."
-                )
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body="Permission denied: You are not authorized to approve this leave request."
+            )
             return True
 
-    # Case C: Step 1 is NOT yet approved
-    if is_step1_auth:
+    # 5b. Step 1 is NOT yet approved
+    if is_head_coordinator:
         app.first_approver = approver
         app.first_approved_at = now
         app.save(update_fields=['first_approver', 'first_approved_at'])
 
         send_whatsapp_text(
             to=sender_wa_id,
-            body=f"✅ Step 1 approval recorded for {applicant_name}. Notification forwarded to {step2_role} for final approval."
+            body=f"✅ Step 1 approval recorded for {applicant_name}. Notification forwarded to Branch Manager for final approval."
         )
 
-        step2_users = get_approvers_for_step(app, step2_role)
-        if not step2_users.exists():
+        bm_users = get_approvers_for_step(app, 'branch_manager')
+        if not bm_users.exists():
             app.status = 'approved'
             app.reviewed_by = approver
             app.reviewed_at = now
@@ -1126,11 +1219,11 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
             finalize_leave_approval(app, approver, now)
             return True
 
-        for u in step2_users:
+        for bm in bm_users:
             notify(
-                str(u.id),
+                str(bm.id),
                 title="Leave awaiting your approval",
-                body=f"{applicant_name} leave approved by {approver_role}. Your approval needed.",
+                body=f"{applicant_name} leave approved by Head Coordinator. Your approval needed.",
                 metadata={"leave_id": str(app.id), "approval_step": 2, "skip_whatsapp": True},
                 email_template='emails/leave_applied.html',
                 email_context={
@@ -1141,37 +1234,16 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
                     'reason': app.reason,
                 }
             )
-            # Trigger WhatsApp with [Approve] & [Reject] buttons to Step 2 Approver
-            send_employee_leave_whatsapp_notification(app, u, approval_step=2)
+            send_employee_leave_whatsapp_notification(app, bm, approval_step=2)
 
         return True
 
-    # Case D: Step 2 approver or super_admin clicks while Step 1 is still pending
-    if is_step2_auth:
-        if approver.role == 'super_admin':
-            # Super Admin bypass: complete both steps directly
-            app.first_approver = approver
-            app.first_approved_at = now
-            app.second_approver = approver
-            app.second_approved_at = now
-            app.status = 'approved'
-            app.reviewed_by = approver
-            app.reviewed_at = now
-            app.save()
-
-            finalize_leave_approval(app, approver, now)
-
-            send_whatsapp_text(
-                to=sender_wa_id,
-                body=f"✅ Leave application for {applicant_name} is now fully APPROVED."
-            )
-            return True
-        else:
-            send_whatsapp_text(
-                to=sender_wa_id,
-                body=f"First approval by {step1_role} is required before Step 2 approval."
-            )
-            return True
+    if is_branch_manager:
+        send_whatsapp_text(
+            to=sender_wa_id,
+            body="First approval by Head Coordinator is required before Branch Manager approval."
+        )
+        return True
 
     send_whatsapp_text(
         to=sender_wa_id,
