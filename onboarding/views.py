@@ -444,27 +444,145 @@ class AdmissionListView(APIView):
         admission_id = data.get('id') or data.get('admission_id')
 
         if not admission_id:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'id is required. Admissions are created automatically when a lead is converted.',
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            # ── No id provided: auto-create a converted Lead + Admission ────────
+            # This supports the case where a student fills the admission form
+            # without a pre-existing lead/admission ID (e.g. walk-in / direct form).
+            # A new Lead (stage=converted) and its linked Admission are created on
+            # the fly, then the normal payment-setup flow runs exactly as usual.
+            try:
+                from django.db.models import Q
+                from django.utils import timezone as tz
+                from leads.models import Lead, LeadStage
 
-        # Find admission by ID or by linked lead ID
+                # Resolve branch from data or fall back to the request user's branch
+                branch_id = data.get('branch')
+                branch_obj = None
+                if branch_id:
+                    from branch.models import Branch
+                    branch_obj = Branch.objects.filter(id=branch_id).first()
+                if branch_obj is None and getattr(request.user, 'branch', None):
+                    branch_obj = request.user.branch
+
+                # Build the minimum required lead fields from the submitted form data
+                lead = Lead(
+                    form_type='inquiry',
+                    first_name=data.get('first_name', ''),
+                    surname=data.get('surname', ''),
+                    email=data.get('email') or None,
+                    phone_student=data.get('phone_student', ''),
+                    course=data.get('course') or None,
+                    group_module=data.get('group_module', ''),
+                    batch_attempt=data.get('batch_attempt', ''),
+                    location=data.get('location', ''),
+                    qualification=data.get('qualification', ''),
+                    reference=data.get('reference', ''),
+                    father_name=data.get('father_name', ''),
+                    phone_father=data.get('phone_father', ''),
+                    street=data.get('street', ''),
+                    apartment=data.get('apartment', ''),
+                    city=data.get('city', ''),
+                    state=data.get('state', ''),
+                    country=data.get('country', 'India'),
+                    consent=bool(data.get('consent', False)),
+                    current_stage='converted',
+                    converted_at=tz.localdate(),
+                    branch=branch_obj,
+                )
+                lead.save()
+
+                # Record the converted stage in LeadStage history
+                LeadStage.objects.create(
+                    lead=lead,
+                    stage='converted',
+                    changed_by=request.user if request.user.is_authenticated else None,
+                    note='Auto-converted: admission form submitted without a pre-existing ID.',
+                )
+
+                # Resolve assigned counsellor (optional)
+                assigned_counsellor = None
+                counsellor_id = data.get('assigned_counsellor')
+                if counsellor_id:
+                    from auth_user.models import User as AuthUser
+                    assigned_counsellor = AuthUser.objects.filter(id=counsellor_id).first()
+                if assigned_counsellor is None and getattr(request.user, 'role', '') == 'counsellor':
+                    assigned_counsellor = request.user
+
+                auto_note = (
+                    f'Auto-created: admission form submitted without an ID. '
+                    f'New lead #{lead.id} created with converted status.'
+                )
+
+                # Create the Admission with the same id as the new Lead (consistent
+                # with the existing lead-conversion flow in leads/views.py)
+                admission = Admission(
+                    id=lead.id,
+                    lead=lead,
+                    branch=branch_obj,
+                    status='form_pending',
+                    note=auto_note,
+                    assigned_counsellor=assigned_counsellor,
+                    first_name=lead.first_name,
+                    surname=lead.surname,
+                    email=lead.email or '',
+                    phone_student=lead.phone_student,
+                    course=lead.course,
+                    group_module=lead.group_module,
+                    batch_attempt=lead.batch_attempt,
+                    location=lead.location,
+                    qualification=lead.qualification,
+                    reference=lead.reference,
+                    father_name=lead.father_name,
+                    phone_father=lead.phone_father,
+                    street=lead.street,
+                    apartment=lead.apartment,
+                    city=lead.city,
+                    state=lead.state,
+                    country=lead.country,
+                    consent=lead.consent,
+                )
+                admission.save()
+
+                AdmissionStatusHistory.objects.create(
+                    admission=admission,
+                    status='form_pending',
+                    changed_by=request.user if request.user.is_authenticated else None,
+                    note=auto_note,
+                )
+
+                logger.info(
+                    f"Auto-created Lead #{lead.id} (converted) and Admission #{admission.id} "
+                    f"from a direct admission form submission (no id provided)."
+                )
+
+            except Exception as e:
+                logger.error(f"Auto-create Lead/Admission error (no id path): {e}")
+                return Response(
+                    {'success': False, 'message': f'Something went wrong while creating your record: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        # ── Normal path: id was provided — look up the existing admission ────────
+        if admission_id:
+            try:
+                from django.db.models import Q
+                admission = Admission.objects.filter(
+                    Q(id=admission_id) | Q(lead__id=admission_id)
+                ).first()
+                if not admission:
+                    return Response({'success': False, 'message': 'Admission not found for this ID.'}, status=status.HTTP_404_NOT_FOUND)
+
+                # Check permissions if necessary
+                if getattr(request.user, 'organization', None) and admission.branch and admission.branch.organization != request.user.organization:
+                    return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+            except Exception as e:
+                logger.error(f"Admission lookup error: {e}")
+                return Response(
+                    {'success': False, 'message': f'Something went wrong: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        # ── Common path: update admission fields, assign fee, and notify ─────────
         try:
-            from django.db.models import Q
-            admission = Admission.objects.filter(
-                Q(id=admission_id) | Q(lead__id=admission_id)
-            ).first()
-            if not admission:
-                return Response({'success': False, 'message': 'Admission not found for this ID.'}, status=status.HTTP_404_NOT_FOUND)
-
-            # Check permissions if necessary
-            if getattr(request.user, 'organization', None) and admission.branch and admission.branch.organization != request.user.organization:
-                return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-            
             serializer = AdmissionUpdateSerializer(admission, data=data, partial=True)
             if not serializer.is_valid():
                 return Response(
