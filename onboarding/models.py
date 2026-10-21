@@ -378,6 +378,38 @@ class Admission(models.Model):
         self.payment_history = history
         self.save(update_fields=['payment_history', 'updated_at'])
 
+    def update_payment_history_entry(self, match_event: str, updates: dict, fallback_event: str = None, fallback_data: dict = None):
+        """
+        Finds the LAST entry in payment_history whose 'event' matches `match_event`
+        and merges `updates` into it (in-place).
+        If no match is found and fallback_event + fallback_data are provided,
+        appends a new entry with fallback_event instead.
+        Persists to DB.
+        """
+        from django.utils import timezone
+        history = list(self.payment_history or [])
+        # find last matching entry
+        match_idx = None
+        for i in range(len(history) - 1, -1, -1):
+            if history[i].get('event') == match_event:
+                match_idx = i
+                break
+
+        if match_idx is not None:
+            history[match_idx].update({
+                'timestamp': timezone.now().isoformat(),
+                **updates,
+            })
+        elif fallback_event is not None:
+            history.append({
+                'event': fallback_event,
+                'timestamp': timezone.now().isoformat(),
+                **(fallback_data or updates),
+            })
+
+        self.payment_history = history
+        self.save(update_fields=['payment_history', 'updated_at'])
+
     def get_payment_history_list(self, request=None):
         """
         Returns full payment_history list including link sent events, payment transactions,

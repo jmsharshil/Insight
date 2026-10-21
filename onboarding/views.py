@@ -1819,19 +1819,36 @@ class RazorpayWebhookView(APIView):
                         except Exception as exc:
                             logger.error(f"Failed to dispatch payment receipt for Razorpay payment {payment.id}: {exc}")
 
-                        admission.add_payment_history_entry('payment_approved', {
-                            'payment_choice': 'online',
-                            'amount': float(amount_paid),
-                            'transaction_id': transaction_id,
-                            'razorpay_payment_id': transaction_id,
-                            'status': 'verified',
-                            'level': 'auto',
-                            'approver_role': 'system_razorpay',
-                            'verified_by': 'Razorpay (Direct to Bank)',
-                            'verified_at': timezone.now().isoformat(),
-                            'date': timezone.now().date().isoformat(),
-                            'note': enroll_note,
-                        })
+                        # Update the existing payment_link_created entry to verified.
+                        # Only add a new payment_approved entry if no prior link entry exists.
+                        admission.update_payment_history_entry(
+                            match_event='payment_link_created',
+                            updates={
+                                'status': 'verified',
+                                'transaction_id': transaction_id,
+                                'razorpay_payment_id': transaction_id,
+                                'amount': float(amount_paid),
+                                'verified_by': 'Razorpay (Direct to Bank)',
+                                'verified_at': timezone.now().isoformat(),
+                                'approver_role': 'system_razorpay',
+                                'level': 'auto',
+                                'note': enroll_note,
+                            },
+                            fallback_event='payment_approved',
+                            fallback_data={
+                                'payment_choice': 'online',
+                                'amount': float(amount_paid),
+                                'transaction_id': transaction_id,
+                                'razorpay_payment_id': transaction_id,
+                                'status': 'verified',
+                                'level': 'auto',
+                                'approver_role': 'system_razorpay',
+                                'verified_by': 'Razorpay (Direct to Bank)',
+                                'verified_at': timezone.now().isoformat(),
+                                'date': timezone.now().date().isoformat(),
+                                'note': enroll_note,
+                            },
+                        )
 
                         # Informational notification only (no manual approval required)
                         try:
