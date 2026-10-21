@@ -1618,7 +1618,7 @@ class MyFeesAPIView(APIView):
         if payment_choice == 'online':
             from .razorpay_service import create_payment_link
 
-            unique_ref = f"SF_{student_fee.id}_full_payment_{int(time.time())}"
+            unique_ref = f"SF_{int(time.time())}_{student_fee.id.hex[:16]}"
             course_name = (
                 student_fee.fee_structure.name
                 if (student_fee.fee_structure and student_fee.fee_structure.name)
@@ -1631,6 +1631,12 @@ class MyFeesAPIView(APIView):
             if len(clean_phone) > 10:
                 clean_phone = clean_phone[-10:]
 
+            notes = {
+                'student_fee_id': str(student_fee.id),
+                'student_id': str(student.id),
+                'payment_type': 'full_payment',
+            }
+
             result = create_payment_link(
                 amount=float(amount_due),
                 reference_id=unique_ref,
@@ -1638,6 +1644,7 @@ class MyFeesAPIView(APIView):
                 customer_email=student.email or '',
                 customer_contact=clean_phone,
                 description=description,
+                notes=notes,
             )
 
             if not result.get('success'):
@@ -1819,13 +1826,22 @@ class RazorpayGeneratePaymentLinkView(APIView):
         except Exception:
             pass
 
+        import time
+        ref_id = f"SF_{int(time.time())}_{sf.id.hex[:16]}"
+        notes = {
+            'student_fee_id': str(sf.id),
+            'student_id': str(student.id),
+            'payment_type': str(payment_type),
+        }
+
         result = create_payment_link(
             amount               = amount,
-            reference_id         = f"SF_{sf.id}_{payment_type}",
+            reference_id         = ref_id,
             customer_name        = student.full_name,
             customer_email       = student.email or '',
             customer_contact     = student.phone or '',
             description          = f"Fee Payment — {fee_structure.name if fee_structure else 'Insight Institute'}",
+            notes                = notes,
         )
 
         if not result['success']:

@@ -50,18 +50,20 @@ def create_payment_link(
     customer_contact,
     description="Fee Payment",
     upi_id=None,
+    notes=None,
 ) -> dict:
     """
     Create a Razorpay Payment Link.
 
     Args:
         amount              – Amount in INR (int/float/Decimal).
-        reference_id        – Unique reference string (e.g. "ADM_42", "SF_<uuid>_token_full").
+        reference_id        – Unique reference string (max 40 chars).
         customer_name       – Student / payer full name.
         customer_email      – Customer email.
         customer_contact    – Customer phone (10-digit, no country code prefix needed).
         description         – Short description shown on the payment page.
         upi_id              – (Unused in API; UPI deep-link is built separately.)
+        notes               – Optional dictionary of metadata key-value pairs (max 15 pairs).
 
     Returns:
         { "success": True, "data": <razorpay response dict> }
@@ -77,11 +79,15 @@ def create_payment_link(
     except (ValueError, TypeError):
         return {"success": False, "error": "Invalid amount provided."}
 
+    ref_str = str(reference_id or '')
+    if len(ref_str) > 40:
+        ref_str = ref_str[:40]
+
     payload = {
         "amount": _to_paise(amount),
         "currency": "INR",
         "accept_partial": False,
-        "reference_id": str(reference_id),
+        "reference_id": ref_str,
         "description": description,
         "customer": {
             "name": customer_name or "",
@@ -94,6 +100,8 @@ def create_payment_link(
         },
         "reminder_enable": True,
     }
+    if notes and isinstance(notes, dict):
+        payload["notes"] = {str(k): str(v)[:256] for k, v in notes.items()}
 
     try:
         resp = http_requests.post(
@@ -507,17 +515,27 @@ def process_payment_link_paid_event(payload: dict) -> dict:
 
         # ── StudentFee flow ───────────────────────────────────────────────
         if reference_id.startswith('SF_'):
-            parts = reference_id.split('_')
-            sf_id = parts[1] if len(parts) > 1 else None
+            notes = link_entity.get('notes', {}) or pay_entity.get('notes', {}) or {}
+            sf_id = notes.get('student_fee_id')
             if not sf_id:
-                return {"success": False, "error": "Could not parse SF id from reference_id."}
+                parts = reference_id.split('_')
+                sf_id = parts[1] if len(parts) > 1 else None
+
+            if not sf_id:
+                return {"success": False, "error": "Could not parse SF id from reference_id or notes."}
 
             from .models import StudentFee, Payment
             from .utils import update_student_fee_status
 
+            sf = None
             try:
                 sf = StudentFee.objects.select_related('student').get(pk=sf_id)
-            except StudentFee.DoesNotExist:
+            except (StudentFee.DoesNotExist, ValueError):
+                std_id = notes.get('student_id')
+                if std_id:
+                    sf = StudentFee.objects.select_related('student').filter(student_id=std_id).order_by('-created_at').first()
+
+            if not sf:
                 logger.error(f"Razorpay webhook: StudentFee {sf_id} not found.")
                 return {"success": False, "error": f"StudentFee {sf_id} not found."}
 
