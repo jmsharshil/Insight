@@ -246,6 +246,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         elif isinstance(target_date, datetime):
             target_date = target_date.date()
 
+        if self.is_day_off(target_date):
+            return Decimal('0.00')
+
         day_name = target_date.strftime('%A').lower() if isinstance(target_date, date) else normalize_day_name(target_date)
 
         if self.weekly_schedule and isinstance(self.weekly_schedule, dict) and day_name in self.weekly_schedule:
@@ -277,13 +280,18 @@ class User(AbstractBaseUser, PermissionsMixin):
     def is_day_off(self, target_date=None):
         """
         Returns True if target_date is an off day for this user based on weekly_schedule.
+        Supports saturday_rule:
+          * 'odd': 1st, 3rd, 5th Saturday of month is working; 2nd, 4th Saturday is off.
+          * 'even': 2nd, 4th Saturday of month is working; 1st, 3rd, 5th Saturday is off.
+          * 'off': All Saturdays are off.
+          * 'all': All Saturdays are working.
         If is_off is explicitly set to True for this day, returns True.
         If weekly_schedule is configured and is_off is False, returns False.
         Falls back to Sunday (weekday 6) being off if no weekly_schedule is configured.
         """
         from django.utils import timezone
         from datetime import datetime, date
-        from auth_user.utils import normalize_day_name
+        from auth_user.utils import normalize_day_name, is_saturday_off
 
         if target_date is None:
             target_date = timezone.localdate()
@@ -300,6 +308,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         if self.weekly_schedule and isinstance(self.weekly_schedule, dict) and day_name in self.weekly_schedule:
             day_data = self.weekly_schedule[day_name]
             if isinstance(day_data, dict):
+                if day_name == 'saturday':
+                    sat_rule = day_data.get('saturday_rule') or day_data.get('rule') or day_data.get('mode')
+                    if sat_rule:
+                        return is_saturday_off(target_date, sat_rule)
                 return bool(day_data.get('is_off', False))
 
         return dow == 6 if dow is not None else False

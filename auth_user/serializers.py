@@ -203,6 +203,15 @@ class EmployeeFieldsMixin:
                     'working_hours': mutable_data.pop(wh_key, None),
                     'is_off': is_off_val,
                 }
+
+        # Check for saturday_rule in flat fields (e.g. saturday_rule='odd')
+        sat_rule_val = mutable_data.pop('saturday_rule', None) or mutable_data.pop('sat_rule', None)
+        if sat_rule_val:
+            if 'saturday' not in flat_schedule:
+                flat_schedule['saturday'] = {'saturday_rule': str(sat_rule_val).strip().lower()}
+            else:
+                flat_schedule['saturday']['saturday_rule'] = str(sat_rule_val).strip().lower()
+
         if flat_schedule:
             existing_sched = mutable_data.get('weekly_schedule') or (
                 getattr(self.instance, 'weekly_schedule', None) if self.instance else None

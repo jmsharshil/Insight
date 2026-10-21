@@ -623,15 +623,34 @@ def process_weekly_schedule(schedule_data):
         else:
             calc_wh = Decimal('0.00')
 
-        if calc_wh > 0 and not is_off:
+        sat_rule = None
+        if day_key == 'saturday':
+            raw_rule = entry.get('saturday_rule') or entry.get('rule') or entry.get('mode')
+            if raw_rule is not None:
+                r_str = str(raw_rule).strip().lower()
+                if r_str in ('odd', 'odd_saturday', 'odd_saturdays'):
+                    sat_rule = 'odd'
+                elif r_str in ('even', 'even_saturday', 'even_saturdays'):
+                    sat_rule = 'even'
+                elif r_str in ('all', 'all_working'):
+                    sat_rule = 'all'
+                elif r_str in ('off', 'all_off'):
+                    sat_rule = 'off'
+                    is_off = True
+
+        if calc_wh > 0 and not is_off and sat_rule != 'off':
             active_working_hours.append(calc_wh)
 
-        normalized[day_key] = {
+        day_dict = {
             'start_time': clean_start,
             'end_time': clean_end,
             'working_hours': float(calc_wh),
             'is_off': is_off,
         }
+        if sat_rule:
+            day_dict['saturday_rule'] = sat_rule
+
+        normalized[day_key] = day_dict
 
     avg_hours = Decimal('0.00')
     if active_working_hours:
@@ -640,4 +659,55 @@ def process_weekly_schedule(schedule_data):
         )
 
     return normalized, avg_hours
+
+
+def is_saturday_off(target_date, saturday_rule):
+    """
+    Given a target_date (date or datetime) and saturday_rule ('odd', 'even', 'all', 'off'),
+    determines whether that Saturday is an off day.
+
+    Odd Saturdays: 1st, 3rd, 5th Saturday of the month.
+    Even Saturdays: 2nd, 4th Saturday of the month.
+
+    saturday_rule == 'odd':
+      - 1, 3, 5 Saturday -> False (working day)
+      - 2, 4 Saturday    -> True (off day)
+
+    saturday_rule == 'even':
+      - 2, 4 Saturday    -> False (working day)
+      - 1, 3, 5 Saturday -> True (off day)
+
+    saturday_rule == 'all':
+      - All Saturdays   -> False (working day)
+
+    saturday_rule == 'off':
+      - All Saturdays   -> True (off day)
+    """
+    if not saturday_rule:
+        return False
+    rule = str(saturday_rule).strip().lower()
+    if rule in ('all', 'all_working'):
+        return False
+    if rule in ('off', 'all_off'):
+        return True
+
+    from datetime import datetime, date
+    if isinstance(target_date, datetime):
+        target_date = target_date.date()
+    if not isinstance(target_date, date):
+        return False
+
+    # Check if target_date is indeed Saturday
+    if target_date.weekday() != 5:
+        return False
+
+    occurrence = (target_date.day - 1) // 7 + 1
+    is_odd = (occurrence % 2 != 0)
+
+    if rule in ('odd', 'odd_saturday', 'odd_saturdays'):
+        return not is_odd  # odd is working (False), even is off (True)
+    elif rule in ('even', 'even_saturday', 'even_saturdays'):
+        return is_odd      # even is working (False), odd is off (True)
+
+    return False
 

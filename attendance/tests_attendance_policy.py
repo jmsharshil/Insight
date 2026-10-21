@@ -97,3 +97,147 @@ class AttendancePolicyTests(SimpleTestCase):
         self.assertEqual(msg, '')
         record.save.assert_not_called()
 
+    def test_half_day_leave_afternoon_session_less_than_5_hours_marked_absent(self):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from attendance.utils import apply_half_day_rule
+
+        mock_leave = SimpleNamespace(
+            half_day_session='afternoon',
+            get_half_day_session_display=lambda: 'Afternoon',
+        )
+        user = SimpleNamespace(
+            working_hours=Decimal('9.00'),
+            get_working_hours_for_date=lambda dt: Decimal('9.00'),
+            active_half_day_leave=mock_leave,
+        )
+        record = MagicMock()
+        record.date = datetime(2026, 10, 21).date()
+        record.checked_in_at = datetime(2026, 10, 21, 9, 0, 0)
+        record.checked_out_at = datetime(2026, 10, 21, 13, 30, 0)  # 4.5 hours worked (< 5)
+        record.status = 'present'
+        record.timetable_slot = None
+
+        msg = apply_half_day_rule(record, user)
+
+        self.assertEqual(record.status, 'absent')
+        self.assertIn("applied for half day leave (Afternoon session)", msg)
+        self.assertIn("less than 5 hours", msg)
+        self.assertIn("considered as absent", msg)
+        record.save.assert_called_once_with(update_fields=['status'])
+
+    def test_half_day_leave_morning_session_less_than_5_hours_marked_absent(self):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from attendance.utils import apply_half_day_rule
+
+        mock_leave = SimpleNamespace(
+            half_day_session='morning',
+            get_half_day_session_display=lambda: 'Morning',
+        )
+        user = SimpleNamespace(
+            working_hours=Decimal('9.00'),
+            get_working_hours_for_date=lambda dt: Decimal('9.00'),
+            active_half_day_leave=mock_leave,
+        )
+        record = MagicMock()
+        record.date = datetime(2026, 10, 21).date()
+        record.checked_in_at = datetime(2026, 10, 21, 14, 0, 0)
+        record.checked_out_at = datetime(2026, 10, 21, 17, 30, 0)  # 3.5 hours worked (< 5)
+        record.status = 'present'
+        record.timetable_slot = None
+
+        msg = apply_half_day_rule(record, user)
+
+        self.assertEqual(record.status, 'absent')
+        self.assertIn("applied for half day leave (Morning session)", msg)
+        self.assertIn("less than 5 hours", msg)
+        self.assertIn("considered as absent", msg)
+        record.save.assert_called_once_with(update_fields=['status'])
+
+    def test_half_day_leave_afternoon_session_5_hours_marked_half_day(self):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from attendance.utils import apply_half_day_rule
+
+        mock_leave = SimpleNamespace(
+            half_day_session='afternoon',
+            get_half_day_session_display=lambda: 'Afternoon',
+        )
+        user = SimpleNamespace(
+            working_hours=Decimal('9.00'),
+            get_working_hours_for_date=lambda dt: Decimal('9.00'),
+            active_half_day_leave=mock_leave,
+        )
+        record = MagicMock()
+        record.date = datetime(2026, 10, 21).date()
+        record.checked_in_at = datetime(2026, 10, 21, 9, 0, 0)
+        record.checked_out_at = datetime(2026, 10, 21, 14, 0, 0)  # 5.0 hours worked (>= 5)
+        record.status = 'present'
+        record.timetable_slot = None
+
+        msg = apply_half_day_rule(record, user)
+
+        self.assertEqual(record.status, 'half_day')
+        self.assertIn("with half day leave (Afternoon session)", msg)
+        self.assertIn("considered as a half day", msg)
+        record.save.assert_called_once_with(update_fields=['status'])
+
+    def test_half_day_leave_morning_session_6_hours_marked_half_day(self):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from attendance.utils import apply_half_day_rule
+
+        mock_leave = SimpleNamespace(
+            half_day_session='morning',
+            get_half_day_session_display=lambda: 'Morning',
+        )
+        user = SimpleNamespace(
+            working_hours=Decimal('9.00'),
+            get_working_hours_for_date=lambda dt: Decimal('9.00'),
+            active_half_day_leave=mock_leave,
+        )
+        record = MagicMock()
+        record.date = datetime(2026, 10, 21).date()
+        record.checked_in_at = datetime(2026, 10, 21, 13, 0, 0)
+        record.checked_out_at = datetime(2026, 10, 21, 19, 0, 0)  # 6.0 hours worked (>= 5)
+        record.status = 'present'
+        record.timetable_slot = None
+
+        msg = apply_half_day_rule(record, user)
+
+        self.assertEqual(record.status, 'half_day')
+        self.assertIn("with half day leave (Morning session)", msg)
+        self.assertIn("considered as a half day", msg)
+        record.save.assert_called_once_with(update_fields=['status'])
+
+    def test_get_required_shift_minutes_with_half_day_leave(self):
+        from unittest.mock import patch, MagicMock
+        from attendance.views import _get_required_shift_minutes
+
+        user = MagicMock()
+        user.id = 'some-uuid'
+        target_date = datetime(2026, 10, 21).date()
+
+        with patch('leave.models.LeaveApplication.objects.filter') as mock_filter:
+            mock_filter.return_value.exists.return_value = True
+            mins = _get_required_shift_minutes(user, target_date)
+            self.assertEqual(mins, 300)  # 5 hours = 300 minutes
+
+    def test_get_required_shift_minutes_without_half_day_leave(self):
+        from unittest.mock import patch, MagicMock
+        from decimal import Decimal
+        from attendance.views import _get_required_shift_minutes
+
+        user = MagicMock()
+        user.id = 'some-uuid'
+        user.get_working_hours_for_date.return_value = Decimal('9.00')
+        target_date = datetime(2026, 10, 21).date()
+
+        with patch('leave.models.LeaveApplication.objects.filter') as mock_filter:
+            mock_filter.return_value.exists.return_value = False
+            mins = _get_required_shift_minutes(user, target_date)
+            self.assertEqual(mins, 540)  # 9 hours = 540 minutes
+
+
+

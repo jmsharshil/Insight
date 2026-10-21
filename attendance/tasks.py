@@ -494,11 +494,13 @@ def auto_mark_staff_absentees_eod(target_date=None):
             is_active=True
         ).exclude(role__in=['student', 'parents', 'faculty', 'super_admin'])
         
+        # Only full-day approved leaves exempt staff from having to check in
         leave_user_ids = set(
             LeaveApplication.objects.filter(
                 from_date__lte=today,
                 to_date__gte=today,
-                status='approved'
+                status='approved',
+                is_half_day=False,
             ).values_list('applied_by_id', flat=True)
         )
         
@@ -525,12 +527,30 @@ def auto_mark_staff_absentees_eod(target_date=None):
             EmployeeAttendanceRecord.objects.bulk_create(records, ignore_conflicts=True)
             logger.info(f"Auto-marked {len(records)} staff members absent for {today}.")
             
-        # Mark missing checkouts as half-day
+        # For staff who applied for half-day leave but never checked out:
+        # they did not complete 5 hours of check-in check-out, so mark as absent
+        half_day_leave_user_ids = set(
+            LeaveApplication.objects.filter(
+                from_date__lte=today,
+                to_date__gte=today,
+                status__in=['approved', 'approval_pending'],
+                is_half_day=True,
+            ).values_list('applied_by_id', flat=True)
+        )
+        if half_day_leave_user_ids:
+            EmployeeAttendanceRecord.objects.filter(
+                date=today,
+                user_id__in=half_day_leave_user_ids,
+                checked_in_at__isnull=False,
+                checked_out_at__isnull=True,
+            ).update(status='absent')
+
+        # Mark other missing checkouts as half-day
         updated_count = EmployeeAttendanceRecord.objects.filter(
             date=today,
             checked_in_at__isnull=False,
-            checked_out_at__isnull=True
-        ).update(status='half_day')
+            checked_out_at__isnull=True,
+        ).exclude(user_id__in=half_day_leave_user_ids).update(status='half_day')
         if updated_count > 0:
             logger.info(f"Auto-marked {updated_count} staff members as half_day for missing checkout on {today}.")
             

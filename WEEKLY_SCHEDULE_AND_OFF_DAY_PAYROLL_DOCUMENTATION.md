@@ -90,23 +90,36 @@ Each day's entry in `user.weekly_schedule` contains 4 standard attributes:
     "start_time": "10:00:00",
     "end_time": "19:00:00",
     "working_hours": 9.0,
-    "is_off": false
+    "is_off": false,
+    "saturday_rule": "odd"
   }
 }
 ```
+
+#### Saturday Rule (`saturday_rule`) Options:
+- `"odd"`: **1st, 3rd, 5th Saturday** of each month is a **working day**; **2nd, 4th Saturday** is an **off day** (`is_day_off: true`).
+- `"even"`: **2nd, 4th Saturday** of each month is a **working day**; **1st, 3rd, 5th Saturday** is an **off day** (`is_day_off: true`).
+- `"all"`: Every Saturday is a working day (standard).
+- `"off"`: Every Saturday is an off day (`is_off: true`).
+
+The occurrence number of Saturday in the month is computed mathematically as:
+$$\text{Occurrence} = \left\lfloor\frac{\text{day} - 1}{7}\right\rfloor + 1$$
+- $\text{Occurrence} \pmod 2 \neq 0 \implies \text{Odd Saturday (1, 3, 5)}$
+- $\text{Occurrence} \pmod 2 = 0 \implies \text{Even Saturday (2, 4)}$
 
 ### 3.2 Processing Routine (`auth_user/utils.py:process_weekly_schedule`)
 
 The `process_weekly_schedule(schedule_data)` utility:
 1. **Normalizes Day Keys**: Accepts day names or integer weekday indices (e.g. `'monday'`, `'Monday'`, `'MON'`, `0`).
 2. **Safe Boolean Parsing**: Parses `is_off` values from JSON booleans or form strings (`"true"`, `"false"`, `"1"`, `"0"`, `"yes"`, `"t"`).
-3. **Auto-Calculates Daily Working Hours**:
+3. **Parses & Preserves `saturday_rule`**: Supports `'odd'`, `'even'`, `'all'`, and `'off'`. Also supported via flat form fields (`saturday_rule='odd'`).
+4. **Auto-Calculates Daily Working Hours**:
    - If `start_time` and `end_time` are provided, computes:
      $$\text{Daily Working Hours} = \frac{\text{end\_time} - \text{start\_time}}{3600}$$
      (handles midnight-crossing shifts automatically).
    - If explicit `working_hours` is sent, that value is preserved.
    - If marked `is_off: true`, the day's scheduled shift duration is still stored in `weekly_schedule[day]['working_hours']` for reference.
-4. **Averages Non-Off Days for User.working_hours**:
+5. **Averages Non-Off Days for User.working_hours**:
    - Averages all active working days (`is_off: false` and `working_hours > 0`):
      $$\text{User.working\_hours} = \frac{\sum \text{Active Daily Hours}}{\text{Total Active Days}}$$
    - Off days (`is_off: true`) do **not** dilute the active daily average.
