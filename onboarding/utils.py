@@ -181,38 +181,81 @@ class AdmissionService:
         except Exception as e:
             logger.error(f"Student email sending failed for admission {admission.id}: {e}")
 
-        parent_phone = re.sub(r'\D', '', admission.phone_father or admission.phone_father_2 or '')
-        
-        if admission.email_parent and parent_phone:
-            if admission.email_parent.lower() == admission.email.lower():
-                logger.info(f"Skipping parent account creation for admission {admission.id}: Parent email is identical to student email.")
-            else:
-                parent_name  = admission.father_name.strip() or f"Parent of {student_name}"
+        # ── Parent User Account Creation ──────────────────────────────────────
+        raw_father = admission.father_name.strip() if admission.father_name else ''
+        raw_mother = admission.mother_name.strip() if admission.mother_name else ''
+        parent_name = raw_father or raw_mother or f"Parent of {student_name}"
 
-                parent_username = student_username.replace('_S_', '_P_', 1)
+        # Safely determine parent phone (with fallbacks to student phone numbers)
+        parent_phone = re.sub(
+            r'\D', '',
+            admission.phone_father or admission.phone_father_2 or admission.phone_student_2 or admission.phone_student or ''
+        )
 
-                parent_user, parent_password = AdmissionService._create_or_update_user(
-                    email=admission.email_parent,
-                    phone=parent_phone,
-                    name=parent_name,
+        # Safely determine parent email (fallback to student email if not separately provided)
+        parent_email = (admission.email_parent or '').strip()
+        if not parent_email:
+            parent_email = (admission.email or '').strip()
+
+        if parent_email and parent_phone:
+            # Generate guaranteed-unique username for parent
+            try:
+                parent_username, _ = generate_username(
                     role='parents',
-                    linked_student=student_user,
-                    organization=admission.branch.organization if admission.branch else None,
                     branch=admission.branch,
-                    username=parent_username,
+                    course=admission.course,
+                    batch_attempt=admission.batch_attempt,
+                    attempt_year=admission.attempt_year,
                 )
-                parent_user.branches.set([admission.branch]) if admission.branch else None
+            except Exception:
+                parent_username = student_username.replace('_S_', '_P_', 1) if '_S_' in student_username else f"{student_username}_P"
 
+            counter = 1
+            base_p_username = parent_username
+            while User.objects.filter(username=parent_username).exists():
+                parent_username = f"{base_p_username}_{counter}"
+                counter += 1
+
+            parent_user, parent_password = AdmissionService._create_or_update_user(
+                email=parent_email,
+                phone=parent_phone,
+                name=parent_name,
+                role='parents',
+                linked_student=student_user,
+                organization=admission.branch.organization if admission.branch else None,
+                branch=admission.branch,
+                username=parent_username,
+            )
+            if admission.branch:
+                parent_user.branches.set([admission.branch])
+
+            # Ensure ParentLink is established if Student master profile exists
+            if hasattr(admission, 'student_profile') and admission.student_profile:
                 try:
-                    if parent_password:
-                        send_parent_login_credentials(parent_user, student_user, parent_password)
-                        logger.info(f"Parent credentials sent for admission {admission.id}")
-                    else:
-                        logger.info(f"Parent account already existed, added student link for admission {admission.id} (no new credentials sent).")
-                except Exception as e:
-                    logger.error(f"Parent email sending failed for admission {admission.id}: {e}")
+                    from students.models import ParentLink
+                    ParentLink.objects.get_or_create(
+                        student=admission.student_profile,
+                        parent=parent_user,
+                        defaults={
+                            'relationship': 'father' if raw_father else ('mother' if raw_mother else 'parent'),
+                            'is_primary': True,
+                        }
+                    )
+                except Exception as link_err:
+                    logger.error(f"Error creating ParentLink for admission {admission.id}: {link_err}")
+
+            try:
+                if parent_password:
+                    send_parent_login_credentials(parent_user, student_user, parent_password)
+                    logger.info(f"Parent credentials sent for admission {admission.id}")
+                else:
+                    # Parent account already existed: re-send or notify with student link
+                    send_parent_login_credentials(parent_user, student_user, "Use your existing password or reset if forgotten")
+                    logger.info(f"Parent account already existed, added student link for admission {admission.id}.")
+            except Exception as e:
+                logger.error(f"Parent email sending failed for admission {admission.id}: {e}")
         else:
-            logger.info(f"Skipping parent account creation for admission {admission.id} (missing email or phone).")
+            logger.warning(f"Skipping parent account creation for admission {admission.id} (missing email and phone).")
 
     # ── User Create / Update Helper ───────────────────────────────────────────
 
@@ -233,7 +276,12 @@ class AdmissionService:
         if not phone:
             raise ValueError("Phone is required to create login credentials.")
 
-        user = User.objects.filter(email__iexact=email).first()
+        # Look up by username first, or by (email, role) so parent and student don't collide if sharing an email
+        user = None
+        if username:
+            user = User.objects.filter(username=username).first()
+        if not user and email:
+            user = User.objects.filter(email__iexact=email, role=role).first()
 
         if user:
             if not user.username:
