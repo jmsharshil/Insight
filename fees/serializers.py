@@ -390,6 +390,53 @@ class PaymentListSerializer(serializers.ModelSerializer):
     batch_name = serializers.SerializerMethodField()
     payment_mode_display = serializers.CharField(source="get_payment_mode_display", read_only=True)
     fee_structure_name = serializers.SerializerMethodField()
+    payment_proof_url = serializers.SerializerMethodField()
+    payment_type = serializers.SerializerMethodField()
+    payment_type_display = serializers.SerializerMethodField()
+    payment_label = serializers.SerializerMethodField()
+
+    def get_payment_proof_url(self, obj):
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        proof = obj.payment_proof or obj.payment_document
+        if not proof and obj.admission and obj.admission.payment_screenshot:
+            proof = obj.admission.payment_screenshot
+        if proof:
+            try:
+                url = proof.url
+                if request:
+                    return request.build_absolute_uri(url)
+                return url
+            except Exception:
+                return str(proof)
+        return None
+
+    def get_payment_type(self, obj):
+        note = (obj.note or '').lower()
+        if 'token' in note:
+            return 'token'
+        if 'finance' in note:
+            return 'finance'
+        if 'remaining' in note:
+            return 'full_payment'
+        if obj.admission and getattr(obj.admission, 'payment_type', None):
+            return obj.admission.payment_type
+        if getattr(obj, 'student_fee', None) and getattr(obj.student_fee, 'fee_structure', None):
+            token_amt = obj.student_fee.fee_structure.token_amount
+            if token_amt and abs(float(obj.amount) - float(token_amt)) < 1.0:
+                return 'token'
+        return 'full_payment'
+
+    def get_payment_type_display(self, obj):
+        pt = self.get_payment_type(obj)
+        mapping = {
+            'token': 'Token Payment',
+            'full_payment': 'Full Payment',
+            'finance': 'Finance',
+        }
+        return mapping.get(pt, 'Fee Payment')
+
+    def get_payment_label(self, obj):
+        return self.get_payment_type_display(obj)
 
     def get_student_name(self, obj):
         if obj.student:
@@ -452,10 +499,11 @@ class PaymentListSerializer(serializers.ModelSerializer):
         fields = ['id', 'student', 'student_name', 'student_email', 'student_phone',
                   'admission', 'admission_id', 'student_fee',
                   'installment_item', 'amount', 'payment_mode',
-                  'transaction_ref', 'payment_proof', 'payment_document',
+                  'transaction_ref', 'payment_proof', 'payment_proof_url', 'payment_document',
+                  'payment_type', 'payment_type_display', 'payment_label',
                   'status', 'status_display', 'receipt_number',
                   'payment_date', 'created_at', 'payment_mode_display',
-                  'course_name', 'batch_name', 'fee_structure_name']
+                  'course_name', 'batch_name', 'fee_structure_name', 'note', 'verified_at']
 
 
 class PaymentDetailSerializer(serializers.ModelSerializer):
