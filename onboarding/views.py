@@ -647,6 +647,12 @@ class AdmissionListView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+    # The admission form may send PATCH instead of POST (typical for "update"
+    # semantics on a form).  Both verbs run identical logic: no-id → create
+    # new Lead + Admission, with-id → update the existing one.
+    def patch(self, request):
+        return self.post(request)
+
     def get(self, request):
         queryset = Admission.objects.all()
         
