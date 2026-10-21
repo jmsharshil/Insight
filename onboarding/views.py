@@ -585,7 +585,10 @@ class AdmissionListView(APIView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
-        # ── Common path: update admission fields, assign fee, and notify ─────────
+        # ── Common path: save admission fields only ───────────────────────────────
+        # Bank assignment / Razorpay link / WhatsApp notifications are handled by
+        # the dedicated  POST /api/admissions/<id>/setup/  endpoint so that slow
+        # external calls never block the form submission response.
         try:
             serializer = AdmissionUpdateSerializer(admission, data=data, partial=True)
             if not serializer.is_valid():
@@ -594,15 +597,6 @@ class AdmissionListView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             serializer.save()
-
-            _assign_fee_structure(admission)
-            # Cleaned: rely on shared helper (removes ~40 lines of duplication)
-            _setup_payment_bank_and_notify(admission)
-            try:
-                from .utils import sync_admission_payment
-                sync_admission_payment(admission, request=request)
-            except Exception as e:
-                logger.error(f"Error syncing admission payment in AdmissionListView.post: {e}")
 
         except Exception as e:
             logger.error(f"Admission update error: {e}")
@@ -1506,6 +1500,83 @@ class AdmissionDocumentUploadView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+# ── POST /api/admissions/<id>/setup/ ──────────────────────────────────────────
+# Runs all post-save actions (fee structure assignment, bank selection, Razorpay
+# link generation, WhatsApp notification) that were previously embedded in the
+# admission form POST.  Splitting them out keeps the form submission fast and
+# prevents external-service failures from rolling back the saved form data.
+#
+# Call this immediately after a successful POST /api/admissions/ response.
+# Public endpoint — student has no auth token at form-submission time.
+
+class AdmissionPaymentSetupView(APIView):
+
+    def get_permissions(self):
+        return [AllowAny()]
+
+    def post(self, request, admission_id):
+        from django.db.models import Q
+
+        # ── Lookup ────────────────────────────────────────────────────────────
+        try:
+            admission = Admission.objects.filter(
+                Q(id=admission_id) | Q(lead__id=admission_id)
+            ).first()
+        except Exception:
+            admission = None
+
+        if not admission:
+            return Response(
+                {'success': False, 'message': 'Admission not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── Fee structure ─────────────────────────────────────────────────────
+        try:
+            _assign_fee_structure(admission)
+        except Exception as e:
+            logger.error(f'AdmissionPaymentSetupView: fee structure error for {admission_id}: {e}')
+
+        # ── Bank assignment + Razorpay link + WhatsApp ────────────────────────
+        try:
+            _setup_payment_bank_and_notify(admission)
+        except Exception as e:
+            logger.error(f'AdmissionPaymentSetupView: payment setup error for {admission_id}: {e}')
+
+        # ── Sync payment record ───────────────────────────────────────────────
+        try:
+            from .utils import sync_admission_payment
+            sync_admission_payment(admission, request=request)
+        except Exception as e:
+            logger.error(f'AdmissionPaymentSetupView: sync error for {admission_id}: {e}')
+
+        # Re-fetch to pick up any field updates made by the helpers above
+        admission.refresh_from_db()
+
+        return Response(
+            {
+                'success': True,
+                'message': 'Payment setup completed.',
+                'data': {
+                    'admission_id':            admission.id,
+                    'status':                  admission.status,
+                    'status_display':          admission.get_status_display(),
+                    'payment_type':            admission.payment_type,
+                    'payment_choice':          admission.payment_choice,
+                    'payment_choice_display':  admission.get_payment_choice_display(),
+                    'total_fees':              admission.total_fees,
+                    'remaining_fees':          admission.remaining_fees,
+                    'is_paid':                 admission.is_paid,
+                    'is_razorpay_paid':        admission.is_razorpay_paid,
+                    'razorpay_payment_status': admission.razorpay_payment_status,
+                    'razorpay_payment_link':   admission.razorpay_payment_link,
+                    'payment_history':         admission.get_payment_history_list(),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 # ── POST /api/admissions/razorpay-webhook/ ─────────────────────────────────────
 
