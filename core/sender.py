@@ -79,19 +79,21 @@ def send_email(to, subject, cc=None, text="", template=None, attachments=None, t
     if template and template.endswith(".html"):
         ctx = {**(template_context or {})}
         if organization:
-            ctx.update({
-                'org_name': getattr(organization, 'name', ''),
-                'logo_url': getattr(organization, 'logo_url', ''),
-                'footer_text': getattr(organization, 'footer_text', ''),
-                'primary_color': getattr(organization, 'primary_color', ''),
-                'website_url': getattr(organization, 'website_url', ''),
-            })
+            org_name = getattr(organization, 'name', '') or 'Insight Institute'
+            ctx.setdefault('org_name', org_name)
+            ctx.setdefault('logo_url', getattr(organization, 'logo_url', ''))
+            ctx.setdefault('footer_text', getattr(organization, 'footer_text', ''))
+            ctx.setdefault('primary_color', getattr(organization, 'primary_color', '') or '#2563EB')
+            ctx.setdefault('website_url', getattr(organization, 'website_url', ''))
         else:
-            ctx.setdefault('org_name', 'Insight ERP')
+            ctx.setdefault('org_name', 'Insight Institute')
             ctx.setdefault('logo_url', '')
             ctx.setdefault('footer_text', '')
             ctx.setdefault('primary_color', '#2563EB')
             ctx.setdefault('website_url', '')
+
+        ctx.setdefault('play_store_url', 'https://play.google.com/store/apps/details?id=com.jmsinsight.app&hl=en_IN')
+        ctx.setdefault('app_store_url', 'https://apps.apple.com/in/app/insight-institute/id6780808050')
             
         html_body = render_to_string(template, ctx)
 

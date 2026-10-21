@@ -1510,12 +1510,46 @@ class MyFeesAPIView(APIView):
                 ),
             }
 
+        # Payment History (complete audit trail, same as admission form)
+        payment_history = []
+        if getattr(student, 'admission', None):
+            try:
+                payment_history = student.admission.get_payment_history_list(request=request)
+            except Exception as hist_err:
+                logger.error(f"Error fetching admission payment_history: {hist_err}")
+                payment_history = list(getattr(student.admission, 'payment_history', []) or [])
+        else:
+            for p in payments:
+                p_proof = None
+                if p.payment_proof:
+                    try:
+                        p_proof = request.build_absolute_uri(p.payment_proof.url) if request else p.payment_proof.url
+                    except Exception:
+                        p_proof = str(p.payment_proof)
+                payment_history.append({
+                    'event': 'payment_approved' if p.status == 'verified' else ('payment_rejected' if p.status == 'rejected' else 'payment_approval_pending'),
+                    'payment_choice': p.payment_mode,
+                    'payment_choice_display': p.payment_mode.title() if p.payment_mode else 'N/A',
+                    'amount': float(p.amount),
+                    'transaction_id': p.transaction_ref,
+                    'receipt_number': p.receipt_number,
+                    'status': p.status,
+                    'date': p.payment_date.isoformat() if p.payment_date else None,
+                    'created_at': p.created_at.isoformat() if p.created_at else None,
+                    'payment_screenshot': p_proof,
+                    'payment_proof': p_proof,
+                    'note': p.note or None,
+                    'total_fees': float(total_billed),
+                    'remaining_fees': float(total_due),
+                })
+
         return Response({
             'success': True, 
             'role': role, 
             'student_id': str(student.id),
             'admission_id': admission_id,
             'admission_number': admission_number,
+            'payment_history': payment_history,
             'data': {
                 'admission_id': admission_id,
                 'admission_number': admission_number,
@@ -1532,7 +1566,8 @@ class MyFeesAPIView(APIView):
                 'installments': [],  # Installments disabled for this flow (models/tables retained)
                 'installments_enabled': False,
                 'payments': payment_serializer.data,
-                'refunds': refund_serializer.data
+                'refunds': refund_serializer.data,
+                'payment_history': payment_history,
             }
         })
 
@@ -1595,6 +1630,13 @@ class MyFeesAPIView(APIView):
             if getattr(student, 'admission', None):
                 student.admission.payment_type = 'finance'
                 student.admission.save(update_fields=['payment_type', 'updated_at'])
+                student.admission.add_payment_history_entry('finance_process_selected', {
+                    'payment_type': 'finance',
+                    'amount_due': float(amount_due),
+                    'status': 'finance_selected',
+                    'date': timezone.now().date().isoformat(),
+                    'note': 'Student opted for Finance option for remaining fees.',
+                })
 
             return Response({
                 'success': True,
@@ -1665,6 +1707,16 @@ class MyFeesAPIView(APIView):
                 student.admission.razorpay_payment_link = link_url
                 student.admission.razorpay_payment_link_id = link_id
                 student.admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+                student.admission.add_payment_history_entry('payment_link_created', {
+                    'payment_choice': 'online',
+                    'payment_type': 'full_payment',
+                    'amount': float(amount_due),
+                    'razorpay_payment_link': link_url,
+                    'razorpay_payment_link_id': link_id,
+                    'status': 'pending',
+                    'date': timezone.now().date().isoformat(),
+                    'note': 'Remaining fee payment link generated via Razorpay.',
+                })
 
             return Response({
                 'success': True,
