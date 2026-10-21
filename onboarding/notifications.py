@@ -133,37 +133,45 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         submitted_at = str(sub_dt)[:19]
     submitted_at = " ".join(submitted_at.split())[:60]
 
-    PLACEHOLDER_RECEIPT_URL = (
-        "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net"
-        "/static/images/payment_receipt_placeholder.png"
-    )
-
-    # Resolve screenshot URL
+    # Resolve screenshot URL (student-uploaded payment proof)
     screenshot_url = get_payment_screenshot_url(admission)
 
-    # WhatsApp Cloud API template headers of type IMAGE only accept JPEG and PNG.
-    # PDFs and other formats must fall back to the placeholder image in the header,
-    # with the actual proof URL included in the body/fallback text.
-    header_image_url = screenshot_url
-    if not header_image_url:
-        header_image_url = PLACEHOLDER_RECEIPT_URL
-    else:
-        clean_path = header_image_url.split('?')[0].lower()
-        if not (clean_path.endswith('.jpg') or clean_path.endswith('.jpeg') or clean_path.endswith('.png')):
-            header_image_url = PLACEHOLDER_RECEIPT_URL
+    # Determine header component:
+    # WhatsApp IMAGE header only accepts JPEG / PNG.
+    # - If we have a valid image URL → use it as the dynamic header image.
+    # - If the file is a PDF / unknown format → omit the header (Meta will error
+    #   if we send a wrong media type for a static-IMAGE template).
+    # - If no screenshot at all → omit the header entirely (no broken placeholder).
+    SUPPORTED_IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 
-    components: List[Dict[str, Any]] = [
-        {
-            "type": "header",
-            "parameters": [
-                {
-                    "type": "image",
-                    "image": {
-                        "link": header_image_url
+    header_component = None
+    if screenshot_url:
+        # Strip query-string (Azure SAS tokens, CDN params, etc.) before checking extension
+        clean_path = screenshot_url.split('?')[0].lower()
+        # Also handle paths where the filename has no extension but content was stored
+        # with a known image MIME in the blob name (Azure sometimes adds type in the name)
+        is_image = any(clean_path.endswith(ext) for ext in SUPPORTED_IMAGE_EXTS)
+        if not is_image:
+            # Last-resort: if the URL path segment contains 'jpg' / 'jpeg' / 'png' (e.g. blob names)
+            import re as _re
+            is_image = bool(_re.search(r'\.(jpg|jpeg|png|webp)(?:[^/]*)$', clean_path))
+        if is_image:
+            header_component = {
+                "type": "header",
+                "parameters": [
+                    {
+                        "type": "image",
+                        "image": {"link": screenshot_url}
                     }
-                }
-            ]
-        },
+                ]
+            }
+        # else: PDF or unknown — omit header, proof URL is already in fallback_body text
+
+    components: List[Dict[str, Any]] = []
+    if header_component:
+        components.append(header_component)
+
+    components += [
         {
             "type": "body",
             "parameters": [
@@ -192,6 +200,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
             "parameters": [{"type": "payload", "payload": f"adm_pay_reject:{admission.id}"}]
         }
     ]
+
 
     fallback_body = (
         f"FEE PAYMENT VERIFICATION\n\n"
