@@ -1049,12 +1049,28 @@ class SalesActivityPhotoView(APIView):
                         duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
                         req_mins = 540
                         target_dt = getattr(open_rec, 'date', None) or checkout_time.date()
-                        if hasattr(activity.user, 'get_working_hours_for_date'):
-                            dwh = activity.user.get_working_hours_for_date(target_dt)
-                            if dwh > 0:
-                                req_mins = int(Decimal(str(dwh)) * 60)
-                        elif getattr(activity.user, 'working_hours', None) and activity.user.working_hours > 0:
-                            req_mins = int(Decimal(str(activity.user.working_hours)) * 60)
+                        has_half_day_leave = False
+                        try:
+                            from leave.models import LeaveApplication
+                            if target_dt and hasattr(activity.user, 'id') and LeaveApplication.objects.filter(
+                                applied_by=activity.user,
+                                from_date__lte=target_dt,
+                                to_date__gte=target_dt,
+                                is_half_day=True,
+                                status__in=['approved', 'approval_pending'],
+                            ).exists():
+                                req_mins = 300
+                                has_half_day_leave = True
+                        except Exception:
+                            pass
+
+                        if not has_half_day_leave:
+                            if hasattr(activity.user, 'get_working_hours_for_date'):
+                                dwh = activity.user.get_working_hours_for_date(target_dt)
+                                if dwh > 0:
+                                    req_mins = int(Decimal(str(dwh)) * 60)
+                            elif getattr(activity.user, 'working_hours', None) and activity.user.working_hours > 0:
+                                req_mins = int(Decimal(str(activity.user.working_hours)) * 60)
                         shortfall = max(0, req_mins - duration_mins)
                         open_rec.shortfall_minutes = shortfall
                     open_rec.save()

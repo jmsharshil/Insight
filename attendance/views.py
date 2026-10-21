@@ -49,8 +49,22 @@ def _get_required_shift_minutes(user, target_date=None):
     Computes required shift duration in minutes for an employee on a given date.
     Respects day-specific schedule (e.g. Saturday 4-hour half day) from get_working_hours_for_date,
     falling back to user.working_hours or default 9-hour (540 min) shift.
+    If employee applied for half-day leave on target_date, required shift is 5 hours (300 min).
     """
     from decimal import Decimal
+    try:
+        from leave.models import LeaveApplication
+        if target_date and hasattr(user, 'id') and LeaveApplication.objects.filter(
+            applied_by=user,
+            from_date__lte=target_date,
+            to_date__gte=target_date,
+            is_half_day=True,
+            status__in=['approved', 'approval_pending'],
+        ).exists():
+            return 5 * 60
+    except Exception:
+        pass
+
     if hasattr(user, 'get_working_hours_for_date') and target_date:
         day_req_hours = user.get_working_hours_for_date(target_date)
         if day_req_hours > 0:

@@ -655,5 +655,159 @@ class AuthUserAPITestCase(TestCase):
         self.assertEqual(payslip.attendance_bonus, Decimal('1000.00'))
         self.assertEqual(payslip.net_salary, Decimal('31000.00'))
 
+    def test_is_saturday_off_helper(self):
+        from .utils import is_saturday_off
+        from datetime import date
+        # October 2026 Saturdays:
+        # Oct 3  -> 1st Sat (odd)
+        # Oct 10 -> 2nd Sat (even)
+        # Oct 17 -> 3rd Sat (odd)
+        # Oct 24 -> 4th Sat (even)
+        # Oct 31 -> 5th Sat (odd)
+        sat_1 = date(2026, 10, 3)
+        sat_2 = date(2026, 10, 10)
+        sat_3 = date(2026, 10, 17)
+        sat_4 = date(2026, 10, 24)
+        sat_5 = date(2026, 10, 31)
+
+        # Non-Saturday (Friday) should never be an off Saturday
+        fri = date(2026, 10, 2)
+        self.assertFalse(is_saturday_off(fri, 'odd'))
+        self.assertFalse(is_saturday_off(fri, 'even'))
+
+        # Odd rule: 1, 3, 5 are working (is_off=False), 2, 4 are off (is_off=True)
+        self.assertFalse(is_saturday_off(sat_1, 'odd'))
+        self.assertTrue(is_saturday_off(sat_2, 'odd'))
+        self.assertFalse(is_saturday_off(sat_3, 'odd'))
+        self.assertTrue(is_saturday_off(sat_4, 'odd'))
+        self.assertFalse(is_saturday_off(sat_5, 'odd'))
+
+        # Even rule: 2, 4 are working (is_off=False), 1, 3, 5 are off (is_off=True)
+        self.assertTrue(is_saturday_off(sat_1, 'even'))
+        self.assertFalse(is_saturday_off(sat_2, 'even'))
+        self.assertTrue(is_saturday_off(sat_3, 'even'))
+        self.assertFalse(is_saturday_off(sat_4, 'even'))
+        self.assertTrue(is_saturday_off(sat_5, 'even'))
+
+        # All rule: All are working (is_off=False)
+        self.assertFalse(is_saturday_off(sat_1, 'all'))
+        self.assertFalse(is_saturday_off(sat_2, 'all'))
+
+        # Off rule: All are off (is_off=True)
+        self.assertTrue(is_saturday_off(sat_1, 'off'))
+        self.assertTrue(is_saturday_off(sat_2, 'off'))
+
+    def test_odd_and_even_saturday_user_methods(self):
+        from datetime import date
+        odd_user = User.objects.create_user(
+            username='odd_sat_user',
+            email='odd_sat@test.org',
+            password='Password123!',
+            phone='9222222221',
+            name='Odd Saturday User',
+            role='admin_executive',
+            weekly_schedule={
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'saturday': {'start_time': '10:00:00', 'end_time': '18:00:00', 'saturday_rule': 'odd'},
+                'sunday': {'is_off': True},
+            }
+        )
+
+        even_user = User.objects.create_user(
+            username='even_sat_user',
+            email='even_sat@test.org',
+            password='Password123!',
+            phone='9222222222',
+            name='Even Saturday User',
+            role='admin_executive',
+            weekly_schedule={
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'saturday': {'start_time': '10:00:00', 'end_time': '18:00:00', 'saturday_rule': 'even'},
+                'sunday': {'is_off': True},
+            }
+        )
+
+        # October 2026:
+        sat_1 = date(2026, 10, 3)   # 1st Sat (Odd)
+        sat_2 = date(2026, 10, 10)  # 2nd Sat (Even)
+        sat_3 = date(2026, 10, 17)  # 3rd Sat (Odd)
+        sat_4 = date(2026, 10, 24)  # 4th Sat (Even)
+        sat_5 = date(2026, 10, 31)  # 5th Sat (Odd)
+
+        # Odd User: 1, 3, 5 are working (8.00 hrs, is_off=False); 2, 4 are off (0.00 hrs, is_off=True)
+        self.assertFalse(odd_user.is_day_off(sat_1))
+        self.assertEqual(odd_user.get_working_hours_for_date(sat_1), Decimal('8.00'))
+
+        self.assertTrue(odd_user.is_day_off(sat_2))
+        self.assertEqual(odd_user.get_working_hours_for_date(sat_2), Decimal('0.00'))
+
+        self.assertFalse(odd_user.is_day_off(sat_3))
+        self.assertEqual(odd_user.get_working_hours_for_date(sat_3), Decimal('8.00'))
+
+        self.assertTrue(odd_user.is_day_off(sat_4))
+        self.assertEqual(odd_user.get_working_hours_for_date(sat_4), Decimal('0.00'))
+
+        self.assertFalse(odd_user.is_day_off(sat_5))
+        self.assertEqual(odd_user.get_working_hours_for_date(sat_5), Decimal('8.00'))
+
+        # Even User: 2, 4 are working (8.00 hrs, is_off=False); 1, 3, 5 are off (0.00 hrs, is_off=True)
+        self.assertTrue(even_user.is_day_off(sat_1))
+        self.assertEqual(even_user.get_working_hours_for_date(sat_1), Decimal('0.00'))
+
+        self.assertFalse(even_user.is_day_off(sat_2))
+        self.assertEqual(even_user.get_working_hours_for_date(sat_2), Decimal('8.00'))
+
+        self.assertTrue(even_user.is_day_off(sat_3))
+        self.assertEqual(even_user.get_working_hours_for_date(sat_3), Decimal('0.00'))
+
+        self.assertFalse(even_user.is_day_off(sat_4))
+        self.assertEqual(even_user.get_working_hours_for_date(sat_4), Decimal('8.00'))
+
+        self.assertTrue(even_user.is_day_off(sat_5))
+        self.assertEqual(even_user.get_working_hours_for_date(sat_5), Decimal('0.00'))
+
+    def test_add_user_serializer_with_saturday_rule_json_and_flat(self):
+        from .serializers import AddUserSerializer
+
+        # 1. Via nested weekly_schedule
+        data_json = {
+            'username': 'new_sat_odd_admin',
+            'email': 'sat_odd_admin@test.org',
+            'phone': '9333333331',
+            'name': 'Sat Odd Admin',
+            'role': 'admin_executive',
+            'weekly_schedule': {
+                'monday': {'start_time': '10:00:00', 'end_time': '19:00:00', 'is_off': False},
+                'saturday': {'start_time': '10:00:00', 'end_time': '18:00:00', 'saturday_rule': 'odd'},
+                'sunday': {'is_off': True},
+            }
+        }
+        ser1 = AddUserSerializer(data=data_json)
+        self.assertTrue(ser1.is_valid(), ser1.errors)
+        u1 = ser1.save()
+        self.assertIn('saturday', u1.weekly_schedule)
+        self.assertEqual(u1.weekly_schedule['saturday']['saturday_rule'], 'odd')
+        self.assertEqual(u1.weekly_schedule['saturday']['working_hours'], 8.0)
+
+        # 2. Via flat fields: saturday_start_time, saturday_end_time, saturday_rule
+        data_flat = {
+            'username': 'new_sat_even_admin',
+            'email': 'sat_even_admin@test.org',
+            'phone': '9333333332',
+            'name': 'Sat Even Admin',
+            'role': 'admin_executive',
+            'saturday_start_time': '09:00:00',
+            'saturday_end_time': '17:00:00',
+            'saturday_rule': 'even',
+            'sunday_is_off': True,
+        }
+        ser2 = AddUserSerializer(data=data_flat)
+        self.assertTrue(ser2.is_valid(), ser2.errors)
+        u2 = ser2.save()
+        self.assertIn('saturday', u2.weekly_schedule)
+        self.assertEqual(u2.weekly_schedule['saturday']['saturday_rule'], 'even')
+        self.assertEqual(u2.weekly_schedule['saturday']['working_hours'], 8.0)
+
+
 
 

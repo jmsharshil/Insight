@@ -798,10 +798,16 @@ def evaluate_daily_slots_attendance(
 def apply_half_day_rule(record, user, checkout_time=None):
     """
     Evaluates attendance status upon checkout:
-      - If the hours worked for the day on checkout is less than 5 hours: mark as 'absent'.
-      - If worked is 5 hours or more, but employee checks out >= 1 hour before their
-        required working_hours (shortfall >= 1 hour): mark as 'half_day'.
-      - Otherwise: remains as 'present' (full day worked).
+      - If user applied for a half-day leave for this date (morning or afternoon session):
+          * If check-in to check-out working hours is less than 5 hours:
+              it is NOT considered as half day, it should be marked as 'absent' for that day.
+          * If working hours is 5 hours or more:
+              it is considered as 'half_day'.
+      - Otherwise (no half-day leave applied):
+          * If hours worked is less than 5 hours: mark as 'absent'.
+          * If worked is 5 hours or more, but employee checks out >= 1 hour before their
+            required working_hours (shortfall >= 1 hour): mark as 'half_day'.
+          * Otherwise: remains as 'present' (full day worked).
     Returns a message to append to the checkout response.
     """
     from decimal import Decimal
@@ -844,6 +850,51 @@ def apply_half_day_rule(record, user, checkout_time=None):
     except Exception:
         pass
 
+    # Check if user applied for half-day leave for target_date
+    half_day_leave = getattr(user, 'active_half_day_leave', None)
+    if half_day_leave is None:
+        try:
+            from leave.models import LeaveApplication
+            if hasattr(user, 'id') or hasattr(user, '_meta'):
+                half_day_leave = LeaveApplication.objects.filter(
+                    applied_by=user,
+                    from_date__lte=target_date,
+                    to_date__gte=target_date,
+                    is_half_day=True,
+                    status__in=['approved', 'approval_pending'],
+                ).first()
+        except Exception:
+            half_day_leave = None
+
+    if half_day_leave:
+        session_name = getattr(half_day_leave, 'half_day_session', '') or ''
+        if session_name == 'morning':
+            session_display = 'Morning'
+        elif session_name == 'afternoon':
+            session_display = 'Afternoon'
+        else:
+            session_display = getattr(half_day_leave, 'get_half_day_session_display', lambda: '')() or 'Half Day'
+
+        session_str = f" ({session_display} session)" if session_display else ""
+
+        # If working hour on check in check out is less than 5 hours -> absent
+        if worked < Decimal('5'):
+            record.status = 'absent'
+            record.save(update_fields=['status'])
+            return (
+                f" You applied for half day leave{session_str} and worked {worked.quantize(Decimal('0.01'))} hours today, "
+                f"which is less than 5 hours, so this day is considered as absent."
+            )
+
+        # Working hour is 5 hours or more -> consider as half day
+        record.status = 'half_day'
+        record.save(update_fields=['status'])
+        return (
+            f" You worked {worked.quantize(Decimal('0.01'))} hours today with half day leave{session_str}, "
+            f"so this day is considered as a half day."
+        )
+
+    # Standard rules when no half-day leave was applied:
     # 1. Less than 5 hours -> Absent
     if worked < Decimal('5'):
         record.status = 'absent'
