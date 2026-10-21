@@ -76,6 +76,7 @@ Retrieves the authenticated student's fee summary, remaining balance, 15-day fin
 | `payments[].transaction_ref` | String | Transaction ID or cheque number |
 | `payments[].status` | String | `verified`, `approval_pending`, `level_1_approved` |
 | `payments[].receipt_number` | String | Unique payment receipt code |
+| `payment_history` | Array | **Same audit trail array as Admission Form**. Lists link generation, offline submissions, approvals, proofs, amounts, and dates |
 
 #### Example Response (Within 15-Day Window):
 ```json
@@ -85,6 +86,39 @@ Retrieves the authenticated student's fee summary, remaining balance, 15-day fin
   "student_id": "8a72b6c1-4c3e-4fa0-86c0-798cb3d41f12",
   "admission_id": 142,
   "admission_number": "ADM-2025-000142",
+  "payment_history": [
+    {
+      "event": "payment_link_created",
+      "payment_choice": "online",
+      "payment_type": "token",
+      "payment_type_display": "Token",
+      "amount": 5000.0,
+      "razorpay_payment_link": "https://rzp.io/i/abcdef123",
+      "razorpay_payment_link_id": "plink_P897Gf412",
+      "status": "paid",
+      "date": "2026-10-21",
+      "created_at": "2026-10-21T09:30:00Z",
+      "total_fees": 50000.0,
+      "token_amount": 5000.0,
+      "remaining_fees": 45000.0,
+      "terms_note": "In 15 days you have to pay remaining fees otherwise it will be considered as Finance."
+    },
+    {
+      "event": "payment_approved",
+      "payment_choice": "online",
+      "payment_choice_display": "Online",
+      "payment_type": "token",
+      "amount": 5000.0,
+      "transaction_id": "pay_Plkn875412Aa",
+      "receipt_number": "RCT-202610-0012",
+      "status": "verified",
+      "date": "2026-10-21",
+      "payment_proof": null,
+      "payment_screenshot": null,
+      "total_fees": 50000.0,
+      "remaining_fees": 45000.0
+    }
+  ],
   "data": {
     "admission_id": 142,
     "admission_number": "ADM-2025-000142",
@@ -151,7 +185,28 @@ Retrieves the authenticated student's fee summary, remaining balance, 15-day fin
         "note": "Auto-verified via Razorpay: plink_P897Gf412"
       }
     ],
-    "refunds": []
+    "refunds": [],
+    "payment_history": [
+      {
+        "event": "payment_link_created",
+        "payment_choice": "online",
+        "payment_type": "token",
+        "amount": 5000.0,
+        "razorpay_payment_link": "https://rzp.io/i/abcdef123",
+        "status": "paid",
+        "date": "2026-10-21"
+      },
+      {
+        "event": "payment_approved",
+        "payment_choice": "online",
+        "payment_type": "token",
+        "amount": 5000.0,
+        "transaction_id": "pay_Plkn875412Aa",
+        "receipt_number": "RCT-202610-0012",
+        "status": "verified",
+        "date": "2026-10-21"
+      }
+    ]
   }
 }
 ```

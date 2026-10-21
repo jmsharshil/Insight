@@ -135,11 +135,15 @@ Best Regards,
 
 def send_student_login_credentials(user, password):
     """Send login credentials to newly converted student"""
-    subject = "Welcome! Your Student Account Login Credentials"
+    org_title = user.organization.name if (user.organization and user.organization.name) else 'Insight Institute'
+    play_store_url = "https://play.google.com/store/apps/details?id=com.jmsinsight.app&hl=en_IN"
+    app_store_url = "https://apps.apple.com/in/app/insight-institute/id6780808050"
+
+    subject = f"Welcome! Your Student Account Login Credentials - {org_title}"
     text_content = f"""
 Hello {user.name},
 
-Congratulations! Your account has been successfully created in the {user.organization.name if user.organization else 'Insight ERP'} System.
+Congratulations! Your account has been successfully created at {org_title}.
 
 Your Login Credentials:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -147,10 +151,14 @@ Email/Username: {user.email}
 Password: {password}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+Download Our Mobile App:
+• Google Play Store (Android): {play_store_url}
+• Apple App Store (iOS): {app_store_url}
+
 How to Access Your Account:
-1. Visit the {user.organization.name if user.organization else 'Insight ERP'} System login page
+1. Download the {org_title} app from the links above or visit the web portal
 2. Enter your email/username and the password provided above
-3. Log in to your student dashboard
+3. Log in to access your student dashboard
 
 Important Security Notes:
 • Please keep your credentials confidential
@@ -158,10 +166,10 @@ Important Security Notes:
 • Never share your password with anyone
 • If you did not request this account, please contact our support team
 
-Welcome to {user.organization.name if user.organization else 'Insight ERP'}!
+Welcome to {org_title}!
 
 Best Regards,
-{user.organization.name if user.organization else 'Insight ERP'} Team
+{org_title} Team
 """
 
     send_email(
@@ -173,6 +181,9 @@ Best Regards,
             'user_name': user.name,
             'user_email': user.email,
             'password': password,
+            'org_name': org_title,
+            'play_store_url': play_store_url,
+            'app_store_url': app_store_url,
         },
         organization=user.organization,
     )
@@ -187,7 +198,7 @@ Best Regards,
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": user.name},
-                        {"type": "text", "text": user.organization.name if user.organization else 'Insight ERP'},
+                        {"type": "text", "text": org_title},
                         {"type": "text", "text": user.email},
                         {"type": "text", "text": password}
                     ],
@@ -202,32 +213,44 @@ Best Regards,
 
 def send_parent_login_credentials(parent_user, student_user, password):
     """Send login credentials to a parent account linked with a student"""
-    subject = "Welcome! Your Parent Portal Login Credentials"
+    org_title = parent_user.organization.name if (parent_user.organization and parent_user.organization.name) else 'Insight Institute'
+    play_store_url = "https://play.google.com/store/apps/details?id=com.jmsinsight.app&hl=en_IN"
+    app_store_url = "https://apps.apple.com/in/app/insight-institute/id6780808050"
+
+    subject = f"Welcome! Your Parent Portal Login Credentials - {org_title}"
     text_content = f"""
 Hello {parent_user.name},
 
-Your parent account has been created in the {parent_user.organization.name if parent_user.organization else 'Insight ERP'} System.
+Your parent account has been created at {org_title}.
 
 Linked Student Profile:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Student Name: {student_user.name}
 Student Email: {student_user.email}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Your Login Credentials:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Email/Username: {parent_user.email}
 Password: {password}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Download Our Mobile App:
+• Google Play Store (Android): {play_store_url}
+• Apple App Store (iOS): {app_store_url}
 
 How to Access Your Account:
-1. Visit the {parent_user.organization.name if parent_user.organization else 'Insight ERP'} System login page
+1. Download the {org_title} app from the links above or visit the web portal
 2. Enter your email/username and the password provided above
 3. Log in to view your linked student's profile and updates
 
 Important Security Notes:
-- Please keep your credentials confidential
-- Change your password after your first login
-- Never share your password with anyone
+• Please keep your credentials confidential
+• Change your password after your first login
+• Never share your password with anyone
 
 Best Regards,
-{parent_user.organization.name if parent_user.organization else 'Insight ERP'} Team
+{org_title} Team
 """
 
     send_email(
@@ -241,6 +264,9 @@ Best Regards,
             'student_email': student_user.email,
             'parent_email': parent_user.email,
             'password': password,
+            'org_name': org_title,
+            'play_store_url': play_store_url,
+            'app_store_url': app_store_url,
         },
         organization=parent_user.organization,
     )
@@ -255,7 +281,7 @@ Best Regards,
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": parent_user.name},
-                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'},
+                        {"type": "text", "text": org_title},
                         {"type": "text", "text": parent_user.email},
                         {"type": "text", "text": password}
                     ],
