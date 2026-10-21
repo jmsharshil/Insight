@@ -1385,6 +1385,9 @@ def _user_role(user):
 class MyFeesAPIView(APIView):
     """
     Returns the fee and payment records for the authenticated student based on their token.
+    Allows submitting remaining fee payment:
+      - payment_type: 'full_payment' | 'finance'
+      - payment_choice: 'online' (generates Razorpay link) | 'cash' | 'cheque' (uploads proof)
     """
     # permission_classes = [IsAuthenticated]
     
@@ -1398,14 +1401,14 @@ class MyFeesAPIView(APIView):
         from students.models import Student, ParentLink
         try:
             if role == 'student':
-                student = Student.objects.get(user=user)
+                student = Student.objects.select_related('admission', 'branch').get(user=user)
             else:
                 student_id = request.GET.get('student_id')
                 if student_id:
-                    link = ParentLink.objects.get(parent=user, student_id=student_id)
+                    link = ParentLink.objects.select_related('student__admission', 'student__branch').get(parent=user, student_id=student_id)
                     student = link.student
                 else:
-                    link = ParentLink.objects.filter(parent=user).first()
+                    link = ParentLink.objects.select_related('student__admission', 'student__branch').filter(parent=user).first()
                     if not link:
                         return Response({'success': False, 'message': 'No linked students found.'}, status=404)
                     student = link.student
@@ -1415,39 +1418,343 @@ class MyFeesAPIView(APIView):
         student_fees = StudentFee.objects.select_related('fee_structure').filter(student=student).order_by('-created_at')
         payments = Payment.objects.filter(student=student).order_by('-payment_date', '-created_at')
         
-        from .models import InstallmentPlan, Refund
-        from .serializers import InstallmentPlanListSerializer, RefundListSerializer
+        from .models import Refund
+        from .serializers import RefundListSerializer
         
-        installment_plans = InstallmentPlan.objects.filter(student_fee__student=student).order_by('-created_at')
         refunds = Refund.objects.filter(payment__student=student).order_by('-created_at')
         
-        fee_serializer = StudentFeeListSerializer(student_fees, many=True)
-        payment_serializer = PaymentListSerializer(payments, many=True)
-        installment_serializer = InstallmentPlanListSerializer(installment_plans, many=True)
-        refund_serializer = RefundListSerializer(refunds, many=True)
+        fee_serializer = StudentFeeListSerializer(student_fees, many=True, context={'request': request})
+        payment_serializer = PaymentListSerializer(payments, many=True, context={'request': request})
+        refund_serializer = RefundListSerializer(refunds, many=True, context={'request': request})
         
         # Summary
         total_billed = student_fees.aggregate(total=Sum('total_amount'))['total'] or 0
         total_discount = student_fees.aggregate(total=Sum('discount'))['total'] or 0
         total_paid = student_fees.aggregate(total=Sum('amount_paid'))['total'] or 0
-        
+        total_due = max(0, total_billed - total_discount - total_paid)
+
+        admission_id = getattr(student, 'admission_id', None)
+        admission_number = getattr(student, 'admission_number', None)
+
+        # ── 15-Day Finance Rule Notice ─────────────────────────────────────────
+        finance_notice = None
+        remaining_fee_options = None
+
+        if total_due > 0:
+            # Enrolled date when credentials were generated & issued
+            enrolled_datetime = getattr(student, 'enrolled_at', None) or getattr(student, 'created_at', None) or timezone.now()
+            enrolled_date = enrolled_datetime.date() if hasattr(enrolled_datetime, 'date') else enrolled_datetime
+
+            finance_deadline_date = enrolled_date + timezone.timedelta(days=15)
+            today = timezone.now().date()
+            days_left = (finance_deadline_date - today).days
+
+            if days_left > 0:
+                is_moved_to_finance = False
+                note_message = (
+                    f"Please pay your remaining fee of ₹{total_due:,.0f} within 15 days of receiving your login credentials "
+                    f"(deadline: {finance_deadline_date.strftime('%d %b %Y')}, {days_left} day(s) remaining). "
+                    "If not paid within 15 days, your fee balance will automatically be moved to the finance process."
+                )
+            elif days_left == 0:
+                is_moved_to_finance = False
+                note_message = (
+                    f"Today is the final day (deadline: {finance_deadline_date.strftime('%d %b %Y')}) to pay your remaining fee of ₹{total_due:,.0f}. "
+                    "If not paid today, your fee balance will automatically be moved to the finance process tomorrow."
+                )
+            else:
+                is_moved_to_finance = True
+                days_overdue = abs(days_left)
+                note_message = (
+                    f"The 15-day payment window for remaining fees expired on {finance_deadline_date.strftime('%d %b %Y')} "
+                    f"({days_overdue} day(s) ago). Your remaining fee balance of ₹{total_due:,.0f} has been moved to the finance process. "
+                    "Our finance team will coordinate the finance/loan process with you."
+                )
+                # Auto-sync admission payment_type to finance if not already set
+                if getattr(student, 'admission', None) and student.admission.payment_type != 'finance':
+                    student.admission.payment_type = 'finance'
+                    student.admission.save(update_fields=['payment_type', 'updated_at'])
+
+            finance_notice = {
+                'enrolled_date': enrolled_date.isoformat(),
+                'deadline_date': finance_deadline_date.isoformat(),
+                'deadline_date_display': finance_deadline_date.strftime('%d %b %Y'),
+                'days_left': max(0, days_left),
+                'days_overdue': abs(days_left) if days_left < 0 else 0,
+                'is_moved_to_finance': is_moved_to_finance,
+                'status': 'moved_to_finance' if is_moved_to_finance else 'pending_payment',
+                'note': note_message,
+            }
+
+            remaining_fee_options = {
+                'amount_due': float(total_due),
+                'finance_notice': finance_notice,
+                'payment_types': [
+                    {'key': 'full_payment', 'label': 'Full Payment'},
+                    {'key': 'finance', 'label': 'Finance (No Immediate Payment)'},
+                ],
+                'payment_choices': [
+                    {'key': 'online', 'label': 'Online Transfer (Razorpay)'},
+                    {'key': 'cash', 'label': 'Cash'},
+                    {'key': 'cheque', 'label': 'Cheque'},
+                ],
+                'instruction': (
+                    f"{note_message} "
+                    'To pay remaining fees, submit POST /api/v1/fees/my-fees/ with payment_type and payment_choice. '
+                    'If full_payment and online: Razorpay link is generated. '
+                    'If full_payment and cash/cheque: upload payment_proof and transaction_ref. '
+                    'If finance: finance option is registered.'
+                ),
+            }
+
         return Response({
             'success': True, 
             'role': role, 
             'student_id': str(student.id),
+            'admission_id': admission_id,
+            'admission_number': admission_number,
             'data': {
+                'admission_id': admission_id,
+                'admission_number': admission_number,
+                'is_fully_paid': (total_due == 0),
                 'summary': {
                     'total_billed': total_billed,
                     'total_discount': total_discount,
                     'total_paid': total_paid,
-                    'total_due': max(0, total_billed - total_discount - total_paid),
+                    'total_due': total_due,
                 },
+                'finance_notice': finance_notice,
+                'remaining_fee_options': remaining_fee_options,
                 'fees': fee_serializer.data,
-                'installments': installment_serializer.data,
+                'installments': [],  # Installments disabled for this flow (models/tables retained)
+                'installments_enabled': False,
                 'payments': payment_serializer.data,
                 'refunds': refund_serializer.data
             }
         })
+
+    def post(self, request):
+        user = request.user
+        role = _user_role(user)
+        
+        if role not in ['student', 'parents']:
+            return Response({'success': False, 'message': 'Only students or parents can access this API.'}, status=403)
+            
+        import re
+        import time
+        from students.models import Student, ParentLink
+
+        try:
+            if role == 'student':
+                student = Student.objects.select_related('admission', 'branch').get(user=user)
+            else:
+                student_id = request.data.get('student_id') or request.GET.get('student_id')
+                if student_id:
+                    link = ParentLink.objects.select_related('student__admission', 'student__branch').get(parent=user, student_id=student_id)
+                    student = link.student
+                else:
+                    link = ParentLink.objects.select_related('student__admission', 'student__branch').filter(parent=user).first()
+                    if not link:
+                        return Response({'success': False, 'message': 'No linked students found.'}, status=404)
+                    student = link.student
+        except (Student.DoesNotExist, ParentLink.DoesNotExist):
+            return Response({'success': False, 'message': 'Student profile not found or access denied.'}, status=404)
+
+        student_fee = StudentFee.objects.select_related('fee_structure').filter(student=student).order_by('-created_at').first()
+        if not student_fee:
+            return Response({'success': False, 'message': 'No student fee record found.'}, status=404)
+
+        amount_due = student_fee.amount_due
+        if amount_due <= 0:
+            return Response({
+                'success': False,
+                'message': 'No remaining fees due. Your fee has already been fully paid.',
+                'data': {
+                    'total_amount': float(student_fee.total_amount),
+                    'amount_paid': float(student_fee.amount_paid),
+                    'amount_due': 0,
+                    'status': student_fee.status,
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_type = (request.data.get('payment_type') or 'full_payment').strip().lower()
+        payment_choice = (request.data.get('payment_choice') or request.data.get('payment_mode') or 'online').strip().lower()
+
+        # Validate payment_type
+        if payment_type not in ('full_payment', 'finance'):
+            return Response({
+                'success': False,
+                'message': "Invalid payment_type. Must be 'full_payment' or 'finance'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── 1. Finance Option ──────────────────────────────────────────────────
+        if payment_type == 'finance':
+            if getattr(student, 'admission', None):
+                student.admission.payment_type = 'finance'
+                student.admission.save(update_fields=['payment_type', 'updated_at'])
+
+            return Response({
+                'success': True,
+                'payment_type': 'finance',
+                'message': 'Finance option selected. No immediate payment is required. Our finance team will assist you with the process.',
+                'data': {
+                    'student_id': str(student.id),
+                    'admission_id': getattr(student, 'admission_id', None),
+                    'student_fee_id': str(student_fee.id),
+                    'payment_type': 'finance',
+                    'amount_due': float(amount_due),
+                    'status': 'finance_selected',
+                }
+            }, status=status.HTTP_200_OK)
+
+        # ── 2. Full Payment ───────────────────────────────────────────────────
+        if payment_choice not in ('online', 'cash', 'cheque'):
+            return Response({
+                'success': False,
+                'message': "Invalid payment_choice. Must be 'online', 'cash', or 'cheque'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # ── 2A. Online Payment via Razorpay ──────────────────────────────────
+        if payment_choice == 'online':
+            from .razorpay_service import create_payment_link
+
+            unique_ref = f"SF_{student_fee.id}_full_payment_{int(time.time())}"
+            course_name = (
+                student_fee.fee_structure.name
+                if (student_fee.fee_structure and student_fee.fee_structure.name)
+                else 'Insight Institute'
+            )
+            description = f"Remaining Fee Payment ({course_name})"
+
+            customer_phone = student.phone_student or ''
+            clean_phone = re.sub(r'\D', '', customer_phone)
+            if len(clean_phone) > 10:
+                clean_phone = clean_phone[-10:]
+
+            result = create_payment_link(
+                amount=float(amount_due),
+                reference_id=unique_ref,
+                customer_name=student.full_name,
+                customer_email=student.email or '',
+                customer_contact=clean_phone,
+                description=description,
+            )
+
+            if not result.get('success'):
+                return Response({
+                    'success': False,
+                    'message': f"Failed to generate Razorpay payment link: {result.get('error', 'Unknown error')}",
+                    'detail': result.get('detail'),
+                }, status=status.HTTP_502_BAD_GATEWAY)
+
+            rp_data = result.get('data', {})
+            link_url = rp_data.get('short_url') or rp_data.get('url') or ''
+            link_id = rp_data.get('id')
+
+            if getattr(student, 'admission', None):
+                student.admission.razorpay_payment_link = link_url
+                student.admission.razorpay_payment_link_id = link_id
+                student.admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+
+            return Response({
+                'success': True,
+                'payment_type': 'full_payment',
+                'payment_choice': 'online',
+                'message': 'Razorpay payment link generated successfully for remaining fees.',
+                'data': {
+                    'student_id': str(student.id),
+                    'admission_id': getattr(student, 'admission_id', None),
+                    'student_fee_id': str(student_fee.id),
+                    'amount': float(amount_due),
+                    'payment_link_url': link_url,
+                    'payment_link_id': link_id,
+                    'payment_mode': 'online',
+                    'status': 'link_generated',
+                }
+            }, status=status.HTTP_200_OK)
+
+        # ── 2B. Cash / Cheque with Proof Upload ──────────────────────────────
+        payment_proof = request.FILES.get('payment_proof') or request.FILES.get('payment_screenshot')
+        transaction_ref = (request.data.get('transaction_ref') or request.data.get('transaction_id') or '').strip()
+        payment_note = (request.data.get('payment_note') or request.data.get('note') or '').strip()
+
+        if payment_choice == 'cheque' and not transaction_ref and not payment_proof:
+            return Response({
+                'success': False,
+                'message': 'Please provide the cheque number (transaction_ref) or upload a photo of the cheque (payment_proof).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        amount_to_pay = float(request.data.get('amount') or amount_due)
+        if amount_to_pay <= 0:
+            amount_to_pay = float(amount_due)
+
+        note_text = f"Remaining fee payment ({payment_choice.upper()}) submitted by student."
+        if payment_note:
+            note_text += f" Note: {payment_note}"
+
+        payment = Payment.objects.create(
+            student=student,
+            admission=getattr(student, 'admission', None),
+            student_fee=student_fee,
+            amount=amount_to_pay,
+            payment_mode=payment_choice,
+            transaction_ref=transaction_ref,
+            payment_proof=payment_proof,
+            status='approval_pending',
+            payment_date=timezone.now().date(),
+            note=note_text,
+        )
+
+        if getattr(student, 'admission', None):
+            student.admission.add_payment_history_entry('offline_payment_selected', {
+                'payment_choice': payment_choice,
+                'payment_type': 'full_payment',
+                'amount_to_pay': float(amount_to_pay),
+                'transaction_id': transaction_ref,
+                'status': 'approval_pending',
+                'date': timezone.now().date().isoformat(),
+                'note': note_text,
+            })
+
+        try:
+            from core.utils import notify_users_by_role
+            notify_users_by_role(
+                roles=['accountant', 'super_admin'],
+                title=f'Remaining Fee Payment Proof Submitted ({payment_choice.title()})',
+                body=(
+                    f"Student {student.full_name} submitted remaining fee payment proof of ₹{amount_to_pay:,.0f} "
+                    f"via {payment_choice.title()}. Transaction/Ref: {transaction_ref or 'N/A'}. Pending verification."
+                ),
+                organization=student.branch.organization if getattr(student, 'branch', None) else None,
+                branch=student.branch if getattr(student, 'branch', None) else None,
+            )
+        except Exception as notify_err:
+            logger.error(f"Failed to notify admins of remaining fee payment: {notify_err}")
+
+        proof_url = request.build_absolute_uri(payment.payment_proof.url) if payment.payment_proof else None
+
+        return Response({
+            'success': True,
+            'payment_type': 'full_payment',
+            'payment_choice': payment_choice,
+            'message': (
+                f"Remaining fee payment proof for {payment_choice.title()} submitted successfully! "
+                "It is pending verification by the accountant and super admin."
+            ),
+            'data': {
+                'payment_id': str(payment.id),
+                'student_id': str(student.id),
+                'admission_id': getattr(student, 'admission_id', None),
+                'student_fee_id': str(student_fee.id),
+                'amount': float(payment.amount),
+                'payment_mode': payment.payment_mode,
+                'transaction_ref': payment.transaction_ref,
+                'status': payment.status,
+                'status_display': payment.get_status_display(),
+                'payment_date': payment.payment_date.isoformat(),
+                'payment_proof_url': proof_url,
+            }
+        }, status=status.HTTP_201_CREATED)
 
 import json
 from django.conf import settings
