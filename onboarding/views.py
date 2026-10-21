@@ -436,6 +436,9 @@ class AdmissionListView(APIView):
     search_fields = ['first_name', 'surname', 'email', 'phone_student']
     ordering_fields = '__all__'
 
+    def get_permissions(self):
+        return [AllowAny()]
+
     def post(self, request):
         # Merge body + files
         data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
