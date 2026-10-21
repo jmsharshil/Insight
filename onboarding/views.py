@@ -991,15 +991,15 @@ class AdmissionApproveView(APIView):
         is_superuser = getattr(acting_user, 'is_superuser', False) if acting_user else False
 
         # Role-based guard: authorized approvers (Level 1 & Level 2)
-        authorized_roles = ('super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'accountant')
-        if role not in authorized_roles and not is_superuser:
+        authorized_roles = ('super_admin', 'accountant')
+        from .notifications import user_has_payment_role
+        if not user_has_payment_role(acting_user, authorized_roles):
             return Response(
                 {
                     'success': False,
                     'message': (
                         'Permission denied. Payment approval requires an authorized role: '
-                        'Accountant, Branch Manager, Admin Senior Executive, Admin Executive (Level 1) '
-                        'or Super Admin (Level 2).'
+                        'Accountant (Level 1) or Super Admin (Level 2).'
                     ),
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -1019,7 +1019,7 @@ class AdmissionApproveView(APIView):
             )
         )
 
-        level1_roles = ('accountant', 'branch_manager', 'admin_senior_executive', 'admin_executive')
+        level1_roles = ('accountant',)
 
         if is_pending_level1:
             # If not force_override, perform Level 1 approval:
@@ -1135,7 +1135,7 @@ class AdmissionApproveView(APIView):
         #   or super_admin with force_override.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         if admission.status == 'approved' or force_override:
-            if role != 'super_admin' and not is_superuser:
+            if not user_has_payment_role(acting_user, {'super_admin'}):
                 return Response(
                     {
                         'success': False,
@@ -1468,12 +1468,13 @@ class AdmissionRejectView(APIView):
         role = getattr(acting_user, 'role', '') if acting_user else ''
         is_superuser = getattr(acting_user, 'is_superuser', False) if acting_user else False
 
-        authorized_roles = ('super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'accountant')
-        if role not in authorized_roles and not is_superuser:
+        authorized_roles = ('super_admin', 'accountant')
+        from .notifications import user_has_payment_role
+        if not user_has_payment_role(acting_user, authorized_roles):
             return Response(
                 {
                     'success': False,
-                    'message': 'Permission denied. You do not have permission to reject admissions.',
+                    'message': 'Permission denied. Payment rejection requires an authorized role: Accountant or Super Admin.',
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -1675,7 +1676,8 @@ class AdmissionPaymentSetupView(APIView):
         # ── Sync payment record ───────────────────────────────────────────────
         try:
             from .utils import sync_admission_payment
-            sync_admission_payment(admission, request=request)
+            force_sync = bool(admission.payment_choice in ('cash', 'cheque', 'check') or admission.payment_screenshot or admission.transaction_id)
+            sync_admission_payment(admission, request=request, force=force_sync)
         except Exception as e:
             logger.error(f'AdmissionPaymentSetupView: sync error for {admission_id}: {e}')
 

@@ -26,7 +26,6 @@ Buttons:
     Level 1: Accountant verifies payment (moves status to 'approved' and notifies Super Admin).
     Level 2: Super Admin final approval (moves status to 'enrolled', creates student & dispatches credentials).
 """
-from auth_user import test_additional_roles
 import logging
 import re
 from typing import Optional, Tuple, Dict, Any, List
@@ -37,25 +36,55 @@ from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
-PAYMENT_APPROVER_ROLES = {'super_admin', 'accountant'}
+LEVEL1_APPROVER_ROLES = {'accountant'}
+
+PAYMENT_APPROVER_ROLES = LEVEL1_APPROVER_ROLES | {'super_admin'}
+
+
+def user_has_payment_role(user, allowed_roles) -> bool:
+    """
+    Checks if a user is authorized for one of the allowed roles,
+    considering is_superuser, primary role, and additional_roles JSON list.
+    """
+    if not user:
+        return False
+    if getattr(user, 'is_superuser', False):
+        return True
+    if getattr(user, 'role', '') in allowed_roles:
+        return True
+    addl = getattr(user, 'additional_roles', None) or []
+    if isinstance(addl, (list, set, tuple)) and any(r in allowed_roles for r in addl):
+        return True
+    return False
 
 
 def get_payment_screenshot_url(admission) -> str:
     """
     Returns an absolute, publicly accessible URL for the uploaded payment screenshot.
     Handles Azure Blob Storage, full URLs, and relative MEDIA_URL paths.
+    Checks admission.payment_screenshot and fallback to linked fees.Payment.payment_proof.
     """
-    if not admission or not getattr(admission, 'payment_screenshot', None):
+    if not admission:
         return ""
     try:
-        raw_val = str(getattr(admission.payment_screenshot, 'name', admission.payment_screenshot) or '')
+        field = getattr(admission, 'payment_screenshot', None)
+        if not field:
+            from fees.models import Payment
+            p = Payment.objects.filter(admission=admission).exclude(payment_proof='').exclude(payment_proof__isnull=True).first()
+            if p and p.payment_proof:
+                field = p.payment_proof
+
+        if not field:
+            return ""
+
+        raw_val = str(getattr(field, 'name', field) or '')
         if raw_val.startswith("http://") or raw_val.startswith("https://"):
             return raw_val
 
-        if hasattr(admission.payment_screenshot, 'url'):
-            url = str(admission.payment_screenshot.url)
+        if hasattr(field, 'url'):
+            url = str(field.url)
         else:
-            url = str(admission.payment_screenshot)
+            url = str(field)
 
         if not url:
             return ""
@@ -70,7 +99,7 @@ def get_payment_screenshot_url(admission) -> str:
         base_domain = getattr(
             settings,
             'BACKEND_BASE_URL',
-            'https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net'
+            getattr(settings, 'BASE_URL', 'https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net')
         ).rstrip('/')
         return f"{base_domain}/{url.lstrip('/')}"
     except Exception as e:
@@ -136,42 +165,44 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
     # Resolve screenshot URL (student-uploaded payment proof)
     screenshot_url = get_payment_screenshot_url(admission)
 
+    PLACEHOLDER_RECEIPT_URL = (
+        "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net"
+        "/static/images/payment_receipt_placeholder.png"
+    )
+
     # Determine header component:
-    # WhatsApp IMAGE header only accepts JPEG / PNG.
-    # - If we have a valid image URL → use it as the dynamic header image.
-    # - If the file is a PDF / unknown format → omit the header (Meta will error
-    #   if we send a wrong media type for a static-IMAGE template).
-    # - If no screenshot at all → omit the header entirely (no broken placeholder).
+    # WhatsApp IMAGE header requires a JPEG / PNG / WEBP image link.
+    # - If we have a valid image URL → use it dynamically.
+    # - If the file is a PDF, or no screenshot uploaded (e.g. online link, cash pending) →
+    #   fall back to PLACEHOLDER_RECEIPT_URL so Meta accepts the template
+    #   and preserves the quick-reply buttons (Approve / Reject).
     SUPPORTED_IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 
-    header_component = None
+    header_image_url = None
     if screenshot_url:
-        # Strip query-string (Azure SAS tokens, CDN params, etc.) before checking extension
         clean_path = screenshot_url.split('?')[0].lower()
-        # Also handle paths where the filename has no extension but content was stored
-        # with a known image MIME in the blob name (Azure sometimes adds type in the name)
-        is_image = any(clean_path.endswith(ext) for ext in SUPPORTED_IMAGE_EXTS)
-        if not is_image:
-            # Last-resort: if the URL path segment contains 'jpg' / 'jpeg' / 'png' (e.g. blob names)
+        if any(clean_path.endswith(ext) for ext in SUPPORTED_IMAGE_EXTS):
+            header_image_url = screenshot_url
+        else:
             import re as _re
-            is_image = bool(_re.search(r'\.(jpg|jpeg|png|webp)(?:[^/]*)$', clean_path))
-        if is_image:
-            header_component = {
-                "type": "header",
-                "parameters": [
-                    {
-                        "type": "image",
-                        "image": {"link": screenshot_url}
-                    }
-                ]
+            if _re.search(r'\.(jpg|jpeg|png|webp)(?:[^a-z0-9]|$)', clean_path):
+                header_image_url = screenshot_url
+
+    if not header_image_url:
+        header_image_url = PLACEHOLDER_RECEIPT_URL
+
+    header_component = {
+        "type": "header",
+        "parameters": [
+            {
+                "type": "image",
+                "image": {"link": header_image_url}
             }
-        # else: PDF or unknown — omit header, proof URL is already in fallback_body text
+        ]
+    }
 
-    components: List[Dict[str, Any]] = []
-    if header_component:
-        components.append(header_component)
-
-    components += [
+    components: List[Dict[str, Any]] = [
+        header_component,
         {
             "type": "body",
             "parameters": [
@@ -201,7 +232,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         }
     ]
 
-
+    proof_display = screenshot_url if screenshot_url else 'N/A'
     fallback_body = (
         f"FEE PAYMENT VERIFICATION\n\n"
         f"Student Details\n"
@@ -216,7 +247,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         f"• Payment Amount: ₹{amt_str}\n"
         f"• Transaction ID / Cheque No.: {txn_id}\n"
         f"• Payment Submitted At: {submitted_at}\n\n"
-        f"Proof Screenshot: {screenshot_url or 'N/A'}\n\n"
+        f"Proof Screenshot: {proof_display}\n\n"
         f"Reply with:\n"
         f"- APPROVE {admission_id_str} to approve\n"
         f"- REJECT {admission_id_str} to reject\n\n"
@@ -230,7 +261,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
 def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=None):
     """
     Sends WhatsApp payment verification notification using 'payment_approve_reject' template.
-      - level 1: Sent to Accountants (for initial verification)
+      - level 1: Sent to Level 1 approvers (Accountant, Branch Manager, Admin Executive)
       - level 2: Sent to Super Admins (for final enrollment approval)
     """
     from chat.notifications import send_whatsapp_with_fallback
@@ -240,20 +271,31 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
         recipients = [approver_user]
     else:
         if level == 1:
-            qs = User.objects.filter(role=='acountant', is_active=True)
+            from django.db.models import Q
+            base_qs = User.objects.filter(is_active=True).exclude(phone='').exclude(phone__isnull=True)
+
+            role_q = Q(role__in=LEVEL1_APPROVER_ROLES)
+            for r in LEVEL1_APPROVER_ROLES:
+                role_q |= Q(additional_roles__contains=r)
+            qs = base_qs.filter(role_q)
+
+            recipients = []
             if getattr(admission, 'branch', None):
                 branch_qs = qs.filter(branch=admission.branch)
-                branch_users = [u for u in branch_qs if getattr(u, 'phone', None)]
+                branch_users = [u for u in branch_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
                 if branch_users:
-                    recipients = branch_users
-                elif admission.branch.organization:
+                    accts = [u for u in branch_users if u.role == 'accountant' or ('accountant' in (getattr(u, 'additional_roles', None) or []))]
+                    recipients = accts if accts else branch_users
+                elif getattr(admission.branch, 'organization', None):
                     org_qs = qs.filter(branch__organization=admission.branch.organization)
-                    org_users = [u for u in org_qs if getattr(u, 'phone', None)]
-                    recipients = org_users if org_users else [u for u in qs if getattr(u, 'phone', None)]
-                else:
-                    recipients = [u for u in qs if getattr(u, 'phone', None)]
-            else:
-                recipients = [u for u in qs if getattr(u, 'phone', None)]
+                    org_users = [u for u in org_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
+                    accts = [u for u in org_users if u.role == 'accountant' or ('accountant' in (getattr(u, 'additional_roles', None) or []))]
+                    recipients = accts if accts else org_users
+
+            if not recipients:
+                all_users = [u for u in qs if getattr(u, 'phone', None) and str(u.phone).strip()]
+                accts = [u for u in all_users if u.role == 'accountant' or ('accountant' in (getattr(u, 'additional_roles', None) or []))]
+                recipients = accts if accts else all_users
 
             # If level 1 has no active staff with phone in LEVEL1_APPROVER_ROLES, fallback to super_admin
             if not recipients:
@@ -261,14 +303,16 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
                     "[WA ADMISSION] No Level 1 approver found with phone number for admission %s. Falling back to super_admin.",
                     admission.id
                 )
-                recipients = list(User.objects.filter(role='super_admin', is_active=True))
+                recipients = [u for u in base_qs.filter(role='super_admin') if getattr(u, 'phone', None) and str(u.phone).strip()]
         else:
-            qs = User.objects.filter(role='super_admin', is_active=True)
-            if getattr(admission, 'branch', None) and admission.branch.organization:
-                scoped_qs = qs.filter(branch__organization=admission.branch.organization)
-                if scoped_qs.exists():
-                    qs = scoped_qs
-            recipients = list(qs)
+            from django.db.models import Q
+            base_qs = User.objects.filter(role='super_admin', is_active=True).exclude(phone='').exclude(phone__isnull=True)
+            if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None):
+                scoped_qs = base_qs.filter(Q(branch__organization=admission.branch.organization) | Q(organization=admission.branch.organization))
+                scoped_users = [u for u in scoped_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
+                recipients = scoped_users if scoped_users else [u for u in base_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
+            else:
+                recipients = [u for u in base_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
 
     components, fallback_body = build_payment_approve_reject_components(admission)
 
@@ -404,15 +448,15 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
     # Find candidate with approver role
     approver = None
     for c in candidates:
-        if c.role in PAYMENT_APPROVER_ROLES or getattr(c, 'is_superuser', False):
+        if user_has_payment_role(c, PAYMENT_APPROVER_ROLES):
             approver = c
             break
 
     if not approver:
-        logger.warning("[WA ADMISSION] User %s is not an authorized approver (role=%s)", candidates[0].id, candidates[0].role)
+        logger.warning("[WA ADMISSION] User %s is not an authorized approver (role=%s, additional_roles=%s)", candidates[0].id, candidates[0].role, getattr(candidates[0], 'additional_roles', None))
         send_whatsapp_text(
             to=sender_wa_id,
-            body="Unauthorized: Payment approval requires an authorized role (Accountant, Branch Manager, Admin Executive, or Super Admin)."
+            body="Unauthorized: Payment approval requires an authorized role: Accountant (Level 1) or Super Admin (Level 2)."
         )
         return True
 
@@ -425,8 +469,14 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
         return True
 
     approver_name = getattr(approver, 'name', None) or approver.username
+    is_superuser = getattr(approver, 'is_superuser', False) or user_has_payment_role(approver, {'super_admin'})
     role = approver.role
-    is_superuser = getattr(approver, 'is_superuser', False)
+    if not is_superuser and role not in PAYMENT_APPROVER_ROLES:
+        addl = getattr(approver, 'additional_roles', None) or []
+        for r in PAYMENT_APPROVER_ROLES:
+            if r in addl:
+                role = r
+                break
 
     # 3. Handle REJECT action
     if action == "reject":
@@ -561,7 +611,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
 
         # LEVEL 2: Admission is in 'approved' status (waiting for Super Admin)
         if admission.status == 'approved':
-            if role != 'super_admin' and not is_superuser:
+            if not user_has_payment_role(approver, {'super_admin'}):
                 send_whatsapp_text(
                     to=sender_wa_id,
                     body=(

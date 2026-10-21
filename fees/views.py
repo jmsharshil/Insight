@@ -552,14 +552,14 @@ class PaymentVerifyView(APIView):
 
     def post(self, request, pk):
         role = getattr(request.user, 'role', '') if (request.user and request.user.is_authenticated) else ''
-        level1_approver_roles = ('accountant', 'branch_manager', 'admin_senior_executive', 'admin_executive')
-        authorized_verifier_roles = level1_approver_roles + ('super_admin',)
-        is_superuser = getattr(request.user, 'is_superuser', False) if request.user else False
-        if role not in authorized_verifier_roles and not is_superuser:
+        level1_approver_roles = ('accountant',)
+        authorized_verifier_roles = ('accountant', 'super_admin')
+        from onboarding.notifications import user_has_payment_role
+        if not user_has_payment_role(request.user, authorized_verifier_roles):
             return Response(
                 {
                     'success': False,
-                    'message': 'Permission denied. Only Accountant, Branch Manager, Admin Executive, or Super Admin can verify payments.',
+                    'message': 'Permission denied. Only Accountant (Level 1) or Super Admin (Level 2) can verify payments.',
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -586,7 +586,7 @@ class PaymentVerifyView(APIView):
         admission = payment.admission or (
             payment.student.admission if getattr(payment, 'student', None) and hasattr(payment.student, 'admission') else None
         )
-        is_level1_role = (role in level1_approver_roles and not is_superuser)
+        is_level1_role = (user_has_payment_role(request.user, level1_approver_roles) and not user_has_payment_role(request.user, {'super_admin'}))
 
         if admission and is_level1_role and payment.status == 'level_1_approved':
             return Response(
