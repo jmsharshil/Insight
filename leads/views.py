@@ -1775,7 +1775,10 @@ def get_lead_queryset(request):
 
     # Scope by organisation when available
     if getattr(request.user, 'organization', None):
-        queryset = queryset.filter(branch__organization=request.user.organization)
+        from django.db.models import Q as _Q
+        queryset = queryset.filter(
+            _Q(branch__organization=request.user.organization) | _Q(branch__isnull=True)
+        )
 
     user = request.user
     if user.is_authenticated:

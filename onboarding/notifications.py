@@ -26,6 +26,7 @@ Buttons:
     Level 1: Accountant verifies payment (moves status to 'approved' and notifies Super Admin).
     Level 2: Super Admin final approval (moves status to 'enrolled', creates student & dispatches credentials).
 """
+from auth_user import test_additional_roles
 import logging
 import re
 from typing import Optional, Tuple, Dict, Any, List
@@ -132,37 +133,45 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         submitted_at = str(sub_dt)[:19]
     submitted_at = " ".join(submitted_at.split())[:60]
 
-    PLACEHOLDER_RECEIPT_URL = (
-        "https://insightinstitute-fufvf3dbe0grg2b3.centralindia-01.azurewebsites.net"
-        "/static/images/payment_receipt_placeholder.png"
-    )
-
-    # Resolve screenshot URL
+    # Resolve screenshot URL (student-uploaded payment proof)
     screenshot_url = get_payment_screenshot_url(admission)
 
-    # WhatsApp Cloud API template headers of type IMAGE only accept JPEG and PNG.
-    # PDFs and other formats must fall back to the placeholder image in the header,
-    # with the actual proof URL included in the body/fallback text.
-    header_image_url = screenshot_url
-    if not header_image_url:
-        header_image_url = PLACEHOLDER_RECEIPT_URL
-    else:
-        clean_path = header_image_url.split('?')[0].lower()
-        if not (clean_path.endswith('.jpg') or clean_path.endswith('.jpeg') or clean_path.endswith('.png')):
-            header_image_url = PLACEHOLDER_RECEIPT_URL
+    # Determine header component:
+    # WhatsApp IMAGE header only accepts JPEG / PNG.
+    # - If we have a valid image URL → use it as the dynamic header image.
+    # - If the file is a PDF / unknown format → omit the header (Meta will error
+    #   if we send a wrong media type for a static-IMAGE template).
+    # - If no screenshot at all → omit the header entirely (no broken placeholder).
+    SUPPORTED_IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 
-    components: List[Dict[str, Any]] = [
-        {
-            "type": "header",
-            "parameters": [
-                {
-                    "type": "image",
-                    "image": {
-                        "link": header_image_url
+    header_component = None
+    if screenshot_url:
+        # Strip query-string (Azure SAS tokens, CDN params, etc.) before checking extension
+        clean_path = screenshot_url.split('?')[0].lower()
+        # Also handle paths where the filename has no extension but content was stored
+        # with a known image MIME in the blob name (Azure sometimes adds type in the name)
+        is_image = any(clean_path.endswith(ext) for ext in SUPPORTED_IMAGE_EXTS)
+        if not is_image:
+            # Last-resort: if the URL path segment contains 'jpg' / 'jpeg' / 'png' (e.g. blob names)
+            import re as _re
+            is_image = bool(_re.search(r'\.(jpg|jpeg|png|webp)(?:[^/]*)$', clean_path))
+        if is_image:
+            header_component = {
+                "type": "header",
+                "parameters": [
+                    {
+                        "type": "image",
+                        "image": {"link": screenshot_url}
                     }
-                }
-            ]
-        },
+                ]
+            }
+        # else: PDF or unknown — omit header, proof URL is already in fallback_body text
+
+    components: List[Dict[str, Any]] = []
+    if header_component:
+        components.append(header_component)
+
+    components += [
         {
             "type": "body",
             "parameters": [
@@ -191,6 +200,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
             "parameters": [{"type": "payload", "payload": f"adm_pay_reject:{admission.id}"}]
         }
     ]
+
 
     fallback_body = (
         f"FEE PAYMENT VERIFICATION\n\n"
@@ -229,20 +239,36 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
     if approver_user:
         recipients = [approver_user]
     else:
-        target_role = 'accountant' if level == 1 else 'super_admin'
-        qs = User.objects.filter(role=target_role, is_active=True)
+        if level == 1:
+            qs = User.objects.filter(role=='acountant', is_active=True)
+            if getattr(admission, 'branch', None):
+                branch_qs = qs.filter(branch=admission.branch)
+                branch_users = [u for u in branch_qs if getattr(u, 'phone', None)]
+                if branch_users:
+                    recipients = branch_users
+                elif admission.branch.organization:
+                    org_qs = qs.filter(branch__organization=admission.branch.organization)
+                    org_users = [u for u in org_qs if getattr(u, 'phone', None)]
+                    recipients = org_users if org_users else [u for u in qs if getattr(u, 'phone', None)]
+                else:
+                    recipients = [u for u in qs if getattr(u, 'phone', None)]
+            else:
+                recipients = [u for u in qs if getattr(u, 'phone', None)]
 
-        if getattr(admission, 'branch', None) and admission.branch.organization:
-            scoped_qs = qs.filter(branch__organization=admission.branch.organization)
-            if scoped_qs.exists():
-                qs = scoped_qs
-
-        recipients = list(qs)
-
-        # If level 1 has no active accountants with phone, fallback to super_admin
-        if level == 1 and not any(getattr(u, 'phone', None) for u in recipients):
-            logger.warning("[WA ADMISSION] No accountant found with phone number for admission %s. Falling back to super_admin.", admission.id)
-            recipients = list(User.objects.filter(role='super_admin', is_active=True))
+            # If level 1 has no active staff with phone in LEVEL1_APPROVER_ROLES, fallback to super_admin
+            if not recipients:
+                logger.warning(
+                    "[WA ADMISSION] No Level 1 approver found with phone number for admission %s. Falling back to super_admin.",
+                    admission.id
+                )
+                recipients = list(User.objects.filter(role='super_admin', is_active=True))
+        else:
+            qs = User.objects.filter(role='super_admin', is_active=True)
+            if getattr(admission, 'branch', None) and admission.branch.organization:
+                scoped_qs = qs.filter(branch__organization=admission.branch.organization)
+                if scoped_qs.exists():
+                    qs = scoped_qs
+            recipients = list(qs)
 
     components, fallback_body = build_payment_approve_reject_components(admission)
 
@@ -386,7 +412,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
         logger.warning("[WA ADMISSION] User %s is not an authorized approver (role=%s)", candidates[0].id, candidates[0].role)
         send_whatsapp_text(
             to=sender_wa_id,
-            body="Unauthorized: Payment approval requires Accountant (Level 1) or Super Admin (Level 2) role."
+            body="Unauthorized: Payment approval requires an authorized role (Accountant, Branch Manager, Admin Executive, or Super Admin)."
         )
         return True
 
@@ -411,7 +437,8 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             )
             return True
 
-        reject_note = f"Payment rejected via WhatsApp by {approver_name} ({role})."
+        reject_role_label = approver.get_role_display() if hasattr(approver, 'get_role_display') else role
+        reject_note = f"Payment rejected via WhatsApp by {approver_name} ({reject_role_label})."
         AdmissionService.update_status(
             admission=admission,
             new_status='rejected',
@@ -429,6 +456,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             'transaction_id': admission.transaction_id,
             'status': 'rejected',
             'rejected_by': approver_name,
+            'rejected_by_role': role,
             'rejected_at': timezone.now().isoformat(),
             'date': timezone.now().date().isoformat(),
             'note': reject_note,
@@ -457,152 +485,79 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             return True
 
         # Check approval level:
-        # LEVEL 1: Pending accountant verification
+        # LEVEL 1: Pending verification
         if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending'):
-            if role == 'accountant' or is_superuser:
-                level1_note = f"Level 1 payment approval completed via WhatsApp by Accountant {approver_name}."
-                AdmissionService.update_status(
+            role_label = approver.get_role_display() if hasattr(approver, 'get_role_display') else role.replace('_', ' ').title()
+            level1_note = f"Level 1 payment approval completed via WhatsApp by {role_label} {approver_name}."
+            AdmissionService.update_status(
+                admission=admission,
+                new_status='approved',
+                note=level1_note,
+                user=approver,
+            )
+            admission.add_payment_history_entry('payment_verified', {
+                'payment_choice': admission.payment_choice,
+                'amount': float(admission.payment_amount or admission.total_fees or 0),
+                'transaction_id': admission.transaction_id,
+                'status': 'level_1_approved',
+                'level': 1,
+                'approver_role': role,
+                'verified_by': approver_name,
+                'verified_at': timezone.now().isoformat(),
+                'date': timezone.now().date().isoformat(),
+                'note': level1_note,
+            })
+
+            # Synchronize Payment status to level_1_approved
+            from fees.models import Payment
+            payment = Payment.objects.filter(admission=admission).first()
+            if payment:
+                payment.status = 'level_1_approved'
+                payment.verified_by = approver
+                payment.note = level1_note
+                payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
+            else:
+                mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                Payment.objects.create(
                     admission=admission,
-                    new_status='approved',
+                    amount=admission.payment_amount or admission.total_fees or 0,
+                    payment_mode=mapped_mode,
+                    transaction_ref=admission.transaction_id or '',
+                    payment_proof=admission.payment_screenshot,
+                    status='level_1_approved',
+                    verified_by=approver,
+                    payment_date=timezone.now().date(),
                     note=level1_note,
-                    user=approver,
-                )
-                admission.add_payment_history_entry('payment_verified', {
-                    'payment_choice': admission.payment_choice,
-                    'amount': float(admission.payment_amount or admission.total_fees or 0),
-                    'transaction_id': admission.transaction_id,
-                    'status': 'level_1_approved',
-                    'level': 1,
-                    'approver_role': 'accountant',
-                    'verified_by': approver_name,
-                    'verified_at': timezone.now().isoformat(),
-                    'date': timezone.now().date().isoformat(),
-                    'note': level1_note,
-                })
-
-                # Synchronize Payment status to level_1_approved
-                from fees.models import Payment
-                payment = Payment.objects.filter(admission=admission).first()
-                if payment:
-                    payment.status = 'level_1_approved'
-                    payment.verified_by = approver
-                    payment.note = level1_note
-                    payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
-                else:
-                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
-                    Payment.objects.create(
-                        admission=admission,
-                        amount=admission.payment_amount or admission.total_fees or 0,
-                        payment_mode=mapped_mode,
-                        transaction_ref=admission.transaction_id or '',
-                        payment_proof=admission.payment_screenshot,
-                        status='level_1_approved',
-                        verified_by=approver,
-                        payment_date=timezone.now().date(),
-                        note=level1_note,
-                    )
-
-                send_whatsapp_text(
-                    to=sender_wa_id,
-                    body=(
-                        f"✅ Level 1 payment approval completed for admission #{admission.id} "
-                        f"({admission.first_name} {admission.surname}).\n\n"
-                        f"Status is now 'Approved'. Notification dispatched to Super Admin for Level 2 (final) approval."
-                    )
                 )
 
-                # Send Level 2 template notification to Super Admins
-                try:
-                    send_payment_verification_whatsapp(admission, level=2)
-                except Exception as exc:
-                    logger.error("[WA ADMISSION] Failed to dispatch Level 2 WhatsApp notification: %s", exc)
-
-                return True
-
-            elif role == 'super_admin':
-                # Super Admin approving directly: complete both Level 1 & Level 2 as executive override
-                super_note = f"Super Admin final approval & enrollment completed via WhatsApp by {approver_name}."
-                AdmissionService.update_status(
-                    admission=admission,
-                    new_status='enrolled',
-                    note=super_note,
-                    user=approver,
+            send_whatsapp_text(
+                to=sender_wa_id,
+                body=(
+                    f"✅ Level 1 payment approval completed for admission #{admission.id} "
+                    f"({admission.first_name} {admission.surname}).\n\n"
+                    f"Status is now 'Approved'. Notification dispatched to Super Admin for Level 2 (final) approval."
                 )
+            )
 
-                from auth_user.models import User as AuthUser
-                student_user = AuthUser.objects.filter(email__iexact=admission.email, role='student').first()
-                adm_no = f"ADM-{admission.id}"
-                if student_user:
-                    try:
-                        from students.utils import StudentService
-                        student = StudentService.create_from_admission(admission=admission, user=student_user, acting_user=approver)
-                        adm_no = student.admission_number
-                    except Exception as exc:
-                        logger.error("[WA ADMISSION] StudentService.create_from_admission error: %s", exc)
+            # Send Level 2 template notification to Super Admins
+            try:
+                send_payment_verification_whatsapp(admission, level=2)
+            except Exception as exc:
+                logger.error("[WA ADMISSION] Failed to dispatch Level 2 WhatsApp notification: %s", exc)
 
-                admission.add_payment_history_entry('payment_approved', {
-                    'payment_choice': admission.payment_choice,
-                    'amount': float(admission.payment_amount or admission.total_fees or 0),
-                    'transaction_id': admission.transaction_id,
-                    'status': 'verified',
-                    'level': 2,
-                    'approver_role': 'super_admin',
-                    'verified_by': approver_name,
-                    'verified_at': timezone.now().isoformat(),
-                    'date': timezone.now().date().isoformat(),
-                    'note': super_note,
-                })
-
-                # Synchronize Payment status to verified and link student
-                from fees.models import Payment
-                from fees.services import send_payment_receipt
-                payment = Payment.objects.filter(admission=admission).first()
-                if payment:
-                    payment.status = 'verified'
-                    if student_user and 'student' in locals() and student:
-                        try:
-                            payment.student = student
-                        except Exception:
-                            pass
-                    payment.verified_by = approver
-                    payment.verified_at = timezone.now()
-                    payment.note = super_note
-                    payment.save(update_fields=['status', 'student', 'verified_by', 'verified_at', 'note', 'updated_at'])
-                    try:
-                        send_payment_receipt(payment)
-                    except Exception as exc:
-                        logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
-                else:
-                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
-                    payment = Payment.objects.create(
-                        admission=admission,
-                        student=student if ('student' in locals() and student) else None,
-                        amount=admission.payment_amount or admission.total_fees or 0,
-                        payment_mode=mapped_mode,
-                        transaction_ref=admission.transaction_id or '',
-                        payment_proof=admission.payment_screenshot,
-                        status='verified',
-                        recorded_by=approver,
-                        verified_by=approver,
-                        verified_at=timezone.now(),
-                        payment_date=timezone.now().date(),
-                        note=super_note,
-                    )
-                    try:
-                        send_payment_receipt(payment)
-                    except Exception as exc:
-                        logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
-
-                send_whatsapp_text(
-                    to=sender_wa_id,
-                    body=(
-                        f"🎉 Final approval completed! Admission #{admission.id} "
-                        f"({admission.first_name} {admission.surname}) is now enrolled.\n\n"
-                        f"Admission No: {adm_no}\n"
-                        f"Student login credentials have been dispatched."
-                    )
+            try:
+                from core.utils import notify_users_by_role
+                notify_users_by_role(
+                    roles=['super_admin'],
+                    title='Admission Payment Ready for Final Approval',
+                    body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified at Level 1 and requires Super Admin final approval.",
+                    organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                    branch=admission.branch if getattr(admission, 'branch', None) else None,
+                    email_subject=f'Final Approval Required: Admission #{admission.id}',
                 )
-                return True
+            except Exception as exc:
+                logger.error("[WA ADMISSION] Failed to notify super_admin of level 1 approval: %s", exc)
+            return True
 
         # LEVEL 2: Admission is in 'approved' status (waiting for Super Admin)
         if admission.status == 'approved':

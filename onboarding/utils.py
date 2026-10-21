@@ -581,6 +581,6 @@ def sync_admission_payment(admission, request=None, force=False):
                 branch=admission.branch if getattr(admission, 'branch', None) else None,
             )
         except Exception as exc:
-            logger.error(f"Failed to dispatch accountant system notification for admission {admission.id}: {exc}")
+            logger.error(f"Failed to dispatch Level 1 system notification for admission {admission.id}: {exc}")
 
     return payment
