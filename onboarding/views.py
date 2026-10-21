@@ -389,14 +389,15 @@ def _setup_payment_bank_and_notify(admission):
                 f"Insight Institute Team"
             )
 
-            send_email(
-                to=admission.email,
-                subject="Complete Your Fee Payment",
-                text=text_content,
-                template="emails/payment_setup.html",
-                template_context=template_context,
-                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-            )
+            # [DISABLED] Payment setup email — uncomment to re-enable
+            # send_email(
+            #     to=admission.email,
+            #     subject="Complete Your Fee Payment",
+            #     text=text_content,
+            #     template="emails/payment_setup.html",
+            #     template_context=template_context,
+            #     organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+            # )
             
             try:
                 from chat.notifications import send_whatsapp_with_fallback

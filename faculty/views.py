@@ -73,44 +73,49 @@ class FacultyListCreateView(APIView):
         if role not in FACULTY_VIEW_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related(
-            'batch_assignments__batch', 'levels', 'levels__course'
-        ).annotate(
-            batch_count=Count('batch_assignments', distinct=True)
-        )
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(branch__organization=request.user.organization)
-        if role not in ('super_admin', 'branch_manager'):
-            branch_ids = get_user_branch_ids(request.user)
-            if branch_ids:
-                qs = qs.filter(branch_id__in=branch_ids)
+        try:
+            qs = FacultyProfile.objects.select_related('user', 'branch').prefetch_related(
+                'batch_assignments__batch', 'levels', 'levels__course'
+            ).annotate(
+                batch_count=Count('batch_assignments', distinct=True)
+            )
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            if role not in ('super_admin', 'branch_manager'):
+                branch_ids = get_user_branch_ids(request.user)
+                if branch_ids:
+                    qs = qs.filter(branch_id__in=branch_ids)
 
-        for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type')]:
-            val = request.GET.get(param)
-            if val:
-                if param == 'is_active':
-                    qs = qs.filter(is_active=val.lower() == 'true')
-                else:
-                    qs = qs.filter(**{field: val})
+            for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type')]:
+                val = request.GET.get(param)
+                if val:
+                    if param == 'is_active':
+                        qs = qs.filter(is_active=val.lower() == 'true')
+                    else:
+                        qs = qs.filter(**{field: val})
 
-        # branch_id / branch filter â available to all roles (branch_manager
-        # in particular uses this to scope the list to a specific branch).
-        branch_filter = request.GET.get('branch_id') or request.GET.get('branch')
-        if branch_filter:
-            qs = qs.filter(branch_id=branch_filter)
+            # branch_id / branch filter â available to all roles (branch_manager
+            # in particular uses this to scope the list to a specific branch).
+            branch_filter = request.GET.get('branch_id') or request.GET.get('branch')
+            if branch_filter:
+                qs = qs.filter(branch_id=branch_filter)
 
-        level_val = request.GET.get('level_id') or request.GET.get('level')
-        if level_val:
-            from django.db.models import Q
-            qs = qs.filter(
-                Q(level=level_val) |
-                Q(levels__id=level_val) |
-                Q(levels__name__icontains=level_val)
-            ).distinct()
+            level_val = request.GET.get('level_id') or request.GET.get('level')
+            if level_val:
+                from django.db.models import Q
+                qs = qs.filter(
+                    Q(level=level_val) |
+                    Q(levels__id=level_val) |
+                    Q(levels__name__icontains=level_val)
+                ).distinct()
 
-        qs = apply_filters(self, request, qs)
+            qs = apply_filters(self, request, qs)
 
-        return paginate_queryset(qs, request, FacultyListSerializer, serializer_context={'request': request})
+            return paginate_queryset(qs, request, FacultyListSerializer, serializer_context={'request': request})
+
+        except Exception as e:
+            logger.error(f'FacultyListCreateView.get error (role={role}): {e}', exc_info=True)
+            return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request):
         role = _user_role(request.user)
