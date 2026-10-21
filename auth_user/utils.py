@@ -180,16 +180,14 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=user.phone,
-            template_name="login_cred_",
+            template_name="login_",
             language_code="en",
             components=[
                 {
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": user.name},
-                        {"type": "text", "text": user.organization.name if user.organization else 'Insight ERP'},
-                        {"type": "text", "text": user.email},
-                        {"type": "text", "text": password}
+                        {"type": "text", "text": user.organization.name if user.organization else 'Insight ERP'}
                     ],
                 }
             ],
@@ -248,16 +246,14 @@ Best Regards,
     try:
         send_whatsapp_with_fallback(
             to=parent_user.phone,
-            template_name="login_cred_",
+            template_name="login_",
             language_code="en",
             components=[
                 {
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": parent_user.name},
-                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'},
-                        {"type": "text", "text": parent_user.email},
-                        {"type": "text", "text": password}
+                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'}
                     ],
                 }
             ],

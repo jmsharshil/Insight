@@ -552,12 +552,14 @@ class PaymentVerifyView(APIView):
 
     def post(self, request, pk):
         role = getattr(request.user, 'role', '') if (request.user and request.user.is_authenticated) else ''
+        level1_approver_roles = ('accountant', 'branch_manager', 'admin_senior_executive', 'admin_executive')
+        authorized_verifier_roles = level1_approver_roles + ('super_admin',)
         is_superuser = getattr(request.user, 'is_superuser', False) if request.user else False
-        if role not in ('accountant', 'super_admin') and not is_superuser:
+        if role not in authorized_verifier_roles and not is_superuser:
             return Response(
                 {
                     'success': False,
-                    'message': 'Permission denied. Only Accountant or Super Admin can verify payments.',
+                    'message': 'Permission denied. Only Accountant, Branch Manager, Admin Executive, or Super Admin can verify payments.',
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -584,13 +586,13 @@ class PaymentVerifyView(APIView):
         admission = payment.admission or (
             payment.student.admission if getattr(payment, 'student', None) and hasattr(payment.student, 'admission') else None
         )
-        is_level1_role = (role == 'accountant' and not is_superuser)
+        is_level1_role = (role in level1_approver_roles and not is_superuser)
 
         if admission and is_level1_role and payment.status == 'level_1_approved':
             return Response(
                 {
                     'success': False,
-                    'message': 'Level 1 approval is already completed by Accountant. Pending Level 2 (final) approval by Super Admin.',
+                    'message': 'Level 1 approval is already completed. Pending Level 2 (final) approval by Super Admin.',
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -629,14 +631,15 @@ class PaymentVerifyView(APIView):
 
         if new_status == 'verified':
             if admission and is_level1_role:
-                # ── LEVEL 1 APPROVAL (Accountant) ─────────────────────────────
+                # ── LEVEL 1 APPROVAL (Accountant / Branch Manager / Admin Executive) ─────────────────────────────
                 payment.status = 'level_1_approved'
                 payment.verified_by = request.user if request.user.is_authenticated else None
                 payment.verified_at = timezone.now()
                 payment.save(update_fields=['status', 'verified_by', 'verified_at'])
 
                 from onboarding.utils import AdmissionService
-                level1_note = note or 'Level 1 payment approval completed by Accountant via Payment Tab.'
+                role_label = getattr(request.user, 'get_role_display', lambda: role)() if (request.user and request.user.is_authenticated) else role.replace('_', ' ').title()
+                level1_note = note or f'Level 1 payment approval completed by {role_label} via Payment Tab.'
                 if admission.status in ('approval_pending', 'payment_submitted', 'payment_pending'):
                     AdmissionService.update_status(
                         admission=admission,
@@ -656,7 +659,7 @@ class PaymentVerifyView(APIView):
                     'receipt_number': payment.receipt_number,
                     'status': 'level_1_approved',
                     'level': 1,
-                    'approver_role': 'accountant',
+                    'approver_role': role,
                     'verified_by': verifier_name,
                     'verified_at': timezone.now().isoformat(),
                     'date': timezone.now().date().isoformat(),
@@ -1535,6 +1538,46 @@ class RazorpayGeneratePaymentLinkView(APIView):
         except Exception:
             pass
 
+        # Send WhatsApp razorpay_link template to student if phone is available
+        recipient_phone = getattr(student, 'phone', None) or (getattr(admission, 'phone_student', None) if admission else None)
+        short_url = rp.get('short_url', '')
+        if recipient_phone and short_url:
+            try:
+                from chat.notifications import send_whatsapp_with_fallback
+                rzp_suffix = str(short_url).strip()
+                for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
+                    if rzp_suffix.startswith(prefix):
+                        rzp_suffix = rzp_suffix[len(prefix):]
+                        break
+
+                send_whatsapp_with_fallback(
+                    to=recipient_phone,
+                    template_name="razorpay_link",
+                    language_code="en",
+                    components=[
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": f"{float(amount):,.0f}"},
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "sub_type": "url",
+                            "index": 0,
+                            "parameters": [
+                                {"type": "text", "text": rzp_suffix}
+                            ]
+                        }
+                    ],
+                    fallback_body=(
+                        f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount):,.0f}. "
+                        f"You can pay through clicking below: {short_url}"
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"Failed to send WhatsApp razorpay_link to student: {e}")
+
         return Response({
             'success': True,
             'message': 'Razorpay payment link created.',
@@ -1567,6 +1610,7 @@ class RazorpayDirectPaymentLinkView(APIView):
         amount = request.data.get('amount')
         reference_id = request.data.get('reference_id')
         customer_name = request.data.get('customer_name')
+        customer_contact = request.data.get('customer_contact')
         
         if not amount or not reference_id or not customer_name:
             return Response({
@@ -1580,7 +1624,7 @@ class RazorpayDirectPaymentLinkView(APIView):
             reference_id=reference_id,
             customer_name=customer_name,
             customer_email=request.data.get('customer_email', ''),
-            customer_contact=request.data.get('customer_contact', ''),
+            customer_contact=customer_contact or '',
             description=request.data.get('description', 'Direct Payment'),
             upi_id=request.data.get('upi_id')
         )
@@ -1588,6 +1632,45 @@ class RazorpayDirectPaymentLinkView(APIView):
         if not result['success']:
             return Response({'success': False, 'message': result['error'], 'detail': result.get('detail')}, status=502)
             
+        rp_data = result.get('data') or {}
+        short_url = rp_data.get('short_url', '')
+        if customer_contact and short_url:
+            try:
+                from chat.notifications import send_whatsapp_with_fallback
+                rzp_suffix = str(short_url).strip()
+                for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
+                    if rzp_suffix.startswith(prefix):
+                        rzp_suffix = rzp_suffix[len(prefix):]
+                        break
+
+                send_whatsapp_with_fallback(
+                    to=customer_contact,
+                    template_name="razorpay_link",
+                    language_code="en",
+                    components=[
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": f"{float(amount):,.0f}"},
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "sub_type": "url",
+                            "index": 0,
+                            "parameters": [
+                                {"type": "text", "text": rzp_suffix}
+                            ]
+                        }
+                    ],
+                    fallback_body=(
+                        f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount):,.0f}. "
+                        f"You can pay through clicking below: {short_url}"
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"Failed to send WhatsApp razorpay_link for direct payment: {e}")
+
         return Response({
             'success': True,
             'message': 'Razorpay payment link created.',

@@ -184,14 +184,6 @@ def _setup_payment_bank_and_notify(admission):
     from fees.models import BankAccount
     from fees.razorpay_service import create_payment_link
 
-    if getattr(admission, 'bank_account', None):
-        try:
-            from .utils import sync_admission_payment
-            sync_admission_payment(admission)
-        except Exception as e:
-            logger.error(f"Error syncing payment for admission {admission.id}: {e}")
-        return  # already assigned
-
     from decimal import Decimal
     payment_amount = _get_bank_selection_amount(admission)
 
@@ -219,77 +211,98 @@ def _setup_payment_bank_and_notify(admission):
         }
         amount_to_pay = default_course_fees.get(admission.course, Decimal('1'))
 
-    eligible_banks = select_bank_accounts_for_payment(amount_to_pay)
-    if not eligible_banks:
-        eligible_banks = list(BankAccount.objects.filter(is_active=True))
-    if not eligible_banks:
-        logger.warning(f"No active bank accounts for admission {admission.id}")
-        assigned_bank = None
+    assigned_bank = getattr(admission, 'bank_account', None)
+    if not assigned_bank:
+        eligible_banks = select_bank_accounts_for_payment(amount_to_pay)
+        if not eligible_banks:
+            eligible_banks = list(BankAccount.objects.filter(is_active=True))
+        if not eligible_banks:
+            logger.warning(f"No active bank accounts for admission {admission.id}")
+            assigned_bank = None
+        else:
+            assigned_bank = eligible_banks[0]
+            admission.assign_payment_bank_account(assigned_bank)
     else:
-        assigned_bank = eligible_banks[0]
-        admission.assign_payment_bank_account(assigned_bank)
+        if admission.status == 'form_pending':
+            admission.status = 'payment_pending'
+            admission.save(update_fields=['status', 'updated_at'])
 
-    AdmissionStatusHistory.objects.create(
-        admission=admission,
-        status='payment_pending',
-        changed_by=None,
-        note='Form submitted. Waiting for fee payment.',
-    )
+    if not AdmissionStatusHistory.objects.filter(admission=admission, status='payment_pending').exists():
+        AdmissionStatusHistory.objects.create(
+            admission=admission,
+            status='payment_pending',
+            changed_by=None,
+            note='Form submitted. Waiting for fee payment.',
+        )
 
     print("Amount to pay..........", amount_to_pay)
-    razorpay_link_url = ""
-    
-    # Check if student selected 'online' payment choice
-    # If user selected 'online', generate & send Razorpay payment link.
+
+    # Determine whether payment is online or offline:
     # If user selected 'cash' or 'cheque', do NOT generate Razorpay link.
-    # Backwards compatibility: if payment_choice is not set, generate if payment_type in ('full_payment', 'token')
-    is_online_choice = False
+    # If payment_choice is not set, default to online unless payment_type == 'finance'.
+    is_online_choice = True
     if admission.payment_choice:
-        is_online_choice = (admission.payment_choice.lower() == 'online')
+        if admission.payment_choice.lower() in ('cash', 'cheque', 'check'):
+            is_online_choice = False
+        else:
+            is_online_choice = (admission.payment_choice.lower() == 'online')
+    elif admission.payment_type == 'finance':
+        is_online_choice = False
     else:
-        is_online_choice = (admission.payment_type in ('full_payment', 'token'))
+        is_online_choice = True
+        admission.payment_choice = 'online'
+        admission.save(update_fields=['payment_choice', 'updated_at'])
+
+    razorpay_link_url = admission.razorpay_payment_link or ""
+    rp_link_id = admission.razorpay_payment_link_id or ""
 
     if amount_to_pay > 0 and is_online_choice:
         try:
-            # Make reference_id unique to prevent "reference_id already exists" errors on re-runs
-            import time
-            unique_ref = f"ADM_{admission.id}_{int(time.time())}"
-            payment_type_label = "Token" if admission.payment_type == 'token' else "Full Payment"
-            
-            response = create_payment_link(
-                amount=amount_to_pay,
-                reference_id=unique_ref,
-                customer_name=f"{admission.first_name} {admission.surname}".strip(),
-                customer_email=admission.email,
-                customer_contact=admission.phone_student,
-                description=f"Insight Institute Fee Payment ({payment_type_label})",
-            )
-            print("================================================")
-            print(response)
-            print("================================================")
-            if response.get('success') and response.get('data'):
-                rp_link = response['data']
-                print(rp_link)
-                if rp_link and 'short_url' in rp_link:
-                    razorpay_link_url = rp_link['short_url']
-                    admission.razorpay_payment_link = razorpay_link_url
-                    admission.razorpay_payment_link_id = rp_link.get('id')
-                    admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
-                    
-                    # Record payment link generation event in payment_history
+            # If no payment link exists yet, create one via Razorpay
+            if not razorpay_link_url:
+                import time
+                unique_ref = f"ADM_{admission.id}_{int(time.time())}"
+                payment_type_label = "Token" if admission.payment_type == 'token' else "Full Payment"
+                
+                response = create_payment_link(
+                    amount=amount_to_pay,
+                    reference_id=unique_ref,
+                    customer_name=f"{admission.first_name} {admission.surname}".strip(),
+                    customer_email=admission.email,
+                    customer_contact=admission.phone_student,
+                    description=f"Insight Institute Fee Payment ({payment_type_label})",
+                )
+                print("================================================")
+                print(response)
+                print("================================================")
+                if response.get('success') and response.get('data'):
+                    rp_link = response['data']
+                    print(rp_link)
+                    if rp_link and 'short_url' in rp_link:
+                        razorpay_link_url = rp_link['short_url']
+                        rp_link_id = rp_link.get('id')
+                        admission.razorpay_payment_link = razorpay_link_url
+                        admission.razorpay_payment_link_id = rp_link_id
+                        admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+                        print(f"Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
+                    else:
+                        print(f"Razorpay response missing short_url: {rp_link}")
+                else:
+                    error_detail = response.get('error') or response.get('detail', response)
+                    print(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
+
+            # Record payment link generation event in payment_history if not present
+            if razorpay_link_url:
+                existing_events = [e.get('event') for e in (admission.payment_history or [])]
+                if 'payment_link_created' not in existing_events:
                     admission.add_payment_history_entry('payment_link_created', {
                         'payment_choice': 'online',
                         'amount': float(amount_to_pay),
                         'razorpay_payment_link': razorpay_link_url,
-                        'razorpay_payment_link_id': rp_link.get('id'),
+                        'razorpay_payment_link_id': rp_link_id,
                         'status': 'pending',
                     })
-                    print(f"Razorpay link generated successfully for admission {admission.id}: {razorpay_link_url}")
-                else:
-                    print(f"Razorpay response missing short_url: {rp_link}")
-            else:
-                error_detail = response.get('error') or response.get('detail', response)
-                print(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
+                    print(f"Payment history entry 'payment_link_created' added for admission {admission.id}")
         except Exception as e:
             print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
     else:
@@ -328,6 +341,64 @@ def _setup_payment_bank_and_notify(admission):
             print(f"Skipping Razorpay link generation for admission {admission.id} because payment choice is '{admission.payment_choice}'.")
         else:
             print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
+
+    # ── WhatsApp Notification (independent of email) ─────────────────────────
+    if admission.phone_student:
+        try:
+            from chat.notifications import send_whatsapp_with_fallback
+            if razorpay_link_url:
+                # Extract dynamic suffix for button (template base URL: https://rzp.io/{{1}})
+                rzp_suffix = str(razorpay_link_url).strip()
+                for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
+                    if rzp_suffix.startswith(prefix):
+                        rzp_suffix = rzp_suffix[len(prefix):]
+                        break
+
+                send_whatsapp_with_fallback(
+                    to=admission.phone_student,
+                    template_name="razorpay_link",
+                    language_code="en",
+                    components=[
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "sub_type": "url",
+                            "index": 0,
+                            "parameters": [
+                                {"type": "text", "text": rzp_suffix}
+                            ]
+                        }
+                    ],
+                    fallback_body=(
+                        f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_to_pay):,.0f}. "
+                        f"You can pay through clicking below: {razorpay_link_url}"
+                    ),
+                )
+                logger.info(f"WhatsApp razorpay_link dispatched to {admission.phone_student} for admission {admission.id}")
+            else:
+                send_whatsapp_with_fallback(
+                    to=admission.phone_student,
+                    template_name="payment_setup_",
+                    language_code="en",
+                    components=[
+                        {
+                            "type": "body", 
+                            "parameters": [
+                                {"type": "text", "text": admission.first_name},
+                                {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
+                            ]
+                        }
+                    ],
+                    fallback_body=f"Hello {admission.first_name}, please complete your fee payment of INR {float(amount_to_pay):,.0f}.",
+                )
+                logger.info(f"WhatsApp payment_setup_ dispatched to {admission.phone_student} for admission {admission.id}")
+        except Exception as e:
+            logger.error(f"Failed to send WhatsApp payment notification for admission {admission.id}: {e}")
 
     if admission.email and assigned_bank:
         try:
@@ -398,33 +469,7 @@ def _setup_payment_bank_and_notify(admission):
             #     template_context=template_context,
             #     organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
             # )
-            
-            try:
-                from chat.notifications import send_whatsapp_with_fallback
-                send_whatsapp_with_fallback(
-                    to=admission.phone_student,
-                    template_name="payment_setup_",
-                    language_code="en",
-                    components=[
-                        {
-                            "type": "body", 
-                            "parameters": [
-                                {"type": "text", "text": admission.first_name},
-                                {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
-                            ]
-                        },
-                        {
-                            "type": "button",
-                            "sub_type": "url",
-                            "index": 0,
-                            "parameters": [{"type": "text", "text": razorpay_link_url if razorpay_link_url else payment_link}]
-                        }
-                    ],
-                    fallback_body=text_content,
-                )
-            except Exception as e:
-                print(e)
-            logger.info(f"Payment email sent directly to {admission.email} with bank: {assigned_bank.bank_name}")
+            logger.info(f"Payment email prepared for {admission.email} with bank: {assigned_bank.bank_name}")
         except Exception as e:
             logger.error(f"Failed to send payment email to {admission.email}: {e}")
 
@@ -445,6 +490,30 @@ class AdmissionListView(APIView):
         data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
         data.update({k: v for k, v in request.FILES.items()})
 
+        # Resolve branch from data, user, or active fallback
+        branch_id = data.get('branch') or data.get('branch_id')
+        branch_obj = None
+        if branch_id:
+            if isinstance(branch_id, dict):
+                branch_id = branch_id.get('id')
+            try:
+                from branch.models import Branch
+                branch_obj = Branch.objects.filter(id=branch_id).first()
+            except Exception:
+                branch_obj = None
+
+        if branch_obj is None and getattr(request.user, 'branch', None):
+            branch_obj = request.user.branch
+
+        if branch_obj is None:
+            from branch.models import Branch
+            if getattr(request.user, 'organization', None):
+                branch_obj = Branch.objects.filter(
+                    organization=request.user.organization, is_deleted=False, is_active=True
+                ).first()
+            if branch_obj is None:
+                branch_obj = Branch.objects.filter(is_deleted=False, is_active=True).first() or Branch.objects.filter(is_deleted=False).first()
+
         admission_id = data.get('id') or data.get('admission_id')
 
         if not admission_id:
@@ -457,15 +526,6 @@ class AdmissionListView(APIView):
                 from django.db.models import Q
                 from django.utils import timezone as tz
                 from leads.models import Lead, LeadStage
-
-                # Resolve branch from data or fall back to the request user's branch
-                branch_id = data.get('branch')
-                branch_obj = None
-                if branch_id:
-                    from branch.models import Branch
-                    branch_obj = Branch.objects.filter(id=branch_id).first()
-                if branch_obj is None and getattr(request.user, 'branch', None):
-                    branch_obj = request.user.branch
 
                 # Build the minimum required lead fields from the submitted form data
                 lead = Lead(
@@ -590,6 +650,15 @@ class AdmissionListView(APIView):
         # the dedicated  POST /api/admissions/<id>/setup/  endpoint so that slow
         # external calls never block the form submission response.
         try:
+            # Ensure branch is properly passed or populated
+            if 'branch' in data and not data['branch']:
+                if branch_obj:
+                    data['branch'] = str(branch_obj.id)
+                else:
+                    data.pop('branch', None)
+            elif 'branch' not in data and branch_obj and (admission.branch is None):
+                data['branch'] = str(branch_obj.id)
+
             serializer = AdmissionUpdateSerializer(admission, data=data, partial=True)
             if not serializer.is_valid():
                 return Response(
@@ -597,6 +666,13 @@ class AdmissionListView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             serializer.save()
+
+            if admission.branch is None and branch_obj:
+                admission.branch = branch_obj
+                admission.save(update_fields=['branch'])
+            if getattr(admission, 'lead', None) and admission.lead.branch is None and admission.branch:
+                admission.lead.branch = admission.branch
+                admission.lead.save(update_fields=['branch'])
 
         except Exception as e:
             logger.error(f"Admission update error: {e}")
@@ -652,7 +728,10 @@ class AdmissionListView(APIView):
         queryset = Admission.objects.all()
         
         if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(branch__organization=request.user.organization)
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(branch__organization=request.user.organization) | Q(branch__isnull=True)
+            )
 
         if getattr(request.user, 'role', None) == 'counsellor':
             queryset = queryset.filter(assigned_counsellor=request.user)
@@ -911,14 +990,16 @@ class AdmissionApproveView(APIView):
         role = getattr(acting_user, 'role', '') if acting_user else ''
         is_superuser = getattr(acting_user, 'is_superuser', False) if acting_user else False
 
-        # Role-based guard: only accountant (Level 1) and super_admin (Level 2) are authorized
-        if role not in ('accountant', 'super_admin') and not is_superuser:
+        # Role-based guard: authorized approvers (Level 1 & Level 2)
+        authorized_roles = ('super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'accountant')
+        if role not in authorized_roles and not is_superuser:
             return Response(
                 {
                     'success': False,
                     'message': (
-                        'Permission denied. Payment approval from admission requires a 2-level process: '
-                        'Accountant (Level 1) and Super Admin (Level 2).'
+                        'Permission denied. Payment approval requires an authorized role: '
+                        'Accountant, Branch Manager, Admin Senior Executive, Admin Executive (Level 1) '
+                        'or Super Admin (Level 2).'
                     ),
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -928,7 +1009,7 @@ class AdmissionApproveView(APIView):
         force_override = bool(request.data.get('override') or request.data.get('force'))
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # LEVEL 1: Accountant Approval
+        # LEVEL 1: Verification
         #   Admission is in 'payment_submitted', 'approval_pending', or
         #   offline 'payment_pending' with cash or cheque choice.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -938,31 +1019,15 @@ class AdmissionApproveView(APIView):
             )
         )
 
-        if is_pending_level1:
-            # If a super_admin attempts approval before accountant approval:
-            # Require accountant approval first, unless override/force flag is explicitly passed.
-            if (role == 'super_admin' or is_superuser) and not force_override:
-                return Response(
-                    {
-                        'success': False,
-                        'message': (
-                            'Level 1 approval by an Accountant is required before Super Admin can give final approval. '
-                            'Please have an Accountant verify the payment first (or pass override=true if Accountant is unavailable).'
-                        ),
-                        'data': {
-                            'admission_id': admission.id,
-                            'admission_status': admission.status,
-                            'status_display': admission.get_status_display(),
-                            'required_role': 'accountant',
-                            'approval_level': 1,
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        level1_roles = ('accountant', 'branch_manager', 'admin_senior_executive', 'admin_executive')
 
-            # If acting user is accountant (or super_admin with override):
-            if role == 'accountant' and not force_override:
-                level1_note = note or 'Level 1 payment approval completed by Accountant.'
+        if is_pending_level1:
+            # If not force_override, perform Level 1 approval:
+            # Allowed for all level1_roles as well as super_admin / is_superuser
+            if not force_override:
+                role_label = getattr(acting_user, 'get_role_display', lambda: role)() if acting_user else 'Staff'
+                actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Staff')
+                level1_note = note or f'Level 1 payment approval completed by {role_label}.'
                 AdmissionService.update_status(
                     admission=admission,
                     new_status='approved',
@@ -976,8 +1041,8 @@ class AdmissionApproveView(APIView):
                     'transaction_id': admission.transaction_id,
                     'status': 'level_1_approved',
                     'level': 1,
-                    'approver_role': 'accountant',
-                    'verified_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Accountant'),
+                    'approver_role': role,
+                    'verified_by': actor_name,
                     'verified_at': timezone.now().isoformat(),
                     'date': timezone.now().date().isoformat(),
                     'note': level1_note,
@@ -1011,7 +1076,7 @@ class AdmissionApproveView(APIView):
                     notify_users_by_role(
                         roles=['super_admin'],
                         title='Admission Payment Ready for Final Approval',
-                        body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified by Accountant and requires Super Admin final approval.",
+                        body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified by {role_label} and requires Super Admin final approval.",
                         organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                         branch=admission.branch if getattr(admission, 'branch', None) else None,
                         email_subject=f'Final Approval Required: Admission #{admission.id}',
@@ -1029,13 +1094,13 @@ class AdmissionApproveView(APIView):
                 return Response(
                     {
                         'success': True,
-                        'message': 'Level 1 payment approval completed by Accountant. Pending Level 2 (final) approval by Super Admin.',
+                        'message': f'Level 1 payment approval completed by {role_label}. Pending Level 2 (final) approval by Super Admin.',
                         'data': {
                             'admission_id': admission.id,
                             'admission_status': admission.status,
                             'status_display': admission.get_status_display(),
                             'approval_level': 1,
-                            'approved_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Accountant'),
+                            'approved_by': actor_name,
                             'next_step': 'super_admin_approval',
                         },
                     },
@@ -1066,7 +1131,7 @@ class AdmissionApproveView(APIView):
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # LEVEL 2: Super Admin Final Approval
-        #   Admission is in 'approved' status (Level 1 completed by Accountant),
+        #   Admission is in 'approved' status (Level 1 completed),
         #   or super_admin with force_override.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         if admission.status == 'approved' or force_override:
@@ -1075,7 +1140,7 @@ class AdmissionApproveView(APIView):
                     {
                         'success': False,
                         'message': (
-                            'Level 1 approval is already completed by Accountant. '
+                            'Level 1 approval is already completed. '
                             'Level 2 (final) approval must be performed by a Super Admin.'
                         ),
                         'data': {
@@ -1398,19 +1463,33 @@ class AdmissionRejectView(APIView):
         admission = _get_admission(request, admission_id)
         if not admission:
             return _not_found()
- 
+
+        acting_user = request.user if (request.user and request.user.is_authenticated) else None
+        role = getattr(acting_user, 'role', '') if acting_user else ''
+        is_superuser = getattr(acting_user, 'is_superuser', False) if acting_user else False
+
+        authorized_roles = ('super_admin', 'branch_manager', 'admin_senior_executive', 'admin_executive', 'accountant')
+        if role not in authorized_roles and not is_superuser:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Permission denied. You do not have permission to reject admissions.',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if admission.status == 'enrolled':
             return Response(
                 {'success': False, 'message': 'Enrolled admissions cannot be rejected.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
- 
+
         if admission.status == 'rejected':
             return Response(
                 {'success': False, 'message': 'Admission is already rejected.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
- 
+
         reason = request.data.get('reason', '').strip()
         if not reason:
             return Response(
@@ -1420,12 +1499,12 @@ class AdmissionRejectView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         AdmissionService.update_status(
             admission  = admission,
             new_status = 'rejected',
             note       = reason,
-            user       = request.user if request.user.is_authenticated else None,
+            user       = acting_user,
         )
 
         from fees.models import Payment
@@ -1433,7 +1512,20 @@ class AdmissionRejectView(APIView):
             status='rejected',
             note=f"Admission rejected: {reason}",
         )
- 
+
+        actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Staff')
+        admission.add_payment_history_entry('payment_rejected', {
+            'payment_choice': admission.payment_choice,
+            'amount': float(admission.payment_amount or admission.total_fees or 0),
+            'transaction_id': admission.transaction_id,
+            'status': 'rejected',
+            'rejected_by': actor_name,
+            'rejected_by_role': role,
+            'rejected_at': timezone.now().isoformat(),
+            'date': timezone.now().date().isoformat(),
+            'note': reason,
+        })
+
         return Response(
             {
                 'success': True,
@@ -1531,6 +1623,42 @@ class AdmissionPaymentSetupView(APIView):
                 {'success': False, 'message': 'Admission not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        # ── Update payment preferences from request body if provided ──────────
+        data = request.data if hasattr(request, 'data') else {}
+        update_fields = []
+
+        raw_choice = data.get('payment_choice')
+        if raw_choice:
+            choice = str(raw_choice).strip().lower()
+            if choice in ('check', 'cheque'):
+                choice = 'cheque'
+            if admission.payment_choice != choice:
+                admission.payment_choice = choice
+                update_fields.append('payment_choice')
+
+        raw_type = data.get('payment_type')
+        if raw_type and admission.payment_type != raw_type:
+            admission.payment_type = raw_type
+            update_fields.append('payment_type')
+
+        raw_amount = data.get('payment_amount') or data.get('amount') or data.get('amount_to_pay')
+        if raw_amount is not None:
+            from decimal import Decimal
+            try:
+                admission.payment_amount = Decimal(str(raw_amount))
+                update_fields.append('payment_amount')
+            except Exception:
+                pass
+
+        # If regenerate/force requested, reset existing link so a new one is created
+        if data.get('force_new') or data.get('regenerate_link') or data.get('force_new_link'):
+            admission.razorpay_payment_link = None
+            admission.razorpay_payment_link_id = None
+            update_fields.extend(['razorpay_payment_link', 'razorpay_payment_link_id'])
+
+        if update_fields:
+            admission.save(update_fields=list(set(update_fields)) + ['updated_at'])
 
         # ── Fee structure ─────────────────────────────────────────────────────
         try:
