@@ -436,6 +436,9 @@ class AdmissionListView(APIView):
     search_fields = ['first_name', 'surname', 'email', 'phone_student']
     ordering_fields = '__all__'
 
+    def get_permissions(self):
+        return [AllowAny()]
+
     def post(self, request):
         # Merge body + files
         data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
@@ -643,6 +646,12 @@ class AdmissionListView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    # The admission form may send PATCH instead of POST (typical for "update"
+    # semantics on a form).  Both verbs run identical logic: no-id → create
+    # new Lead + Admission, with-id → update the existing one.
+    def patch(self, request):
+        return self.post(request)
 
     def get(self, request):
         queryset = Admission.objects.all()

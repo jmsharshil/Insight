@@ -58,7 +58,7 @@ class FacultyListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['is_active', 'employment_type', 'level']
+    filterset_fields = ['is_active', 'employment_type', 'level', 'branch']
     search_fields = ['user__name', 'employee_id', 'specialization']
     ordering_fields = '__all__'
 
@@ -92,6 +92,12 @@ class FacultyListCreateView(APIView):
                     qs = qs.filter(is_active=val.lower() == 'true')
                 else:
                     qs = qs.filter(**{field: val})
+
+        # branch_id / branch filter â available to all roles (branch_manager
+        # in particular uses this to scope the list to a specific branch).
+        branch_filter = request.GET.get('branch_id') or request.GET.get('branch')
+        if branch_filter:
+            qs = qs.filter(branch_id=branch_filter)
 
         level_val = request.GET.get('level_id') or request.GET.get('level')
         if level_val:
