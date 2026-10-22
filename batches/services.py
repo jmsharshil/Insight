@@ -296,8 +296,7 @@ def auto_assign_batch(student):
                     bseq = parts[-1]  # last segment
                     branch_prefix = f"{bseq.lstrip('0') or '0'}"
                 else:
-                    # Fallback: use first 4 chars of branch name
-                    branch_prefix = f"{branch.name[:4]}"
+                    branch_prefix = branch.name[:3].upper()
             except Exception:
                 branch_prefix = 'BXX'
 
