@@ -55,7 +55,7 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FacultyListCreateView(APIView):
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'employment_type', 'level', 'branch']
@@ -79,10 +79,15 @@ class FacultyListCreateView(APIView):
             ).annotate(
                 batch_count=Count('batch_assignments', distinct=True)
             )
-            if getattr(request.user, 'organization', None):
+            branch_ids = get_user_branch_ids(request.user)
+            if role == 'branch_manager':
+                if branch_ids:
+                    qs = qs.filter(branch_id__in=branch_ids)
+                else:
+                    qs = qs.none()
+            elif getattr(request.user, 'organization', None):
                 qs = qs.filter(branch__organization=request.user.organization)
             if role not in ('super_admin', 'branch_manager'):
-                branch_ids = get_user_branch_ids(request.user)
                 if branch_ids:
                     qs = qs.filter(branch_id__in=branch_ids)
 
