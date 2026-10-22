@@ -171,7 +171,10 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
     )
 
     # Leads pipeline
-    lead_qs = Lead.objects.filter(bq)
+    lead_bq = bq
+    if user.role == 'super_admin' and getattr(user, 'organization', None):
+        lead_bq = Q(branch__organization=user.organization) | Q(branch__isnull=True)
+    lead_qs = Lead.objects.filter(lead_bq)
     lead_pipeline = list(
         lead_qs.values('current_stage')
         .annotate(count=Count('id'))

@@ -10,7 +10,7 @@ def get_lead_report(user, params):
     bq = Q()
     org = getattr(user, 'organization', None)
     if org:
-        bq &= Q(branch__organization=org)
+        bq &= Q(branch__organization=org) | Q(branch__isnull=True)
     if role != 'super_admin':
         bid = getattr(user, 'branch_id', None)
         if bid:
