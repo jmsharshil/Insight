@@ -344,7 +344,7 @@ def _setup_payment_bank_and_notify(admission):
             print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
 
     # ── WhatsApp Notification (independent of email) ─────────────────────────
-    if admission.phone_student:
+    if admission.phone_student and is_online_choice:
         try:
             from chat.notifications import send_whatsapp_with_fallback
             if razorpay_link_url:
