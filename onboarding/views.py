@@ -314,22 +314,23 @@ def _setup_payment_bank_and_notify(admission):
                     proof_url = admission.payment_screenshot.url
                 except Exception:
                     proof_url = str(admission.payment_screenshot)
-            admission.add_payment_history_entry('offline_payment_selected', {
-                'payment_choice': admission.payment_choice,
-                'payment_choice_display': admission.get_payment_choice_display(),
-                'payment_type': admission.payment_type,
-                'payment_type_display': admission.get_payment_type_display(),
-                'amount_to_pay': float(amount_to_pay),
-                'total_fees': float(admission.total_fees),
-                'token_amount': float(getattr(admission.fee_structure, 'token_amount', 0) or 0),
-                'remaining_fees': float(admission.remaining_fees),
-                'fee_terms_note': admission.token_payment_terms_note,
-                'payment_screenshot': proof_url,
-                'payment_proof': proof_url,
-                'transaction_id': admission.transaction_id or None,
-                'status': 'payment_pending',
-                'date': timezone.now().date().isoformat(),
-            })
+            if not admission.has_payment_history_cycle():
+                admission.add_payment_history_entry('offline_payment_selected', {
+                    'payment_choice': admission.payment_choice,
+                    'payment_choice_display': admission.get_payment_choice_display(),
+                    'payment_type': admission.payment_type,
+                    'payment_type_display': admission.get_payment_type_display(),
+                    'amount_to_pay': float(amount_to_pay),
+                    'total_fees': float(admission.total_fees),
+                    'token_amount': float(getattr(admission.fee_structure, 'token_amount', 0) or 0),
+                    'remaining_fees': float(admission.remaining_fees),
+                    'fee_terms_note': admission.token_payment_terms_note,
+                    'payment_screenshot': proof_url,
+                    'payment_proof': proof_url,
+                    'transaction_id': admission.transaction_id or None,
+                    'status': 'payment_pending',
+                    'date': timezone.now().date().isoformat(),
+                })
 
             # If payment screenshot or transaction ID or offline choice was provided upfront, record pending Payment
             try:
@@ -529,7 +530,7 @@ class AdmissionListView(APIView):
 
                 # Build the minimum required lead fields from the submitted form data
                 lead = Lead(
-                    form_type='inquiry',
+                    form_type='admission',
                     first_name=data.get('first_name', ''),
                     surname=data.get('surname', ''),
                     email=data.get('email') or None,
@@ -1035,7 +1036,7 @@ class AdmissionApproveView(APIView):
                     user=acting_user,
                 )
 
-                admission.add_payment_history_entry('payment_verified', {
+                admission.update_current_payment_history_entry('payment_verified', {
                     'payment_choice': admission.payment_choice,
                     'amount': float(admission.payment_amount or admission.total_fees or 0),
                     'transaction_id': admission.transaction_id,
@@ -1109,7 +1110,7 @@ class AdmissionApproveView(APIView):
 
             # If super_admin with override on pending level 1:
             level1_note = note or 'Level 1 payment approval completed by Super Admin (override).'
-            admission.add_payment_history_entry('payment_verified', {
+            admission.update_current_payment_history_entry('payment_verified', {
                 'payment_choice': admission.payment_choice,
                 'amount': float(admission.payment_amount or admission.total_fees or 0),
                 'transaction_id': admission.transaction_id,
@@ -1278,7 +1279,7 @@ class AdmissionApproveView(APIView):
             #         f"{admission_id}: {exc}"
             #     )
             #     # Non-fatal: student is already created, fee can be added manually 
-            admission.add_payment_history_entry('payment_approved', {
+            admission.update_current_payment_history_entry('payment_approved', {
                 'payment_choice': admission.payment_choice,
                 'amount': float(admission.payment_amount or admission.total_fees or 0),
                 'transaction_id': admission.transaction_id,
@@ -1427,7 +1428,7 @@ class AdmissionPaymentSubmitView(APIView):
         ])
 
         from .utils import sync_admission_payment
-        sync_admission_payment(admission, request=request, force=True)
+        sync_admission_payment(admission, request=request, force=True, new_payment=True)
 
         return Response(
             {
@@ -1515,7 +1516,7 @@ class AdmissionRejectView(APIView):
         )
 
         actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Staff')
-        admission.add_payment_history_entry('payment_rejected', {
+        admission.update_current_payment_history_entry('payment_rejected', {
             'payment_choice': admission.payment_choice,
             'amount': float(admission.payment_amount or admission.total_fees or 0),
             'transaction_id': admission.transaction_id,
@@ -1676,8 +1677,7 @@ class AdmissionPaymentSetupView(APIView):
         # ── Sync payment record ───────────────────────────────────────────────
         try:
             from .utils import sync_admission_payment
-            force_sync = bool(admission.payment_choice in ('cash', 'cheque', 'check') or admission.payment_screenshot or admission.transaction_id)
-            sync_admission_payment(admission, request=request, force=force_sync)
+            sync_admission_payment(admission, request=request)
         except Exception as e:
             logger.error(f'AdmissionPaymentSetupView: sync error for {admission_id}: {e}')
 

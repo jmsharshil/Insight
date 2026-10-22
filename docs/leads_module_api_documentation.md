@@ -24,7 +24,7 @@
 ### Core Models
 | Model | Purpose |
 |-------|---------|
-| `Lead` | Inquiry (contact/inquiry form data, stage, assigned_counsellor, linked admission on conversion) |
+| `Lead` | Contact, inquiry, or direct-admission form data, stage, assigned_counsellor, linked admission on conversion |
 | `LeadStage` | Immutable stage history log |
 | `LeadAssignmentLog` | Immutable assignment/reassignment audit |
 
@@ -77,7 +77,7 @@ Onboarding flow (form submission → fees bank select via `fees.utils`, payment,
 ## FULL WALKTHROUGH: Lead to Admission Conversion
 
 ### Step 1: Lead Capture
-Public or admin POST to create Lead (`new` stage, form_type=contact/inquiry).
+Public or admin POST to create a contact or inquiry Lead (`new` stage, form_type=contact/inquiry). A Lead created automatically from a direct admission submission is recorded with `form_type=admission`.
 
 ### Step 2: Assignment
 Automatic round-robin via signal on Lead save (`auto_assign_lead`). Uses `form_type` to select role (`tele_caller` for contact forms, `counsellor` for inquiries). `notify_new_lead_assignment` fires. Manual re-assignment via `/assign/` still supported (logs to `LeadAssignmentLog`).
@@ -103,7 +103,7 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
 ### List Leads
 **`GET /api/v1/leads/`** — Paginated. Role-scoped (counsellor sees assigned only).
 
-**Query Params:** `form_type` (`contact`/`inquiry`), `current_stage`, `course`, `assigned_to`, `search` (name/phone/email), `date_from`, `date_to`.
+**Query Params:** `form_type` (`contact`/`inquiry`/`admission`), `current_stage`, `course`, `assigned_to`, `search` (name/phone/email), `date_from`, `date_to`.
 
 **Response Example:**
 ```json

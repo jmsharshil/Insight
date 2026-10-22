@@ -648,7 +648,7 @@ class PaymentVerifyView(APIView):
                         user=request.user,
                     )
 
-                admission.add_payment_history_entry('payment_verified', {
+                admission.update_current_payment_history_entry('payment_verified', {
                     'payment_choice': payment.payment_mode,
                     'payment_type': getattr(admission, 'payment_type', 'full'),
                     'payment_type_display': admission.get_payment_type_display() if hasattr(admission, 'get_payment_type_display') else '',
@@ -731,7 +731,7 @@ class PaymentVerifyView(APIView):
                             except Exception as exc:
                                 logger.error(f"Failed to auto-create student from admission in PaymentVerifyView: {exc}")
 
-                    admission.add_payment_history_entry('payment_approved', {
+                    admission.update_current_payment_history_entry('payment_approved', {
                         'payment_choice': payment.payment_mode,
                         'payment_type': getattr(admission, 'payment_type', 'full'),
                         'payment_type_display': admission.get_payment_type_display() if hasattr(admission, 'get_payment_type_display') else '',
@@ -785,7 +785,7 @@ class PaymentVerifyView(APIView):
                     note=note or 'Payment rejected via Payment Tab.',
                     user=request.user,
                 )
-                admission.add_payment_history_entry('payment_rejected', {
+                admission.update_current_payment_history_entry('payment_rejected', {
                     'payment_choice': payment.payment_mode,
                     'payment_type': getattr(admission, 'payment_type', 'full'),
                     'payment_type_display': admission.get_payment_type_display() if hasattr(admission, 'get_payment_type_display') else '',
@@ -2273,4 +2273,3 @@ class RazorpayWebhookTestView(APIView):
             'simulated_payload': simulated_payload,
             'result': result,
         })
-

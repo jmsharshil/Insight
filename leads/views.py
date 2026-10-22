@@ -22,7 +22,7 @@ from .serializers import (
     LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
     SalesDailyPlanSerializer, SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
     OdometerReadingSerializer, OdometerApproveSerializer, OdometerRejectSerializer,
-    MonthlyOdometerApproveSerializer, MonthlyOdometerRejectSerializer,
+    MonthlyOdometerApproveSerializer, MonthlyOdometerRejectSerializer, SERIALIZER_MAP,
 )
 from .utils import LeadService
 from .models import (
@@ -1833,6 +1833,7 @@ class LeadListView(APIView):
                     "valid_form_types": [
                         {"value": key, "display": label}
                         for key, label in FORM_TYPE_CHOICES
+                        if key in SERIALIZER_MAP
                     ],
                     "errors": e.detail
                 },
