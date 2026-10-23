@@ -5,8 +5,11 @@ from rest_framework import status
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
 from datetime import datetime
+from decimal import Decimal
+from types import SimpleNamespace
 
 from dashboard.views import DashboardAPIView
+from dashboard.services import _get_paid_fee_total
 
 
 @override_settings(
@@ -227,3 +230,32 @@ class DashboardTests(SimpleTestCase):
             self.assertIsInstance(data['data'], dict)
             self.assertIn('kpis', data['data'])
             self.assertIn('role', data['data'])  # merged in service
+
+
+class PaidFeeTotalTests(SimpleTestCase):
+    @patch('dashboard.services.Refund.objects.filter')
+    @patch('dashboard.services.Payment.objects.filter')
+    def test_total_uses_verified_payments_minus_completed_refunds(
+        self, mock_payment_filter, mock_refund_filter
+    ):
+        mock_payment_filter.return_value.aggregate.return_value = {
+            'total': Decimal('1500.00')
+        }
+        mock_refund_filter.return_value.aggregate.return_value = {
+            'total': Decimal('250.00')
+        }
+        user = SimpleNamespace(
+            role='accountant',
+            branch_id='branch-id',
+            organization=None,
+        )
+
+        total = _get_paid_fee_total(user)
+
+        self.assertEqual(total, Decimal('1250.00'))
+        self.assertEqual(mock_payment_filter.call_args.kwargs['status'], 'verified')
+        self.assertEqual(mock_refund_filter.call_args.kwargs['status'], 'completed')
+        self.assertEqual(
+            mock_payment_filter.call_args.args[0].children,
+            [('student_fee__student__branch_id', 'branch-id')],
+        )

@@ -24,6 +24,7 @@ It eliminates all static/demo data, using **optimized Django ORM aggregates**, `
 - **Data**: upcoming_exams (Exam), lead_pipeline (by current_stage), attendance_trend (7 days), fee_collection_trend (30 days via Payments), recent_activities.
 - **Charts**: attendance_by_batch, enrollment_by_course.
 - **Queries**: Student.aggregate(), AttendanceRecord (with status filter), StudentFee (using F-expressions for due = total - discount - paid), Lead.values('current_stage').annotate(Count), Exam.filter(scheduled_date__gte).
+- **Fee collection**: `fee_collected` is calculated from verified student-fee payments minus completed refunds, scoped to the user's organization and branch. Pending or rejected payments are excluded.
 - **Scoping**: Full org/branch filter via `_branch_filter`.
 
 ### 2. Faculty Dashboard (`faculty`, `exam_supervisor`, `paper_checker`)

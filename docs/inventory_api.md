@@ -346,9 +346,24 @@ The forecasting API dynamically calculates how fast items are being consumed (ba
     "days_until_stockout": 400,
     "status": "healthy",
     "message": "Stock is healthy for the next 30 days."
+  },
+  {
+    "item_id": "unused-item-uuid",
+    "item_name": "Unused Supply",
+    "category": "Supplies",
+    "current_stock": 25,
+    "reorder_level": 5,
+    "last_30d_usage": 0,
+    "daily_burn_rate": 0,
+    "projected_30d_demand": 0,
+    "days_until_stockout": null,
+    "status": "healthy",
+    "message": "No recent usage; stockout is not currently projected."
   }
 ]
 ```
+
+`days_until_stockout` is `null` when there has been no usage in the last 30 days; a sentinel day count is not used.
 
 ### Understanding Forecast Statuses
 - **`healthy`**: Current stock is enough to cover the projected 30-day demand and stay above the reorder level.

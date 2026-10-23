@@ -32,14 +32,18 @@ def get_inventory_forecast(user=None):
         projected_30d_demand = int(daily_burn_rate * 30)
         
         # 3. Predict days until stockout
-        if daily_burn_rate > 0:
-            days_until_stockout = int(item.total_stock / daily_burn_rate)
-        else:
-            days_until_stockout = 9999  # practically infinite
-            
+        days_until_stockout = (
+            int(item.total_stock / daily_burn_rate)
+            if daily_burn_rate > 0
+            else None
+        )
+
         # 4. Status determination
         projected_stock = item.total_stock - projected_30d_demand
-        if projected_stock <= 0:
+        if item.total_stock <= 0:
+            status = 'critical'
+            message = "Out of stock."
+        elif projected_stock <= 0:
             status = 'critical'
             message = f"Stockout expected in {days_until_stockout} days!"
         elif projected_stock <= item.reorder_level:
@@ -50,7 +54,11 @@ def get_inventory_forecast(user=None):
             message = "Currently at or below reorder level."
         else:
             status = 'healthy'
-            message = "Stock is healthy for the next 30 days."
+            message = (
+                "No recent usage; stockout is not currently projected."
+                if daily_burn_rate == 0
+                else "Stock is healthy for the next 30 days."
+            )
             
         forecast_data.append({
             'item_id': item.id,
@@ -61,7 +69,7 @@ def get_inventory_forecast(user=None):
             'last_30d_usage': allocations_30d,
             'daily_burn_rate': round(daily_burn_rate, 2),
             'projected_30d_demand': projected_30d_demand,
-            'days_until_stockout': days_until_stockout if days_until_stockout != 9999 else "999+",
+            'days_until_stockout': days_until_stockout,
             'status': status,
             'message': message,
         })

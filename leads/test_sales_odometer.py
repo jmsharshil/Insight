@@ -1,12 +1,14 @@
 import datetime
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
+from django.db.models import Model
 from django.test import TestCase
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from rest_framework import status
 
+from attendance.models import EmployeeAttendanceRecord
 from auth_user.models import User, Organization, NotificationHistory
 from branch.models import Branch
 from leads.models import SalesDailyActivity, SalesActivityPhoto, OdometerReading
@@ -41,16 +43,28 @@ class SalesActivityAndOdometerTests(TestCase):
         self.blob_upload_patcher.start()
         self.blob_download_patcher = patch('auditlog.blob_service.download_log_file', return_value="")
         self.blob_download_patcher.start()
+        self.photo_storage_patcher = patch.object(
+            SalesActivityPhoto._meta.get_field('photo').storage,
+            'save',
+            side_effect=lambda name, content, max_length=None: name,
+        )
+        self.photo_storage_patcher.start()
 
         self.client = APIClient()
         self.org = Organization.objects.create(name="Test Org Sales")
-        self.branch = Branch.objects.create(
-            name="Main Branch",
-            organization=self.org,
-            latitude=12.9716,
-            longitude=77.5946,
-            allowed_radius_meters=1000
-        )
+        with patch.object(
+            Branch,
+            'save',
+            autospec=True,
+            side_effect=lambda instance, *args, **kwargs: Model.save(instance, *args, **kwargs),
+        ):
+            self.branch = Branch.objects.create(
+                name="Main Branch",
+                organization=self.org,
+                latitude=12.9716,
+                longitude=77.5946,
+                allowed_radius_meters=1000
+            )
 
         self.admin = User.objects.create_user(
             username="super_admin_sales",
@@ -91,6 +105,7 @@ class SalesActivityAndOdometerTests(TestCase):
         self.thread_patcher.stop()
         self.blob_upload_patcher.stop()
         self.blob_download_patcher.stop()
+        self.photo_storage_patcher.stop()
 
     def test_sales_activity_date_and_search_filters(self):
         """Test name search, date filter, and that empty result is returned for a date with no activity."""
@@ -144,11 +159,22 @@ class SalesActivityAndOdometerTests(TestCase):
 
     def test_odometer_photo_auto_creates_reading(self):
         """Test uploading start and end odometer photos auto-creates/updates OdometerReading."""
+        self.admin.additional_roles = ['branch_manager']
+        self.admin.save(update_fields=['additional_roles'])
+
         today = timezone.localdate()
         activity = SalesDailyActivity.objects.create(
             user=self.sales_user1,
             activity_date=today,
             notes="Field visit"
+        )
+        EmployeeAttendanceRecord.objects.create(
+            user=self.sales_user1,
+            branch=self.branch,
+            date=today,
+            status='present',
+            checked_in_at=timezone.now(),
+            marked_by=self.sales_user1,
         )
 
         self.client.force_authenticate(user=self.sales_user1)
@@ -193,8 +219,29 @@ class SalesActivityAndOdometerTests(TestCase):
         self.assertEqual(reading.end_kms, Decimal('155.50'))
         self.assertEqual(reading.total_kms, Decimal('55.00'))  # 155.50 - 100.50
 
-        # Verify notification sent to admin with notification_type='sales'
-        admin_notif = NotificationHistory.objects.filter(user=self.admin, notification_type='sales').first()
+        # Reposting the completed reading must not notify the same entry again.
+        dummy_img3 = SimpleUploadedFile("end-retry.gif", TINY_GIF, content_type="image/gif")
+        res = self.client.post(
+            f'/api/v1/sales/activities/{activity.id}/photos/',
+            data={
+                'photo_type': 'end_odometer',
+                'photo': dummy_img3,
+                'latitude': '12.9716',
+                'longitude': '77.5946',
+                'odometer_kms': '155.50'
+            },
+            format='multipart'
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        # A user matching both approver groups should only get one notification.
+        admin_notifications = NotificationHistory.objects.filter(
+            user=self.admin,
+            notification_type='sales',
+            title='New Odometer Reading for Approval',
+        )
+        self.assertEqual(admin_notifications.count(), 1)
+        admin_notif = admin_notifications.first()
         self.assertIsNotNone(admin_notif)
         self.assertIn('55.0', admin_notif.body)
 
