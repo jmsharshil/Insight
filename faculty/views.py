@@ -58,7 +58,7 @@ class FacultyListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['is_active', 'employment_type', 'level', 'branch']
+    filterset_fields = ['employment_type', 'level', 'branch']
     search_fields = ['user__name', 'employee_id', 'specialization']
     ordering_fields = '__all__'
 
@@ -91,13 +91,22 @@ class FacultyListCreateView(APIView):
                 if branch_ids:
                     qs = qs.filter(branch_id__in=branch_ids)
 
-            for param, field in [('is_active', 'is_active'), ('employment_type', 'employment_type')]:
-                val = request.GET.get(param)
-                if val:
-                    if param == 'is_active':
-                        qs = qs.filter(is_active=val.lower() == 'true')
-                    else:
-                        qs = qs.filter(**{field: val})
+            is_active = request.GET.get('is_active')
+            if is_active is not None:
+                normalized_is_active = is_active.strip().lower()
+                if normalized_is_active in {'true', '1', 'yes'}:
+                    qs = qs.filter(is_active=True, user__is_active=True)
+                elif normalized_is_active in {'false', '0', 'no'}:
+                    qs = qs.filter(Q(is_active=False) | Q(user__is_active=False))
+                else:
+                    return Response(
+                        {'success': False, 'message': 'is_active must be true or false.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            employment_type = request.GET.get('employment_type')
+            if employment_type:
+                qs = qs.filter(employment_type=employment_type)
 
             # branch_id / branch filter â available to all roles (branch_manager
             # in particular uses this to scope the list to a specific branch).
@@ -107,7 +116,6 @@ class FacultyListCreateView(APIView):
 
             level_val = request.GET.get('level_id') or request.GET.get('level')
             if level_val:
-                from django.db.models import Q
                 qs = qs.filter(
                     Q(level=level_val) |
                     Q(levels__id=level_val) |
@@ -176,6 +184,7 @@ class FacultyListCreateView(APIView):
 
             fp = FacultyProfile.objects.create(
                 user=user, branch=branch, employee_id=emp_id,
+                is_active=user.is_active,
                 qualification=d['qualification'], specialization=d['specialization'],
                 subject_expertise=d.get('subject_expertise', ''),
                 level=d.get('level', 'executive'),
