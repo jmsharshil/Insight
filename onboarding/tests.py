@@ -288,7 +288,7 @@ class AdmissionFeeStructureSelectionTest(TestCase):
                 return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/link', 'id': 'plink_test'}},
             ) as create_payment_link,
             patch('core.sender.send_email'),
-            patch('chat.notifications.send_whatsapp_with_fallback'),
+            patch('chat.notifications.send_whatsapp_with_fallback') as mock_whatsapp,
         ):
             _setup_payment_bank_and_notify(admission)
 
@@ -527,7 +527,7 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
                 return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/plink_123', 'id': 'plink_123'}},
             ) as mock_create_link,
             patch('core.sender.send_email'),
-            patch('chat.notifications.send_whatsapp_with_fallback'),
+            patch('chat.notifications.send_whatsapp_with_fallback') as mock_whatsapp,
         ):
             _setup_payment_bank_and_notify(admission)
 
@@ -545,6 +545,8 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertEqual(history[0]['event'], 'payment_link_created')
         self.assertEqual(history[0]['payment_choice'], 'online')
         self.assertEqual(history[0]['razorpay_payment_link'], 'https://razorpay.test/plink_123')
+        mock_whatsapp.assert_called_once()
+        self.assertEqual(mock_whatsapp.call_args.kwargs['template_name'], 'razorpay_link')
 
     def test_payment_choice_cash_or_cheque_skips_razorpay_link(self):
         from onboarding.views import _setup_payment_bank_and_notify
@@ -567,7 +569,7 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
                 patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
                 patch('fees.razorpay_service.create_payment_link') as mock_create_link,
                 patch('core.sender.send_email'),
-                patch('chat.notifications.send_whatsapp_with_fallback'),
+                patch('chat.notifications.send_whatsapp_with_fallback') as mock_whatsapp,
             ):
                 _setup_payment_bank_and_notify(admission)
 
@@ -575,6 +577,144 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             mock_create_link.assert_not_called()
             self.assertIsNone(admission.razorpay_payment_link)
             self.assertEqual(admission.razorpay_payment_status, 'not_created')
+            mock_whatsapp.assert_not_called()
+
+    def test_offline_payment_never_sends_existing_razorpay_link(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        admission = _make_admission(
+            email='offline_existing_link@example.com',
+            phone_student='9876543287',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='cash',
+            status='payment_pending',
+            razorpay_payment_link='https://rzp.io/testlink',
+            razorpay_payment_link_id='plink_existing',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+            patch('fees.razorpay_service.create_payment_link') as mock_create_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback') as mock_whatsapp,
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        mock_create_link.assert_not_called()
+        mock_whatsapp.assert_not_called()
+
+    def test_repeated_offline_payment_setup_keeps_one_history_entry(self):
+        from onboarding.views import AdmissionPaymentSetupView
+        from rest_framework.test import APIRequestFactory
+
+        admission = _make_admission(
+            email='cash_setup_history@example.com',
+            phone_student='9876543288',
+            fee_structure=self.fee_structure,
+            payment_type='token',
+            payment_choice='cash',
+            payment_amount=Decimal('5000'),
+            status='form_pending',
+        )
+        factory = APIRequestFactory()
+        view = AdmissionPaymentSetupView.as_view()
+
+        with (
+            patch('onboarding.views._assign_fee_structure'),
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+            patch('fees.razorpay_service.create_payment_link') as mock_create_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+            patch('onboarding.notifications.send_payment_verification_whatsapp'),
+            patch('core.utils.notify_users_by_role'),
+        ):
+            for _ in range(2):
+                request = factory.post(
+                    f'/api/admissions/{admission.id}/payment-setup/',
+                    {'payment_choice': 'cash', 'payment_amount': '5000'},
+                    format='json',
+                )
+                response = view(request, admission_id=admission.id)
+                self.assertEqual(response.status_code, 200)
+
+        admission.refresh_from_db()
+        payment_entries = [
+            entry for entry in admission.payment_history
+            if entry.get('event') in {
+                'offline_payment_selected',
+                'payment_submitted',
+                'payment_verified',
+                'payment_approved',
+                'payment_rejected',
+            }
+        ]
+        self.assertEqual(len(payment_entries), 1)
+        self.assertEqual(payment_entries[0]['event'], 'payment_submitted')
+        mock_create_link.assert_not_called()
+
+        admission.update_current_payment_history_entry(
+            'payment_verified',
+            {'status': 'level_1_approved', 'level': 1},
+        )
+        admission.refresh_from_db()
+        admission.update_current_payment_history_entry(
+            'payment_approved',
+            {'status': 'verified', 'level': 2},
+        )
+        admission.refresh_from_db()
+        self.assertEqual(len(admission.payment_history), 1)
+        self.assertEqual(admission.payment_history[0]['event'], 'payment_approved')
+        self.assertEqual(admission.payment_history[0]['status'], 'verified')
+
+        from onboarding.utils import sync_admission_payment
+        with (
+            patch('onboarding.notifications.send_payment_verification_whatsapp'),
+            patch('core.utils.notify_users_by_role'),
+        ):
+            sync_admission_payment(admission, force=True, new_payment=True)
+
+        admission.refresh_from_db()
+        self.assertEqual(
+            sum(entry.get('event') == 'payment_submitted' for entry in admission.payment_history),
+            1,
+        )
+        self.assertEqual(len(admission.payment_history), 2)
+
+    def test_payment_verification_dispatches_template_without_text_fallback(self):
+        from onboarding.notifications import send_payment_verification_whatsapp
+
+        admission = _make_admission(
+            fee_structure=self.fee_structure,
+            payment_choice='cash',
+            status='approval_pending',
+        )
+        approver = MagicMock(
+            phone='+919876543210',
+            id='approver-id',
+            username='accountant',
+            name='Test Accountant',
+        )
+
+        with patch('chat.notifications.send_whatsapp_template') as mock_send_template:
+            send_payment_verification_whatsapp(admission, approver_user=approver)
+
+        self.assertEqual(mock_send_template.call_count, 1)
+        self.assertEqual(mock_send_template.call_args.kwargs['template_name'], 'payment_approve_reject')
+        self.assertEqual(mock_send_template.call_args.kwargs['language_code'], 'en')
+        self.assertNotIn('fallback_body', mock_send_template.call_args.kwargs)
+        buttons = [
+            component
+            for component in mock_send_template.call_args.kwargs['components']
+            if component.get('type') == 'button'
+        ]
+        self.assertEqual(
+            [button['parameters'][0]['payload'] for button in buttons],
+            [
+                f'adm_pay_approve:{admission.id}',
+                f'adm_pay_reject:{admission.id}',
+            ],
+        )
 
     def test_razorpay_payment_paid_updates_flags_and_history(self):
         from fees.razorpay_service import process_payment_link_paid_event
@@ -1162,7 +1302,3 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         with patch('onboarding.notifications.send_payment_verification_whatsapp') as mock_send_l1:
             sync_admission_payment(admission, force=True)
             mock_send_l1.assert_called_once_with(admission, level=1)
-
-
-
-

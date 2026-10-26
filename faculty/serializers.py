@@ -104,6 +104,7 @@ class FacultyListSerializer(serializers.ModelSerializer):
     phone = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
+    is_active = serializers.SerializerMethodField()
     batch_count = serializers.IntegerField(read_only=True, default=0)
     level_display = serializers.SerializerMethodField()
     employment_type_display = serializers.SerializerMethodField()
@@ -129,6 +130,9 @@ class FacultyListSerializer(serializers.ModelSerializer):
 
     def get_phone(self, obj):
         return getattr(obj.user, 'phone', '') if obj.user else ''
+
+    def get_is_active(self, obj):
+        return obj.is_active and obj.user.is_active
 
     def get_branch_name(self, obj):
         return obj.branch.name if obj.branch else ''

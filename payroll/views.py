@@ -837,18 +837,22 @@ class FacultySalaryPreviewView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class LatePolicyView(APIView):
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         role = _user_role(request.user)
-        # if role not in LATE_POLICY_VIEW_ROLES:
-        #     return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        if role not in LATE_POLICY_VIEW_ROLES:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
         branch_ids = get_user_branch_ids(request.user)
         qs = LateEntryPolicy.objects.select_related('branch').all()
-        if getattr(request.user, 'organization', None):
-            qs = qs.filter(branch__organization=request.user.organization)
-        if role != 'super_admin' and branch_ids:
-            qs = qs.filter(branch_id__in=branch_ids)
+        if role != 'super_admin':
+            if branch_ids:
+                qs = qs.filter(branch_id__in=branch_ids)
+            elif role != 'branch_manager' and getattr(request.user, 'organization_id', None):
+                qs = qs.filter(branch__organization_id=request.user.organization_id)
+            else:
+                qs = qs.none()
         return Response({'success': True, 'data': LateEntryPolicySerializer(qs, many=True).data})
 
     def post(self, request):
@@ -1086,4 +1090,3 @@ class MyPayrollView(APIView):
             },
             'payslips': payslips,
         })
-

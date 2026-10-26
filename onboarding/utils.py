@@ -435,7 +435,7 @@ def get_module_fee(fee_structure, group_module):
     return Decimal(str(fee_structure.total_amount or 0))
 
 
-def sync_admission_payment(admission, request=None, force=False):
+def sync_admission_payment(admission, request=None, force=False, new_payment=False):
     """
     Ensures that when payment details (screenshot, transaction_id, payment_amount, or offline payment choice)
     are submitted for an admission, a corresponding fees.Payment record is created or updated in 'approval_pending'
@@ -542,12 +542,16 @@ def sync_admission_payment(admission, request=None, force=False):
             note=f"Payment details recorded. Transaction ID: {admission.transaction_id or 'N/A'}",
         )
 
-        admission.add_payment_history_entry('payment_submitted', {
+        payment_history_data = {
             'payment_choice': admission.payment_choice or mapped_mode,
             'amount': float(pay_amount or 0),
             'transaction_id': admission.transaction_id or '',
             'status': 'approval_pending',
-        })
+        }
+        if new_payment:
+            admission.add_payment_history_entry('payment_submitted', payment_history_data)
+        else:
+            admission.update_current_payment_history_entry('payment_submitted', payment_history_data)
     elif force and has_proof_or_offline:
         if not admission.payment_submitted_at:
             admission.payment_submitted_at = timezone.now()
@@ -560,12 +564,16 @@ def sync_admission_payment(admission, request=None, force=False):
             note=f"Payment proof submitted. Transaction ID: {admission.transaction_id or 'N/A'}",
         )
 
-        admission.add_payment_history_entry('payment_submitted', {
+        payment_history_data = {
             'payment_choice': admission.payment_choice or mapped_mode,
             'amount': float(pay_amount or 0),
             'transaction_id': admission.transaction_id or '',
             'status': 'approval_pending',
-        })
+        }
+        if new_payment:
+            admission.add_payment_history_entry('payment_submitted', payment_history_data)
+        else:
+            admission.update_current_payment_history_entry('payment_submitted', payment_history_data)
 
     # Dispatch Level 1 WhatsApp approval notification if newly created with proof, status changed, or forced submission
     should_dispatch_l1 = (

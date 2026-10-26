@@ -309,7 +309,7 @@ class Batch(models.Model):
                         bseq = parts[-1]  # last segment
                         branch_prefix = f"{bseq.lstrip('0') or '0'}".upper()
                     else:
-                        branch_prefix = f"{self.branch.name[:4]}".upper()
+                        branch_prefix = self.branch.name[:3].upper()
                 except Exception:
                     branch_prefix = 'BXX'
 

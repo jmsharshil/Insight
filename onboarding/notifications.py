@@ -264,7 +264,7 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
       - level 1: Sent to Level 1 approvers (Accountant, Branch Manager, Admin Executive)
       - level 2: Sent to Super Admins (for final enrollment approval)
     """
-    from chat.notifications import send_whatsapp_with_fallback
+    from chat.notifications import send_whatsapp_template
     from auth_user.models import User
 
     if approver_user:
@@ -314,19 +314,18 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
             else:
                 recipients = [u for u in base_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
 
-    components, fallback_body = build_payment_approve_reject_components(admission)
+    components, _ = build_payment_approve_reject_components(admission)
 
     for user in recipients:
         phone = getattr(user, 'phone', None)
         if not phone:
             continue
         try:
-            send_whatsapp_with_fallback(
+            send_whatsapp_template(
                 to=phone,
                 template_name="payment_approve_reject",
                 language_code="en",
                 components=components,
-                fallback_body=fallback_body,
                 user_id=str(user.id),
             )
             logger.info(
@@ -500,7 +499,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             status='rejected',
             note=reject_note,
         )
-        admission.add_payment_history_entry('payment_rejected', {
+        admission.update_current_payment_history_entry('payment_rejected', {
             'payment_choice': admission.payment_choice,
             'amount': float(admission.payment_amount or admission.total_fees or 0),
             'transaction_id': admission.transaction_id,
@@ -545,7 +544,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 note=level1_note,
                 user=approver,
             )
-            admission.add_payment_history_entry('payment_verified', {
+            admission.update_current_payment_history_entry('payment_verified', {
                 'payment_choice': admission.payment_choice,
                 'amount': float(admission.payment_amount or admission.total_fees or 0),
                 'transaction_id': admission.transaction_id,
@@ -640,7 +639,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 except Exception as exc:
                     logger.error("[WA ADMISSION] StudentService.create_from_admission error: %s", exc)
 
-            admission.add_payment_history_entry('payment_approved', {
+            admission.update_current_payment_history_entry('payment_approved', {
                 'payment_choice': admission.payment_choice,
                 'amount': float(admission.payment_amount or admission.total_fees or 0),
                 'transaction_id': admission.transaction_id,

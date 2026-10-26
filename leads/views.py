@@ -12,7 +12,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import (
     apply_filters, has_user_branch_access,
-    notify_users_by_role, get_user_branch_ids,
+    get_user_branch_ids, get_role_filter_q,
 )
 from core.sender import send_email
 from django.conf import settings
@@ -22,7 +22,7 @@ from .serializers import (
     LeadDetailSerializer, LeadUpdateSerializer, LeadReassignSerializer,
     SalesDailyPlanSerializer, SalesDailyActivitySerializer, SalesActivityPhotoSerializer,
     OdometerReadingSerializer, OdometerApproveSerializer, OdometerRejectSerializer,
-    MonthlyOdometerApproveSerializer, MonthlyOdometerRejectSerializer,
+    MonthlyOdometerApproveSerializer, MonthlyOdometerRejectSerializer, SERIALIZER_MAP,
 )
 from .utils import LeadService
 from .models import (
@@ -1153,32 +1153,57 @@ class SalesActivityPhotoView(APIView):
                 reading.save()
 
             # If both start and end odometer photos exist, notify approvers
-            if start_photo and end_photo and start_photo.odometer_kms is not None and end_photo.odometer_kms is not None:
+            if (
+                start_photo
+                and end_photo
+                and start_photo.odometer_kms is not None
+                and end_photo.odometer_kms is not None
+            ):
                 try:
                     staff_name = activity.user.name or activity.user.email
                     vtype_label = reading.get_vehicle_type_display()
-                    notify_users_by_role(
-                        roles=['super_admin', 'admin_senior_executive', 'accountant'],
-                        title='New Odometer Reading for Approval',
-                        body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km, {vtype_label} @ ₹{reading.expense_per_km}/km = ₹{reading.total_expense}).",
-                        metadata={
-                            'odometer_reading_id': str(reading.id),
-                            'sales_activity_id': str(activity.id),
-                            'type': 'odometer_submitted',
-                        },
-                        notification_type='sales',
+                    title = 'New Odometer Reading for Approval'
+                    body = (
+                        f"{staff_name} submitted an odometer reading for {activity.activity_date} "
+                        f"({reading.total_kms} km, {vtype_label} @ ₹{reading.expense_per_km}/km "
+                        f"= ₹{reading.total_expense})."
                     )
-                    if activity.user.branch:
-                        notify_users_by_role(
-                            roles=['branch_manager'],
-                            branch=activity.user.branch,
-                            title='New Odometer Reading for Approval',
-                            body=f"{staff_name} submitted an odometer reading for {activity.activity_date} ({reading.total_kms} km, {vtype_label} @ ₹{reading.expense_per_km}/km = ₹{reading.total_expense}).",
-                            metadata={
-                                'odometer_reading_id': str(reading.id),
-                                'sales_activity_id': str(activity.id),
-                                'type': 'odometer_submitted',
-                            },
+                    metadata = {
+                        'odometer_reading_id': str(reading.id),
+                        'sales_activity_id': str(activity.id),
+                        'type': 'odometer_submitted',
+                    }
+                    from django.contrib.auth import get_user_model
+
+                    approver_roles = ['super_admin', 'admin_senior_executive', 'accountant']
+                    approver_filter = get_role_filter_q(approver_roles)
+                    if activity.user.branch_id:
+                        approver_filter |= (
+                            get_role_filter_q(['branch_manager'])
+                            & Q(branch_id=activity.user.branch_id)
+                        )
+                    User = get_user_model()
+                    approvers = list(User.objects.filter(
+                        approver_filter,
+                        is_active=True,
+                    ).distinct())
+                    from auth_user.models import NotificationHistory
+
+                    already_notified = set(
+                        NotificationHistory.objects.filter(
+                            notification_type='sales',
+                            data__odometer_reading_id=str(reading.id),
+                            user_id__in=[approver.id for approver in approvers],
+                        ).values_list('user_id', flat=True)
+                    )
+                    for approver in approvers:
+                        if approver.id in already_notified:
+                            continue
+                        send_system_notification(
+                            user_id=str(approver.id),
+                            title=title,
+                            body=body,
+                            metadata=metadata,
                             notification_type='sales',
                         )
                 except Exception as e:
@@ -1833,6 +1858,7 @@ class LeadListView(APIView):
                     "valid_form_types": [
                         {"value": key, "display": label}
                         for key, label in FORM_TYPE_CHOICES
+                        if key in SERIALIZER_MAP
                     ],
                     "errors": e.detail
                 },

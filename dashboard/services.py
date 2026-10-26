@@ -3,6 +3,7 @@ Uses heavy caching, query optimization (select_related, prefetch_related, aggreg
 and role-based data scoping for minimal response times.
 """
 from datetime import timedelta
+from decimal import Decimal
 from django.utils import timezone
 from django.db.models import Count, Sum, Q, F, Avg, Case, When, Value, FloatField, Min
 from django.core.cache import cache
@@ -10,7 +11,7 @@ from django.core.cache import cache
 from auth_user.models import User, NotificationHistory
 from students.models import Student, ParentLink
 from attendance.models import AttendanceRecord
-from fees.models import StudentFee, Payment
+from fees.models import StudentFee, Payment, Refund
 from exams.models import Exam
 from results.models import MarkSheet, PublishedResult, CheckerQuery
 from leads.models import Lead
@@ -43,6 +44,37 @@ def _branch_filter(user, model=None):
         elif 'branch' in str(model):
             q &= Q(branch_id=bid)
     return q
+
+
+def _fee_student_scope(user, student_path='student'):
+    """Return organization and branch scoping for student-linked fee records."""
+    q = Q()
+    org = getattr(user, 'organization', None)
+    if org:
+        q &= Q(**{f'{student_path}__branch__organization': org})
+    if getattr(user, 'role', None) != 'super_admin':
+        branch_id = getattr(user, 'branch_id', None)
+        if branch_id:
+            q &= Q(**{f'{student_path}__branch_id': branch_id})
+    return q
+
+
+def _get_paid_fee_total(user):
+    """Calculate net collected fees from verified payments and completed refunds."""
+    payment_scope = _fee_student_scope(user, 'student_fee__student')
+    refund_scope = _fee_student_scope(user, 'payment__student_fee__student')
+
+    paid = Payment.objects.filter(
+        payment_scope,
+        student_fee__isnull=False,
+        status='verified',
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    refunded = Refund.objects.filter(
+        refund_scope,
+        payment__student_fee__isnull=False,
+        status='completed',
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    return paid - refunded
 
 
 def get_role_dashboard(user):
@@ -134,13 +166,8 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
     att_rate = round((att_agg['present'] or 0) / (att_agg['total_records'] or 1) * 100, 2)
 
     # Fees - optimized with one query using correct status and due computation
-    fee_bq = Q()
-    if not getattr(user, 'role', None) == 'super_admin':
-        bid = getattr(user, 'branch_id', None)
-        if bid:
-            fee_bq &= Q(student__branch_id=bid)
+    fee_bq = _fee_student_scope(user)
     fee_agg = StudentFee.objects.filter(fee_bq).aggregate(
-        total_collected=Sum('amount_paid'),
         total_due=Sum(
             F('total_amount') - F('discount') - F('amount_paid'),
             filter=Q(status__in=['approval_pending', 'partial', 'overdue']),
@@ -155,7 +182,7 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
     total_discount = float(fee_agg.get('total_discount') or 0)
     net_billed = total_billed - total_discount
     
-    total_collected = float(fee_agg.get('total_collected') or 0)
+    total_collected = float(_get_paid_fee_total(user))
     total_due = float(fee_agg.get('total_due') or 0)
     
     collected_pct = round((total_collected / net_billed) * 100, 2) if net_billed > 0 else 0
@@ -171,7 +198,10 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
     )
 
     # Leads pipeline
-    lead_qs = Lead.objects.filter(bq)
+    lead_bq = bq
+    if user.role == 'super_admin' and getattr(user, 'organization', None):
+        lead_bq = Q(branch__organization=user.organization) | Q(branch__isnull=True)
+    lead_qs = Lead.objects.filter(lead_bq)
     lead_pipeline = list(
         lead_qs.values('current_stage')
         .annotate(count=Count('id'))
@@ -208,15 +238,11 @@ def _get_accountant_dashboard(user, now, today, month_start, thirty_days_ago):
     from fees.models import StudentFee, Payment, Refund, InstallmentPlan
 
     bq = _branch_filter(user)
+    bid = getattr(user, 'branch_id', None)
 
     # Fee collection stats
-    fee_bq = Q()
-    bid = getattr(user, 'branch_id', None)
-    if bid:
-        fee_bq &= Q(student__branch_id=bid)
-
+    fee_bq = _fee_student_scope(user)
     fee_agg = StudentFee.objects.filter(fee_bq).aggregate(
-        total_collected=Sum('amount_paid'),
         total_due=Sum(
             F('total_amount') - F('discount') - F('amount_paid'),
             filter=Q(status__in=['approval_pending', 'partial', 'overdue']),
@@ -231,7 +257,7 @@ def _get_accountant_dashboard(user, now, today, month_start, thirty_days_ago):
     total_discount = float(fee_agg.get('total_discount') or 0)
     net_billed = total_billed - total_discount
     
-    total_collected = float(fee_agg.get('total_collected') or 0)
+    total_collected = float(_get_paid_fee_total(user))
     total_due = float(fee_agg.get('total_due') or 0)
     
     collected_pct = round((total_collected / net_billed) * 100, 2) if net_billed > 0 else 0

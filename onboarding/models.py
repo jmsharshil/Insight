@@ -378,6 +378,57 @@ class Admission(models.Model):
         self.payment_history = history
         self.save(update_fields=['payment_history', 'updated_at'])
 
+    def update_current_payment_history_entry(self, event: str, data: dict):
+        """Update the latest payment-cycle entry, appending only when none exists."""
+        from django.utils import timezone
+
+        payment_events = {
+            'offline_payment_selected',
+            'payment_submitted',
+            'payment_received',
+            'payment_approval_pending',
+            'payment_verified',
+            'payment_approved',
+            'payment_rejected',
+        }
+        history = list(self.payment_history or [])
+        match_idx = next(
+            (
+                index for index in range(len(history) - 1, -1, -1)
+                if history[index].get('event') in payment_events
+            ),
+            None,
+        )
+        entry = {
+            'event': event,
+            'timestamp': timezone.now().isoformat(),
+            **data,
+        }
+
+        if match_idx is None:
+            history.append(entry)
+        else:
+            history[match_idx].update(entry)
+
+        self.payment_history = history
+        self.save(update_fields=['payment_history', 'updated_at'])
+
+    def has_payment_history_cycle(self):
+        """Return whether payment_history already contains a payment cycle entry."""
+        payment_events = {
+            'offline_payment_selected',
+            'payment_submitted',
+            'payment_received',
+            'payment_approval_pending',
+            'payment_verified',
+            'payment_approved',
+            'payment_rejected',
+        }
+        return any(
+            item.get('event') in payment_events
+            for item in (self.payment_history or [])
+        )
+
     def update_payment_history_entry(self, match_event: str, updates: dict, fallback_event: str = None, fallback_data: dict = None):
         """
         Finds the LAST entry in payment_history whose 'event' matches `match_event`
