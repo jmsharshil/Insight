@@ -209,13 +209,14 @@ Best Regards,
         print(e)
 
 
-def send_parent_login_credentials(parent_user, student_user, password):
+def send_parent_login_credentials(parent_user, student_user, password, student_password=None):
     """Send login credentials to a parent account linked with a student"""
     org_title = parent_user.organization.name if (parent_user.organization and parent_user.organization.name) else 'Insight Institute'
     play_store_url = "https://play.google.com/store/apps/details?id=com.jmsinsight.app&hl=en_IN"
     app_store_url = "https://apps.apple.com/in/app/insight-institute/id6780808050"
 
     subject = f"Welcome! Your Parent Portal Login Credentials - {org_title}"
+    student_pw_section = f"\nStudent Password: {student_password}" if student_password else ""
     text_content = f"""
 Hello {parent_user.name},
 
@@ -224,7 +225,7 @@ Your parent account has been created at {org_title}.
 Linked Student Profile:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Student Name: {student_user.name}
-Student Email: {student_user.email}
+Student Email: {student_user.email}{student_pw_section}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Your Login Credentials:
@@ -260,6 +261,7 @@ Best Regards,
             'parent_name': parent_user.name,
             'student_name': student_user.name,
             'student_email': student_user.email,
+            'student_password': student_password,
             'parent_email': parent_user.email,
             'password': password,
             'org_name': org_title,

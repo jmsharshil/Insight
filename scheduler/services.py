@@ -296,10 +296,14 @@ class TaskScheduler:
             ).values_list("id", flat=True)
         )
 
-        # Tasks stuck in 'running' (process died mid-execution)
+        # Tasks stuck in 'running' (process died mid-execution).
+        # Only consider tasks running for a long time; otherwise we'd re-run
+        # tasks that are actively executing (-> duplicate WhatsApp/emails).
+        stale_before = now - timedelta(minutes=10)
         stuck_running = list(
             ScheduledTask.objects.filter(
                 status="running",
+                started_at__lt=stale_before,
             ).values_list("id", flat=True)
         )
 

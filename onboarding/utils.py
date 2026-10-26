@@ -246,11 +246,21 @@ class AdmissionService:
 
             try:
                 if parent_password:
-                    send_parent_login_credentials(parent_user, student_user, parent_password)
+                    send_parent_login_credentials(
+                        parent_user,
+                        student_user,
+                        parent_password,
+                        student_password=student_password,
+                    )
                     logger.info(f"Parent credentials sent for admission {admission.id}")
                 else:
                     # Parent account already existed: re-send or notify with student link
-                    send_parent_login_credentials(parent_user, student_user, "Use your existing password or reset if forgotten")
+                    send_parent_login_credentials(
+                        parent_user,
+                        student_user,
+                        "Use your existing password or reset if forgotten",
+                        student_password=student_password,
+                    )
                     logger.info(f"Parent account already existed, added student link for admission {admission.id}.")
             except Exception as e:
                 logger.error(f"Parent email sending failed for admission {admission.id}: {e}")
