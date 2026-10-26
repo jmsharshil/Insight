@@ -280,7 +280,12 @@ class ReimbursementApproveAPIView(APIView):
                 user_id=str(reimb.user.id),
                 title='Reimbursement Approved',
                 body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved and will be added to your monthly pay.",
-                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_approved', 'route': f"/reimbursements/{reimb.id}"},
+                metadata={
+                    'reimbursement_id': str(reimb.id),
+                    'type': 'reimbursement_approved',
+                    'route': f"/reimbursements/{reimb.id}",
+                    'skip_whatsapp': True,
+                },
                 notification_type='payroll',
             )
         except Exception as e:
@@ -337,7 +342,12 @@ class ReimbursementRejectAPIView(APIView):
                 user_id=str(reimb.user.id),
                 title='Reimbursement Rejected',
                 body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} was rejected. Reason: {reimb.rejection_reason}",
-                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_rejected', 'route': f"/reimbursements/{reimb.id}"},
+                metadata={
+                    'reimbursement_id': str(reimb.id),
+                    'type': 'reimbursement_rejected',
+                    'route': f"/reimbursements/{reimb.id}",
+                    'skip_whatsapp': True,
+                },
                 notification_type='payroll',
             )
         except Exception as e:

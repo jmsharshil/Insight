@@ -822,6 +822,18 @@ def apply_half_day_rule(record, user, checkout_time=None):
         return ''
 
     target_date = getattr(record, 'date', None) or checkout_time.date()
+
+    # If employee attended work on their off day (Sunday / week-off / holiday),
+    # their attendance is voluntary / overtime: keep as 'present' and never mark 'absent'!
+    is_off_day = (
+        (hasattr(user, 'is_day_off') and user.is_day_off(target_date)) or
+        (target_date and target_date.weekday() == 6)
+    )
+    if is_off_day:
+        record.status = 'present'
+        record.save(update_fields=['status'])
+        return f" You attended work on your week off ({target_date.strftime('%A')}), marked as present."
+
     if hasattr(user, 'get_working_hours_for_date') and target_date:
         required = user.get_working_hours_for_date(target_date)
     else:
@@ -914,3 +926,128 @@ def apply_half_day_rule(record, user, checkout_time=None):
             f"{required.quantize(Decimal('0.01'))} working hours, so this day is considered as a half day."
         )
     return ''
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Employee Attendance Status & Working Day Helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+LEAVE_STATUS_CHOICES = [
+    'on_leave', 'paid_leave', 'sick_leave', 'casual_leave',
+    'paid', 'sick', 'casual'
+]
+OFF_DAY_STATUS_CHOICES = [
+    'holiday', 'public_holiday', 'week_off', 'week_of'
+]
+NON_WORKING_STATUS_CHOICES = LEAVE_STATUS_CHOICES + OFF_DAY_STATUS_CHOICES
+
+
+def get_leave_type_status(leave_type):
+    """
+    Normalizes a leave type string into an EmployeeAttendanceRecord status string.
+    e.g. 'sick' -> 'sick_leave', 'paid' -> 'paid_leave', 'casual' -> 'casual_leave'
+    """
+    if not leave_type:
+        return 'on_leave'
+    lt = str(leave_type).strip().lower()
+    mapping = {
+        'sick': 'sick_leave',
+        'paid': 'paid_leave',
+        'casual': 'casual_leave',
+        'sick_leave': 'sick_leave',
+        'paid_leave': 'paid_leave',
+        'casual_leave': 'casual_leave',
+    }
+    return mapping.get(lt, f"{lt}_leave" if not lt.endswith('_leave') else lt)
+
+
+def determine_employee_day_status(user, target_date):
+    """
+    Determines what an employee's non-present attendance status should be for target_date:
+    1. If date is a PublicHoliday (for user's org or branch) -> 'public_holiday'
+    2. If user has an approved LeaveApplication for date -> leave type status ('sick_leave', 'paid_leave', 'casual_leave', etc.)
+    3. If Sunday (weekday 6) -> 'week_off' (per user requirement: instead of sunday it arrive week_off also for the sunday)
+    4. If Saturday (weekday 5) and user.is_day_off(date) is True -> 'week_off'
+    5. If any other day is user's off day (user.is_day_off(date) is True) -> 'week_off'
+    6. Otherwise -> 'absent'
+    """
+    from datetime import date, datetime
+    from django.db.models import Q
+    if isinstance(target_date, datetime):
+        target_date = target_date.date()
+
+    # 1. Check Public Holiday
+    try:
+        from leave.models import PublicHoliday
+        h_filter = Q(date=target_date)
+        user_branch = getattr(user, 'branch', None)
+        user_org = getattr(user, 'organization', None)
+        if user_branch or user_org:
+            h_filter &= (
+                Q(branch=user_branch) |
+                Q(organization=user_org) |
+                Q(branch__isnull=True, organization__isnull=True)
+            )
+        if PublicHoliday.objects.filter(h_filter).exists():
+            return 'public_holiday'
+    except Exception:
+        pass
+
+    # 2. Check approved LeaveApplication
+    try:
+        from leave.models import LeaveApplication
+        approved_leave = LeaveApplication.objects.filter(
+            applied_by=user,
+            from_date__lte=target_date,
+            to_date__gte=target_date,
+            status='approved',
+        ).first()
+        if approved_leave:
+            return get_leave_type_status(approved_leave.leave_type)
+    except Exception:
+        pass
+
+    # 3. Check Sunday (returns 'week_off' per user requirement)
+    dow = target_date.weekday()
+    if dow == 6:
+        return 'week_off'
+
+    # 4. Check Saturday / other off days
+    if hasattr(user, 'is_day_off') and user.is_day_off(target_date):
+        return 'week_off'
+
+    # 5. Default is absent
+    return 'absent'
+
+
+def sync_stale_absent_records_for_user(user, target_date=None, date_from=None, date_to=None):
+    """
+    Finds existing 'absent' records for a user that fall on a Sunday, week off,
+    public holiday, or approved leave, and updates their status accordingly.
+    Also migrates any Sunday records with status 'holiday' to 'week_off'.
+    """
+    from attendance.models import EmployeeAttendanceRecord
+    qs = EmployeeAttendanceRecord.objects.filter(user=user)
+    if target_date:
+        qs = qs.filter(date=target_date)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
+
+    updated_count = 0
+    for rec in qs.filter(status='absent'):
+        correct_status = determine_employee_day_status(user, rec.date)
+        if correct_status != 'absent':
+            rec.status = correct_status
+            rec.save(update_fields=['status'])
+            updated_count += 1
+
+    for rec in qs.filter(status='holiday'):
+        if rec.date.weekday() == 6 and determine_employee_day_status(user, rec.date) == 'week_off':
+            rec.status = 'week_off'
+            rec.save(update_fields=['status'])
+            updated_count += 1
+
+    return updated_count
+

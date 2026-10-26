@@ -14,6 +14,16 @@ ATTENDANCE_STATUS_CHOICES = [
     ('half_day', 'Half Day'),
     ('on_leave', 'On Leave'),
     ('checkout_pending', 'Checkout Pending'),
+    ('holiday', 'Holiday'),
+    ('week_of', 'Week Off'),
+    ('week_off', 'Week Off'),
+    ('public_holiday', 'Public Holiday'),
+    ('paid_leave', 'Paid Leave'),
+    ('sick_leave', 'Sick Leave'),
+    ('casual_leave', 'Casual Leave'),
+    ('paid', 'Paid Leave'),
+    ('sick', 'Sick Leave'),
+    ('casual', 'Casual Leave'),
 ]
 
 SCAN_TYPE_CHOICES = [
@@ -335,6 +345,16 @@ EMPLOYEE_ATTENDANCE_STATUS_CHOICES = [
     ('half_day', 'Half Day'),
     ('on_leave', 'On Leave'),
     ('checkout_pending', 'Checkout Pending'),
+    ('holiday', 'Holiday'),
+    ('week_of', 'Week Off'),
+    ('week_off', 'Week Off'),
+    ('public_holiday', 'Public Holiday'),
+    ('paid_leave', 'Paid Leave'),
+    ('sick_leave', 'Sick Leave'),
+    ('casual_leave', 'Casual Leave'),
+    ('paid', 'Paid Leave'),
+    ('sick', 'Sick Leave'),
+    ('casual', 'Casual Leave'),
 ]
 
 EMPLOYEE_CHECKIN_METHOD_CHOICES = [

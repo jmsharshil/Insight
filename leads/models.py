@@ -682,3 +682,90 @@ class SalesPlanReminder(models.Model):
 
     def __str__(self):
         return f"Reminder for {self.plan.id} at {self.reminder_time} (Sent: {self.is_sent})"
+
+
+SALES_ATTENDANCE_APPROVAL_STATUS = [
+    ('pending', 'Pending Approval'),
+    ('approved', 'Approved'),
+    ('rejected', 'Rejected'),
+]
+
+SALES_ATTENDANCE_APPROVAL_TYPE = [
+    ('check_in', 'Check In'),
+    ('check_out', 'Check Out'),
+]
+
+
+class SalesAttendanceApproval(models.Model):
+    """
+    Tracks check-in (start_selfie) and check-out (end_selfie) approval requests
+    for sales persons. Requires approval from CMO or Super Admin.
+    If either CMO or Super Admin approves, the EmployeeAttendanceRecord entry is created/finalized.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sales_attendance_approvals',
+        help_text="The salesperson who submitted the selfie"
+    )
+    activity = models.ForeignKey(
+        SalesDailyActivity,
+        on_delete=models.CASCADE,
+        related_name='attendance_approvals',
+        help_text="The sales activity linked to this check-in/out"
+    )
+    photo = models.ForeignKey(
+        SalesActivityPhoto,
+        on_delete=models.CASCADE,
+        related_name='attendance_approvals',
+        help_text="The start_selfie or end_selfie photo"
+    )
+    approval_type = models.CharField(
+        max_length=20,
+        choices=SALES_ATTENDANCE_APPROVAL_TYPE,
+        help_text="Whether this is check_in or check_out"
+    )
+    date = models.DateField(default=timezone.localdate)
+    captured_at = models.DateTimeField(default=timezone.now)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=SALES_ATTENDANCE_APPROVAL_STATUS,
+        default='pending'
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_sales_attendances'
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='rejected_sales_attendances'
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
+    attendance_record = models.ForeignKey(
+        'attendance.EmployeeAttendanceRecord',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sales_attendance_approvals'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_attendance_approvals'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.name or self.user.email} - {self.approval_type} on {self.date} [{self.status}]"
+

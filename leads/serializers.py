@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from rest_framework import serializers
-from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, SalesPlanReminder, SalesDailyActivityTiming, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
+from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, SalesPlanReminder, SalesDailyActivityTiming, SalesAttendanceApproval, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
                      BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
 from auth_user.models import User
@@ -181,6 +181,40 @@ class MonthlyOdometerRejectSerializer(serializers.Serializer):
     )
 
 
+class SalesAttendanceApprovalSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.name', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    user_phone = serializers.CharField(source='user.phone', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.name', read_only=True)
+    rejected_by_name = serializers.CharField(source='rejected_by.name', read_only=True)
+    approval_type_display = serializers.CharField(source='get_approval_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    photo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SalesAttendanceApproval
+        fields = [
+            'id', 'user', 'user_name', 'user_email', 'user_phone',
+            'activity', 'photo', 'photo_url',
+            'approval_type', 'approval_type_display',
+            'date', 'captured_at', 'latitude', 'longitude',
+            'status', 'status_display',
+            'approved_by', 'approved_by_name', 'approved_at',
+            'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
+            'attendance_record',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_photo_url(self, obj):
+        if obj.photo and getattr(obj.photo, 'photo', None):
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.photo.url)
+            return getattr(obj.photo.photo, 'url', None)
+        return None
+
+
 class SalesDailyActivitySerializer(serializers.ModelSerializer):
     photos = SalesActivityPhotoSerializer(many=True, read_only=True)
     user_name = serializers.CharField(source='user.name', read_only=True)
@@ -196,6 +230,7 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
     allocations = serializers.SerializerMethodField()
     violations = serializers.SerializerMethodField()
     attendance = serializers.SerializerMethodField()
+    attendance_approvals = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyActivity
@@ -207,10 +242,15 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
             'self_vehicle',
-            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations', 'attendance',
+            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations', 'attendance', 'attendance_approvals',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'attendance', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'attendance', 'attendance_approvals', 'created_at', 'updated_at']
+
+    def get_attendance_approvals(self, obj):
+        approvals = obj.attendance_approvals.all()
+        return SalesAttendanceApprovalSerializer(approvals, many=True, context=self.context).data
+
 
     def get_attendance(self, obj):
         from attendance.models import EmployeeAttendanceRecord
