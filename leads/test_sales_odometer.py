@@ -99,6 +99,28 @@ class SalesActivityAndOdometerTests(TestCase):
             is_active=True
         )
 
+        self.admin_exec = User.objects.create_user(
+            username="admin_exec_user",
+            email="admin_exec@test.com",
+            password="password123",
+            role="admin_executive",
+            organization=self.org,
+            branch=self.branch,
+            name="Admin Executive User",
+            is_active=True
+        )
+
+        self.admin_senior_exec = User.objects.create_user(
+            username="admin_snr_exec_user",
+            email="admin_snr_exec@test.com",
+            password="password123",
+            role="admin_senior_executive",
+            organization=self.org,
+            branch=self.branch,
+            name="Admin Senior Executive User",
+            is_active=True
+        )
+
         NotificationHistory.objects.all().delete()
 
     def tearDown(self):
@@ -244,6 +266,21 @@ class SalesActivityAndOdometerTests(TestCase):
         admin_notif = admin_notifications.first()
         self.assertIsNotNone(admin_notif)
         self.assertIn('55.0', admin_notif.body)
+
+        # admin_executive and admin_senior_executive must NOT receive odometer notifications
+        admin_exec_notifs = NotificationHistory.objects.filter(
+            user=self.admin_exec,
+            notification_type='sales',
+            title='New Odometer Reading for Approval',
+        )
+        self.assertEqual(admin_exec_notifs.count(), 0)
+
+        admin_snr_notifs = NotificationHistory.objects.filter(
+            user=self.admin_senior_exec,
+            notification_type='sales',
+            title='New Odometer Reading for Approval',
+        )
+        self.assertEqual(admin_snr_notifs.count(), 0)
 
     def test_odometer_approve_and_reject_flow(self):
         """Test approving with editable expense_per_km and rejecting with reason."""

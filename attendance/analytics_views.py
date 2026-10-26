@@ -391,6 +391,23 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
 
         # Attendance data
         records = AttendanceRecord.objects.filter(student=s)
+
+        # Exclude ghost absent records if active entry exists on same date
+        has_active_student = AttendanceRecord.objects.filter(
+            student_id=OuterRef('student_id'),
+            date=OuterRef('date'),
+            status__in=['present', 'late', 'half_day', 'checkout_pending']
+        )
+        records = records.exclude(Q(status='absent') & Exists(has_active_student))
+
+        # Exclude duplicate absent records on the same date (keep only one absent record per date)
+        has_duplicate_student_absent = AttendanceRecord.objects.filter(
+            student_id=OuterRef('student_id'),
+            date=OuterRef('date'),
+            status='absent',
+            id__gt=OuterRef('id'),
+        )
+        records = records.exclude(Q(status='absent') & Exists(has_duplicate_student_absent))
         
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
@@ -1911,6 +1928,15 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
             status__in=['present', 'late', 'half_day', 'checkout_pending']
         )
         records = records.exclude(Q(status='absent') & Exists(has_active))
+
+        # Exclude duplicate absent records on the same date (keep only one absent record per date)
+        has_duplicate_absent = EmployeeAttendanceRecord.objects.filter(
+            user=OuterRef('user'),
+            date=OuterRef('date'),
+            status='absent',
+            id__gt=OuterRef('id'),
+        )
+        records = records.exclude(Q(status='absent') & Exists(has_duplicate_absent))
         
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')

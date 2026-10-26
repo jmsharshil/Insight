@@ -806,7 +806,7 @@ def auto_mark_student_absentees():
                 if not on_leave:
                     from .models import EmployeeAttendanceRecord
                     faculty_recorded = EmployeeAttendanceRecord.objects.filter(
-                        user=faculty_user, date=today, timetable_slot=slot
+                        user=faculty_user, date=today
                     ).exists()
                     
                     if not faculty_recorded:

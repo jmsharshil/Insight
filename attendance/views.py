@@ -1010,7 +1010,24 @@ class StudentAttendanceView(APIView):
         elif role not in ADMIN_ROLES:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = AttendanceRecord.objects.filter(student_id=student_id).select_related('marked_by').order_by('-date')
+        qs = AttendanceRecord.objects.filter(student_id=student_id).select_related('marked_by')
+
+        # Exclude ghost absent records if active entry exists on same date
+        has_active_student = AttendanceRecord.objects.filter(
+            student_id=OuterRef('student_id'),
+            date=OuterRef('date'),
+            status__in=['present', 'late', 'half_day', 'checkout_pending']
+        )
+        qs = qs.exclude(Q(status='absent') & Exists(has_active_student))
+
+        # Exclude duplicate absent records on the same date (keep only one absent record per date)
+        has_duplicate_student_absent = AttendanceRecord.objects.filter(
+            student_id=OuterRef('student_id'),
+            date=OuterRef('date'),
+            status='absent',
+            id__gt=OuterRef('id'),
+        )
+        qs = qs.exclude(Q(status='absent') & Exists(has_duplicate_student_absent)).order_by('-date')
         
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
@@ -1465,6 +1482,15 @@ class EmployeeAttendanceListCreateView(APIView):
         )
         qs = qs.exclude(Q(status='absent') & Exists(has_active))
 
+        # Exclude duplicate absent records on the same date (keep only one absent record per date)
+        has_duplicate_absent = EmployeeAttendanceRecord.objects.filter(
+            user_id=OuterRef('user_id'),
+            date=OuterRef('date'),
+            status='absent',
+            id__gt=OuterRef('id'),
+        )
+        qs = qs.exclude(Q(status='absent') & Exists(has_duplicate_absent))
+
         qs = apply_filters(self, request, qs)
         return paginate_queryset(qs, request, EmployeeAttendanceRecordSerializer)
 
@@ -1860,6 +1886,15 @@ class EmployeeAttendanceHistoryView(APIView):
             status__in=['present', 'late', 'half_day', 'checkout_pending']
         )
         qs = qs.exclude(Q(status='absent') & Exists(has_active))
+
+        # Exclude duplicate absent records on the same date (keep only one absent record per date)
+        has_duplicate_absent = EmployeeAttendanceRecord.objects.filter(
+            user_id=OuterRef('user_id'),
+            date=OuterRef('date'),
+            status='absent',
+            id__gt=OuterRef('id'),
+        )
+        qs = qs.exclude(Q(status='absent') & Exists(has_duplicate_absent))
 
         qs = qs.order_by('-date')
 

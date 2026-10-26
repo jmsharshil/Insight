@@ -1175,7 +1175,7 @@ class SalesActivityPhotoView(APIView):
                     }
                     from django.contrib.auth import get_user_model
 
-                    approver_roles = ['super_admin', 'admin_senior_executive', 'accountant']
+                    approver_roles = ['super_admin', 'accountant']
                     approver_filter = get_role_filter_q(approver_roles)
                     if activity.user.branch_id:
                         approver_filter |= (
