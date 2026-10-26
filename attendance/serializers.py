@@ -295,6 +295,11 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     check_in_method_display = serializers.CharField(source='get_check_in_method_display', read_only=True)
     check_out_method_display = serializers.CharField(source='get_check_out_method_display', read_only=True)
+    leave_type = serializers.SerializerMethodField()
+    leave_type_display = serializers.SerializerMethodField()
+    is_leave = serializers.SerializerMethodField()
+    is_holiday = serializers.SerializerMethodField()
+    is_week_off = serializers.SerializerMethodField()
     # Override datetime fields to return IST (Asia/Kolkata) times instead of UTC
     checked_in_at = serializers.SerializerMethodField()
     checked_out_at = serializers.SerializerMethodField()
@@ -305,7 +310,10 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'user_name', 'employee_id',
             'branch', 'branch_name', 'date',
-            'status', 'status_display', 'checked_in_at', 'checked_out_at',
+            'status', 'status_display',
+            'leave_type', 'leave_type_display',
+            'is_leave', 'is_holiday', 'is_week_off',
+            'checked_in_at', 'checked_out_at',
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'correction_note',
             'shortfall_minutes', 'latitude', 'longitude', 'location_verified',
@@ -341,6 +349,38 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
 
     def get_marked_at(self, obj):
         return _fmt_local(getattr(obj, 'marked_at', None))
+
+    def get_leave_type(self, obj):
+        if obj.status in ['sick_leave', 'sick']:
+            return 'sick_leave'
+        if obj.status in ['paid_leave', 'paid']:
+            return 'paid_leave'
+        if obj.status in ['casual_leave', 'casual']:
+            return 'casual_leave'
+        if obj.status == 'on_leave':
+            return 'on_leave'
+        return None
+
+    def get_leave_type_display(self, obj):
+        mapping = {
+            'sick_leave': 'Sick Leave',
+            'sick': 'Sick Leave',
+            'paid_leave': 'Paid Leave',
+            'paid': 'Paid Leave',
+            'casual_leave': 'Casual Leave',
+            'casual': 'Casual Leave',
+            'on_leave': 'On Leave',
+        }
+        return mapping.get(obj.status)
+
+    def get_is_leave(self, obj):
+        return obj.status in ['on_leave', 'paid_leave', 'sick_leave', 'casual_leave', 'paid', 'sick', 'casual']
+
+    def get_is_holiday(self, obj):
+        return obj.status in ['holiday', 'public_holiday']
+
+    def get_is_week_off(self, obj):
+        return obj.status in ['week_off', 'week_of']
 
 
 class EmployeeAttendanceCreateSerializer(serializers.Serializer):

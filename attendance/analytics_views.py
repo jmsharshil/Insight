@@ -1921,13 +1921,13 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
         from attendance.models import EmployeeAttendanceRecord
         records = EmployeeAttendanceRecord.objects.filter(user=employee)
         
-        # Deduplicate: exclude ghost 'absent' records if an active attendance record exists for the same user and date
+        # Deduplicate: exclude ghost 'absent' or unattended placeholder records if an active attendance record exists for the same user and date
         has_active = EmployeeAttendanceRecord.objects.filter(
             user=OuterRef('user'),
             date=OuterRef('date'),
             status__in=['present', 'late', 'half_day', 'checkout_pending']
         )
-        records = records.exclude(Q(status='absent') & Exists(has_active))
+        records = records.exclude(Q(status__in=['absent', 'week_off', 'week_of', 'holiday'], checked_in_at__isnull=True) & Exists(has_active))
 
         # Exclude duplicate absent records on the same date (keep only one absent record per date)
         has_duplicate_absent = EmployeeAttendanceRecord.objects.filter(
@@ -1938,6 +1938,11 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
         )
         records = records.exclude(Q(status='absent') & Exists(has_duplicate_absent))
         
+        from attendance.utils import (
+            determine_employee_day_status, LEAVE_STATUS_CHOICES,
+            OFF_DAY_STATUS_CHOICES, NON_WORKING_STATUS_CHOICES
+        )
+
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
         date_filter = request.GET.get('date')
@@ -1949,14 +1954,39 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
             records = records.filter(date__lte=end_date)
         if date_filter:
             records = records.filter(date=date_filter)
-        if status_filter:
-            records = records.filter(status=status_filter)
 
-        total_days = records.exclude(status='on_leave').count()
+        # Synchronize/correct any stale absent records for this employee (e.g. Sunday, week off, holiday, leave)
+        for rec in records.filter(status='absent'):
+            correct_status = determine_employee_day_status(employee, rec.date)
+            if correct_status != 'absent':
+                rec.status = correct_status
+                rec.save(update_fields=['status'])
+
+        # If an existing Sunday record was marked 'holiday' (and not an official public holiday), migrate to 'week_off'
+        for rec in records.filter(status='holiday'):
+            if rec.date.weekday() == 6 and determine_employee_day_status(employee, rec.date) == 'week_off':
+                rec.status = 'week_off'
+                rec.save(update_fields=['status'])
+
+        if status_filter:
+            if status_filter in ['week_off', 'week_of']:
+                records = records.filter(status__in=['week_off', 'week_of'])
+            elif status_filter == 'on_leave':
+                records = records.filter(status__in=LEAVE_STATUS_CHOICES)
+            elif status_filter == 'holiday':
+                records = records.filter(status__in=['holiday', 'public_holiday'])
+            else:
+                records = records.filter(status=status_filter)
+
+        total_days = records.count()
+        working_days = records.exclude(status__in=NON_WORKING_STATUS_CHOICES).count()
         present_count = records.filter(status__in=['present', 'late', 'half_day']).count()
         absent_count = records.filter(status='absent').count()
         late_count = records.filter(status='late').count()
-        pct = round((present_count / total_days) * 100, 2) if total_days > 0 else 0.0
+        holiday_count = records.filter(status__in=['holiday', 'public_holiday']).count()
+        week_off_count = records.filter(status__in=['week_off', 'week_of']).count()
+        leave_count = records.filter(status__in=LEAVE_STATUS_CHOICES).count()
+        pct = round((present_count / working_days) * 100, 2) if working_days > 0 else 0.0
 
         # Check-in and check-out logs
         check_in_history = []
@@ -1981,10 +2011,25 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'location_verified': r.location_verified
                 }
 
+            leave_type = None
+            if r.status in ['sick_leave', 'sick']:
+                leave_type = 'sick_leave'
+            elif r.status in ['paid_leave', 'paid']:
+                leave_type = 'paid_leave'
+            elif r.status in ['casual_leave', 'casual']:
+                leave_type = 'casual_leave'
+            elif r.status == 'on_leave':
+                leave_type = 'on_leave'
+
             day_wise_attendance.append({
                 'id': str(r.id),
                 'date': r.date,
                 'status': r.status,
+                'status_display': r.get_status_display(),
+                'leave_type': leave_type,
+                'is_leave': r.status in LEAVE_STATUS_CHOICES,
+                'is_holiday': r.status in ['holiday', 'public_holiday'],
+                'is_week_off': r.status in ['week_off', 'week_of'],
                 'checked_in_at': r.checked_in_at,
                 'checked_out_at': r.checked_out_at,
                 'timetable_slot': slot_info,
@@ -2006,7 +2051,7 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'timetable_slot': slot_info,
                 })
 
-        # Recent absences
+        # Recent absences (genuine absences only)
         recent_absences = []
         for r in records.filter(status='absent').order_by('-date')[:5]:
             recent_absences.append({
@@ -2034,10 +2079,10 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
             if timezone.datetime(year=y, month=m, day=1).date() < creation_date and (first_attendance_date is None or first_attendance_date.month != m or first_attendance_date.year != y):
                 continue
 
-            m_records = EmployeeAttendanceRecord.objects.filter(user=employee, date__year=y, date__month=m).exclude(status='on_leave')
-            m_total = m_records.count()
+            m_records = EmployeeAttendanceRecord.objects.filter(user=employee, date__year=y, date__month=m)
+            m_working = m_records.exclude(status__in=NON_WORKING_STATUS_CHOICES).count()
             m_present = m_records.filter(status__in=['present', 'late', 'half_day']).count()
-            m_pct = round((m_present / m_total) * 100, 2) if m_total > 0 else 0.0
+            m_pct = round((m_present / m_working) * 100, 2) if m_working > 0 else 0.0
 
             import calendar
             monthly_trend.append({
@@ -2080,9 +2125,13 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                 'attendance_percentage': pct,
                 'summary': {
                     'total_days': total_days,
+                    'working_days': working_days,
                     'present_count': present_count,
                     'absent_count': absent_count,
                     'late_count': late_count,
+                    'holiday_count': holiday_count,
+                    'week_off_count': week_off_count,
+                    'leave_count': leave_count,
                 },
                 'day_wise_attendance': day_wise_attendance[start:end],
                 'recent_absences': recent_absences,
@@ -2152,6 +2201,15 @@ class EmployeeViolationsAPIView(SafeAPIView):
                     Q(user__email__icontains=search) |
                     Q(user__employee_id__icontains=search)
                 )
+
+        from attendance.utils import determine_employee_day_status, NON_WORKING_STATUS_CHOICES
+        # Normalize any stale absent records that fall on Sunday, week off, holiday, or leave
+        for rec in qs.filter(status='absent')[:200]:
+            correct_status = determine_employee_day_status(rec.user, rec.date)
+            if correct_status != 'absent':
+                rec.status = correct_status
+                rec.save(update_fields=['status'])
+        qs = qs.exclude(status__in=NON_WORKING_STATUS_CHOICES)
 
         # Convert to violation-style response (consistent with student violations)
         violation_list = []

@@ -8,6 +8,9 @@ from .views import (
     OdometerReadingApproveView, OdometerReadingRejectView,
     MonthlyOdometerApproveView, MonthlyOdometerRejectView,
     SalesUserActivityStatsView,
+    SalesAttendanceApprovalListView,
+    SalesAttendanceApprovalApproveView,
+    SalesAttendanceApprovalRejectView,
 )
 
 urlpatterns = [
@@ -33,6 +36,11 @@ urlpatterns = [
     path("sales/odometer/monthly/approve/", MonthlyOdometerApproveView.as_view(), name="sales-odometer-monthly-approve"),
     path("sales/odometer/monthly/reject/", MonthlyOdometerRejectView.as_view(), name="sales-odometer-monthly-reject"),
     
+    # Sales attendance approval endpoints (check-in / check-out with selfies)
+    path("sales/attendance-approvals/", SalesAttendanceApprovalListView.as_view(), name="sales-attendance-approvals-list"),
+    path("sales/attendance-approvals/<uuid:pk>/approve/", SalesAttendanceApprovalApproveView.as_view(), name="sales-attendance-approvals-approve"),
+    path("sales/attendance-approvals/<uuid:pk>/reject/", SalesAttendanceApprovalRejectView.as_view(), name="sales-attendance-approvals-reject"),
+
     # User seminar & fair statistics
     path("sales/users/<uuid:user_id>/stats/", SalesUserActivityStatsView.as_view(), name="sales-user-activity-stats"),
 ]

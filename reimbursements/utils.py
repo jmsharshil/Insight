@@ -369,7 +369,13 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
                 user_id=str(reimb.user.id),
                 title='Reimbursement Rejected',
                 body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} was rejected by {approver_name}.",
-                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_rejected', 'status': 'rejected', 'route': f"/reimbursements/{reimb.id}"},
+                metadata={
+                    'reimbursement_id': str(reimb.id),
+                    'type': 'reimbursement_rejected',
+                    'status': 'rejected',
+                    'route': f"/reimbursements/{reimb.id}",
+                    'skip_whatsapp': True,
+                },
                 notification_type='payroll',
             )
         except Exception as e:
@@ -403,7 +409,13 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
                 user_id=str(reimb.user.id),
                 title='Reimbursement Approved',
                 body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved by {approver_name} and will be added to your monthly pay.",
-                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_approved', 'status': 'approved', 'route': f"/reimbursements/{reimb.id}"},
+                metadata={
+                    'reimbursement_id': str(reimb.id),
+                    'type': 'reimbursement_approved',
+                    'status': 'approved',
+                    'route': f"/reimbursements/{reimb.id}",
+                    'skip_whatsapp': True,
+                },
                 notification_type='payroll',
             )
         except Exception as e:

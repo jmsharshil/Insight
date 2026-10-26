@@ -398,6 +398,32 @@ class LeaveApproveView(APIView):
             balance.used_days += app.total_days
             balance.save(update_fields=['used_days'])
 
+        # Update or create EmployeeAttendanceRecord with approved leave type
+        try:
+            from datetime import timedelta
+            from attendance.models import EmployeeAttendanceRecord
+            from attendance.utils import get_leave_type_status
+            leave_status = get_leave_type_status(app.leave_type)
+            curr_date = app.from_date
+            while curr_date <= app.to_date:
+                existing_rec = EmployeeAttendanceRecord.objects.filter(
+                    user=app.applied_by, date=curr_date
+                ).first()
+                if existing_rec:
+                    if existing_rec.status in ['absent', 'on_leave']:
+                        existing_rec.status = leave_status
+                        existing_rec.save(update_fields=['status'])
+                else:
+                    EmployeeAttendanceRecord.objects.create(
+                        user=app.applied_by,
+                        branch=app.branch or getattr(app.applied_by, 'branch', None),
+                        date=curr_date,
+                        status=leave_status,
+                    )
+                curr_date += timedelta(days=1)
+        except Exception as att_err:
+            logger.error(f"[Leave Approved] Failed to update EmployeeAttendanceRecord: {att_err}")
+
         notify(
             str(app.applied_by.id),
             title="Leave Approved",

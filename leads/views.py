@@ -941,6 +941,7 @@ class SalesActivityPhotoView(APIView):
 
         # ── Pre-check for start_selfie, end_selfie, and other photos ──
         from attendance.models import EmployeeAttendanceRecord
+        from .models import SalesAttendanceApproval
         today = timezone.localdate()
         
         already_checked_in = EmployeeAttendanceRecord.objects.filter(
@@ -949,8 +950,20 @@ class SalesActivityPhotoView(APIView):
             checked_in_at__isnull=False,
         ).exists()
 
+        start_selfie_submitted = activity.photos.filter(
+            photo_type='start_selfie', captured_at__date=today
+        ).exists() or SalesAttendanceApproval.objects.filter(
+            user=activity.user, date=today, approval_type='check_in'
+        ).exists()
+
+        if photo_type == 'start_selfie':
+            if already_checked_in or SalesAttendanceApproval.objects.filter(
+                user=activity.user, date=today, approval_type='check_in', status__in=['pending', 'approved']
+            ).exists():
+                return Response({'detail': 'Start selfie check-in has already been submitted for today.'}, status=status.HTTP_400_BAD_REQUEST)
+
         if photo_type != 'start_selfie':
-            if not already_checked_in:
+            if not already_checked_in and not start_selfie_submitted:
                 return Response({'detail': 'You must check in (upload a start selfie) before uploading activity photos.'}, status=status.HTTP_403_FORBIDDEN)
                 
         already_checked_out = EmployeeAttendanceRecord.objects.filter(
@@ -959,7 +972,19 @@ class SalesActivityPhotoView(APIView):
             checked_out_at__isnull=False,
         ).exists()
 
-        if already_checked_out and photo_type != 'end_selfie':
+        end_selfie_submitted = activity.photos.filter(
+            photo_type='end_selfie', captured_at__date=today
+        ).exists() or SalesAttendanceApproval.objects.filter(
+            user=activity.user, date=today, approval_type='check_out'
+        ).exists()
+
+        if photo_type == 'end_selfie':
+            if already_checked_out or SalesAttendanceApproval.objects.filter(
+                user=activity.user, date=today, approval_type='check_out', status__in=['pending', 'approved']
+            ).exists():
+                return Response({'detail': 'End selfie check-out has already been submitted for today.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if (already_checked_out or end_selfie_submitted) and photo_type != 'end_selfie':
             return Response({'detail': 'You have already checked out for today. You cannot upload more photos.'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = SalesActivityPhotoSerializer(data={
@@ -979,146 +1004,71 @@ class SalesActivityPhotoView(APIView):
             activity.status = 'ongoing'
             activity.save(update_fields=['status'])
 
-        # ── Attendance Check-in / Check-out on Start and End Selfies ──
+        # ── Attendance Check-in / Check-out on Start and End Selfies (Approval Required) ──
         attendance_info = None
         if photo_type == 'start_selfie' and not already_checked_in:
             try:
-                from attendance.models import EmployeeAttendanceRecord
-                from core.utils import get_user_branch_id
+                from .models import SalesAttendanceApproval
+                from .utils import send_sales_attendance_approval_requests
                 today = timezone.localdate()
 
-                bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
-                if not bid:
-                    from branch.models import Branch
-                    first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
-                    bid = first_branch.id if first_branch else None
-
-                if bid:
-                    # Clear stale absent record
-                    EmployeeAttendanceRecord.objects.filter(
-                        user=activity.user, date=today, status='absent'
-                    ).delete()
-
-                    checkin_time = photo.captured_at or timezone.now()
-                    rec = EmployeeAttendanceRecord.objects.create(
-                        user=activity.user,
-                        branch_id=bid,
-                        date=today,
-                        status='checkout_pending',
-                        checked_in_at=checkin_time,
-                        latitude=photo.latitude,
-                        longitude=photo.longitude,
-                        location_verified=False,
-                        marked_by=activity.user,
-                        check_in_method='selfie',  # checked in via start-day selfie in sales module
-                    )
-                    attendance_info = {
-                        'action': 'check_in',
-                        'record_id': str(rec.id),
-                        'status': 'checkout_pending',
-                        'checked_in_at': rec.checked_in_at.isoformat(),
-                        'check_in_method': rec.check_in_method,
-                        'check_out_method': rec.check_out_method,
+                approval, _ = SalesAttendanceApproval.objects.get_or_create(
+                    user=activity.user,
+                    date=today,
+                    approval_type='check_in',
+                    defaults={
+                        'activity': activity,
+                        'photo': photo,
+                        'captured_at': photo.captured_at or timezone.now(),
+                        'latitude': photo.latitude,
+                        'longitude': photo.longitude,
+                        'status': 'pending',
                     }
-                else:
-                    logger.warning(f"Could not auto check-in user {activity.user.id}: no branch found")
+                )
+                # Send approval notifications to CMO and Super Admin (WhatsApp & In-App)
+                send_sales_attendance_approval_requests(approval)
+
+                attendance_info = {
+                    'action': 'check_in',
+                    'approval_id': str(approval.id),
+                    'status': 'approval_pending',
+                    'message': 'Check-in request sent to CMO and Super Admin for approval. Attendance entry will arrive upon approval.',
+                    'check_in_method': 'selfie',
+                }
             except Exception as e:
-                logger.error(f"Auto check-in on start_selfie failed: {e}", exc_info=True)
+                logger.error(f"Check-in approval request on start_selfie failed: {e}", exc_info=True)
 
         elif photo_type == 'end_selfie' and not already_checked_out:
             try:
-                from attendance.models import EmployeeAttendanceRecord
-                from core.utils import get_user_branch_id
+                from .models import SalesAttendanceApproval
+                from .utils import send_sales_attendance_approval_requests
                 today = timezone.localdate()
 
-                checkout_time = photo.captured_at or timezone.now()
-                open_rec = EmployeeAttendanceRecord.objects.filter(
+                approval, _ = SalesAttendanceApproval.objects.get_or_create(
                     user=activity.user,
                     date=today,
-                    checked_in_at__isnull=False,
-                    checked_out_at__isnull=True,
-                ).order_by('-checked_in_at').first()
-
-                if open_rec:
-                    open_rec.checked_out_at = checkout_time
-                    open_rec.status = 'present'
-                    open_rec.check_out_method = 'selfie'
-                    role = getattr(activity.user, 'role', '')
-                    if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
-                        from decimal import Decimal
-                        duration_mins = int((checkout_time - open_rec.checked_in_at).total_seconds() / 60)
-                        req_mins = 540
-                        target_dt = getattr(open_rec, 'date', None) or checkout_time.date()
-                        has_half_day_leave = False
-                        try:
-                            from leave.models import LeaveApplication
-                            if target_dt and hasattr(activity.user, 'id') and LeaveApplication.objects.filter(
-                                applied_by=activity.user,
-                                from_date__lte=target_dt,
-                                to_date__gte=target_dt,
-                                is_half_day=True,
-                                status__in=['approved', 'approval_pending'],
-                            ).exists():
-                                req_mins = 300
-                                has_half_day_leave = True
-                        except Exception:
-                            pass
-
-                        if not has_half_day_leave:
-                            if hasattr(activity.user, 'get_working_hours_for_date'):
-                                dwh = activity.user.get_working_hours_for_date(target_dt)
-                                if dwh > 0:
-                                    req_mins = int(Decimal(str(dwh)) * 60)
-                            elif getattr(activity.user, 'working_hours', None) and activity.user.working_hours > 0:
-                                req_mins = int(Decimal(str(activity.user.working_hours)) * 60)
-                        shortfall = max(0, req_mins - duration_mins)
-                        open_rec.shortfall_minutes = shortfall
-                    open_rec.save()
-                    from attendance.utils import apply_half_day_rule
-                    apply_half_day_rule(open_rec, activity.user, checkout_time)
-                    attendance_info = {
-                        'action': 'check_out',
-                        'record_id': str(open_rec.id),
-                        'status': open_rec.status,
-                        'checked_out_at': open_rec.checked_out_at.isoformat(),
-                        'check_in_method': open_rec.check_in_method,
-                        'check_out_method': open_rec.check_out_method,
+                    approval_type='check_out',
+                    defaults={
+                        'activity': activity,
+                        'photo': photo,
+                        'captured_at': photo.captured_at or timezone.now(),
+                        'latitude': photo.latitude,
+                        'longitude': photo.longitude,
+                        'status': 'pending',
                     }
-                else:
-                    bid = get_user_branch_id(activity.user) or getattr(activity.user, 'branch_id', None)
-                    if not bid:
-                        from branch.models import Branch
-                        first_branch = Branch.objects.filter(organization=activity.user.organization).first() or Branch.objects.first()
-                        bid = first_branch.id if first_branch else None
+                )
+                # Send approval notifications to CMO and Super Admin (WhatsApp & In-App)
+                send_sales_attendance_approval_requests(approval)
 
-                    if bid:
-                        EmployeeAttendanceRecord.objects.filter(
-                            user=activity.user, date=today, status='absent'
-                        ).delete()
-                        rec = EmployeeAttendanceRecord.objects.create(
-                            user=activity.user,
-                            branch_id=bid,
-                            date=today,
-                            status='present',
-                            checked_in_at=checkout_time,
-                            checked_out_at=checkout_time,
-                            latitude=photo.latitude,
-                            longitude=photo.longitude,
-                            location_verified=False,
-                            marked_by=activity.user,
-                            check_in_method='selfie',
-                            check_out_method='selfie',
-                        )
-                        attendance_info = {
-                            'action': 'check_out',
-                            'record_id': str(rec.id),
-                            'status': 'present',
-                            'checked_out_at': rec.checked_out_at.isoformat(),
-                            'check_in_method': rec.check_in_method,
-                            'check_out_method': rec.check_out_method,
-                        }
+                attendance_info = {
+                    'action': 'check_out',
+                    'approval_id': str(approval.id),
+                    'status': 'approval_pending',
+                    'message': 'Check-out request sent to CMO and Super Admin for approval. Attendance entry will arrive upon approval.',
+                    'check_out_method': 'selfie',
+                }
             except Exception as e:
-                logger.error(f"Auto check-out on end_selfie failed: {e}", exc_info=True)
+                logger.error(f"Check-out approval request on end_selfie failed: {e}", exc_info=True)
 
         # ── Auto-sync Odometer Reading ──
         if photo_type in {'start_odometer', 'end_odometer'}:
@@ -2693,3 +2643,134 @@ class LeadTransferRequestReviewView(APIView):
             return Response(LeadTransferRequestSerializer(transfer_request).data)
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Sales Attendance Approval Views (CMO & Super Admin)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _is_cmo_or_super_admin(user):
+    if not user or not user.is_authenticated:
+        return False
+    roles = [user.role] + (getattr(user, 'additional_roles', None) or [])
+    return 'cmo' in roles or 'super_admin' in roles or getattr(user, 'is_superuser', False)
+
+
+class SalesAttendanceApprovalListView(APIView):
+    """
+    GET /api/v1/sales/attendance-approvals/
+    List sales attendance approvals (check-in / check-out).
+    - Super Admin and CMO can view all attendance approvals for their organization.
+    - Sales persons can view their own attendance approval requests.
+    Supports filtering by ?status=pending|approved|rejected, ?date=YYYY-MM-DD,
+    ?approval_type=check_in|check_out, and ?user_id=<uuid>.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import SalesAttendanceApproval
+        from .serializers import SalesAttendanceApprovalSerializer
+
+        user = request.user
+        is_admin = _is_cmo_or_super_admin(user)
+
+        if is_admin:
+            qs = SalesAttendanceApproval.objects.select_related(
+                'user', 'activity', 'photo', 'approved_by', 'rejected_by', 'attendance_record'
+            ).all()
+            if getattr(user, 'organization', None) and not user.is_superuser:
+                qs = qs.filter(user__organization=user.organization)
+        else:
+            qs = SalesAttendanceApproval.objects.filter(user=user).select_related(
+                'activity', 'photo', 'approved_by', 'rejected_by', 'attendance_record'
+            )
+
+        status_filter = request.GET.get('status')
+        date_filter = request.GET.get('date')
+        type_filter = request.GET.get('approval_type')
+        user_id_filter = request.GET.get('user_id')
+
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        if date_filter:
+            qs = qs.filter(date=date_filter)
+        if type_filter:
+            qs = qs.filter(approval_type=type_filter)
+        if user_id_filter and is_admin:
+            qs = qs.filter(user_id=user_id_filter)
+
+        return Response(SalesAttendanceApprovalSerializer(qs, many=True, context={'request': request}).data)
+
+
+class SalesAttendanceApprovalApproveView(APIView):
+    """
+    POST /api/v1/sales/attendance-approvals/<uuid:pk>/approve/
+    Approve a sales attendance check-in or check-out request.
+    Only CMO or Super Admin can approve.
+    If either CMO or Super Admin approves, the EmployeeAttendanceRecord arrives.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import SalesAttendanceApproval
+        from .serializers import SalesAttendanceApprovalSerializer
+        from .utils import apply_sales_attendance_approval
+        from django.shortcuts import get_object_or_404
+
+        if not _is_cmo_or_super_admin(request.user):
+            return Response(
+                {'detail': 'Permission denied: Only CMO or Super Admin can approve sales attendance.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        approval = get_object_or_404(SalesAttendanceApproval, pk=pk)
+        if approval.user_id == request.user.id:
+            return Response(
+                {'detail': 'You cannot approve your own attendance request.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        success, msg = apply_sales_attendance_approval(approval, request.user)
+        if not success:
+            return Response({'success': False, 'message': msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'success': True,
+            'message': msg,
+            'data': SalesAttendanceApprovalSerializer(approval, context={'request': request}).data
+        })
+
+
+class SalesAttendanceApprovalRejectView(APIView):
+    """
+    POST /api/v1/sales/attendance-approvals/<uuid:pk>/reject/
+    Reject a sales attendance check-in or check-out request.
+    Only CMO or Super Admin can reject.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import SalesAttendanceApproval
+        from .serializers import SalesAttendanceApprovalSerializer
+        from .utils import apply_sales_attendance_rejection
+        from django.shortcuts import get_object_or_404
+
+        if not _is_cmo_or_super_admin(request.user):
+            return Response(
+                {'detail': 'Permission denied: Only CMO or Super Admin can reject sales attendance.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        approval = get_object_or_404(SalesAttendanceApproval, pk=pk)
+        reason = request.data.get('reason') or request.data.get('rejection_reason') or ''
+
+        success, msg = apply_sales_attendance_rejection(approval, request.user, reason=reason)
+        if not success:
+            return Response({'success': False, 'message': msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'success': True,
+            'message': msg,
+            'data': SalesAttendanceApprovalSerializer(approval, context={'request': request}).data
+        })
+

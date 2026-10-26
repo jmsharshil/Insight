@@ -471,12 +471,18 @@ def detect_missing_scans_all_branches():
 
 def auto_mark_staff_absentees_eod(target_date=None):
     """
-    Nightly task: Auto-marks non-faculty staff as absent if they have no check-in for the day.
+    Nightly task: Auto-marks non-faculty staff for the day.
+    - If user has approved leave: records with their leave type (sick_leave, paid_leave, etc.)
+    - If public holiday: records as public_holiday
+    - If Sunday: records as holiday (not absent)
+    - If Saturday (or off day) with week off: records as week_of
+    - Otherwise (normal working day with no check-in): records as absent
     """
     try:
         from django.contrib.auth import get_user_model
         from .models import EmployeeAttendanceRecord
-        from leave.models import LeaveApplication
+        from .utils import determine_employee_day_status
+        from leave.models import LeaveApplication, PublicHoliday
         from datetime import timedelta
         User = get_user_model()
         
@@ -492,40 +498,41 @@ def auto_mark_staff_absentees_eod(target_date=None):
         
         staff_users = User.objects.filter(
             is_active=True
-        ).exclude(role__in=['student', 'parents', 'faculty', 'super_admin'])
+        ).exclude(role__in=['student', 'parents', 'faculty', 'super_admin']).select_related('branch', 'organization')
         
-        # Only full-day approved leaves exempt staff from having to check in
-        leave_user_ids = set(
-            LeaveApplication.objects.filter(
-                from_date__lte=today,
-                to_date__gte=today,
-                status='approved',
-                is_half_day=False,
-            ).values_list('applied_by_id', flat=True)
-        )
+        # Existing records for today (indexed by user_id)
+        existing_records = {
+            rec.user_id: rec
+            for rec in EmployeeAttendanceRecord.objects.filter(date=today)
+        }
         
-        recorded_user_ids = set(
-            EmployeeAttendanceRecord.objects.filter(
-                date=today
-            ).values_list('user_id', flat=True)
-        )
-        
-        to_mark_absent = staff_users.exclude(id__in=leave_user_ids).exclude(id__in=recorded_user_ids)
-        
-        records = []
-        for user in to_mark_absent:
-            records.append(
+        records_to_create = []
+        for user in staff_users:
+            if user.id in existing_records:
+                rec = existing_records[user.id]
+                # If an existing record was marked absent, verify if it should be corrected
+                # (e.g. if it fell on Sunday, week off, public holiday, or approved leave)
+                if rec.status == 'absent':
+                    correct_status = determine_employee_day_status(user, today)
+                    if correct_status != 'absent':
+                        rec.status = correct_status
+                        rec.save(update_fields=['status'])
+                continue
+            
+            # Staff has no record for today - determine proper status
+            status_to_assign = determine_employee_day_status(user, today)
+            records_to_create.append(
                 EmployeeAttendanceRecord(
                     user=user,
                     branch=getattr(user, 'branch', None),
                     date=today,
-                    status='absent'
+                    status=status_to_assign,
                 )
             )
             
-        if records:
-            EmployeeAttendanceRecord.objects.bulk_create(records, ignore_conflicts=True)
-            logger.info(f"Auto-marked {len(records)} staff members absent for {today}.")
+        if records_to_create:
+            EmployeeAttendanceRecord.objects.bulk_create(records_to_create, ignore_conflicts=True)
+            logger.info(f"Auto-marked {len(records_to_create)} staff members for {today}.")
             
         # For staff who applied for half-day leave but never checked out:
         # they did not complete 5 hours of check-in check-out, so mark as absent
@@ -794,16 +801,10 @@ def auto_mark_student_absentees():
             faculty_profile = getattr(slot, 'faculty', None)
             if faculty_profile and faculty_profile.user:
                 faculty_user = faculty_profile.user
+                from .utils import determine_employee_day_status
+                faculty_status = determine_employee_day_status(faculty_user, today)
                 
-                from leave.models import LeaveApplication
-                on_leave = LeaveApplication.objects.filter(
-                    applied_by=faculty_user,
-                    from_date__lte=today,
-                    to_date__gte=today,
-                    status='approved'
-                ).exists()
-                
-                if not on_leave:
+                if faculty_status == 'absent':
                     from .models import EmployeeAttendanceRecord
                     faculty_recorded = EmployeeAttendanceRecord.objects.filter(
                         user=faculty_user, date=today

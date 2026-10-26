@@ -65,6 +65,9 @@ def _get_required_shift_minutes(user, target_date=None):
     except Exception:
         pass
 
+    if target_date and hasattr(user, 'is_day_off') and user.is_day_off(target_date):
+        return 0
+
     if hasattr(user, 'get_working_hours_for_date') and target_date:
         day_req_hours = user.get_working_hours_for_date(target_date)
         if day_req_hours > 0:
@@ -474,9 +477,11 @@ class QRScanView(APIView):
                             'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.',
                         }, status=status.HTTP_400_BAD_REQUEST)
                 
-                # Remove any stale absent record for this employee today (since they are checking in)
+                # Remove any stale absent or unattended placeholder record for this employee today (since they are checking in)
                 EmployeeAttendanceRecord.objects.filter(
-                    user=user, date=today, status='absent'
+                    user=user, date=today,
+                    status__in=['absent', 'week_off', 'week_of', 'holiday'],
+                    checked_in_at__isnull=True
                 ).delete()
 
                 # Create a new session record
@@ -1463,7 +1468,15 @@ class EmployeeAttendanceListCreateView(APIView):
         if to_date:
             qs = qs.filter(date__lte=to_date)
         if status_filter:
-            qs = qs.filter(status=status_filter)
+            if status_filter in ['week_off', 'week_of']:
+                qs = qs.filter(status__in=['week_off', 'week_of'])
+            elif status_filter == 'on_leave':
+                from attendance.utils import LEAVE_STATUS_CHOICES
+                qs = qs.filter(status__in=LEAVE_STATUS_CHOICES)
+            elif status_filter == 'holiday':
+                qs = qs.filter(status__in=['holiday', 'public_holiday'])
+            else:
+                qs = qs.filter(status=status_filter)
         # Search by employee name or email
         search_query = request.GET.get('search')
         if search_query:
@@ -1474,13 +1487,13 @@ class EmployeeAttendanceListCreateView(APIView):
         if user_id and role in EMPLOYEE_ATTENDANCE_ADMIN_ROLES:
             qs = qs.filter(user_id=user_id)
 
-        # Exclude ghost absent records if the employee has an active (present/late/half_day/checkout_pending) record on the same date
+        # Exclude ghost absent/unattended records if the employee has an active (present/late/half_day/checkout_pending) record on the same date
         has_active = EmployeeAttendanceRecord.objects.filter(
             user_id=OuterRef('user_id'),
             date=OuterRef('date'),
             status__in=['present', 'late', 'half_day', 'checkout_pending']
         )
-        qs = qs.exclude(Q(status='absent') & Exists(has_active))
+        qs = qs.exclude(Q(status__in=['absent', 'week_off', 'week_of', 'holiday'], checked_in_at__isnull=True) & Exists(has_active))
 
         # Exclude duplicate absent records on the same date (keep only one absent record per date)
         has_duplicate_absent = EmployeeAttendanceRecord.objects.filter(
@@ -1740,9 +1753,11 @@ class EmployeeCheckInOutView(APIView):
                         'message': 'You have already completed attendance for this session today. Check-in again is only allowed for the next session.',
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Remove any stale absent record for this employee today (since they are checking in)
+            # Remove any stale absent or unattended placeholder record for this employee today (since they are checking in)
             EmployeeAttendanceRecord.objects.filter(
-                user=user, date=today, status='absent'
+                user=user, date=today,
+                status__in=['absent', 'week_off', 'week_of', 'holiday'],
+                checked_in_at__isnull=True
             ).delete()
 
             # Create a new session record
@@ -1879,13 +1894,42 @@ class EmployeeAttendanceHistoryView(APIView):
         if to_date:
             qs = qs.filter(date__lte=to_date)
 
-        # Exclude ghost absent records if the employee has an active record on the same date
+        status_filter = request.GET.get('status')
+        if status_filter:
+            if status_filter in ['week_off', 'week_of']:
+                qs = qs.filter(status__in=['week_off', 'week_of'])
+            elif status_filter == 'on_leave':
+                from attendance.utils import LEAVE_STATUS_CHOICES
+                qs = qs.filter(status__in=LEAVE_STATUS_CHOICES)
+            elif status_filter == 'holiday':
+                qs = qs.filter(status__in=['holiday', 'public_holiday'])
+            else:
+                qs = qs.filter(status=status_filter)
+
+        # Exclude ghost absent/unattended records if the employee has an active record on the same date
         has_active = EmployeeAttendanceRecord.objects.filter(
             user_id=OuterRef('user_id'),
             date=OuterRef('date'),
             status__in=['present', 'late', 'half_day', 'checkout_pending']
         )
-        qs = qs.exclude(Q(status='absent') & Exists(has_active))
+        qs = qs.exclude(Q(status__in=['absent', 'week_off', 'week_of', 'holiday'], checked_in_at__isnull=True) & Exists(has_active))
+
+        # Synchronize/correct any stale absent records for this user (e.g. Sunday, week off, holiday, leave)
+        from attendance.utils import (
+            determine_employee_day_status, LEAVE_STATUS_CHOICES,
+            OFF_DAY_STATUS_CHOICES, NON_WORKING_STATUS_CHOICES
+        )
+        for rec in qs.filter(status='absent'):
+            correct_status = determine_employee_day_status(user, rec.date)
+            if correct_status != 'absent':
+                rec.status = correct_status
+                rec.save(update_fields=['status'])
+
+        # If an existing Sunday record was marked 'holiday' (and not an official public holiday), migrate to 'week_off'
+        for rec in qs.filter(status='holiday'):
+            if rec.date.weekday() == 6 and determine_employee_day_status(user, rec.date) == 'week_off':
+                rec.status = 'week_off'
+                rec.save(update_fields=['status'])
 
         # Exclude duplicate absent records on the same date (keep only one absent record per date)
         has_duplicate_absent = EmployeeAttendanceRecord.objects.filter(
@@ -1900,11 +1944,16 @@ class EmployeeAttendanceHistoryView(APIView):
 
         # Compute summary
         total = qs.count()
-        present = qs.filter(status__in=['present', 'late']).count()
+        present = qs.filter(status__in=['present', 'late', 'half_day']).count()
         absent = qs.filter(status='absent').count()
         half_day = qs.filter(status='half_day').count()
-        on_leave = qs.filter(status='on_leave').count()
-        percentage = round((present / total) * 100, 1) if total > 0 else 0
+        on_leave = qs.filter(status__in=LEAVE_STATUS_CHOICES).count()
+        holidays = qs.filter(status__in=['holiday', 'public_holiday']).count()
+        week_offs = qs.filter(status__in=['week_off', 'week_of']).count()
+
+        # Working days: exclude holidays, week offs, and approved leaves
+        working_days = qs.exclude(status__in=NON_WORKING_STATUS_CHOICES).count()
+        percentage = round((present / working_days) * 100, 1) if working_days > 0 else 0
 
         serialized = EmployeeAttendanceRecordSerializer(qs[:100], many=True).data
 
@@ -1912,10 +1961,13 @@ class EmployeeAttendanceHistoryView(APIView):
             'success': True,
             'summary': {
                 'total_days': total,
+                'working_days': working_days,
                 'present_days': present,
                 'absent_days': absent,
                 'half_days': half_day,
                 'on_leave': on_leave,
+                'holidays': holidays,
+                'week_offs': week_offs,
                 'attendance_percentage': percentage,
             },
             'records': serialized,
