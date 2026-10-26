@@ -179,39 +179,51 @@ def parse_reimbursement_payload(payload_str, text_str=""):
     if not payload_str and not text_str:
         return None, None
 
-    s = str(payload_str or "").strip()
-    t = str(text_str or "").strip().lower()
-
     action = None
     reimb_id = None
 
-    if s.startswith("reimb_approve:"):
-        action = "approve"
-        reimb_id = s[len("reimb_approve:"):]
-    elif s.startswith("reimb_reject:"):
-        action = "reject"
-        reimb_id = s[len("reimb_reject:"):]
-    elif s.startswith("reimb_approve_"):
-        action = "approve"
-        reimb_id = s[len("reimb_approve_"):]
-    elif s.startswith("reimb_reject_"):
-        action = "reject"
-        reimb_id = s[len("reimb_reject_"):]
-    elif s.startswith("reimbursement_approve:"):
-        action = "approve"
-        reimb_id = s[len("reimbursement_approve:"):]
-    elif s.startswith("reimbursement_reject:"):
-        action = "reject"
-        reimb_id = s[len("reimbursement_reject:"):]
-    elif ":" in s and ("reimb" in s or "reimbursement" in s):
-        parts = s.split(":")
-        if len(parts) >= 2:
-            if "approve" in parts[0]:
-                action = "approve"
-                reimb_id = parts[-1]
-            elif "reject" in parts[0]:
-                action = "reject"
-                reimb_id = parts[-1]
+    candidates = [str(payload_str or "").strip(), str(text_str or "").strip()]
+    for s in candidates:
+        if not s:
+            continue
+        s_lower = s.lower()
+        if s_lower.startswith("reimb_approve:") or s_lower.startswith("reimbursement_approve:"):
+            action = "approve"
+            reimb_id = s.split(":", 1)[1].strip()
+            break
+        elif s_lower.startswith("reimb_reject:") or s_lower.startswith("reimbursement_reject:"):
+            action = "reject"
+            reimb_id = s.split(":", 1)[1].strip()
+            break
+        elif s_lower.startswith("reimb_approve_") or s_lower.startswith("reimbursement_approve_") or s_lower.startswith("approve_reimb_"):
+            action = "approve"
+            reimb_id = s.split("_", 2)[-1].strip()
+            break
+        elif s_lower.startswith("reimb_reject_") or s_lower.startswith("reimbursement_reject_") or s_lower.startswith("reject_reimb_"):
+            action = "reject"
+            reimb_id = s.split("_", 2)[-1].strip()
+            break
+        elif ":" in s and ("reimb" in s_lower or "reimbursement" in s_lower):
+            parts = s.split(":")
+            if len(parts) >= 2:
+                if "approve" in parts[0].lower():
+                    action = "approve"
+                    reimb_id = parts[-1].strip()
+                    break
+                elif "reject" in parts[0].lower():
+                    action = "reject"
+                    reimb_id = parts[-1].strip()
+                    break
+        elif s_lower.startswith("approve") or s_lower.startswith("reject"):
+            for prefix, act in [("approve", "approve"), ("reject", "reject")]:
+                if s_lower.startswith(prefix):
+                    remainder = s[len(prefix):].strip(" :_-#")
+                    if remainder:
+                        action = act
+                        reimb_id = remainder
+                        break
+            if action:
+                break
 
     if reimb_id:
         try:
@@ -247,7 +259,7 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
         send_whatsapp_text(to=sender_wa_id, body="Reimbursement claim not found.")
         return True
 
-    applicant_name = getattr(reimb.user, 'name', 'Employee')
+    applicant_name = getattr(reimb.user, 'name', None) or getattr(reimb.user, 'email', 'Employee')
 
     # Status check
     if reimb.status != 'pending':
@@ -272,15 +284,18 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
         phone_clean = phone_clean[1:]
     phone_10 = phone_clean[2:] if (phone_clean.startswith('91') and len(phone_clean) == 12) else phone_clean
 
-    candidates = list(User.objects.filter(
+    phone_filter = (
         Q(phone=sender_wa_id) |
         Q(phone=phone_clean) |
         Q(phone=phone_10) |
         Q(phone=f'+91{phone_10}') |
         Q(phone=f'91{phone_10}') |
-        Q(phone=f'+{phone_clean}'),
-        is_active=True
-    ))
+        Q(phone=f'+{phone_clean}')
+    )
+    if len(phone_10) == 10:
+        phone_filter |= Q(phone__endswith=phone_10)
+
+    candidates = list(User.objects.filter(phone_filter, is_active=True))
 
     if not candidates:
         logger.warning("[WA REIMB] No active user found for sender_wa_id=%s", sender_wa_id)
@@ -309,6 +324,12 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             break
 
     if not approver:
+        for u in candidates:
+            if is_user_approver(u):
+                approver = u
+                break
+
+    if not approver:
         approver = eligible_candidates[0]
 
     if reimb.user == approver:
@@ -326,16 +347,17 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
         return True
 
     now = timezone.now()
+    approver_name = getattr(approver, 'name', None) or getattr(approver, 'email', None) or 'Admin'
 
     # ── Action: REJECT ──────────────────────────────────────────────
     if action == 'reject':
         reimb.status = 'rejected'
         reimb.rejected_by = approver
         reimb.rejected_at = now
-        reimb.rejection_reason = f"Rejected via WhatsApp by {approver.name}"
+        reimb.rejection_reason = f"Rejected via WhatsApp by {approver_name}"
         reimb.approved_by = None
         reimb.approved_at = None
-        reimb.save(update_fields=['status', 'rejected_by', 'rejected_at', 'rejection_reason', 'approved_by', 'approved_at'])
+        reimb.save()
 
         send_whatsapp_text(
             to=sender_wa_id,
@@ -346,15 +368,18 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             send_system_notification(
                 user_id=str(reimb.user.id),
                 title='Reimbursement Rejected',
-                body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} was rejected by {approver.name}.",
-                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_rejected', 'status': 'rejected'},
+                body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} was rejected by {approver_name}.",
+                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_rejected', 'status': 'rejected', 'route': f"/reimbursements/{reimb.id}"},
                 notification_type='payroll',
             )
         except Exception as e:
             logger.error("[WA REIMB] Failed notifying applicant of rejection: %s", e)
 
         # Notify claimant via WhatsApp
-        send_reimbursement_status_whatsapp_to_applicant(reimb, 'rejected', reviewer_name=approver.name)
+        try:
+            send_reimbursement_status_whatsapp_to_applicant(reimb, 'rejected', reviewer_name=approver_name)
+        except Exception as e:
+            logger.error("[WA REIMB] Failed sending status WhatsApp to applicant: %s", e)
 
         return True
 
@@ -366,7 +391,7 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
         reimb.rejected_by = None
         reimb.rejected_at = None
         reimb.rejection_reason = ''
-        reimb.save(update_fields=['status', 'approved_by', 'approved_at', 'rejected_by', 'rejected_at', 'rejection_reason'])
+        reimb.save()
 
         send_whatsapp_text(
             to=sender_wa_id,
@@ -377,15 +402,18 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             send_system_notification(
                 user_id=str(reimb.user.id),
                 title='Reimbursement Approved',
-                body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved by {approver.name} and will be added to your monthly pay.",
-                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_approved', 'status': 'approved'},
+                body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved by {approver_name} and will be added to your monthly pay.",
+                metadata={'reimbursement_id': str(reimb.id), 'type': 'reimbursement_approved', 'status': 'approved', 'route': f"/reimbursements/{reimb.id}"},
                 notification_type='payroll',
             )
         except Exception as e:
             logger.error("[WA REIMB] Failed notifying applicant of approval: %s", e)
 
         # Notify claimant via WhatsApp
-        send_reimbursement_status_whatsapp_to_applicant(reimb, 'approved', reviewer_name=approver.name)
+        try:
+            send_reimbursement_status_whatsapp_to_applicant(reimb, 'approved', reviewer_name=approver_name)
+        except Exception as e:
+            logger.error("[WA REIMB] Failed sending status WhatsApp to applicant: %s", e)
 
         return True
 

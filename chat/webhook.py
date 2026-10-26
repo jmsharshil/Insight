@@ -229,6 +229,9 @@ class WhatsAppWebhookView(View):
             if not handled:
                 handled = handle_student_leave_whatsapp_approval(sender_wa_id, text_body, text_body)
             if not handled:
+                from reimbursements.utils import handle_reimbursement_whatsapp_approval
+                handled = handle_reimbursement_whatsapp_approval(sender_wa_id, text_body, text_body)
+            if not handled:
                 from onboarding.notifications import handle_admission_payment_whatsapp_approval
                 handle_admission_payment_whatsapp_approval(sender_wa_id, text_body, text_body)
         except Exception as e:
@@ -299,6 +302,9 @@ class WhatsAppWebhookView(View):
             if not handled:
                 handled = handle_student_leave_whatsapp_approval(sender_wa_id, reply_id, reply_title)
             if not handled:
+                from reimbursements.utils import handle_reimbursement_whatsapp_approval
+                handled = handle_reimbursement_whatsapp_approval(sender_wa_id, reply_id, reply_title)
+            if not handled:
                 from onboarding.notifications import handle_admission_payment_whatsapp_approval
                 handle_admission_payment_whatsapp_approval(sender_wa_id, reply_id, reply_title)
         except Exception as e:
@@ -324,6 +330,9 @@ class WhatsAppWebhookView(View):
             handled = handle_employee_leave_whatsapp_approval(sender_wa_id, payload, text)
             if not handled:
                 handled = handle_student_leave_whatsapp_approval(sender_wa_id, payload, text)
+            if not handled:
+                from reimbursements.utils import handle_reimbursement_whatsapp_approval
+                handled = handle_reimbursement_whatsapp_approval(sender_wa_id, payload, text)
             if not handled:
                 from onboarding.notifications import handle_admission_payment_whatsapp_approval
                 handle_admission_payment_whatsapp_approval(sender_wa_id, payload, text)
