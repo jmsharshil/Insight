@@ -239,3 +239,75 @@ class EmployeeAttendanceDedupTests(TestCase):
             EmployeeAttendanceRecord.objects.filter(user=self.absent_staff, date=self.today, status='absent').count(),
             1
         )
+
+    @patch('auditlog.blob_service.download_log_file', return_value=None)
+    @patch('auditlog.blob_service.upload_log_file', return_value=True)
+    def test_history_api_deduplicates_multiple_absent_records_for_same_day(self, mock_upload, mock_download):
+        """
+        When two or more absent records exist for an employee on the same day,
+        History API (My Attendance) must return only ONE absent entry and count only 1 absent day.
+        """
+        EmployeeAttendanceRecord.objects.create(
+            user=self.staff_user,
+            branch=self.branch,
+            date=self.today,
+            status='absent'
+        )
+        EmployeeAttendanceRecord.objects.create(
+            user=self.staff_user,
+            branch=self.branch,
+            date=self.today,
+            status='absent'
+        )
+
+        self.client.force_authenticate(user=self.staff_user)
+        url = reverse('employee-attendance-history')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        summary = response.data.get('summary', {})
+        records = response.data.get('records', [])
+
+        self.assertEqual(summary.get('absent_days'), 1)
+        self.assertEqual(summary.get('total_days'), 1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['status'], 'absent')
+
+    @patch('auditlog.blob_service.download_log_file', return_value=None)
+    @patch('auditlog.blob_service.upload_log_file', return_value=True)
+    def test_list_and_detail_api_deduplicate_multiple_absent_records_for_same_day(self, mock_upload, mock_download):
+        """
+        List and Detail APIs must also deduplicate multiple absent entries on the same date.
+        """
+        EmployeeAttendanceRecord.objects.create(
+            user=self.staff_user,
+            branch=self.branch,
+            date=self.today,
+            status='absent'
+        )
+        EmployeeAttendanceRecord.objects.create(
+            user=self.staff_user,
+            branch=self.branch,
+            date=self.today,
+            status='absent'
+        )
+
+        self.client.force_authenticate(user=self.admin_user)
+        # List API
+        url_list = reverse('employee-attendance-list-create')
+        res_list = self.client.get(f"{url_list}?user_id={self.staff_user.id}&date={self.today}")
+        results = res_list.data.get('results', res_list.data.get('data', []))
+        if isinstance(results, dict) and 'results' in results:
+            results = results['results']
+        staff_records = [r for r in results if str(r.get('user', '')) == str(self.staff_user.id)]
+        self.assertEqual(len(staff_records), 1)
+        self.assertEqual(staff_records[0]['status'], 'absent')
+
+        # Detail API
+        url_detail = reverse('employee-attendance-detail', kwargs={'user_id': self.staff_user.id})
+        res_detail = self.client.get(url_detail)
+        data = res_detail.data.get('data', res_detail.data)
+        summary = data.get('summary', {})
+        self.assertEqual(summary.get('absent_count'), 1)
+        self.assertEqual(summary.get('total_days'), 1)
+
