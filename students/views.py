@@ -35,6 +35,12 @@ def _get_student(request, student_id):
         )
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(branch__organization=request.user.organization)
+
+        if request.user.role == 'student':
+            queryset = queryset.filter(user=request.user)
+
+        if request.user.role == 'parent':
+            queryset = queryset.filter(parent_links__parent__user=request.user)
         
         try:
             return queryset.get(id=student_id)
