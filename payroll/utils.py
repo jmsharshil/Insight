@@ -1,5 +1,6 @@
 import logging
 import calendar
+import re
 from decimal import Decimal
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -68,12 +69,16 @@ def build_deduction_note(
     retention_deduction=Decimal('0'),
     retention_percentage=Decimal('0'),
     sunday_deduction=Decimal('0'),
+    attendance_bonus=Decimal('0'),
 ):
     """Build a concise deduction note with accurate per-minute late-checkin details."""
     notes = []
     late_dates = late_dates or []
     absent_dates = absent_dates or []
     leave_dates = leave_dates or []
+
+    if attendance_bonus > 0:
+        notes.append(f"Attendance bonus: +{_fmt_currency(attendance_bonus)}")
 
     if late_penalty > 0:
         date_suffix = f" on {', '.join(late_dates)}" if late_dates else ""
@@ -102,6 +107,19 @@ def build_deduction_note(
         notes.append(f"Sunday Shortfall: -{_fmt_currency(sunday_deduction)}")
 
     return ", ".join(notes)[:300]
+
+
+def update_bonus_note(note, bonus_amount):
+    """Keep the manually-set bonus amount in the payslip deduction note."""
+    note = re.sub(r'(?:^|, )Bonus: \+\d+(?:\.\d{2})?', '', note or '').strip(', ')
+    if bonus_amount <= 0:
+        return note[:300]
+
+    bonus_note = f"Bonus: +{_fmt_currency(Decimal(bonus_amount))}"
+    if not note:
+        return bonus_note
+    available_note_length = max(0, 300 - len(bonus_note) - 2)
+    return f"{note[:available_note_length]}, {bonus_note}"
 
 
 def get_subject_hourly_rate(faculty_profile, subject, month, year):
@@ -777,6 +795,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         retention_deduction=retention_deduction,
         retention_percentage=faculty_profile.salary_retention_percentage,
         sunday_deduction=Decimal('0'),
+        attendance_bonus=attendance_bonus,
     )
 
     # 10. Create PaySlip
@@ -1459,6 +1478,13 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         net = net_before_retention - retention_deduction
         net = max(net, Decimal(0))
 
+        deduction_note_str = build_deduction_note(
+            late_penalty=late_penalty,
+            retention_deduction=retention_deduction,
+            retention_percentage=getattr(user, 'salary_retention_percentage', Decimal('0')),
+            attendance_bonus=attendance_bonus,
+        )
+
         # Add approved expense reimbursements and travel odometer expenses
         reimbs, reimbursements_total = _get_reimbursements_for_user(user, payroll_run)
         odometer_readings, odometer_total = _get_odometer_expenses_for_user(user, payroll_run)
@@ -1481,6 +1507,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             attendance_bonus=attendance_bonus,
             leave_encashment=leave_encashment,
             reimbursements_amount=total_reimbursements,
+            deduction_note=deduction_note_str,
             net_salary=net,
             leaves_taken=leaves_taken,
             working_days=working_days,
@@ -1835,6 +1862,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         retention_deduction=retention_deduction,
         retention_percentage=user.salary_retention_percentage,
         sunday_deduction=sunday_deduction,
+        attendance_bonus=attendance_bonus,
     )
 
     # Add approved expense reimbursements and travel odometer expenses

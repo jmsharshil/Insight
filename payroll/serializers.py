@@ -67,6 +67,14 @@ class PaySlipSerializer(serializers.ModelSerializer):
 
     def get_reimbursement_notes(self, obj):
         notes = []
+        if hasattr(obj, 'reimbursements'):
+            for reimbursement in obj.reimbursements.all():
+                notes.append({
+                    'date': str(reimbursement.expense_date or ''),
+                    'event': reimbursement.title or 'Reimbursement',
+                    'description': reimbursement.description or '',
+                    'expense': float(reimbursement.amount),
+                })
         if hasattr(obj, 'odometer_readings'):
             for reading in obj.odometer_readings.all():
                 activity_date = reading.activity.activity_date if hasattr(reading, 'activity') and reading.activity else ''
@@ -231,8 +239,7 @@ class MyPaySlipSerializer(PaySlipSerializer):
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
-            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'net_salary', 'leaves_taken', 'working_days',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'reimbursement_notes', 'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
-

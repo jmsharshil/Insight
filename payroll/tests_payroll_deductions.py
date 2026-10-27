@@ -181,6 +181,10 @@ class FullTimeFacultyTests(PayrollBaseTest):
         ps = compute_payslip_for_faculty(self.fp, MONTH, YEAR, self.payroll_run)
         self.assertEqual(ps.absence_deductions, Decimal("0"))
         self.assertEqual(ps.late_penalty, Decimal("0"))
+        self.assertIn(
+            f"Attendance bonus: +{ps.attendance_bonus:.2f}",
+            ps.deduction_note,
+        )
 
     def test_unexcused_absence_deduction(self):
         """Attend only first 15 days → 6 absent days × 500 = 3000."""
