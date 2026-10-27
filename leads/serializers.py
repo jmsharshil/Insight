@@ -185,6 +185,7 @@ class SalesAttendanceApprovalSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.name', read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
     user_phone = serializers.CharField(source='user.phone', read_only=True)
+    cmo_approved_by_name = serializers.CharField(source='cmo_approved_by.name', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.name', read_only=True)
     rejected_by_name = serializers.CharField(source='rejected_by.name', read_only=True)
     approval_type_display = serializers.CharField(source='get_approval_type_display', read_only=True)
@@ -199,6 +200,7 @@ class SalesAttendanceApprovalSerializer(serializers.ModelSerializer):
             'approval_type', 'approval_type_display',
             'date', 'captured_at', 'latitude', 'longitude',
             'status', 'status_display',
+            'cmo_approved_by', 'cmo_approved_by_name', 'cmo_approved_at',
             'approved_by', 'approved_by_name', 'approved_at',
             'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
             'attendance_record',

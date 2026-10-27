@@ -31,8 +31,10 @@ The `reimbursements` module provides an automated expense reimbursement workflow
 | `amount` | `Decimal(12, 2)` | Expense amount claimed in INR (must be > 0.00) |
 | `proof` | `FileField` | Uploaded receipt, bill, or invoice image/PDF |
 | `expense_date` | `DateField` | Date when the expense occurred (defaults to today) |
-| `status` | `CharField(20)` | `pending` \| `approved` \| `rejected` (default: `pending`) |
-| `approved_by` | `ForeignKey(User)` | Manager/Admin who approved the claim |
+| `status` | `CharField(30)` | `pending` \| `approved_by_accountant` \| `approved` \| `rejected` (default: `pending`) |
+| `accountant_approved_by` | `ForeignKey(User)` | Accountant who approved Level 1 (if verified by accountant) |
+| `accountant_approved_at` | `DateTimeField` | Timestamp when accountant approved |
+| `approved_by` | `ForeignKey(User)` | Super Admin who approved (Level 2 or direct) |
 | `approved_at` | `DateTimeField` | Timestamp when the claim was approved |
 | `rejected_by` | `ForeignKey(User)` | Manager/Admin who rejected the claim |
 | `rejected_at` | `DateTimeField` | Timestamp when the claim was rejected |
@@ -43,31 +45,37 @@ The `reimbursements` module provides an automated expense reimbursement workflow
 | `created_at` | `DateTimeField` | Claim creation timestamp |
 | `updated_at` | `DateTimeField` | Last update timestamp |
 
-### Status State Machine
+### Status State Machine & 2-Level Approval Flow
 
 ```text
-       [ Staff Submits Claim ]
-                 │
-                 ▼
-             ┌─────────┐
-             │ pending │ ◄── [ Staff can edit/delete while pending ]
-             └────┬────┘
-                  │
-        ┌─────────┴─────────┐
-        ▼                   ▼
-  ┌──────────┐        ┌──────────┐
-  │ approved │        │ rejected │
-  └─────┬────┘        └──────────┘
-        │
-        ▼ (Included in Monthly Payroll Run)
-  ┌──────────┐
-  │ is_paid  │ (Marked upon Payroll Disbursal)
-  └──────────┘
+                     [ Staff Submits Claim ]
+                                │
+                                ▼ (Simultaneous WhatsApp to Accountant & Super Admin)
+                            ┌─────────┐
+                            │ pending │ ◄── [ Staff can edit/delete while pending ]
+                            └────┬────┘
+                                 │
+           ┌─────────────────────┼─────────────────────┐
+           │ (Accountant         │ (Super Admin        │ (Any Approver
+           │  Approves Level 1)  │  Approves Directly) │  Rejects)
+           ▼                     ▼                     ▼
+┌────────────────────────┐ ┌──────────┐          ┌──────────┐
+│ approved_by_accountant │ │ approved │          │ rejected │
+└──────────┬─────────────┘ └─────┬────┘          └──────────┘
+           │ (Super Admin        │
+           │  Approves Level 2)  │
+           └─────────────────────┘
+                                 │
+                                 ▼ (Included in Monthly Payroll Run)
+                           ┌──────────┐
+                           │ is_paid  │ (Marked upon Payroll Disbursal)
+                           └──────────┘
 ```
 
 - **`pending`**: Default state. Editable or cancellable by the applicant.
-- **`approved`**: Approved by an authorized reviewer. Cannot be edited or deleted. Locked for payroll inclusion.
-- **`rejected`**: Rejected with a required `rejection_reason`. Cannot be re-approved.
+- **`approved_by_accountant`**: Approved by Accountant (Level 1). Not yet eligible for payroll settlement. Awaits Super Admin final approval. Super Admin receives in-app & WhatsApp alert.
+- **`approved`**: Approved by Super Admin (either directly from `pending` or following Level 1 accountant verification). Locked for payroll inclusion.
+- **`rejected`**: Rejected by Accountant (from `pending`) or Super Admin (from `pending` or `approved_by_accountant`) with required `rejection_reason`.
 - **`is_paid = true`**: Set automatically upon `POST /api/v1/payroll/<run_id>/disburse/`.
 
 ---

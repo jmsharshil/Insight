@@ -20,6 +20,8 @@ from .serializers import (
 
 logger = logging.getLogger(__name__)
 
+from .utils import is_super_admin_user, is_accountant_user
+
 # Roles allowed to review (approve / reject) reimbursement claims strictly limited to super_admin and accountant
 GLOBAL_ADMIN_ROLES = {'super_admin', 'accountant'}
 
@@ -34,11 +36,8 @@ NON_STAFF_ROLES = {'student', 'parents', 'printers'}
 
 
 def _is_approver(user):
-    user_role = get_user_role(user)
-    if user_role in APPROVER_ROLES:
-        return True
-    add_roles = getattr(user, 'additional_roles', None) or []
-    return any(r in APPROVER_ROLES for r in add_roles)
+    return is_super_admin_user(user) or is_accountant_user(user)
+
 
 
 class ReimbursementListCreateAPIView(APIView):
@@ -51,7 +50,7 @@ class ReimbursementListCreateAPIView(APIView):
         is_appr = _is_approver(user)
 
         # Base queryset
-        qs = Reimbursement.objects.select_related('user', 'branch', 'approved_by', 'rejected_by', 'payroll_run')
+        qs = Reimbursement.objects.select_related('user', 'branch', 'accountant_approved_by', 'approved_by', 'rejected_by', 'payroll_run')
 
         # If not an approver or requested my claims specifically:
         my_only = request.query_params.get('my', '').lower() in ('true', '1')
@@ -70,7 +69,11 @@ class ReimbursementListCreateAPIView(APIView):
         # Filters
         status_param = request.query_params.get('status')
         if status_param:
-            qs = qs.filter(status=status_param)
+            if ',' in status_param:
+                statuses = [s.strip() for s in status_param.split(',') if s.strip()]
+                qs = qs.filter(status__in=statuses)
+            else:
+                qs = qs.filter(status=status_param)
 
         user_id = request.query_params.get('user_id')
         if user_id and is_appr and not my_only:
@@ -194,7 +197,7 @@ class ReimbursementDetailAPIView(APIView):
         user = request.user
         role = get_user_role(user)
         try:
-            reimb = Reimbursement.objects.select_related('user', 'branch', 'approved_by', 'rejected_by', 'payroll_run').get(pk=pk)
+            reimb = Reimbursement.objects.select_related('user', 'branch', 'accountant_approved_by', 'approved_by', 'rejected_by', 'payroll_run').get(pk=pk)
         except Reimbursement.DoesNotExist:
             return None
 
@@ -253,7 +256,7 @@ class ReimbursementApproveAPIView(APIView):
             return Response({'success': False, 'message': 'Permission denied. Only Super Admin and Accountant can approve reimbursement claims.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            reimb = Reimbursement.objects.select_related('user', 'branch').get(pk=pk)
+            reimb = Reimbursement.objects.select_related('user', 'branch', 'accountant_approved_by').get(pk=pk)
         except Reimbursement.DoesNotExist:
             return Response({'success': False, 'message': 'Reimbursement not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -263,47 +266,135 @@ class ReimbursementApproveAPIView(APIView):
         if reimb.status == 'approved':
             return Response({'success': False, 'message': 'Claim is already approved.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if reimb.status == 'rejected':
+            return Response({'success': False, 'message': 'Claim has already been rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+
         if reimb.is_paid:
             return Response({'success': False, 'message': 'Claim has already been paid.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        reimb.status = 'approved'
-        reimb.approved_by = request.user
-        reimb.approved_at = timezone.now()
-        reimb.rejected_by = None
-        reimb.rejected_at = None
-        reimb.rejection_reason = ''
-        reimb.save()
+        user_is_sa = is_super_admin_user(request.user)
+        user_is_acc = is_accountant_user(request.user)
 
-        # Send in-app notification to applicant
-        try:
-            send_system_notification(
-                user_id=str(reimb.user.id),
-                title='Reimbursement Approved',
-                body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved and will be added to your monthly pay.",
-                metadata={
-                    'reimbursement_id': str(reimb.id),
-                    'type': 'reimbursement_approved',
-                    'route': f"/reimbursements/{reimb.id}",
-                    'skip_whatsapp': True,
-                },
-                notification_type='payroll',
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify user for approved reimbursement {reimb.id}: {e}")
+        now = timezone.now()
+        applicant_name = getattr(reimb.user, 'name', None) or getattr(reimb.user, 'email', 'Employee')
+        reviewer_name = request.user.name or request.user.email or 'Admin'
 
-        # Send WhatsApp message to claimer
-        try:
-            from .utils import send_reimbursement_status_whatsapp_to_applicant
-            reviewer_name = request.user.name or 'Admin'
-            send_reimbursement_status_whatsapp_to_applicant(reimb, 'approved', reviewer_name=reviewer_name)
-        except Exception as e:
-            logger.error(f"Failed to send approval WhatsApp to claimer {reimb.user_id}: {e}")
+        if user_is_sa:
+            # Super Admin approves directly from 'pending' OR completes Level 2 from 'approved_by_accountant'
+            reimb.status = 'approved'
+            reimb.approved_by = request.user
+            reimb.approved_at = now
+            reimb.rejected_by = None
+            reimb.rejected_at = None
+            reimb.rejection_reason = ''
+            reimb.save()
 
-        return Response({
-            'success': True,
-            'message': f"Reimbursement '{reimb.title}' approved successfully. Amount will be added to monthly pay.",
-            'data': ReimbursementSerializer(reimb).data
-        })
+            # Send in-app notification to applicant
+            try:
+                send_system_notification(
+                    user_id=str(reimb.user.id),
+                    title='Reimbursement Approved',
+                    body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved by {reviewer_name} and will be added to your monthly pay.",
+                    metadata={
+                        'reimbursement_id': str(reimb.id),
+                        'type': 'reimbursement_approved',
+                        'status': 'approved',
+                        'route': f"/reimbursements/{reimb.id}",
+                        'skip_whatsapp': True,
+                    },
+                    notification_type='payroll',
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify user for approved reimbursement {reimb.id}: {e}")
+
+            # Send WhatsApp message to claimer
+            try:
+                from .utils import send_reimbursement_status_whatsapp_to_applicant
+                send_reimbursement_status_whatsapp_to_applicant(reimb, 'approved', reviewer_name=reviewer_name)
+            except Exception as e:
+                logger.error(f"Failed to send approval WhatsApp to claimer {reimb.user_id}: {e}")
+
+            return Response({
+                'success': True,
+                'message': f"Reimbursement '{reimb.title}' approved successfully by Super Admin. Amount will be added to monthly pay.",
+                'data': ReimbursementSerializer(reimb).data
+            })
+
+        elif user_is_acc:
+            # Accountant approving
+            if reimb.status == 'approved_by_accountant':
+                return Response({
+                    'success': False,
+                    'message': 'Claim has already been approved by Accountant and is awaiting final approval from Super Admin.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Move to 'approved_by_accountant'
+            reimb.status = 'approved_by_accountant'
+            reimb.accountant_approved_by = request.user
+            reimb.accountant_approved_at = now
+            reimb.rejected_by = None
+            reimb.rejected_at = None
+            reimb.rejection_reason = ''
+            reimb.save()
+
+            # In-app notification to applicant
+            try:
+                send_system_notification(
+                    user_id=str(reimb.user.id),
+                    title='Reimbursement Claim Verified by Accountant',
+                    body=f"Your reimbursement claim '{reimb.title}' for ₹{reimb.amount} has been approved by Accountant ({reviewer_name}) and is pending final approval from Super Admin.",
+                    metadata={
+                        'reimbursement_id': str(reimb.id),
+                        'type': 'reimbursement_accountant_approved',
+                        'status': 'approved_by_accountant',
+                        'route': f"/reimbursements/{reimb.id}",
+                        'skip_whatsapp': True,
+                    },
+                    notification_type='payroll',
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify applicant of accountant approval {reimb.id}: {e}")
+
+            # Notify Super Admins
+            try:
+                from django.contrib.auth import get_user_model
+                from core.utils import get_role_filter_q
+                from .utils import send_reimbursement_whatsapp_notification, get_reimbursement_proof_url
+                User = get_user_model()
+                super_admins = list(User.objects.filter(get_role_filter_q(['super_admin']), is_active=True).distinct())
+                for sa in super_admins:
+                    if sa.id == reimb.user_id:
+                        continue
+                    send_system_notification(
+                        user_id=str(sa.id),
+                        title='Reimbursement Pending Final Approval',
+                        body=f"Reimbursement claim '{reimb.title}' for ₹{reimb.amount} ({applicant_name}) was approved by Accountant ({reviewer_name}) and requires your final approval.",
+                        metadata={
+                            'reimbursement_id': str(reimb.id),
+                            'type': 'reimbursement_claim',
+                            'status': 'approved_by_accountant',
+                            'route': f"/reimbursements/{reimb.id}",
+                            'proof_url': get_reimbursement_proof_url(reimb),
+                            'skip_whatsapp': True,
+                        },
+                        notification_type='payroll',
+                    )
+                    try:
+                        send_reimbursement_whatsapp_notification(
+                            reimb,
+                            sa,
+                            note_prefix=f"[Verified by Accountant: {reviewer_name}]"
+                        )
+                    except Exception as wa_err:
+                        logger.error(f"Failed to send WhatsApp to super admin {sa.id}: {wa_err}")
+            except Exception as e:
+                logger.error(f"Failed to notify super admins of accountant approval {reimb.id}: {e}")
+
+            return Response({
+                'success': True,
+                'message': f"Reimbursement '{reimb.title}' approved by Accountant. Pending final approval from Super Admin.",
+                'data': ReimbursementSerializer(reimb).data
+            })
 
 
 class ReimbursementRejectAPIView(APIView):
@@ -321,8 +412,23 @@ class ReimbursementRejectAPIView(APIView):
         if reimb.user == request.user:
             return Response({'success': False, 'message': 'You cannot reject your own reimbursement claim.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if reimb.status == 'approved':
+            return Response({'success': False, 'message': 'Cannot reject a claim that has already been approved.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reimb.status == 'rejected':
+            return Response({'success': False, 'message': 'Claim has already been rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+
         if reimb.is_paid:
             return Response({'success': False, 'message': 'Cannot reject a claim that has already been paid.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user_is_sa = is_super_admin_user(request.user)
+
+        # If already approved by accountant, only Super Admin can reject
+        if reimb.status == 'approved_by_accountant' and not user_is_sa:
+            return Response({
+                'success': False,
+                'message': 'Claim has already been approved by Accountant and is awaiting Super Admin final approval. Only Super Admin can reject it.'
+            }, status=status.HTTP_403_FORBIDDEN)
 
         serializer = ReimbursementRejectSerializer(data=request.data)
         if not serializer.is_valid():
@@ -345,6 +451,7 @@ class ReimbursementRejectAPIView(APIView):
                 metadata={
                     'reimbursement_id': str(reimb.id),
                     'type': 'reimbursement_rejected',
+                    'status': 'rejected',
                     'route': f"/reimbursements/{reimb.id}",
                     'skip_whatsapp': True,
                 },
@@ -395,6 +502,7 @@ class ReimbursementSummaryAPIView(APIView):
             qs = qs.filter(branch_id=branch_id)
 
         pending_qs = qs.filter(status='pending')
+        approved_by_accountant_qs = qs.filter(status='approved_by_accountant')
         approved_qs = qs.filter(status='approved')
         rejected_qs = qs.filter(status='rejected')
         paid_qs = qs.filter(is_paid=True)
@@ -406,6 +514,8 @@ class ReimbursementSummaryAPIView(APIView):
                 'total_amount': qs.aggregate(total=Sum('amount'))['total'] or Decimal('0'),
                 'pending_count': pending_qs.count(),
                 'pending_amount': pending_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0'),
+                'approved_by_accountant_count': approved_by_accountant_qs.count(),
+                'approved_by_accountant_amount': approved_by_accountant_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0'),
                 'approved_count': approved_qs.count(),
                 'approved_amount': approved_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0'),
                 'rejected_count': rejected_qs.count(),

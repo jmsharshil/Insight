@@ -17,6 +17,7 @@ FORM_TYPE_CHOICES = [
 COURSE_TYPE_CHOICES = [
     ('cseet', 'CSEET'),
     ('cs_executive', 'CS Executive'),
+    
     ('cs_professional', 'CS Professional'),
 ]
 
@@ -686,6 +687,7 @@ class SalesPlanReminder(models.Model):
 
 SALES_ATTENDANCE_APPROVAL_STATUS = [
     ('pending', 'Pending Approval'),
+    ('cmo_approved', 'CMO Approved (Pending Super Admin)'),
     ('approved', 'Approved'),
     ('rejected', 'Rejected'),
 ]
@@ -699,8 +701,9 @@ SALES_ATTENDANCE_APPROVAL_TYPE = [
 class SalesAttendanceApproval(models.Model):
     """
     Tracks check-in (start_selfie) and check-out (end_selfie) approval requests
-    for sales persons. Requires approval from CMO or Super Admin.
-    If either CMO or Super Admin approves, the EmployeeAttendanceRecord entry is created/finalized.
+    for sales persons. Requires 2-level approval:
+    - If CMO approves first, status moves to 'cmo_approved' (requires Super Admin final approval).
+    - If Super Admin approves, it is directly / fully approved.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -735,6 +738,15 @@ class SalesAttendanceApproval(models.Model):
         choices=SALES_ATTENDANCE_APPROVAL_STATUS,
         default='pending'
     )
+    cmo_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cmo_approved_sales_attendances',
+        help_text="CMO who granted initial approval"
+    )
+    cmo_approved_at = models.DateTimeField(null=True, blank=True)
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

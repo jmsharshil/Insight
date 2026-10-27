@@ -190,11 +190,38 @@ def get_sales_attendance_approvers(sales_user):
     return approvers
 
 
-def send_sales_attendance_whatsapp_notification(approval, approver):
+def get_sales_attendance_super_admins(sales_user):
+    """
+    Returns users who are Super Admin in the user's organization.
+    """
+    from django.contrib.auth import get_user_model
+    from django.db.models import Q
+    User = get_user_model()
+    org = getattr(sales_user, 'organization', None)
+
+    qs = User.objects.filter(is_active=True)
+    if org:
+        qs = qs.filter(Q(organization=org) | Q(organization__isnull=True))
+
+    super_admins = []
+    seen_ids = set()
+    for u in qs:
+        if u.id == sales_user.id or u.id in seen_ids:
+            continue
+        roles = [u.role] + (getattr(u, 'additional_roles', None) or [])
+        if 'super_admin' in roles or getattr(u, 'is_superuser', False):
+            super_admins.append(u)
+            seen_ids.add(u.id)
+
+    return super_admins
+
+
+def send_sales_attendance_whatsapp_notification(approval, approver, is_step2=False):
     """
     Sends WhatsApp notification with template quick-reply buttons (Approve / Reject)
     to CMO or Super Admin for a sales person's start_selfie or end_selfie attendance.
     Includes the uploaded selfie photo link for approver verification.
+    If is_step2=True, informs Super Admin that CMO has already verified the request.
     """
     if not approver or not getattr(approver, 'phone', None):
         return
@@ -244,15 +271,29 @@ def send_sales_attendance_whatsapp_notification(approval, approver):
 
     photo_display = photo_url or "No photo uploaded"
 
-    notif_body = (
-        f"Sales Attendance Approval Request:\n"
-        f"Salesperson: {applicant_name}\n"
-        f"Request: {approval_type_display}\n"
-        f"Date & Time: {date_str} {time_str}\n"
-        f"Location: {loc_str}\n"
-        f"Selfie Photo: {photo_display}\n\n"
-        f"Reply 'sales_att_approve:{approval.id}' to Approve or 'sales_att_reject:{approval.id}' to Reject."
-    )
+    if is_step2:
+        cmo_name = getattr(approval.cmo_approved_by, 'name', None) or 'CMO'
+        req_type_text = f"Sales {approval_type_display} (CMO Approved)"
+        notif_body = (
+            f"Sales Attendance Final Approval Request:\n"
+            f"Salesperson: {applicant_name}\n"
+            f"Request: {approval_type_display} (Verified by CMO {cmo_name})\n"
+            f"Date & Time: {date_str} {time_str}\n"
+            f"Location: {loc_str}\n"
+            f"Selfie Photo: {photo_display}\n\n"
+            f"Reply 'sales_att_approve:{approval.id}' to Approve or 'sales_att_reject:{approval.id}' to Reject."
+        )
+    else:
+        req_type_text = f"Sales {approval_type_display}"
+        notif_body = (
+            f"Sales Attendance Approval Request:\n"
+            f"Salesperson: {applicant_name}\n"
+            f"Request: {approval_type_display}\n"
+            f"Date & Time: {date_str} {time_str}\n"
+            f"Location: {loc_str}\n"
+            f"Selfie Photo: {photo_display}\n\n"
+            f"Reply 'sales_att_approve:{approval.id}' to Approve or 'sales_att_reject:{approval.id}' to Reject."
+        )
 
     template_name = getattr(
         settings,
@@ -278,7 +319,7 @@ def send_sales_attendance_whatsapp_notification(approval, approver):
             "type": "body",
             "parameters": [
                 {"type": "text", "text": str(applicant_name)},
-                {"type": "text", "text": f"Sales {approval_type_display}"},
+                {"type": "text", "text": str(req_type_text)},
                 {"type": "text", "text": str(date_str)},
                 {"type": "text", "text": str(time_str)},
                 {"type": "text", "text": str(loc_str)},
@@ -341,10 +382,52 @@ def send_sales_attendance_approval_requests(approval):
             logger.error("[SALES ATT] In-app notification to %s failed: %s", approver.id, e)
 
 
+def send_sales_attendance_cmo_approved_to_super_admins(approval):
+    """
+    Called when CMO approves at Step 1.
+    Sends WhatsApp and in-app system notifications to Super Admin(s)
+    alerting them that CMO has verified/approved and final approval is required.
+    """
+    from chat.notifications import send_system_notification
+    super_admins = get_sales_attendance_super_admins(approval.user)
+    if not super_admins:
+        logger.warning("[SALES ATT] No Super Admin found for user %s to receive final approval", approval.user.id)
+        return
+
+    applicant_name = getattr(approval.user, 'name', 'Sales Employee')
+    approval_type_display = approval.get_approval_type_display()
+    cmo_name = getattr(approval.cmo_approved_by, 'name', 'CMO')
+
+    for sa in super_admins:
+        # WhatsApp notification with is_step2=True
+        send_sales_attendance_whatsapp_notification(approval, sa, is_step2=True)
+
+        # In-app notification
+        try:
+            send_system_notification(
+                user_id=str(sa.id),
+                title=f"Final Approval Needed: Sales Attendance for {applicant_name}",
+                body=f"CMO {cmo_name} has approved {approval_type_display} for {applicant_name} on {approval.date}. Your final approval is required to finalize attendance.",
+                metadata={
+                    "approval_id": str(approval.id),
+                    "type": "sales_attendance_approval",
+                    "step": "super_admin_final"
+                }
+            )
+        except Exception as e:
+            logger.error("[SALES ATT] In-app notification to Super Admin %s failed: %s", sa.id, e)
+
+
 def apply_sales_attendance_approval(approval, approver):
     """
-    Finalizes approval by CMO or Super Admin.
-    Creates or updates the EmployeeAttendanceRecord and sends confirmation to both approver & salesperson.
+    Applies approval for sales attendance:
+    - If approver is CMO (and not Super Admin):
+      - If status == 'pending': Moves status to 'cmo_approved', records cmo_approved_by & cmo_approved_at,
+        and alerts Super Admin that final approval is needed. Attendance record is NOT created yet.
+      - If status == 'cmo_approved': Returns already approved by CMO.
+    - If approver is Super Admin:
+      - Can approve from 'pending' (direct approve) or from 'cmo_approved' (final approve).
+      - Marks status as 'approved', creates/updates EmployeeAttendanceRecord, and notifies salesperson.
     """
     from django.utils import timezone
     from attendance.models import EmployeeAttendanceRecord
@@ -352,10 +435,49 @@ def apply_sales_attendance_approval(approval, approver):
     from branch.models import Branch
     from chat.notifications import send_whatsapp_text, send_system_notification
 
-    if approval.status != 'pending':
-        return False, f"This request has already been {approval.get_status_display().lower()}."
+    if approval.status == 'approved':
+        return False, "This request has already been approved."
+    if approval.status == 'rejected':
+        return False, "This request has already been rejected."
+
+    roles = [approver.role] + (getattr(approver, 'additional_roles', None) or [])
+    user_is_sa = 'super_admin' in roles or getattr(approver, 'is_superuser', False)
+    user_is_cmo = 'cmo' in roles
+
+    if not user_is_sa and not user_is_cmo:
+        return False, "Permission denied: Only CMO or Super Admin can approve sales attendance."
 
     now = timezone.now()
+    applicant_name = getattr(approval.user, 'name', 'Employee')
+    approval_type_disp = approval.get_approval_type_display()
+
+    # ── CASE 1: CMO Approval (Step 1) ──────────────────────────────────────────
+    if user_is_cmo and not user_is_sa:
+        if approval.status == 'cmo_approved':
+            return False, "This request has already been approved by CMO and is awaiting final Super Admin approval."
+
+        approval.status = 'cmo_approved'
+        approval.cmo_approved_by = approver
+        approval.cmo_approved_at = now
+        approval.save(update_fields=['status', 'cmo_approved_by', 'cmo_approved_at', 'updated_at'])
+
+        # Notify Super Admins for final approval
+        send_sales_attendance_cmo_approved_to_super_admins(approval)
+
+        # Notify applicant that CMO has verified
+        try:
+            send_system_notification(
+                user_id=str(approval.user.id),
+                title=f"Attendance {approval_type_disp} Verified by CMO",
+                body=f"Your sales {approval_type_disp.lower()} on {approval.date} has been verified by CMO {approver.name} and forwarded to Super Admin for final approval.",
+                metadata={"approval_id": str(approval.id), "status": "cmo_approved"}
+            )
+        except Exception as e:
+            logger.error("[SALES ATT] In-app notification to applicant failed: %s", e)
+
+        return True, "First approval completed by CMO. Awaiting Super Admin final approval."
+
+    # ── CASE 2: Super Admin Direct / Final Approval ────────────────────────────
     approval.status = 'approved'
     approval.approved_by = approver
     approval.approved_at = now
@@ -457,14 +579,12 @@ def apply_sales_attendance_approval(approval, approver):
                 approval.attendance_record = rec
                 approval.save()
 
-    # Notify applicant
-    applicant_name = getattr(approval.user, 'name', 'Employee')
-    approval_type_disp = approval.get_approval_type_display()
+    # Notify applicant of final approval
     if getattr(approval.user, 'phone', None):
         try:
             send_whatsapp_text(
                 to=approval.user.phone,
-                body=f"Hello {applicant_name}, your sales {approval_type_disp.lower()} on {approval.date} has been APPROVED by {approver.name}. Your attendance entry has arrived."
+                body=f"Hello {applicant_name}, your sales {approval_type_disp.lower()} on {approval.date} has been APPROVED by Super Admin {approver.name}. Your attendance entry has arrived."
             )
         except Exception as e:
             logger.error("[SALES ATT] WhatsApp to applicant %s failed: %s", approval.user.id, e)
@@ -473,11 +593,23 @@ def apply_sales_attendance_approval(approval, approver):
         send_system_notification(
             user_id=str(approval.user.id),
             title=f"Attendance {approval_type_disp} Approved",
-            body=f"Your sales {approval_type_disp.lower()} on {approval.date} has been approved by {approver.name}.",
+            body=f"Your sales {approval_type_disp.lower()} on {approval.date} has been approved by Super Admin {approver.name}.",
             metadata={"approval_id": str(approval.id), "status": "approved"}
         )
     except Exception as e:
         logger.error("[SALES ATT] In-app notification to applicant failed: %s", e)
+
+    # If CMO had verified earlier, notify CMO that Super Admin completed final approval
+    if approval.cmo_approved_by_id and approval.cmo_approved_by_id != approver.id:
+        try:
+            send_system_notification(
+                user_id=str(approval.cmo_approved_by_id),
+                title=f"Sales Attendance Approved by Super Admin: {applicant_name}",
+                body=f"Super Admin {approver.name} has finalized approval for {applicant_name}'s {approval_type_disp.lower()} on {approval.date}.",
+                metadata={"approval_id": str(approval.id), "status": "approved"}
+            )
+        except Exception as e:
+            logger.error("[SALES ATT] Notification to CMO failed: %s", e)
 
     return True, f"Sales {approval.get_approval_type_display().lower()} approved successfully."
 
@@ -489,7 +621,7 @@ def apply_sales_attendance_rejection(approval, approver, reason=""):
     from django.utils import timezone
     from chat.notifications import send_whatsapp_text, send_system_notification
 
-    if approval.status != 'pending':
+    if approval.status in ('approved', 'rejected'):
         return False, f"This request has already been {approval.get_status_display().lower()}."
 
     now = timezone.now()
@@ -610,7 +742,7 @@ def handle_sales_attendance_whatsapp_approval(sender_wa_id, payload_str, text_st
     applicant_name = getattr(approval.user, 'name', 'Sales Employee')
     approval_type_disp = approval.get_approval_type_display()
 
-    if approval.status != 'pending':
+    if approval.status in ('approved', 'rejected'):
         status_disp = approval.get_status_display()
         send_whatsapp_text(
             to=sender_wa_id,
@@ -667,13 +799,30 @@ def handle_sales_attendance_whatsapp_approval(sender_wa_id, payload_str, text_st
         )
         return True
 
+    roles = [approver.role] + (getattr(approver, 'additional_roles', None) or [])
+    user_is_sa = 'super_admin' in roles or getattr(approver, 'is_superuser', False)
+    user_is_cmo = 'cmo' in roles
+
+    if approval.status == 'cmo_approved' and user_is_cmo and not user_is_sa:
+        send_whatsapp_text(
+            to=sender_wa_id,
+            body=f"This {approval_type_disp.lower()} request for {applicant_name} has already been approved by CMO and is awaiting final Super Admin approval."
+        )
+        return True
+
     if action == 'approve':
         success, msg = apply_sales_attendance_approval(approval, approver)
         if success:
-            send_whatsapp_text(
-                to=sender_wa_id,
-                body=f"✅ You have APPROVED sales {approval_type_disp.lower()} for {applicant_name} ({approval.date}). Entry has arrived in attendance."
-            )
+            if approval.status == 'cmo_approved':
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body=f"✅ You have approved sales {approval_type_disp.lower()} for {applicant_name} (CMO Step 1). Request has been forwarded to Super Admin for final approval."
+                )
+            else:
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body=f"✅ You have APPROVED sales {approval_type_disp.lower()} for {applicant_name} ({approval.date}). Entry has arrived in attendance."
+                )
         else:
             send_whatsapp_text(to=sender_wa_id, body=msg)
         return True

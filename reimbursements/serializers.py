@@ -45,6 +45,7 @@ class ReimbursementSerializer(serializers.ModelSerializer):
     user_email = serializers.CharField(source='user.email', read_only=True)
     user_role = serializers.CharField(source='user.role', read_only=True)
     branch_name = serializers.CharField(source='branch.name', default=None, read_only=True)
+    accountant_approved_by_name = serializers.CharField(source='accountant_approved_by.name', default=None, read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.name', default=None, read_only=True)
     rejected_by_name = serializers.CharField(source='rejected_by.name', default=None, read_only=True)
     payroll_month = serializers.IntegerField(source='payroll_run.month', default=None, read_only=True)
@@ -56,6 +57,7 @@ class ReimbursementSerializer(serializers.ModelSerializer):
             'id', 'user', 'user_name', 'user_email', 'user_role',
             'branch', 'branch_name', 'title', 'description', 'amount',
             'proof', 'expense_date', 'status',
+            'accountant_approved_by', 'accountant_approved_by_name', 'accountant_approved_at',
             'approved_by', 'approved_by_name', 'approved_at',
             'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
             'payroll_run', 'payroll_month', 'payroll_year', 'payslip', 'is_paid',

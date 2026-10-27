@@ -6,6 +6,7 @@ from django.utils import timezone
 
 REIMBURSEMENT_STATUS_CHOICES = [
     ('pending', 'Pending'),
+    ('approved_by_accountant', 'Approved by Accountant'),
     ('approved', 'Approved'),
     ('rejected', 'Rejected'),
 ]
@@ -47,12 +48,23 @@ class Reimbursement(models.Model):
         help_text="Date when the expense occurred"
     )
     status = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=REIMBURSEMENT_STATUS_CHOICES,
         default='pending'
     )
 
-    # Approver details
+    # Accountant review details (Level 1)
+    accountant_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='accountant_approved_reimbursements',
+        help_text="Accountant who approved the claim at Level 1"
+    )
+    accountant_approved_at = models.DateTimeField(null=True, blank=True)
+
+    # Final Approver details (Super Admin / Level 2 or Direct)
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

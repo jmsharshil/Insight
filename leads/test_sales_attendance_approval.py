@@ -137,17 +137,28 @@ class SalesAttendanceApprovalTests(TestCase):
         # Before approval: no EmployeeAttendanceRecord exists
         self.assertFalse(EmployeeAttendanceRecord.objects.filter(user=self.sales_user, date=self.today).exists())
 
-        # CMO approves
-        with patch("chat.notifications.send_whatsapp_text"), patch("chat.notifications.send_system_notification"):
+        # Step 1: CMO approves -> moves to cmo_approved, no attendance record created yet
+        with patch("chat.notifications.send_whatsapp_with_fallback"), patch("chat.notifications.send_system_notification"):
             success, msg = apply_sales_attendance_approval(approval, self.cmo_user)
 
         self.assertTrue(success)
+        self.assertIn("CMO", msg)
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, "cmo_approved")
+        self.assertEqual(approval.cmo_approved_by, self.cmo_user)
+        self.assertFalse(EmployeeAttendanceRecord.objects.filter(user=self.sales_user, date=self.today).exists())
+
+        # Step 2: Super Admin approves -> finalized to approved and attendance record created
+        with patch("chat.notifications.send_whatsapp_text"), patch("chat.notifications.send_system_notification"):
+            success_sa, msg_sa = apply_sales_attendance_approval(approval, self.sa_user)
+
+        self.assertTrue(success_sa)
         approval.refresh_from_db()
         self.assertEqual(approval.status, "approved")
-        self.assertEqual(approval.approved_by, self.cmo_user)
+        self.assertEqual(approval.approved_by, self.sa_user)
         self.assertIsNotNone(approval.attendance_record)
 
-        # After approval: entry has arrived!
+        # After final approval: entry has arrived!
         record = EmployeeAttendanceRecord.objects.get(user=self.sales_user, date=self.today)
         self.assertEqual(record.status, "checkout_pending")
         self.assertEqual(record.check_in_method, "selfie")
@@ -257,24 +268,36 @@ class SalesAttendanceApprovalTests(TestCase):
             status="pending",
         )
 
-        # CMO clicks "Approve" via WhatsApp
-        handled = handle_sales_attendance_whatsapp_approval(
-            sender_wa_id="919876543211",
-            payload_str=f"sales_att_approve:{approval.id}",
-            text_str="Approve"
-        )
+        # 1. CMO clicks "Approve" via WhatsApp -> moves to cmo_approved
+        with patch("chat.notifications.send_whatsapp_with_fallback"):
+            handled = handle_sales_attendance_whatsapp_approval(
+                sender_wa_id="919876543211",
+                payload_str=f"sales_att_approve:{approval.id}",
+                text_str="Approve"
+            )
         self.assertTrue(handled)
         approval.refresh_from_db()
-        self.assertEqual(approval.status, "approved")
-        self.assertEqual(approval.approved_by, self.cmo_user)
+        self.assertEqual(approval.status, "cmo_approved")
+        self.assertEqual(approval.cmo_approved_by, self.cmo_user)
 
-        # Second approval by Super Admin is gracefully handled (already approved)
+        # 2. Super Admin clicks "Approve" via WhatsApp -> moves to approved
         handled_second = handle_sales_attendance_whatsapp_approval(
             sender_wa_id="919876543212",
             payload_str=f"sales_att_approve:{approval.id}",
             text_str="Approve"
         )
         self.assertTrue(handled_second)
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, "approved")
+        self.assertEqual(approval.approved_by, self.sa_user)
+
+        # 3. Third attempt after approved is gracefully handled (already approved)
+        handled_third = handle_sales_attendance_whatsapp_approval(
+            sender_wa_id="919876543212",
+            payload_str=f"sales_att_approve:{approval.id}",
+            text_str="Approve"
+        )
+        self.assertTrue(handled_third)
 
 
 class SalesAttendanceApprovalAPITests(TestCase):
@@ -304,6 +327,17 @@ class SalesAttendanceApprovalAPITests(TestCase):
             role="cmo",
             phone="919876543221",
             name="Alice CMO API",
+            organization=self.org,
+            is_active=True,
+        )
+
+        self.sa_user = User.objects.create_user(
+            username="sa_api",
+            email="saapi@example.com",
+            password="password123",
+            role="super_admin",
+            phone="919876543222",
+            name="Bob SuperAdmin API",
             organization=self.org,
             is_active=True,
         )
@@ -344,8 +378,21 @@ class SalesAttendanceApprovalAPITests(TestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["id"], str(self.approval.id))
 
-    def test_approve_via_api(self):
+    def test_approve_via_api_2_tier(self):
+        # Step 1: CMO approves -> cmo_approved
         self.client.force_authenticate(user=self.cmo_user)
+        with patch("chat.notifications.send_whatsapp_with_fallback"), patch("chat.notifications.send_system_notification"):
+            response = self.client.post(f"/api/v1/sales/attendance-approvals/{self.approval.id}/approve/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["success"])
+
+        self.approval.refresh_from_db()
+        self.assertEqual(self.approval.status, "cmo_approved")
+        self.assertEqual(self.approval.cmo_approved_by, self.cmo_user)
+        self.assertFalse(EmployeeAttendanceRecord.objects.filter(user=self.sales_user, date=self.today).exists())
+
+        # Step 2: Super Admin approves -> approved
+        self.client.force_authenticate(user=self.sa_user)
         with patch("chat.notifications.send_whatsapp_text"), patch("chat.notifications.send_system_notification"):
             response = self.client.post(f"/api/v1/sales/attendance-approvals/{self.approval.id}/approve/")
         self.assertEqual(response.status_code, 200)
@@ -353,7 +400,20 @@ class SalesAttendanceApprovalAPITests(TestCase):
 
         self.approval.refresh_from_db()
         self.assertEqual(self.approval.status, "approved")
-        self.assertEqual(self.approval.approved_by, self.cmo_user)
+        self.assertEqual(self.approval.approved_by, self.sa_user)
+        self.assertTrue(EmployeeAttendanceRecord.objects.filter(user=self.sales_user, date=self.today).exists())
+
+    def test_direct_approve_by_super_admin_via_api(self):
+        # Super Admin direct approval from pending
+        self.client.force_authenticate(user=self.sa_user)
+        with patch("chat.notifications.send_whatsapp_text"), patch("chat.notifications.send_system_notification"):
+            response = self.client.post(f"/api/v1/sales/attendance-approvals/{self.approval.id}/approve/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["success"])
+
+        self.approval.refresh_from_db()
+        self.assertEqual(self.approval.status, "approved")
+        self.assertEqual(self.approval.approved_by, self.sa_user)
         self.assertTrue(EmployeeAttendanceRecord.objects.filter(user=self.sales_user, date=self.today).exists())
 
     def test_reject_via_api(self):
