@@ -1940,7 +1940,10 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
         
         from attendance.utils import (
             determine_employee_day_status, LEAVE_STATUS_CHOICES,
-            OFF_DAY_STATUS_CHOICES, NON_WORKING_STATUS_CHOICES
+            OFF_DAY_STATUS_CHOICES, NON_WORKING_STATUS_CHOICES,
+            build_attendance_location_details,
+            resolve_attendance_checkin_location,
+            resolve_attendance_checkout_location,
         )
 
         from_date = request.GET.get('from_date') or request.GET.get('date_from') or request.GET.get('start_date')
@@ -2022,62 +2025,9 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'slot_code': r.timetable_slot.slot_code,
                 }
 
-            checkin_lat = r.latitude
-            checkin_lng = r.longitude
-            checkin_loc_verified = r.location_verified
-
-            checkout_lat = getattr(r, 'checkout_latitude', None)
-            checkout_lng = getattr(r, 'checkout_longitude', None)
-            checkout_loc_verified = getattr(r, 'checkout_location_verified', False)
-
-            # Fallback to FacultyQRScanLog if coordinates are missing on EmployeeAttendanceRecord
-            if (checkout_lat is None and r.checked_out_at) or (checkin_lat is None and r.checked_in_at):
-                try:
-                    from faculty.models import FacultyQRScanLog
-                    if checkout_lat is None and r.checked_out_at:
-                        f_out = FacultyQRScanLog.objects.filter(
-                            faculty__user_id=r.user_id,
-                            scan_type='check_out',
-                            scanned_at__date=r.date,
-                            latitude__isnull=False,
-                            longitude__isnull=False
-                        ).order_by('-scanned_at').first()
-                        if f_out:
-                            checkout_lat = f_out.latitude
-                            checkout_lng = f_out.longitude
-                            checkout_loc_verified = True
-                    if checkin_lat is None and r.checked_in_at:
-                        f_in = FacultyQRScanLog.objects.filter(
-                            faculty__user_id=r.user_id,
-                            scan_type='check_in',
-                            scanned_at__date=r.date,
-                            latitude__isnull=False,
-                            longitude__isnull=False
-                        ).order_by('scanned_at').first()
-                        if f_in:
-                            checkin_lat = f_in.latitude
-                            checkin_lng = f_in.longitude
-                            checkin_loc_verified = True
-                except Exception:
-                    pass
-
-            has_in = checkin_lat is not None and checkin_lng is not None
-            has_out = checkout_lat is not None and checkout_lng is not None
-
-            location_details = None
-            if has_in or has_out:
-                location_details = {
-                    'check_in': {
-                        'latitude': float(checkin_lat),
-                        'longitude': float(checkin_lng),
-                        'location_verified': checkin_loc_verified
-                    } if has_in else None,
-                    'check_out': {
-                        'latitude': float(checkout_lat),
-                        'longitude': float(checkout_lng),
-                        'location_verified': checkout_loc_verified
-                    } if has_out else None,
-                }
+            location_details = build_attendance_location_details(r)
+            checkin_lat, checkin_lng, checkin_loc_verified = resolve_attendance_checkin_location(r)
+            checkout_lat, checkout_lng, checkout_loc_verified = resolve_attendance_checkout_location(r)
 
             leave_type = None
             if r.status in ['sick_leave', 'sick']:

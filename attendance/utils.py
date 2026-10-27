@@ -1051,3 +1051,214 @@ def sync_stale_absent_records_for_user(user, target_date=None, date_from=None, d
 
     return updated_count
 
+
+def resolve_attendance_checkin_location(record):
+    """
+    Resolves check-in latitude, longitude, and location_verified for an EmployeeAttendanceRecord.
+    1. Returns stored latitude / longitude if present.
+    2. If checked_in_at is present but latitude is None:
+       - Checks FacultyQRScanLog
+       - Checks SalesAttendanceApproval
+       - Checks SalesActivityPhoto (start_selfie)
+       - Falls back to branch coordinates
+    Returns (checkin_lat, checkin_lng, checkin_loc_verified) or (None, None, False).
+    """
+    checkin_lat = getattr(record, 'latitude', None)
+    checkin_lng = getattr(record, 'longitude', None)
+    checkin_loc_verified = getattr(record, 'location_verified', False)
+
+    if checkin_lat is not None and checkin_lng is not None:
+        return checkin_lat, checkin_lng, checkin_loc_verified
+
+    if not record.checked_in_at:
+        return None, None, False
+
+    try:
+        from faculty.models import FacultyQRScanLog
+        f_in = FacultyQRScanLog.objects.filter(
+            faculty__user_id=record.user_id,
+            scan_type='check_in',
+            scanned_at__date=record.date,
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).order_by('scanned_at').first()
+        if f_in:
+            return f_in.latitude, f_in.longitude, True
+    except Exception:
+        pass
+
+    try:
+        from leads.models import SalesAttendanceApproval
+        appr = SalesAttendanceApproval.objects.filter(
+            user_id=record.user_id,
+            date=record.date,
+            approval_type='check_in',
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).order_by('captured_at').first()
+        if appr:
+            return appr.latitude, appr.longitude, False
+    except Exception:
+        pass
+
+    try:
+        from leads.models import SalesActivityPhoto
+        photo = SalesActivityPhoto.objects.filter(
+            activity__user_id=record.user_id,
+            captured_at__date=record.date,
+            photo_type='start_selfie',
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).order_by('captured_at').first()
+        if photo:
+            return photo.latitude, photo.longitude, False
+    except Exception:
+        pass
+
+    # Branch fallback
+    branch_obj = getattr(record, 'branch', None)
+    if not branch_obj and getattr(record, 'branch_id', None):
+        try:
+            from branch.models import Branch
+            branch_obj = Branch.objects.filter(id=record.branch_id).first()
+        except Exception:
+            pass
+    if not branch_obj and getattr(record, 'user', None):
+        try:
+            from attendance.views import get_user_branch_id
+            from branch.models import Branch
+            ubid = get_user_branch_id(record.user)
+            if ubid:
+                branch_obj = Branch.objects.filter(id=ubid).first()
+        except Exception:
+            pass
+    if branch_obj and branch_obj.latitude is not None and branch_obj.longitude is not None:
+        return branch_obj.latitude, branch_obj.longitude, True
+
+    return None, None, False
+
+
+def resolve_attendance_checkout_location(record):
+    """
+    Resolves checkout latitude, longitude, and location_verified for an EmployeeAttendanceRecord.
+    1. Returns stored checkout_latitude / checkout_longitude if present.
+    2. If checked_out_at is present but checkout_latitude is None (e.g. historical records):
+       - Checks FacultyQRScanLog (scan_type='check_out')
+       - Checks SalesAttendanceApproval (approval_type='check_out')
+       - Checks SalesActivityPhoto (photo_type='end_selfie')
+       - Falls back to resolved check-in coordinates (same premise / branch check-in)
+       - Falls back to branch coordinates
+    Returns (checkout_lat, checkout_lng, checkout_loc_verified) or (None, None, False).
+    """
+    checkout_lat = getattr(record, 'checkout_latitude', None)
+    checkout_lng = getattr(record, 'checkout_longitude', None)
+    checkout_loc_verified = getattr(record, 'checkout_location_verified', False)
+
+    if checkout_lat is not None and checkout_lng is not None:
+        return checkout_lat, checkout_lng, checkout_loc_verified
+
+    # Only resolve checkout location if check-out actually occurred
+    if not record.checked_out_at:
+        return None, None, False
+
+    # 1. FacultyQRScanLog
+    try:
+        from faculty.models import FacultyQRScanLog
+        f_out = FacultyQRScanLog.objects.filter(
+            Q(faculty__user_id=record.user_id) | Q(faculty__user=getattr(record, 'user', None)),
+            scan_type='check_out',
+            scanned_at__date=record.date,
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).order_by('-scanned_at').first()
+        if f_out:
+            return f_out.latitude, f_out.longitude, True
+    except Exception:
+        pass
+
+    # 2. SalesAttendanceApproval
+    try:
+        from leads.models import SalesAttendanceApproval
+        appr = SalesAttendanceApproval.objects.filter(
+            user_id=record.user_id,
+            date=record.date,
+            approval_type='check_out',
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).order_by('-captured_at').first()
+        if appr:
+            return appr.latitude, appr.longitude, False
+    except Exception:
+        pass
+
+    # 3. SalesActivityPhoto
+    try:
+        from leads.models import SalesActivityPhoto
+        photo = SalesActivityPhoto.objects.filter(
+            activity__user_id=record.user_id,
+            captured_at__date=record.date,
+            photo_type='end_selfie',
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).order_by('-captured_at').first()
+        if photo:
+            return photo.latitude, photo.longitude, False
+    except Exception:
+        pass
+
+    # 4. Fallback to resolved check-in coordinates (same premise / branch check-in)
+    checkin_lat, checkin_lng, checkin_loc_verified = resolve_attendance_checkin_location(record)
+    if checkin_lat is not None and checkin_lng is not None:
+        return checkin_lat, checkin_lng, checkin_loc_verified
+
+    # 5. Fallback to branch coordinates
+    branch_obj = getattr(record, 'branch', None)
+    if not branch_obj and getattr(record, 'branch_id', None):
+        try:
+            from branch.models import Branch
+            branch_obj = Branch.objects.filter(id=record.branch_id).first()
+        except Exception:
+            pass
+    if not branch_obj and getattr(record, 'user', None):
+        try:
+            from attendance.views import get_user_branch_id
+            from branch.models import Branch
+            ubid = get_user_branch_id(record.user)
+            if ubid:
+                branch_obj = Branch.objects.filter(id=ubid).first()
+        except Exception:
+            pass
+    if branch_obj and branch_obj.latitude is not None and branch_obj.longitude is not None:
+        return branch_obj.latitude, branch_obj.longitude, True
+
+    return None, None, False
+
+
+def build_attendance_location_details(record):
+    """
+    Constructs the clean 'location_details' dictionary with 'check_in' and 'check_out' objects.
+    Returns None if neither check_in nor check_out location exists.
+    """
+    checkin_lat, checkin_lng, checkin_verified = resolve_attendance_checkin_location(record)
+    checkout_lat, checkout_lng, checkout_verified = resolve_attendance_checkout_location(record)
+
+    has_in = checkin_lat is not None and checkin_lng is not None
+    has_out = checkout_lat is not None and checkout_lng is not None
+
+    if not has_in and not has_out:
+        return None
+
+    return {
+        'check_in': {
+            'latitude': float(checkin_lat),
+            'longitude': float(checkin_lng),
+            'location_verified': bool(checkin_verified),
+        } if has_in else None,
+        'check_out': {
+            'latitude': float(checkout_lat),
+            'longitude': float(checkout_lng),
+            'location_verified': bool(checkout_verified),
+        } if has_out else None,
+    }
+
+

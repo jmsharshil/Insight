@@ -397,6 +397,8 @@ def auto_mark_sales_attendance(target_date=None):
         checkout_time = end_photo.captured_at if end_photo != start_photo else None
         checkin_lat = start_photo.latitude
         checkin_lon = start_photo.longitude
+        checkout_lat = end_photo.latitude if checkout_time else None
+        checkout_lon = end_photo.longitude if checkout_time else None
 
         # Determine branch
         bid = get_user_branch_id(user) or getattr(user, 'branch_id', None)
@@ -451,6 +453,11 @@ def auto_mark_sales_attendance(target_date=None):
                 latitude=checkin_lat,
                 longitude=checkin_lon,
                 location_verified=False,
+                checkout_latitude=checkout_lat,
+                checkout_longitude=checkout_lon,
+                checkout_location_verified=False,
+                check_in_method='selfie',
+                check_out_method='selfie' if checkout_time else None,
                 shortfall_minutes=shortfall,
                 marked_by=user,
             )
