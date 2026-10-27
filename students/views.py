@@ -83,6 +83,12 @@ class StudentListView(APIView):
         if batch:
             qs = qs.filter(batch=batch)
 
+        if request.user.role == 'student':
+            qs = qs.filter(user=request.user)
+        
+        if request.user.role == 'parent':
+            qs = qs.filter(parent_links__parent__user=request.user)
+
         qs = apply_filters(self, request, qs)
 
         return paginate_queryset(qs, request, StudentListSerializer, serializer_context={'request': request})
