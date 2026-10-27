@@ -425,6 +425,8 @@ class QRScanView(APIView):
                         FacultyQRScanLog.objects.create(
                             faculty=faculty_profile,
                             branch=branch,
+                            latitude=emp_lat,
+                            longitude=emp_lng,
                             scan_type=scan_type,
                             is_late=(late_mins > 0),
                             late_minutes=late_mins,
@@ -1865,6 +1867,8 @@ class EmployeeCheckInOutView(APIView):
                     FacultyQRScanLog.objects.create(
                         faculty=faculty_profile,
                         branch_id=bid,
+                        latitude=emp_lat,
+                        longitude=emp_lng,
                         scan_type=scan_type,
                         is_late=(late_mins > 0),
                         late_minutes=late_mins,

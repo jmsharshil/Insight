@@ -387,25 +387,60 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
         return obj.status in ['week_off', 'week_of']
 
     def get_location_details(self, obj):
-        has_in = obj.latitude is not None and obj.longitude is not None
-        has_out = getattr(obj, 'checkout_latitude', None) is not None and getattr(obj, 'checkout_longitude', None) is not None
+        checkin_lat = obj.latitude
+        checkin_lng = obj.longitude
+        checkin_loc_verified = obj.location_verified
+
+        checkout_lat = getattr(obj, 'checkout_latitude', None)
+        checkout_lng = getattr(obj, 'checkout_longitude', None)
+        checkout_loc_verified = getattr(obj, 'checkout_location_verified', False)
+
+        # Fallback to FacultyQRScanLog if coordinates are missing on EmployeeAttendanceRecord
+        if (checkout_lat is None and obj.checked_out_at) or (checkin_lat is None and obj.checked_in_at):
+            try:
+                from faculty.models import FacultyQRScanLog
+                if checkout_lat is None and obj.checked_out_at:
+                    f_out = FacultyQRScanLog.objects.filter(
+                        faculty__user_id=obj.user_id,
+                        scan_type='check_out',
+                        scanned_at__date=obj.date,
+                        latitude__isnull=False,
+                        longitude__isnull=False
+                    ).order_by('-scanned_at').first()
+                    if f_out:
+                        checkout_lat = f_out.latitude
+                        checkout_lng = f_out.longitude
+                        checkout_loc_verified = True
+                if checkin_lat is None and obj.checked_in_at:
+                    f_in = FacultyQRScanLog.objects.filter(
+                        faculty__user_id=obj.user_id,
+                        scan_type='check_in',
+                        scanned_at__date=obj.date,
+                        latitude__isnull=False,
+                        longitude__isnull=False
+                    ).order_by('scanned_at').first()
+                    if f_in:
+                        checkin_lat = f_in.latitude
+                        checkin_lng = f_in.longitude
+                        checkin_loc_verified = True
+            except Exception:
+                pass
+
+        has_in = checkin_lat is not None and checkin_lng is not None
+        has_out = checkout_lat is not None and checkout_lng is not None
         if not has_in and not has_out:
             return None
         return {
             'check_in': {
-                'latitude': float(obj.latitude),
-                'longitude': float(obj.longitude),
-                'location_verified': obj.location_verified,
+                'latitude': float(checkin_lat),
+                'longitude': float(checkin_lng),
+                'location_verified': checkin_loc_verified,
             } if has_in else None,
             'check_out': {
-                'latitude': float(obj.checkout_latitude),
-                'longitude': float(obj.checkout_longitude),
-                'location_verified': getattr(obj, 'checkout_location_verified', False),
+                'latitude': float(checkout_lat),
+                'longitude': float(checkout_lng),
+                'location_verified': checkout_loc_verified,
             } if has_out else None,
-            # Backward-compatible flat check-in coordinates:
-            'latitude': float(obj.latitude) if has_in else None,
-            'longitude': float(obj.longitude) if has_in else None,
-            'location_verified': obj.location_verified if has_in else False,
         }
 
 

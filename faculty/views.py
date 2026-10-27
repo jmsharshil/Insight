@@ -749,13 +749,26 @@ class FacultyQRCheckinView(APIView):
             ).delete()
             EmployeeAttendanceRecord.objects.create(
                 user=request.user, date=now.date(), timetable_slot=active_slot,
-                branch_id=fp.branch_id, status='checkout_pending', checked_in_at=now
+                branch_id=fp.branch_id, status='checkout_pending', checked_in_at=now,
+                latitude=ser.validated_data.get('latitude'),
+                longitude=ser.validated_data.get('longitude'),
+                location_verified=True,
+                check_in_method='qr',
             )
         elif scan_type == 'check_out':
             if open_record:
                 open_record.checked_out_at = now
                 open_record.status = 'present'
-                open_record.save(update_fields=['checked_out_at', 'status'])
+                open_record.check_out_method = 'qr'
+                checkout_lat = ser.validated_data.get('latitude')
+                checkout_lng = ser.validated_data.get('longitude')
+                checkout_fields = ['checked_out_at', 'status', 'check_out_method']
+                if checkout_lat is not None and checkout_lng is not None:
+                    open_record.checkout_latitude = checkout_lat
+                    open_record.checkout_longitude = checkout_lng
+                    open_record.checkout_location_verified = True
+                    checkout_fields.extend(['checkout_latitude', 'checkout_longitude', 'checkout_location_verified'])
+                open_record.save(update_fields=checkout_fields)
 
         if is_late:
             from leave.models import LateEntryRecord

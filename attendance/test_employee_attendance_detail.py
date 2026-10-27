@@ -81,21 +81,20 @@ class EmployeeAttendanceDetailAPITests(TestCase):
         self.assertEqual(item['check_out_method'], 'qr')
         self.assertEqual(item['check_out_method_display'], 'QR Scan')
 
-        # 2. Verify location_details includes check_in and check_out latitude & longitude
+        # 2. Verify location_details includes ONLY check_in and check_out
         loc = item['location_details']
         self.assertIsNotNone(loc)
         self.assertIn('check_in', loc)
         self.assertIn('check_out', loc)
+        self.assertEqual(set(loc.keys()), {'check_in', 'check_out'})
         self.assertEqual(round(loc['check_in']['latitude'], 4), 19.0761)
         self.assertEqual(round(loc['check_in']['longitude'], 4), 72.8778)
         self.assertTrue(loc['check_in']['location_verified'])
         self.assertEqual(round(loc['check_out']['latitude'], 4), 19.0765)
         self.assertEqual(round(loc['check_out']['longitude'], 4), 72.8780)
         self.assertTrue(loc['check_out']['location_verified'])
-
-        # Check backward compatibility top-level coords
-        self.assertEqual(round(loc['latitude'], 4), 19.0761)
-        self.assertEqual(round(loc['longitude'], 4), 72.8778)
+        self.assertNotIn('latitude', loc)
+        self.assertNotIn('longitude', loc)
 
         # 3. Verify check_in_history and check_out_history
         self.assertEqual(len(data['check_in_history']), 1)

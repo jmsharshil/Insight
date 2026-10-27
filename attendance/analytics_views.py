@@ -2022,26 +2022,61 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'slot_code': r.timetable_slot.slot_code,
                 }
 
-            has_in = r.latitude is not None and r.longitude is not None
-            has_out = getattr(r, 'checkout_latitude', None) is not None and getattr(r, 'checkout_longitude', None) is not None
+            checkin_lat = r.latitude
+            checkin_lng = r.longitude
+            checkin_loc_verified = r.location_verified
+
+            checkout_lat = getattr(r, 'checkout_latitude', None)
+            checkout_lng = getattr(r, 'checkout_longitude', None)
+            checkout_loc_verified = getattr(r, 'checkout_location_verified', False)
+
+            # Fallback to FacultyQRScanLog if coordinates are missing on EmployeeAttendanceRecord
+            if (checkout_lat is None and r.checked_out_at) or (checkin_lat is None and r.checked_in_at):
+                try:
+                    from faculty.models import FacultyQRScanLog
+                    if checkout_lat is None and r.checked_out_at:
+                        f_out = FacultyQRScanLog.objects.filter(
+                            faculty__user_id=r.user_id,
+                            scan_type='check_out',
+                            scanned_at__date=r.date,
+                            latitude__isnull=False,
+                            longitude__isnull=False
+                        ).order_by('-scanned_at').first()
+                        if f_out:
+                            checkout_lat = f_out.latitude
+                            checkout_lng = f_out.longitude
+                            checkout_loc_verified = True
+                    if checkin_lat is None and r.checked_in_at:
+                        f_in = FacultyQRScanLog.objects.filter(
+                            faculty__user_id=r.user_id,
+                            scan_type='check_in',
+                            scanned_at__date=r.date,
+                            latitude__isnull=False,
+                            longitude__isnull=False
+                        ).order_by('scanned_at').first()
+                        if f_in:
+                            checkin_lat = f_in.latitude
+                            checkin_lng = f_in.longitude
+                            checkin_loc_verified = True
+                except Exception:
+                    pass
+
+            has_in = checkin_lat is not None and checkin_lng is not None
+            has_out = checkout_lat is not None and checkout_lng is not None
 
             location_details = None
             if has_in or has_out:
                 location_details = {
                     'check_in': {
-                        'latitude': float(r.latitude),
-                        'longitude': float(r.longitude),
-                        'location_verified': r.location_verified
+                        'latitude': float(checkin_lat),
+                        'longitude': float(checkin_lng),
+                        'location_verified': checkin_loc_verified
                     } if has_in else None,
                     'check_out': {
-                        'latitude': float(r.checkout_latitude),
-                        'longitude': float(r.checkout_longitude),
-                        'location_verified': getattr(r, 'checkout_location_verified', False)
+                        'latitude': float(checkout_lat),
+                        'longitude': float(checkout_lng),
+                        'location_verified': checkout_loc_verified
                     } if has_out else None,
-                    # Backward-compatible flat check-in coordinates:
-                    'latitude': float(r.latitude) if has_in else None,
-                    'longitude': float(r.longitude) if has_in else None,
-                    'location_verified': r.location_verified if has_in else False,
                 }
 
             leave_type = None
@@ -2080,9 +2115,9 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'status': r.status,
                     'check_in_method': r.check_in_method,
                     'check_in_method_display': r.get_check_in_method_display() if r.check_in_method else None,
-                    'latitude': float(r.latitude) if r.latitude is not None else None,
-                    'longitude': float(r.longitude) if r.longitude is not None else None,
-                    'location_verified': r.location_verified,
+                    'latitude': float(checkin_lat) if checkin_lat is not None else None,
+                    'longitude': float(checkin_lng) if checkin_lng is not None else None,
+                    'location_verified': checkin_loc_verified,
                     'timetable_slot': slot_info,
                 })
             if r.checked_out_at:
@@ -2092,9 +2127,9 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'time': r.checked_out_at,
                     'check_out_method': r.check_out_method,
                     'check_out_method_display': r.get_check_out_method_display() if r.check_out_method else None,
-                    'latitude': float(r.checkout_latitude) if getattr(r, 'checkout_latitude', None) is not None else None,
-                    'longitude': float(r.checkout_longitude) if getattr(r, 'checkout_longitude', None) is not None else None,
-                    'location_verified': getattr(r, 'checkout_location_verified', False),
+                    'latitude': float(checkout_lat) if checkout_lat is not None else None,
+                    'longitude': float(checkout_lng) if checkout_lng is not None else None,
+                    'location_verified': checkout_loc_verified,
                     'timetable_slot': slot_info,
                 })
 
