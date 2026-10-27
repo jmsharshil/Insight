@@ -105,6 +105,44 @@ class EmployeeAttendanceDetailAPITests(TestCase):
         self.assertEqual(data['check_out_history'][0]['check_out_method'], 'qr')
         self.assertEqual(round(data['check_out_history'][0]['latitude'], 4), 19.0765)
 
+    def test_historical_record_checkout_location_resolution(self):
+        """Verify historical records with checked_out_at but checkout_latitude=None still resolve check_out location."""
+        self.client.force_authenticate(user=self.admin)
+        today = timezone.now().date()
+        in_time = timezone.now().replace(hour=9, minute=0, second=0)
+        out_time = timezone.now().replace(hour=18, minute=0, second=0)
+
+        # Historical record: checked out, but checkout_latitude is NULL in DB
+        rec = EmployeeAttendanceRecord.objects.create(
+            user=self.employee,
+            branch=self.branch,
+            date=today,
+            status='present',
+            checked_in_at=in_time,
+            checked_out_at=out_time,
+            check_in_method='qr',
+            check_out_method='qr',
+            latitude=23.052972,
+            longitude=72.559006,
+            location_verified=True,
+            checkout_latitude=None,
+            checkout_longitude=None,
+        )
+
+        url = f"/api/v1/attendance/employee/{self.employee.id}/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.data['data']
+
+        item = data['day_wise_attendance'][0]
+        loc = item['location_details']
+        self.assertIsNotNone(loc)
+        self.assertIsNotNone(loc['check_in'])
+        self.assertIsNotNone(loc['check_out'], "check_out must not be null when checked_out_at exists")
+        self.assertEqual(round(loc['check_out']['latitude'], 4), 23.0530)
+        self.assertEqual(round(loc['check_out']['longitude'], 4), 72.5590)
+        self.assertTrue(loc['check_out']['location_verified'])
+
     def test_detail_api_date_filters(self):
         self.client.force_authenticate(user=self.admin)
         d1 = datetime.date(2026, 9, 15)
