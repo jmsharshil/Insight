@@ -16,7 +16,10 @@ from .serializers import (
     PayrollGenerateSerializer, LateEntryPolicySerializer, LateEntryPolicyInputSerializer,
     PaySlipAdjustSerializer,
 )
-from .utils import compute_payslip_for_faculty, compute_payslip_for_user, EMPLOYEE_ROLES
+from .utils import (
+    compute_payslip_for_faculty, compute_payslip_for_user, EMPLOYEE_ROLES,
+    update_bonus_note,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -521,7 +524,9 @@ class PayrollPayslipsView(APIView):
             except Exception as e:
                 logger.error(f"Error regenerating draft payroll in payslips view: {e}")
                 
-        slips = PaySlip.objects.filter(payroll_run_id=payroll_id).select_related('faculty__user').prefetch_related('late_logs')
+        slips = PaySlip.objects.filter(payroll_run_id=payroll_id).select_related('faculty__user').prefetch_related(
+            'late_logs', 'reimbursements', 'odometer_readings__activity',
+        )
         if getattr(request.user, 'organization', None):
             slips = slips.filter(payroll_run__branch__organization=request.user.organization)
             
@@ -582,6 +587,8 @@ class PayslipAdjustView(APIView):
         for field in ['bonus', 'other_deductions', 'deduction_note', 'leave_deductions']:
             if field in d:
                 setattr(ps, field, d[field])
+        if 'bonus' in d:
+            ps.deduction_note = update_bonus_note(ps.deduction_note, ps.bonus)
 
         # Recompute net salary
         reimb_amt = getattr(ps, 'reimbursements_amount', Decimal('0')) or Decimal('0')
@@ -768,7 +775,9 @@ class FacultyPayslipsView(APIView):
         if role not in ['faculty', 'accountant', 'branch_manager', 'super_admin']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        qs = PaySlip.objects.filter(faculty=fp).select_related('payroll_run').prefetch_related('late_logs')
+        qs = PaySlip.objects.filter(faculty=fp).select_related('payroll_run').prefetch_related(
+            'late_logs', 'reimbursements', 'odometer_readings__activity',
+        )
         year = request.GET.get('year')
         month = request.GET.get('month')
         if year:
@@ -1050,7 +1059,9 @@ class MyPayrollView(APIView):
 
         qs = qs.select_related(
             'payroll_run', 'payroll_run__branch', 'faculty',
-        ).prefetch_related('late_logs').order_by('-payroll_run__year', '-payroll_run__month')
+        ).prefetch_related(
+            'late_logs', 'reimbursements', 'odometer_readings__activity',
+        ).order_by('-payroll_run__year', '-payroll_run__month')
 
         # Optional filters
         year = request.GET.get('year')

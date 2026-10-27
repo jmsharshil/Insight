@@ -157,7 +157,7 @@ Cross-references `auth_user_procedure_guide.md` (role matrix, exam_supervisor/pa
 ### Step 3: Review, List & Adjust Payslips
 - **GET** `/payroll/<run_id>/` — detail (regens draft).
 - **GET** `/payroll/<run_id>/payslips/` — list with late_logs, derived fields (faculty_name, per_paper_rate, employment_type, total_salary_sum in response).
-- **PATCH** `/payroll/<run_id>/payslips/<slip_id>/` — bonus/other_deductions/deduction_note/leave_deductions; auto net_salary + run total recalc (accountant/super only; not if disbursed).
+- **PATCH** `/payroll/<run_id>/payslips/<slip_id>/` — bonus/other_deductions/deduction_note/leave_deductions; auto net_salary + run total recalc (accountant/super only; not if disbursed). Bonus changes are reflected in `deduction_note`; generated attendance bonuses are also noted there.
 - DELETE payslip (super only).
 
 ### Step 4: Extra Hours, Preview & Paper-Checker Specifics
@@ -204,6 +204,7 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
 **GET `/payroll/my/`** (any authenticated employee role).
 - Resolves via FacultyProfile or User.
 - Returns employee info (incl. role), summary (total_payslips, total_net_earned, total_disbursed), list of payslips (MyPaySlipSerializer with payroll_month/year/status/branch_name).
+- Each payslip includes `reimbursement_notes`: approved expense claims are listed with date, title, description, and amount; travel claims include date, event, kilometres, and expense.
 - Supports ?year=&month=&status= filters. 404 if no history.
 
 ### Approve / Disburse

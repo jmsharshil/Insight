@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.test import SimpleTestCase
 
-from payroll.utils import build_deduction_note
+from payroll.utils import build_deduction_note, update_bonus_note
 
 
 class DeductionNoteFormattingTests(SimpleTestCase):
@@ -45,3 +45,20 @@ class DeductionNoteFormattingTests(SimpleTestCase):
         self.assertIn('Leave (1 day)', note)
         self.assertIn('Retention (10%)', note)
         self.assertIn('Sunday Shortfall', note)
+
+    def test_attendance_bonus_is_included_in_note(self):
+        note = build_deduction_note(
+            late_penalty=Decimal('0'),
+            attendance_bonus=Decimal('500.00'),
+        )
+
+        self.assertIn('Attendance bonus: +500.00', note)
+
+    def test_manually_adjusted_bonus_is_kept_in_note(self):
+        note = update_bonus_note(
+            'Absent: -120.00, Bonus: +50.00',
+            Decimal('75.00'),
+        )
+
+        self.assertEqual(note, 'Absent: -120.00, Bonus: +75.00')
+        self.assertEqual(update_bonus_note(note, Decimal('0')), 'Absent: -120.00')
