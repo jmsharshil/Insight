@@ -295,6 +295,7 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     check_in_method_display = serializers.CharField(source='get_check_in_method_display', read_only=True)
     check_out_method_display = serializers.CharField(source='get_check_out_method_display', read_only=True)
+    location_details = serializers.SerializerMethodField()
     leave_type = serializers.SerializerMethodField()
     leave_type_display = serializers.SerializerMethodField()
     is_leave = serializers.SerializerMethodField()
@@ -316,9 +317,12 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
             'checked_in_at', 'checked_out_at',
             'marked_by', 'marked_by_name', 'marked_at',
             'is_corrected', 'corrected_by', 'correction_note',
-            'shortfall_minutes', 'latitude', 'longitude', 'location_verified',
+            'shortfall_minutes',
+            'latitude', 'longitude', 'location_verified',
+            'checkout_latitude', 'checkout_longitude', 'checkout_location_verified',
             'check_in_method', 'check_in_method_display',
             'check_out_method', 'check_out_method_display',
+            'location_details',
         ]
 
     def get_user_name(self, obj):
@@ -381,6 +385,28 @@ class EmployeeAttendanceRecordSerializer(serializers.ModelSerializer):
 
     def get_is_week_off(self, obj):
         return obj.status in ['week_off', 'week_of']
+
+    def get_location_details(self, obj):
+        has_in = obj.latitude is not None and obj.longitude is not None
+        has_out = getattr(obj, 'checkout_latitude', None) is not None and getattr(obj, 'checkout_longitude', None) is not None
+        if not has_in and not has_out:
+            return None
+        return {
+            'check_in': {
+                'latitude': float(obj.latitude),
+                'longitude': float(obj.longitude),
+                'location_verified': obj.location_verified,
+            } if has_in else None,
+            'check_out': {
+                'latitude': float(obj.checkout_latitude),
+                'longitude': float(obj.checkout_longitude),
+                'location_verified': getattr(obj, 'checkout_location_verified', False),
+            } if has_out else None,
+            # Backward-compatible flat check-in coordinates:
+            'latitude': float(obj.latitude) if has_in else None,
+            'longitude': float(obj.longitude) if has_in else None,
+            'location_verified': obj.location_verified if has_in else False,
+        }
 
 
 class EmployeeAttendanceCreateSerializer(serializers.Serializer):

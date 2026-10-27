@@ -1943,17 +1943,36 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
             OFF_DAY_STATUS_CHOICES, NON_WORKING_STATUS_CHOICES
         )
 
-        start_date = request.GET.get('start_date')
-        end_date = request.GET.get('end_date')
+        from_date = request.GET.get('from_date') or request.GET.get('date_from') or request.GET.get('start_date')
+        to_date = request.GET.get('to_date') or request.GET.get('date_to') or request.GET.get('end_date')
         date_filter = request.GET.get('date')
+        month = request.GET.get('month')
+        year = request.GET.get('year')
         status_filter = request.GET.get('status')
         
-        if start_date:
-            records = records.filter(date__gte=start_date)
-        if end_date:
-            records = records.filter(date__lte=end_date)
         if date_filter:
             records = records.filter(date=date_filter)
+        if from_date:
+            records = records.filter(date__gte=from_date)
+        if to_date:
+            records = records.filter(date__lte=to_date)
+        if year:
+            try:
+                records = records.filter(date__year=int(year))
+            except (ValueError, TypeError):
+                pass
+        if month:
+            if '-' in str(month):
+                try:
+                    y, m = str(month).split('-')[:2]
+                    records = records.filter(date__year=int(y), date__month=int(m))
+                except (ValueError, TypeError):
+                    pass
+            else:
+                try:
+                    records = records.filter(date__month=int(month))
+                except (ValueError, TypeError):
+                    pass
 
         # Synchronize/correct any stale absent records for this employee (e.g. Sunday, week off, holiday, leave)
         for rec in records.filter(status='absent'):
@@ -2003,12 +2022,26 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'slot_code': r.timetable_slot.slot_code,
                 }
 
+            has_in = r.latitude is not None and r.longitude is not None
+            has_out = getattr(r, 'checkout_latitude', None) is not None and getattr(r, 'checkout_longitude', None) is not None
+
             location_details = None
-            if r.latitude is not None and r.longitude is not None:
+            if has_in or has_out:
                 location_details = {
-                    'latitude': float(r.latitude),
-                    'longitude': float(r.longitude),
-                    'location_verified': r.location_verified
+                    'check_in': {
+                        'latitude': float(r.latitude),
+                        'longitude': float(r.longitude),
+                        'location_verified': r.location_verified
+                    } if has_in else None,
+                    'check_out': {
+                        'latitude': float(r.checkout_latitude),
+                        'longitude': float(r.checkout_longitude),
+                        'location_verified': getattr(r, 'checkout_location_verified', False)
+                    } if has_out else None,
+                    # Backward-compatible flat check-in coordinates:
+                    'latitude': float(r.latitude) if has_in else None,
+                    'longitude': float(r.longitude) if has_in else None,
+                    'location_verified': r.location_verified if has_in else False,
                 }
 
             leave_type = None
@@ -2032,6 +2065,10 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                 'is_week_off': r.status in ['week_off', 'week_of'],
                 'checked_in_at': r.checked_in_at,
                 'checked_out_at': r.checked_out_at,
+                'check_in_method': r.check_in_method,
+                'check_in_method_display': r.get_check_in_method_display() if r.check_in_method else None,
+                'check_out_method': r.check_out_method,
+                'check_out_method_display': r.get_check_out_method_display() if r.check_out_method else None,
                 'timetable_slot': slot_info,
                 'location_details': location_details,
             })
@@ -2041,6 +2078,11 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'date': r.date,
                     'time': r.checked_in_at,
                     'status': r.status,
+                    'check_in_method': r.check_in_method,
+                    'check_in_method_display': r.get_check_in_method_display() if r.check_in_method else None,
+                    'latitude': float(r.latitude) if r.latitude is not None else None,
+                    'longitude': float(r.longitude) if r.longitude is not None else None,
+                    'location_verified': r.location_verified,
                     'timetable_slot': slot_info,
                 })
             if r.checked_out_at:
@@ -2048,6 +2090,11 @@ class EmployeeAttendanceDetailAPIView(SafeAPIView):
                     'id': str(r.id),
                     'date': r.date,
                     'time': r.checked_out_at,
+                    'check_out_method': r.check_out_method,
+                    'check_out_method_display': r.get_check_out_method_display() if r.check_out_method else None,
+                    'latitude': float(r.checkout_latitude) if getattr(r, 'checkout_latitude', None) is not None else None,
+                    'longitude': float(r.checkout_longitude) if getattr(r, 'checkout_longitude', None) is not None else None,
+                    'location_verified': getattr(r, 'checkout_location_verified', False),
                     'timetable_slot': slot_info,
                 })
 

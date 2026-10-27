@@ -521,6 +521,9 @@ def apply_sales_attendance_approval(approval, approver):
             open_rec.checked_out_at = approval.captured_at
             open_rec.status = 'present'
             open_rec.check_out_method = 'selfie'
+            if approval.latitude is not None and approval.longitude is not None:
+                open_rec.checkout_latitude = approval.latitude
+                open_rec.checkout_longitude = approval.longitude
 
             role = getattr(approval.user, 'role', '')
             if role not in {'faculty', 'sweeper', 'maid', 'driver'} and open_rec.checked_in_at:
@@ -572,6 +575,9 @@ def apply_sales_attendance_approval(approval, approver):
                     latitude=approval.latitude,
                     longitude=approval.longitude,
                     location_verified=False,
+                    checkout_latitude=approval.latitude,
+                    checkout_longitude=approval.longitude,
+                    checkout_location_verified=False,
                     marked_by=approver,
                     check_in_method='selfie',
                     check_out_method='selfie',

@@ -513,7 +513,13 @@ class QRScanView(APIView):
                 record.checked_out_at = now
                 record.status = 'present'
                 record.check_out_method = 'qr'
-                record.save(update_fields=['checked_out_at', 'status', 'check_out_method'])
+                checkout_updates = ['checked_out_at', 'status', 'check_out_method']
+                if emp_lat is not None and emp_lng is not None:
+                    record.checkout_latitude = emp_lat
+                    record.checkout_longitude = emp_lng
+                    record.checkout_location_verified = geo_verified
+                    checkout_updates.extend(['checkout_latitude', 'checkout_longitude', 'checkout_location_verified'])
+                record.save(update_fields=checkout_updates)
                 message = f'Employee Check Out recorded successfully.'
                 from attendance.utils import apply_half_day_rule
                 message += apply_half_day_rule(record, user, now)
@@ -1784,7 +1790,13 @@ class EmployeeCheckInOutView(APIView):
             record.checked_out_at = now
             record.status = 'present'
             record.check_out_method = 'qr'
-            record.save(update_fields=['checked_out_at', 'status', 'check_out_method'])
+            checkout_updates = ['checked_out_at', 'status', 'check_out_method']
+            if emp_lat is not None and emp_lng is not None:
+                record.checkout_latitude = emp_lat
+                record.checkout_longitude = emp_lng
+                record.checkout_location_verified = geo_verified
+                checkout_updates.extend(['checkout_latitude', 'checkout_longitude', 'checkout_location_verified'])
+            record.save(update_fields=checkout_updates)
             message = f'Check Out recorded successfully.'
             from attendance.utils import apply_half_day_rule
             message += apply_half_day_rule(record, user, now)

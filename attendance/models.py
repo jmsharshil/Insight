@@ -436,10 +436,15 @@ class EmployeeAttendanceRecord(models.Model):
         help_text="How the employee checked out: 'selfie' = end-day selfie via sales module, 'qr' = QR scan.",
     )
 
-    # ── Geofencing audit ──────────────────────────────────────────────────────
+    # ── Geofencing audit (Check-in) ───────────────────────────────────────────
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     location_verified = models.BooleanField(default=False)
+
+    # ── Geofencing audit (Check-out) ──────────────────────────────────────────
+    checkout_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    checkout_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    checkout_location_verified = models.BooleanField(default=False)
 
     is_corrected = models.BooleanField(default=False)
     corrected_by = models.ForeignKey(
