@@ -20,7 +20,10 @@ from payroll.models import LateEntryPolicy, PayrollRun
 from attendance.models import EmployeeAttendanceRecord
 from results.models import MarkSheet
 from exams.models import Exam
-from payroll.utils import compute_payslip_for_faculty, compute_payslip_for_user
+from payroll.utils import (
+    compute_payslip_for_faculty, compute_payslip_for_user,
+    preview_payslip_for_faculty,
+)
 
 YEAR = 2026
 MONTH = 5   # May 2026 — 21 working weekdays (Mon-Fri)
@@ -186,6 +189,23 @@ class FullTimeFacultyTests(PayrollBaseTest):
             ps.deduction_note,
         )
 
+    def test_late_entry_does_not_deduct_from_full_time_faculty(self):
+        dow = self._weekdays()[0].weekday()
+        TimetableSlot.objects.create(
+            batch=self.batch, subject=self.subject, day_of_week=dow,
+            start_time=time(10, 0), end_time=time(11, 0), faculty=self.fp,
+        )
+        day = self._weekdays()[0]
+        self._session(self.fp, day, start=time(10, 0), end=time(11, 0))
+        self._qr(self.fp, day, time(10, 30), time(11, 0))
+
+        payslip = compute_payslip_for_faculty(self.fp, MONTH, YEAR, self.payroll_run)
+        preview = preview_payslip_for_faculty(self.fp, MONTH, YEAR)
+
+        self.assertEqual(payslip.late_penalty, Decimal('0'))
+        self.assertNotIn('Late check-in/out', payslip.deduction_note)
+        self.assertEqual(preview['late_penalty'], '0.00')
+
     def test_unexcused_absence_deduction(self):
         """Attend only first 15 days → 6 absent days × 500 = 3000."""
         weekdays = self._weekdays()
@@ -304,7 +324,25 @@ class VisitingFacultyTests(PayrollBaseTest):
         d = self._weekdays()[0]
         self._qr(self.fp, d, time(10, 5), time(10, 55))
         ps = compute_payslip_for_faculty(self.fp, MONTH, YEAR, self.payroll_run)
-        self.assertEqual(ps.late_penalty, Decimal("10.00"))
+        self.assertEqual(ps.late_penalty, Decimal("10.00"), ps.per_day_deduction_log)
+
+    def test_late_penalty_not_applied_to_part_time_faculty(self):
+        _, part_time_faculty = self._make_faculty(
+            "part_time_b", "part_time", hourly=500, retention=0
+        )
+        dow = self._weekdays()[0].weekday()
+        TimetableSlot.objects.create(
+            batch=self.batch, subject=self.subject, day_of_week=dow,
+            start_time=time(10, 0), end_time=time(11, 0), faculty=part_time_faculty,
+        )
+        day = self._weekdays()[0]
+        self._qr(part_time_faculty, day, time(10, 10), time(10, 55))
+
+        payslip = compute_payslip_for_faculty(
+            part_time_faculty, MONTH, YEAR, self.payroll_run
+        )
+
+        self.assertEqual(payslip.late_penalty, Decimal('0'))
 
     def test_hourly_pay_based_on_session_hours(self):
         """2-hour session × 500/hr = 1000 gross (no absence deduction)."""
@@ -377,12 +415,13 @@ class RegularStaffTests(PayrollBaseTest):
         ps = compute_payslip_for_user(self.user, MONTH, YEAR, self.payroll_run)
         self.assertEqual(ps.leave_deductions, Decimal("2500.00"))
 
-    def test_late_entry_penalty(self):
-        """30 min late − 5 grace = 25 min penalty dynamically calculated."""
+    def test_late_entry_deduction_not_applied_to_regular_staff(self):
+        """Late-entry deductions are limited to visiting faculty."""
         weekdays = self._weekdays()
         self._attendance(self.user, weekdays[0], in_time=time(9, 30))
         ps = compute_payslip_for_user(self.user, MONTH, YEAR, self.payroll_run)
-        self.assertAlmostEqual(float(ps.late_penalty), 23.15, places=2)
+        self.assertEqual(ps.late_penalty, Decimal('0'))
+        self.assertNotIn('Late check-in/out', ps.deduction_note)
 
     def test_no_late_penalty_within_grace(self):
         """3 min late ≤ 5 grace → penalty = 0."""

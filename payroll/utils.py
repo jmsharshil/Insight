@@ -515,14 +515,12 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
 
     # Compute total late penalty
     late_penalty = Decimal(0)
-    late_half_days = 0
-    days_late_15_mins = 0
+    attendance_half_days = 0
     late_dates = []
-    half_day_dates = []
     total_late_penalty_minutes = 0
 
-    if faculty_profile.employment_type in ('visiting', 'part_time'):
-        # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
+    if faculty_profile.employment_type == 'visiting':
+        # ── Visiting faculty: 5-minute combined buffer per slot ───────────────────
         processed_dates = set()
 
         # QR-based deviation (prioritize actual check-ins/outs)
@@ -565,33 +563,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 daily_stats[d_str]['penalty_minutes'] = penalty_min
                 daily_stats[d_str]['deduction'] += day_penalty
     else:
-        # ── Full-time: aggregate daily delays from session differences ─────────────────────
-        # Note: We NO LONGER sum log.late_minutes and log.early_minutes from FacultyQRScanLog
-        # to avoid double-counting, because daily_delays ALREADY includes total_session_diff.
-
+        # Keep late minutes visible in daily details without deducting them.
         for d_date, d_delay in daily_delays.items():
-            if d_date.weekday() == 6:
-                continue
-
             d_str = d_date.strftime('%Y-%m-%d')
             daily_stats[d_str]['late_minutes'] = d_delay
-
-            if d_delay >= 60:
-                late_half_days += 1
-                half_day_dates.append(d_str)
-            else:
-                if d_delay >= 15:
-                    days_late_15_mins += 1
-
-                # Apply per-minute deduction for full_time (uncommented to fix deduction calculation)
-                if d_delay > grace:
-                    penalty_min = d_delay - grace
-                    day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                    late_penalty += day_penalty
-                    total_late_penalty_minutes += penalty_min
-                    late_dates.append(d_str)
-                    daily_stats[d_str]['penalty_minutes'] = penalty_min
-                    daily_stats[d_str]['deduction'] += day_penalty
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
@@ -606,8 +581,6 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             'penalty_minutes': stat['penalty_minutes'],
             'penalty_amount': str(round(stat['deduction'], 2)),
         })
-
-    late_half_days += (days_late_15_mins // 3)
 
     # 6. Leave deductions
     from datetime import date
@@ -722,14 +695,14 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             half_days_count = len({d for d in unauthorized_half_days if not fac_user.is_day_off(d)})
         else:
             half_days_count = len({d for d in unauthorized_half_days if d.weekday() < 5})
-        late_half_days += half_days_count
+        attendance_half_days += half_days_count
 
         valid_hd_count = len({d for d in half_day_leave_dates if d in attended_dates and d not in all_absent_records and (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
         absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
-        absent_days += Decimal(late_half_days) * Decimal('0.5')
+        absent_days += Decimal(attendance_half_days) * Decimal('0.5')
         
         absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
         absence_deductions = absent_days * absence_deduction_rate
@@ -874,6 +847,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     """
     from .models import LateEntryPolicy
     from faculty.models import SessionReport, FacultyQRScanLog
+    from attendance.models import EmployeeAttendanceRecord
     from leave.models import LeaveApplication
 
     sessions = SessionReport.objects.filter(
@@ -1166,8 +1140,6 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
 
     late_penalty = Decimal(0)
-    late_half_days = 0
-    days_late_15_mins = 0
     total_late_penalty_minutes = 0
 
     # Compute session-based late/early deviations
@@ -1220,8 +1192,8 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         if total_session_diff > 0:
             daily_delays[s.session_date] += total_session_diff
 
-    if faculty_profile.employment_type in ('visiting', 'part_time'):
-        # ── Visiting/Part-time: 5-minute COMBINED buffer per slot ──────────────────
+    if faculty_profile.employment_type == 'visiting':
+        # ── Visiting faculty: 5-minute combined buffer per slot ───────────────────
         processed_dates = set()
 
         # QR-based deviation (prioritize actual check-ins/outs)
@@ -1252,32 +1224,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 daily_stats[d_str]['penalty_minutes'] = penalty_min
                 daily_stats[d_str]['deduction'] += day_penalty
     else:
-        # ── Full-time: legacy approach ──────────────────────────────────────────────
-        for log_date, logs in qr_by_date.items():
-            for log in logs:
-                daily_delays[log_date] += log.late_minutes
-                daily_delays[log_date] += log.early_minutes
-
+        # Keep late minutes visible in daily details without deducting them.
         for d_date, d_delay in daily_delays.items():
-            if d_date.weekday() == 6:
-                continue
-
             d_str = d_date.strftime('%Y-%m-%d')
             daily_stats[d_str]['late_minutes'] = d_delay
-
-            if d_delay >= 60:
-                late_half_days += 1
-            else:
-                if d_delay >= 15:
-                    days_late_15_mins += 1
-
-                if d_delay > grace:
-                    penalty_min = d_delay - grace
-                    day_penalty = min(Decimal(penalty_min) * deduction_rate, max_deduction)
-                    late_penalty += day_penalty
-                    total_late_penalty_minutes += penalty_min
-                    daily_stats[d_str]['penalty_minutes'] = penalty_min
-                    daily_stats[d_str]['deduction'] += day_penalty
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
@@ -1292,8 +1242,6 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             'penalty_minutes': stat['penalty_minutes'],
             'penalty_amount': str(round(stat['deduction'], 2)),
         })
-
-    late_half_days += (days_late_15_mins // 3)
 
     attended_dates = session_dates | set(qr_by_date.keys())
     if has_custom_sched:
@@ -1324,8 +1272,6 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
         absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
-        absent_days += Decimal(late_half_days) * Decimal('0.5')
-    
         absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
         absence_deductions = absent_days * absence_deduction_rate
     else:
@@ -1407,7 +1353,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
       - base salary / hourly attendance
       - leave deductions (unpaid)
       - absence deductions
-      - late penalty (from LateEntryRecord)
+      - no late-entry deduction (reserved for visiting faculty)
       - retention deduction
       - attendance bonus
     - house_keeping/security: NO leave option; instead 2 Sundays required/month:
@@ -1420,7 +1366,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
       Penalty folded into `late_penalty`; paper amount into `hour_based_amount`; sessions_conducted = papers_checked.
       No attendance/leave/sunday/absence calcs applied for this role. Backward compatible.
     """
-    from .models import PaySlip, LateEntryPolicy
+    from .models import PaySlip
     from leave.models import LeaveApplication
     from attendance.models import EmployeeAttendanceRecord
     from datetime import date, datetime, timedelta, time
@@ -1624,123 +1570,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     leave_days = len(leave_dates_in_month) + (Decimal(len(half_day_leave_dates)) * Decimal('0.5'))
     leave_deductions = unpaid_leave_days * daily_rate if user.employment_type == 'full_time' else Decimal(0)
 
-    # 5. Late penalty 
-    from leave.models import LateEntryRecord
-    late_entries = LateEntryRecord.objects.filter(
-        user=user,
-        date__year=year,
-        date__month=month,
-    )
-
-    policy = LateEntryPolicy.objects.filter(branch=user.branch, is_active=True).first() if user.branch else None
-    grace = policy.grace_period_minutes if policy else 5
-
+    # Late-entry deductions do not apply to non-faculty staff.
     late_penalty = Decimal(0)
-    if user.employment_type == 'full_time':
-        if user.work_start_time and user.work_end_time:
-            s_dt = datetime.combine(datetime.today(), user.work_start_time)
-            e_dt = datetime.combine(datetime.today(), user.work_end_time)
-            if e_dt < s_dt:
-                e_dt += timedelta(days=1)
-            work_mins = Decimal((e_dt - s_dt).total_seconds()) / Decimal(60)
-            if work_mins > 0:
-                deduction_per_minute = (user.salary / Decimal(30)) / work_mins
-            else:
-                deduction_per_minute = (user.salary / Decimal(30)) / Decimal(8) / Decimal(60) if user.salary else Decimal(0)
-        else:
-            deduction_per_minute = (user.salary / Decimal(30)) / Decimal(8) / Decimal(60) if user.salary else Decimal(0)
-    else:
-        deduction_per_minute = user.hourly_rate / Decimal(60) if user.hourly_rate else Decimal(0)
-
-    # Don't use policy.deduction_per_minute for these users if we want the actual salary deduction
-    # but keep it if policy overrides
-    # if policy and policy.deduction_per_minute > 0:
-    #     deduction_per_minute = policy.deduction_per_minute
-
-    max_deduction = policy.max_deduction_per_session if policy and policy.max_deduction_per_session > 0 else Decimal('999999')
-
-    # ── 9-hour shortfall deduction for non-exempt roles ──
-    # Roles exempt from 9-hour rule (same as in attendance/views.py)
-    NINE_HOUR_EXEMPT_ROLES = ['faculty', 'exam_supervisor', 'paper_checker', 'house_keeping', 'security']
-    REQUIRED_SHIFT_MINUTES = int(Decimal(str(user.working_hours or 0)) * 60) if (user.working_hours or 0) > 0 else 9 * 60
-    _half_day_dates_early = set(attendance_records.filter(status='half_day').values_list('date', flat=True))
-    SHORTFALL_BUFFER_MINUTES = 5  # Combined 5-minute grace
-
-    daily_delays = defaultdict(int)
-    for entry in late_entries:
-        daily_delays[entry.date] += entry.late_minutes
-
-    # Calculate per-day shortfall from 9-hour requirement (or day-specific required hours)
-    if role not in NINE_HOUR_EXEMPT_ROLES:
-        for rec in attendance_records:
-            if rec.checked_in_at and rec.checked_out_at:
-                from django.utils import timezone
-                local_checkin = timezone.localtime(rec.checked_in_at)
-                local_checkout = timezone.localtime(rec.checked_out_at)
-                actual_minutes = int((local_checkout - local_checkin).total_seconds() / 60)
-                if hasattr(user, 'get_working_hours_for_date'):
-                    day_req_hours = user.get_working_hours_for_date(rec.date)
-                    day_required_mins = int(Decimal(str(day_req_hours)) * 60) if day_req_hours > 0 else REQUIRED_SHIFT_MINUTES
-                else:
-                    day_required_mins = REQUIRED_SHIFT_MINUTES
-                day_shortfall = max(0, day_required_mins - actual_minutes)
-                if day_shortfall > daily_delays.get(rec.date, 0):
-                    daily_delays[rec.date] = day_shortfall
-    else:
-        # For exempt roles, keep the existing late-in / early-out logic with day-specific shift timings
-        for rec in attendance_records:
-            day_diff = 0
-            s_time = user.work_start_time
-            e_time = user.work_end_time
-            if hasattr(user, 'get_shift_timings_for_date'):
-                day_s, day_e = user.get_shift_timings_for_date(rec.date)
-                if day_s:
-                    s_time = day_s
-                if day_e:
-                    e_time = day_e
-
-            if rec.checked_in_at and s_time:
-                from django.utils import timezone
-                local_checkin = timezone.localtime(rec.checked_in_at)
-                s_dt = datetime.combine(rec.date, s_time)
-                if local_checkin.replace(tzinfo=None) > s_dt:
-                    diff = (local_checkin.replace(tzinfo=None) - s_dt).total_seconds() / 60
-                    day_diff += int(diff)
-
-            if rec.checked_out_at and e_time:
-                from django.utils import timezone
-                local_checkout = timezone.localtime(rec.checked_out_at)
-                e_dt = datetime.combine(rec.date, e_time)
-                if s_time and e_time < s_time:
-                    e_dt += timedelta(days=1)
-
-                if local_checkout.replace(tzinfo=None) < e_dt:
-                    diff = (e_dt - local_checkout.replace(tzinfo=None)).total_seconds() / 60
-                    day_diff += int(diff)
-
-            if day_diff > daily_delays[rec.date]:
-                daily_delays[rec.date] = day_diff
-
     late_dates = []
     total_shortfall_penalty_minutes = 0
-    for d_date, d_delay in daily_delays.items():
-        if has_custom_sched and user.is_day_off(d_date):
-            continue  # Scheduled off day: no shortfall deduction or penalty
-        if d_date.weekday() == 6:
-            continue
-        if d_date in _half_day_dates_early:
-            continue  # half day already deducted as 0.5 day; avoid double deduction
-        # Apply combined 5-minute buffer per day
-        if d_delay > SHORTFALL_BUFFER_MINUTES:
-            penalty_min = d_delay - SHORTFALL_BUFFER_MINUTES
-            late_penalty += min(Decimal(penalty_min) * deduction_per_minute, max_deduction)
-            late_dates.append(d_date.strftime('%Y-%m-%d'))
-            total_shortfall_penalty_minutes += penalty_min
-
-    if role in ['house_keeping', 'security']:
-        late_penalty = Decimal(0)
-        late_dates = []
-        total_shortfall_penalty_minutes = 0
 
     from datetime import date
     today = date.today()
@@ -1800,7 +1633,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
         absent_days += Decimal(half_days_count) * Decimal('0.5')
         
-        absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+        absence_deduction_rate = daily_rate
         absence_deductions = absent_days * absence_deduction_rate
     else:
         absent_days = Decimal(0)
@@ -1853,7 +1686,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     deduction_note_str = build_deduction_note(
         late_penalty=late_penalty,
         late_penalty_minutes=late_penalty_minutes,
-        late_penalty_rate=deduction_per_minute,
+        late_penalty_rate=Decimal('0'),
         late_dates=late_dates,
         absence_deductions=absence_deductions,
         absent_dates=absent_dates,

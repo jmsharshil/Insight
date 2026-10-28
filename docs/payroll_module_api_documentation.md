@@ -15,7 +15,7 @@
 - Reconciles `SessionReport` (with chapters) + `FacultyQRScanLog` for hours.
 - Per-subject hourly rates via `SubjectHourlyRate` (effective_from) or fallback to `faculty.hourly_rate` / `user.hourly_rate`.
 - **Extra hours logic**: Compares monthly chapter minutes vs allocated (`Chapter.duration_hours`); auto-creates `ExtraHoursApproval` (pending); only payable if approved.
-- Late penalties: aggregates daily delays from QR + sessions; uses `LateEntryPolicy` (grace, deduction_per_minute, max_deduction, absence_deduction_per_day, late_entry_threshold, auto_halfday_deduction); Sundays exempt; 15min+ counts toward half-day threshold (3x15min=0.5 day).
+- Visiting-faculty late-entry penalties: aggregate daily delays from QR + sessions and use `LateEntryPolicy` (grace, deduction_per_minute, max_deduction). Other faculty and regular staff do not receive late-entry deductions; paper-checker late-submission penalties remain separate.
 - Absence = (working_days - attended) + half-days; Sunday attendance counts as full day.
 - Deductions: unpaid leaves, salary_retention_percentage, other.
 - Bonuses: attendance (>80%), leave_encashment (March only, from LeaveBalance).
@@ -30,8 +30,8 @@
   - Late penalty: 5 days grace after `exam.scheduled_date`; bracketed % penalty (5%,10%,15%...) folded into `late_penalty`.
   - No attendance/leave/sunday/absence for this role; payment = (papers * rate) - penalties - retention.
 - For other staff (`house_keeping`/`security` have Sunday rules: 2 required; <2 = deduction, >=3 = bonus day).
-- Uses `EmployeeAttendanceRecord`, `LateEntryRecord`, `LeaveApplication`.
-- Handles base/hourly, unpaid leaves, late penalties (via policy or implicit), absence, retention (`salary_retention_percentage`), attendance_bonus (>80%), leave_encashment (March).
+- Uses `EmployeeAttendanceRecord` and `LeaveApplication`.
+- Handles base/hourly, unpaid leaves, absence, retention (`salary_retention_percentage`), attendance_bonus (>80%), leave_encashment (March). Late-entry deductions apply only to visiting faculty; paper-checker late-submission penalties remain separate.
 - Deletes old payslip on regen; creates new with `user` FK (`faculty=null`); updates run total via signal.
 - **Blocks payment** for unresolved CheckerQuery/RecheckRequest (per results v2 + answer-key gate).
 
