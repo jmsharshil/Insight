@@ -419,21 +419,29 @@ class PayrollDetailView(APIView):
                 from faculty.models import FacultyProfile
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
-                
+
                 faculty_list = FacultyProfile.objects.filter(branch_id=pr.branch_id, is_active=True)
                 faculty_user_ids = set(faculty_list.values_list('user_id', flat=True))
                 staff_users = User.objects.filter(
                     branch_id=pr.branch_id, role__in=EMPLOYEE_ROLES, is_active=True
                 ).exclude(id__in=faculty_user_ids)
-                
-                pr.payslips.all().delete()
+
+                # Only delete payslips that have NOT been manually adjusted
+                pr.payslips.filter(is_manually_adjusted=False).delete()
+
+                # Skip regeneration for employees whose payslip was manually adjusted
+                adjusted_faculty_ids = set(pr.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
+                adjusted_user_ids = set(pr.payslips.filter(is_manually_adjusted=True, user__isnull=False).values_list('user_id', flat=True))
+
                 total = Decimal(0)
-                for fp in faculty_list:
+                for fp in faculty_list.exclude(id__in=adjusted_faculty_ids):
                     ps = compute_payslip_for_faculty(fp, pr.month, pr.year, pr)
                     total += ps.net_salary
-                for u in staff_users:
+                for u in staff_users.exclude(id__in=adjusted_user_ids):
                     ps = compute_payslip_for_user(u, pr.month, pr.year, pr)
                     total += ps.net_salary
+                # Include adjusted payslips in total
+                total += sum(s.net_salary for s in pr.payslips.filter(is_manually_adjusted=True))
                 pr.total_amount = total
                 pr.save(update_fields=['total_amount'])
             except Exception as e:
@@ -504,21 +512,29 @@ class PayrollPayslipsView(APIView):
                 from faculty.models import FacultyProfile
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
-                
+
                 faculty_list = FacultyProfile.objects.filter(branch_id=pr.branch_id, is_active=True)
                 faculty_user_ids = set(faculty_list.values_list('user_id', flat=True))
                 staff_users = User.objects.filter(
                     branch_id=pr.branch_id, role__in=EMPLOYEE_ROLES, is_active=True
                 ).exclude(id__in=faculty_user_ids)
-                
-                pr.payslips.all().delete()
+
+                # Only delete payslips that have NOT been manually adjusted
+                pr.payslips.filter(is_manually_adjusted=False).delete()
+
+                # Skip regeneration for employees whose payslip was manually adjusted
+                adjusted_faculty_ids = set(pr.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
+                adjusted_user_ids = set(pr.payslips.filter(is_manually_adjusted=True, user__isnull=False).values_list('user_id', flat=True))
+
                 total = Decimal(0)
-                for fp in faculty_list:
+                for fp in faculty_list.exclude(id__in=adjusted_faculty_ids):
                     ps = compute_payslip_for_faculty(fp, pr.month, pr.year, pr)
                     total += ps.net_salary
-                for u in staff_users:
+                for u in staff_users.exclude(id__in=adjusted_user_ids):
                     ps = compute_payslip_for_user(u, pr.month, pr.year, pr)
                     total += ps.net_salary
+                # Include adjusted payslips in total
+                total += sum(s.net_salary for s in pr.payslips.filter(is_manually_adjusted=True))
                 pr.total_amount = total
                 pr.save(update_fields=['total_amount'])
             except Exception as e:
@@ -589,6 +605,9 @@ class PayslipAdjustView(APIView):
                 setattr(ps, field, d[field])
         if 'bonus' in d:
             ps.deduction_note = update_bonus_note(ps.deduction_note, ps.bonus)
+
+        # Mark as manually adjusted so regeneration won't wipe these values
+        ps.is_manually_adjusted = True
 
         # Recompute net salary
         reimb_amt = getattr(ps, 'reimbursements_amount', Decimal('0')) or Decimal('0')

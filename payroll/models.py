@@ -93,6 +93,7 @@ class PaySlip(models.Model):
     working_days = models.IntegerField(default=0)
     sessions_conducted = models.IntegerField(default=0)
     is_disbursed = models.BooleanField(default=False)
+    is_manually_adjusted = models.BooleanField(default=False, help_text="If True, manual bonus/deduction overrides are preserved during payroll regeneration.")
 
     class Meta:
         db_table = 'payroll_payslips'
