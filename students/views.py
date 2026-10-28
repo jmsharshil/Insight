@@ -40,7 +40,7 @@ def _get_student(request, student_id):
             queryset = queryset.filter(user=request.user)
 
         if request.user.role == 'parents':
-            queryset = queryset.filter(parent_links__parent__user=request.user)
+            queryset = queryset.filter(parent_links__parent=request.user)
         
         try:
             return queryset.get(id=student_id)
@@ -87,7 +87,7 @@ class StudentListView(APIView):
             qs = qs.filter(user=request.user)
 
         if request.user.role == 'parents':
-            qs = qs.filter(parent_links__parent__user=request.user).distinct()
+            qs = qs.filter(parent_links__parent=request.user).distinct()
 
         qs = apply_filters(self, request, qs)
 
