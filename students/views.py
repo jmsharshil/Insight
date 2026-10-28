@@ -39,7 +39,7 @@ def _get_student(request, student_id):
         if request.user.role == 'student':
             queryset = queryset.filter(user=request.user)
 
-        if request.user.role == 'parent':
+        if request.user.role == 'parents':
             queryset = queryset.filter(parent_links__parent__user=request.user)
         
         try:
@@ -85,9 +85,9 @@ class StudentListView(APIView):
 
         if request.user.role == 'student':
             qs = qs.filter(user=request.user)
-        
-        if request.user.role == 'parent':
-            qs = qs.filter(parent_links__parent__user=request.user)
+
+        if request.user.role == 'parents':
+            qs = qs.filter(parent_links__parent__user=request.user).distinct()
 
         qs = apply_filters(self, request, qs)
 
@@ -107,6 +107,11 @@ class StudentDetailView(APIView):
         return Response({'success': True, 'data': serializer.data}, status=status.HTTP_200_OK)
 
     def patch(self, request, student_id):
+        if request.user.role in ('student', 'parents'):
+            return Response(
+                {'success': False, 'message': 'You do not have permission to update student records.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
@@ -126,8 +131,13 @@ class StudentDetailView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-    
+
     def delete(self, request, student_id):
+        if request.user.role in ('student', 'parents'):
+            return Response(
+                {'success': False, 'message': 'You do not have permission to delete student records.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
@@ -235,6 +245,11 @@ class StudentRegenerateIDCardView(APIView):
 class StudentStatusUpdateView(APIView):
 
     def post(self, request, student_id):
+        if request.user.role in ('student', 'parents'):
+            return Response(
+                {'success': False, 'message': 'You do not have permission to update student status.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
@@ -272,6 +287,11 @@ class StudentStatusUpdateView(APIView):
 class StudentBatchAllocateView(APIView):
 
     def post(self, request, student_id):
+        if request.user.role in ('student', 'parents'):
+            return Response(
+                {'success': False, 'message': 'You do not have permission to allocate batches.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
@@ -311,6 +331,11 @@ class StudentBatchAllocateView(APIView):
 class StudentDocumentUploadView(APIView):
 
     def post(self, request, student_id):
+        if request.user.role in ('student', 'parents'):
+            return Response(
+                {'success': False, 'message': 'You do not have permission to upload documents.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
@@ -368,6 +393,11 @@ class StudentInventoryView(APIView):
         )
 
     def post(self, request, student_id):
+        if request.user.role in ('student', 'parents'):
+            return Response(
+                {'success': False, 'message': 'You do not have permission to issue inventory items.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         student = _get_student(request, student_id)
         if not student:
             return _not_found(student_id)
