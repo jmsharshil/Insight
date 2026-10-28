@@ -235,21 +235,24 @@ class PayrollListCreateView(APIView):
                     pr.save(update_fields=['total_amount'])
 
                 elif pr.status == 'draft':
-                    # Already exists as draft → regenerate payslips so edited salary/rate is reflected
+                    # Already exists as draft → regenerate, but preserve manually adjusted payslips
                     if role_filter:
                         if role_filter == 'faculty':
-                            pr.payslips.filter(faculty__isnull=False).delete()
+                            pr.payslips.filter(faculty__isnull=False, is_manually_adjusted=False).delete()
                         else:
-                            pr.payslips.filter(get_role_filter_q(role_filter, prefix='user__')).delete()
+                            pr.payslips.filter(get_role_filter_q(role_filter, prefix='user__'), is_manually_adjusted=False).delete()
                     else:
-                        pr.payslips.all().delete()
+                        pr.payslips.filter(is_manually_adjusted=False).delete()
 
-                    for fp in faculty_list:
+                    adjusted_faculty_ids = set(pr.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
+                    adjusted_user_ids = set(pr.payslips.filter(is_manually_adjusted=True, user__isnull=False).values_list('user_id', flat=True))
+
+                    for fp in faculty_list.exclude(id__in=adjusted_faculty_ids):
                         compute_payslip_for_faculty(fp, m_int, y_int, pr)
-                    for u in staff_users:
+                    for u in staff_users.exclude(id__in=adjusted_user_ids):
                         compute_payslip_for_user(u, m_int, y_int, pr)
-                    
-                    # Recalculate total from ALL payslips in the run
+
+                    # Recalculate total from ALL payslips in the run (including adjusted)
                     total = sum(ps.net_salary for ps in pr.payslips.all())
                     pr.total_amount = total
                     pr.save(update_fields=['total_amount'])
@@ -319,16 +322,21 @@ class PayrollListCreateView(APIView):
         existing_run = PayrollRun.objects.filter(branch=d['branch_id'], month=d['month'], year=d['year']).first()
         if existing_run:
             if existing_run.status == 'draft':
-                # Regenerate payslips for draft
-                existing_run.payslips.all().delete()
+                # Regenerate payslips for draft — preserve manually adjusted ones
+                existing_run.payslips.filter(is_manually_adjusted=False).delete()
                 faculty_list = FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True)
+
+                adjusted_faculty_ids = set(existing_run.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
+                adjusted_user_ids = set(existing_run.payslips.filter(is_manually_adjusted=True, user__isnull=False).values_list('user_id', flat=True))
+
                 total = Decimal(0)
-                for fp in faculty_list:
+                for fp in faculty_list.exclude(id__in=adjusted_faculty_ids):
                     ps = compute_payslip_for_faculty(fp, d['month'], d['year'], existing_run)
                     total += ps.net_salary
-                for u in staff_users:
+                for u in staff_users.exclude(id__in=adjusted_user_ids):
                     ps = compute_payslip_for_user(u, d['month'], d['year'], existing_run)
                     total += ps.net_salary
+                total += sum(s.net_salary for s in existing_run.payslips.filter(is_manually_adjusted=True))
                 existing_run.total_amount = total
                 existing_run.save(update_fields=['total_amount'])
                 message = 'Payroll regenerated.'

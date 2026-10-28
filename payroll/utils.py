@@ -772,7 +772,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     )
 
     # 10. Create PaySlip
-    PaySlip.objects.filter(payroll_run=payroll_run, faculty=faculty_profile).delete()
+    PaySlip.objects.filter(payroll_run=payroll_run, faculty=faculty_profile, is_manually_adjusted=False).delete()
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=faculty_profile,
@@ -1438,7 +1438,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         net = max(Decimal(0), net + total_reimbursements)
 
         # Delete existing for regeneration
-        PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
+        PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True, is_manually_adjusted=False).delete()
         payslip = PaySlip.objects.create(
             payroll_run=payroll_run,
             faculty=None,
@@ -1679,7 +1679,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
 
     # 11. Create PaySlip
     # Delete existing payslip for this user in this payroll run (for regeneration)
-    PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).delete()
+    PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True, is_manually_adjusted=False).delete()
 
     late_penalty_minutes = total_shortfall_penalty_minutes
 
