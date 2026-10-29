@@ -157,6 +157,13 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     FRD §4.8.4 — Hour-Based Payroll Computation.
     Reconciles SessionReport hours with QR attendance hours.
     """
+    # Ensure late entry threshold deductions are evaluated and synchronized for this month
+    try:
+        from leave.utils import check_late_entry_threshold
+        check_late_entry_threshold(faculty_profile.user, month, year)
+    except Exception as e:
+        logger.error(f"Error checking late entry threshold for faculty {faculty_profile.id}: {e}")
+
     from .models import PaySlip, SessionLatePenaltyLog, LateEntryPolicy
     from faculty.models import SessionReport, FacultyQRScanLog
     from leave.models import LeaveApplication
@@ -588,6 +595,13 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     last_day_of_month = calendar.monthrange(year, month)[1]
     month_end = date(year, month, last_day_of_month)
 
+    # Ensure late entry threshold deductions are evaluated and synchronized for this month
+    try:
+        from leave.utils import check_late_entry_threshold
+        check_late_entry_threshold(user, month, year)
+    except Exception as e:
+        logger.error(f"Error checking late entry threshold for user {user.id}: {e}")
+
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
         status='approved',
@@ -609,10 +623,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         curr = overlap_start
         while curr <= overlap_end:
             is_off_day = fac_user.is_day_off(curr) if has_custom_sched else (curr.weekday() >= 5)
-            if not is_off_day:  # Only count scheduled working days for leaves
+            if not is_off_day or getattr(l, 'is_auto_generated', False):  # Scheduled working days + auto-generated penalty
                 if l.is_half_day:
                     half_day_leave_dates.add(curr)
-                    if l.leave_type in ['unpaid', 'casual']:
+                    if l.leave_type in ['unpaid', 'casual'] or getattr(l, 'is_auto_generated', False):
                         unpaid_leave_days += Decimal('0.5')
                 else:
                     leave_dates_in_month.add(curr)
@@ -621,7 +635,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             curr += timedelta(days=1)
         leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
         
-    leave_days = len(leave_dates_in_month) + (Decimal(len(half_day_leave_dates)) * Decimal('0.5'))
+    total_half_days = sum(1 for l in approved_leaves if l.is_half_day)
+    leave_days = len(leave_dates_in_month) + (Decimal(total_half_days) * Decimal('0.5'))
     # Daily rate should be derived from monthly salary regardless of hourly rate
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = unpaid_leave_days * daily_rate
@@ -845,6 +860,13 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     Computes and returns a preview of the payslip calculation for a given month/year
     without creating any database records.
     """
+    # Ensure late entry threshold deductions are evaluated and synchronized for this month
+    try:
+        from leave.utils import check_late_entry_threshold
+        check_late_entry_threshold(faculty_profile.user, month, year)
+    except Exception as e:
+        logger.error(f"Error checking late entry threshold in preview for faculty {faculty_profile.id}: {e}")
+
     from .models import LateEntryPolicy
     from faculty.models import SessionReport, FacultyQRScanLog
     from attendance.models import EmployeeAttendanceRecord
@@ -1071,6 +1093,13 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     last_day_of_month = calendar.monthrange(year, month)[1]
     month_end = date(year, month, last_day_of_month)
 
+    # Ensure late entry threshold deductions are evaluated and synchronized for this month
+    try:
+        from leave.utils import check_late_entry_threshold
+        check_late_entry_threshold(user, month, year)
+    except Exception as e:
+        logger.error(f"Error checking late entry threshold for user {user.id}: {e}")
+
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
         status='approved',
@@ -1092,10 +1121,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         curr = overlap_start
         while curr <= overlap_end:
             is_off_day = fac_user.is_day_off(curr) if has_custom_sched else (curr.weekday() >= 5)
-            if not is_off_day:  # Only count scheduled working days for leaves
+            if not is_off_day or getattr(l, 'is_auto_generated', False):  # Scheduled working days + auto-generated penalty
                 if l.is_half_day:
                     half_day_leave_dates.add(curr)
-                    if l.leave_type in ['unpaid', 'casual']:
+                    if l.leave_type in ['unpaid', 'casual'] or getattr(l, 'is_auto_generated', False):
                         unpaid_leave_days += Decimal('0.5')
                 else:
                     leave_dates_in_month.add(curr)
@@ -1104,7 +1133,8 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             curr += timedelta(days=1)
         leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
         
-    leave_days = len(leave_dates_in_month) + (Decimal(len(half_day_leave_dates)) * Decimal('0.5'))
+    total_half_days = sum(1 for l in approved_leaves if l.is_half_day)
+    leave_days = len(leave_dates_in_month) + (Decimal(total_half_days) * Decimal('0.5'))
     # Daily rate should be derived from monthly salary regardless of hourly rate
     daily_rate = fac_salary / Decimal(30) if fac_salary else Decimal(0)
     leave_deductions = unpaid_leave_days * daily_rate
@@ -1537,6 +1567,13 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     last_day_of_month = calendar.monthrange(year, month)[1]
     month_end = date(year, month, last_day_of_month)
 
+    # Ensure late entry threshold deductions are evaluated and synchronized for this month
+    try:
+        from leave.utils import check_late_entry_threshold
+        check_late_entry_threshold(user, month, year)
+    except Exception as e:
+        logger.error(f"Error checking late entry threshold for user {user.id}: {e}")
+
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=user,
         status='approved',
@@ -1555,10 +1592,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         curr = overlap_start
         while curr <= overlap_end:
             is_off_day = user.is_day_off(curr) if has_custom_sched else (curr.weekday() >= 5)
-            if not is_off_day:  # Only count scheduled working days for leaves
+            if not is_off_day or getattr(l, 'is_auto_generated', False):  # Scheduled working days + auto-generated penalty
                 if l.is_half_day:
                     half_day_leave_dates.add(curr)
-                    if l.leave_type in ['unpaid', 'casual']:
+                    if l.leave_type in ['unpaid', 'casual'] or getattr(l, 'is_auto_generated', False):
                         unpaid_leave_days += Decimal('0.5')
                 else:
                     leave_dates_in_month.add(curr)
@@ -1567,7 +1604,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             curr += timedelta(days=1)
         leave_dates.append(f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}")
         
-    leave_days = len(leave_dates_in_month) + (Decimal(len(half_day_leave_dates)) * Decimal('0.5'))
+    total_half_days = sum(1 for l in approved_leaves if l.is_half_day)
+    leave_days = len(leave_dates_in_month) + (Decimal(total_half_days) * Decimal('0.5'))
     leave_deductions = unpaid_leave_days * daily_rate if user.employment_type == 'full_time' else Decimal(0)
 
     # Late-entry deductions do not apply to non-faculty staff.

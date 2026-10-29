@@ -988,13 +988,18 @@ class LateEntryDetailView(APIView):
             if field in request.data:
                 setattr(record, field, request.data[field])
         record.save()
+        check_late_entry_threshold(record.user, record.date.month, record.date.year)
         return Response({'success': True, 'message': 'Late entry updated.', 'data': LateEntryRecordSerializer(record).data})
 
     def delete(self, request, entry_id):
         record, err = self._get_entry(request, entry_id)
         if err:
             return err
+        target_user = record.user
+        m = record.date.month
+        y = record.date.year
         record.delete()
+        check_late_entry_threshold(target_user, m, y)
         return Response({'success': True, 'message': 'Late entry deleted.'}, status=status.HTTP_200_OK)
 
 

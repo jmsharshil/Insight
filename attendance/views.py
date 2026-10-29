@@ -436,6 +436,48 @@ class QRScanView(APIView):
                 except Exception as e:
                     logger.error(f"Faculty QR scan log failed: {e}")
 
+            # Check late entry for employee check-in
+            if scan_type == 'check_in':
+                try:
+                    import datetime
+                    from payroll.models import LateEntryPolicy
+                    from leave.models import LateEntryRecord
+                    from leave.utils import check_late_entry_threshold
+                    
+                    policy = LateEntryPolicy.objects.filter(branch_id=branch.id, is_active=True).first()
+                    grace = policy.grace_period_minutes if policy else 15
+                    
+                    emp_expected_s = None
+                    if timetable_slot_obj and hasattr(timetable_slot_obj, 'start_time') and timetable_slot_obj.start_time:
+                        emp_expected_s = timetable_slot_obj.start_time
+                    elif hasattr(user, 'get_shift_timings_for_date'):
+                        day_s, _ = user.get_shift_timings_for_date(today)
+                        emp_expected_s = day_s or getattr(user, 'work_start_time', None)
+                    else:
+                        emp_expected_s = getattr(user, 'work_start_time', None)
+                    
+                    if emp_expected_s:
+                        s_dt = datetime.datetime.combine(today, emp_expected_s)
+                        diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                        if diff > grace:
+                            late_min_val = int(diff)
+                            LateEntryRecord.objects.get_or_create(
+                                user=user, date=today,
+                                defaults={
+                                    'branch': branch,
+                                    'expected_time': emp_expected_s,
+                                    'actual_time': now.time(),
+                                    'late_minutes': late_min_val,
+                                    'grace_minutes': grace,
+                                    'is_penalized': True,
+                                    'penalty_type': 'salary_deduction',
+                                    'recorded_by': None,
+                                }
+                            )
+                            check_late_entry_threshold(user, today.month, today.year)
+                except Exception as le_err:
+                    logger.error(f"Late entry logging error in QRScanView: {le_err}")
+
             if scan_type == 'check_in':
                 if open_record:
                     return Response({
@@ -1877,6 +1919,51 @@ class EmployeeCheckInOutView(APIView):
                     )
             except Exception as e:
                 logger.error(f"Faculty QR scan log failed in employee view: {e}")
+
+        # Check late entry for employee check-in
+        if scan_type == 'check_in':
+            try:
+                import datetime
+                from payroll.models import LateEntryPolicy
+                from leave.models import LateEntryRecord
+                from leave.utils import check_late_entry_threshold
+                from branch.models import Branch as BranchModel
+                
+                b_obj = BranchModel.objects.filter(id=bid).first()
+                if b_obj:
+                    policy = LateEntryPolicy.objects.filter(branch_id=bid, is_active=True).first()
+                    grace = policy.grace_period_minutes if policy else 15
+                    
+                    emp_expected_s = None
+                    if timetable_slot_obj and hasattr(timetable_slot_obj, 'start_time') and timetable_slot_obj.start_time:
+                        emp_expected_s = timetable_slot_obj.start_time
+                    elif hasattr(user, 'get_shift_timings_for_date'):
+                        day_s, _ = user.get_shift_timings_for_date(today)
+                        emp_expected_s = day_s or getattr(user, 'work_start_time', None)
+                    else:
+                        emp_expected_s = getattr(user, 'work_start_time', None)
+                    
+                    if emp_expected_s:
+                        s_dt = datetime.datetime.combine(today, emp_expected_s)
+                        diff = (now.replace(tzinfo=None) - s_dt).total_seconds() / 60
+                        if diff > grace:
+                            late_min_val = int(diff)
+                            LateEntryRecord.objects.get_or_create(
+                                user=user, date=today,
+                                defaults={
+                                    'branch': b_obj,
+                                    'expected_time': emp_expected_s,
+                                    'actual_time': now.time(),
+                                    'late_minutes': late_min_val,
+                                    'grace_minutes': grace,
+                                    'is_penalized': True,
+                                    'penalty_type': 'salary_deduction',
+                                    'recorded_by': None,
+                                }
+                            )
+                            check_late_entry_threshold(user, today.month, today.year)
+            except Exception as le_err:
+                logger.error(f"Late entry logging error in EmployeeCheckInOutView: {le_err}")
 
         return Response({
             'success': True,

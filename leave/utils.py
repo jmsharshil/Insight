@@ -148,131 +148,153 @@ def initialize_leave_balances_for_year(branch, year):
 
 def check_late_entry_threshold(user, month, year):
     """
-    NEW (FRD §4.9.3): called after every LateEntryRecord is created.
-    If monthly penalized late count >= threshold, auto-create half-day leave.
+    FRD §4.9.3 — Late Entry Threshold Rules:
+    - Every 3 late entries in a calendar month triggers 1 half-day deduction (0.5 day).
+    - If late entry count is not a multiple of 3, the remainder has NO deduction.
+    - Late entry counts are strictly monthly and refreshed each calendar month (no rollover).
     """
     from .models import LateEntryRecord, LeaveApplication, LeaveBalance
     from payroll.models import LateEntryPolicy
 
-    # 1. Count penalized late entries for this month
-    count = LateEntryRecord.objects.filter(
+    # 1. Resolve branch
+    branch_id = getattr(user, 'branch_id', None)
+    if not branch_id and hasattr(user, 'faculty_profile'):
+        branch_id = getattr(user.faculty_profile, 'branch_id', None)
+    if not branch_id and hasattr(user, 'branch') and user.branch:
+        branch_id = user.branch.id
+
+    policy = None
+    if branch_id:
+        policy = LateEntryPolicy.objects.filter(branch_id=branch_id, is_active=True).first()
+
+    # If policy explicitly disables auto halfday deduction, skip
+    if policy and not policy.auto_halfday_deduction:
+        return
+
+    # Multiplier threshold (default: 3)
+    threshold = (policy.late_entry_threshold if policy and policy.late_entry_threshold > 0 else 3)
+
+    # 2. Count penalized late entries for THIS calendar month only (refreshed monthly)
+    late_entries = list(LateEntryRecord.objects.filter(
         user=user,
         date__month=month,
         date__year=year,
         is_penalized=True,
-    ).count()
+    ).order_by('date', 'created_at'))
+    count = len(late_entries)
 
-    # 2. Get policy
-    branch_id = getattr(user, 'branch_id', None)
-    if not branch_id:
-        if hasattr(user, 'faculty_profile'):
-            branch_id = user.faculty_profile.branch_id
-    if not branch_id:
-        return
+    # 3. Calculate target half-days: 1 half-day per 3 late entries; remainder has no deduction
+    target_half_days = count // threshold
 
-    policy = LateEntryPolicy.objects.filter(branch_id=branch_id, is_active=True).first()
-    if not policy:
-        return
-
-    # 3. Check if auto_halfday_deduction is enabled
-    if not policy.auto_halfday_deduction:
-        return
-
-    # 4. Check threshold
-    if count < policy.late_entry_threshold:
-        return
-
-    # 5. Idempotent check: only one auto-deduction per user per month
-    today = timezone.now().date()
-    existing = LeaveApplication.objects.filter(
+    # 4. Check existing auto-generated leaves for this user in this calendar month
+    existing_leaves = list(LeaveApplication.objects.filter(
         applied_by=user,
         is_auto_generated=True,
         from_date__month=month,
         from_date__year=year,
-    ).exists()
-    if existing:
-        return
+    ).order_by('from_date', 'created_at'))
+    existing_count = len(existing_leaves)
 
-    # 6. Auto-create half-day leave
-    # Try casual first, fall back to unpaid if balance exhausted
-    leave_type = 'casual'
-    balance = LeaveBalance.objects.filter(
-        user=user, leave_type='casual', year=year,
-    ).first()
-    if not balance or balance.remaining_days < Decimal('0.5'):
-        leave_type = 'unpaid'
+    # 5. Add any newly triggered half-day deductions
+    if target_half_days > existing_count:
+        for k in range(existing_count + 1, target_half_days + 1):
+            trigger_idx = (k * threshold) - 1
+            if trigger_idx < len(late_entries):
+                trigger_record = late_entries[trigger_idx]
+                leave_date = trigger_record.date
+                trigger_record.auto_deduction_triggered = True
+                trigger_record.save(update_fields=['auto_deduction_triggered'])
+            else:
+                leave_date = timezone.now().date()
+                if leave_date.month != month or leave_date.year != year:
+                    leave_date = late_entries[-1].date if late_entries else timezone.now().date()
 
-    leave = LeaveApplication.objects.create(
-        applied_by=user,
-        branch_id=branch_id,
-        leave_type=leave_type,
-        from_date=today,
-        to_date=today,
-        is_half_day=True,
-        total_days=Decimal('0.5'),
-        reason=f"Auto-deducted: {count} late entries in {month}/{year}",
-        is_auto_generated=True,
-        status='approved',
-    )
+            # Determine leave type: try casual first, fall back to unpaid if balance exhausted
+            leave_type = 'casual'
+            balance = LeaveBalance.objects.filter(
+                user=user, leave_type='casual', year=year,
+            ).first()
+            if not balance or balance.remaining_days < Decimal('0.5'):
+                leave_type = 'unpaid'
 
-    # Deduct balance
-    if leave_type != 'unpaid' and balance:
-        balance.used_days += Decimal('0.5')
-        balance.save(update_fields=['used_days'])
-
-    # Mark latest LateEntryRecord
-    latest = LateEntryRecord.objects.filter(
-        user=user,
-        date__month=month,
-        date__year=year,
-        is_penalized=True,
-    ).order_by('-date', '-created_at').first()
-    if latest:
-        latest.auto_deduction_triggered = True
-        latest.save(update_fields=['auto_deduction_triggered'])
-
-    # Notify user
-    notify(
-        str(user.id),
-        title="Half-day auto-deducted",
-        body=f"You have {count} late entries this month. 0.5 leave day auto-deducted.",
-        metadata={"month": month, "year": year},
-        email_template='emails/leave_auto_deducted.html',
-        email_context={
-            'user_name': user.name,
-            'late_entries_count': count,
-            'month': month,
-            'year': year
-        }
-    )
-    # WhatsApp: leave_auto_deducted_ to the employee
-    try:
-        if getattr(user, 'phone', None):
-            from chat.notifications import send_whatsapp_with_fallback
-            send_whatsapp_with_fallback(
-                to=user.phone,
-                template_name="leave_auto_deducted_",
-                language_code="en",
-                components=[{
-                    "type": "body",
-                    "parameters": [
-                        {"type": "text", "text": user.name},
-                        {"type": "text", "text": str(count)},
-                        {"type": "text", "text": str(month)},
-                        {"type": "text", "text": str(year)},
-                    ]
-                }],
-                fallback_body=(
-                    f"Hello {user.name},\n\n"
-                    f"0.5 days of leave have been auto-deducted from your balance due to {count} late entries in {month}/{year}.\n\n"
-                    "Please adhere to timing policies to avoid further deductions."
-                ),
-                user_id=str(user.id),
+            milestone = k * threshold
+            leave = LeaveApplication.objects.create(
+                applied_by=user,
+                branch_id=branch_id,
+                leave_type=leave_type,
+                from_date=leave_date,
+                to_date=leave_date,
+                is_half_day=True,
+                total_days=Decimal('0.5'),
+                reason=f"Auto-deducted: {milestone} late entries in {month}/{year}",
+                is_auto_generated=True,
+                status='approved',
             )
-    except Exception as wa_err:
-        logger.error(f"[Leave Auto-Deducted] WhatsApp to user {user.id} failed: {wa_err}")
 
-    logger.info(f"Auto half-day deduction for user={user.id}, month={month}/{year}")
+            # Deduct balance if casual
+            if leave_type != 'unpaid' and balance:
+                balance.used_days += Decimal('0.5')
+                balance.save(update_fields=['used_days'])
+
+            # Notify user
+            notify(
+                str(user.id),
+                title="Half-day auto-deducted",
+                body=f"You have reached {milestone} late entries this month ({month}/{year}). 0.5 leave day auto-deducted.",
+                metadata={"month": month, "year": year, "late_entries_count": milestone},
+                email_template='emails/leave_auto_deducted.html',
+                email_context={
+                    'user_name': user.name,
+                    'late_entries_count': milestone,
+                    'month': month,
+                    'year': year
+                }
+            )
+            # WhatsApp: leave_auto_deducted_ to the employee
+            try:
+                if getattr(user, 'phone', None):
+                    from chat.notifications import send_whatsapp_with_fallback
+                    send_whatsapp_with_fallback(
+                        to=user.phone,
+                        template_name="leave_auto_deducted_",
+                        language_code="en",
+                        components=[{
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": user.name},
+                                {"type": "text", "text": str(milestone)},
+                                {"type": "text", "text": str(month)},
+                                {"type": "text", "text": str(year)},
+                            ]
+                        }],
+                        fallback_body=(
+                            f"Hello {user.name},\n\n"
+                            f"0.5 days of leave have been auto-deducted from your balance due to {milestone} late entries in {month}/{year}.\n\n"
+                            "Please adhere to timing policies to avoid further deductions."
+                        ),
+                        user_id=str(user.id),
+                    )
+            except Exception as wa_err:
+                logger.error(f"[Leave Auto-Deducted] WhatsApp to user {user.id} failed: {wa_err}")
+
+            logger.info(f"Auto half-day deduction #{k} ({milestone} late entries) for user={user.id}, month={month}/{year}")
+
+    elif target_half_days < existing_count:
+        # Excess auto-deductions (e.g. late entries deleted or unmarked)
+        for leave in existing_leaves[target_half_days:]:
+            if leave.leave_type != 'unpaid':
+                bal = LeaveBalance.objects.filter(user=user, leave_type=leave.leave_type, year=year).first()
+                if bal:
+                    bal.used_days = max(Decimal(0), bal.used_days - Decimal('0.5'))
+                    bal.save(update_fields=['used_days'])
+            leave.delete()
+
+    # Ensure trigger flags on late entry records accurately reflect milestones
+    for i, entry in enumerate(late_entries):
+        is_trigger = ((i + 1) % threshold == 0) and ((i + 1) <= target_half_days * threshold)
+        if entry.auto_deduction_triggered != is_trigger:
+            entry.auto_deduction_triggered = is_trigger
+            entry.save(update_fields=['auto_deduction_triggered'])
 
 
 # ── WhatsApp Student Leave Parent Approval Handlers ───────────────────────────
