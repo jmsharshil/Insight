@@ -957,7 +957,51 @@ class SalesActivityPhotoView(APIView):
         ).exists()
 
         if photo_type == 'start_selfie':
-            if already_checked_in or SalesAttendanceApproval.objects.filter(
+            if already_checked_in:
+                # Check-in is already recorded for today (e.g. via QR scan). No photo check-in required.
+                existing_record = EmployeeAttendanceRecord.objects.filter(
+                    user=activity.user,
+                    date=today,
+                    checked_in_at__isnull=False,
+                ).order_by('-checked_in_at').first()
+                method = existing_record.check_in_method if existing_record else 'qr'
+                method_display = (
+                    existing_record.get_check_in_method_display()
+                    if existing_record and hasattr(existing_record, 'get_check_in_method_display') and existing_record.check_in_method
+                    else ('QR Scan' if method == 'qr' else method.title())
+                )
+
+                # If a photo was supplied, save it to the activity so the photo history is preserved
+                photo_file = request.FILES.get('photo')
+                if photo_file:
+                    serializer = SalesActivityPhotoSerializer(data={
+                        'photo_type': photo_type,
+                        'photo': photo_file,
+                        'name': request.data.get('name', ''),
+                        'latitude': request.data.get('latitude'),
+                        'longitude': request.data.get('longitude'),
+                        'odometer_kms': request.data.get('odometer_kms') or None,
+                        'captured_at': request.data.get('captured_at') or timezone.now(),
+                    })
+                    serializer.is_valid(raise_exception=True)
+                    saved_photo = serializer.save(activity=activity)
+                    resp_data = SalesActivityPhotoSerializer(saved_photo, context={'request': request}).data
+                else:
+                    resp_data = {}
+
+                resp_data['success'] = True
+                resp_data['already_checked_in'] = True
+                resp_data['check_in_method'] = method
+                resp_data['detail'] = f'Check-in is already recorded for today via {method_display}. Photo check-in is not required.'
+                resp_data['attendance'] = {
+                    'record_id': str(existing_record.id) if existing_record else None,
+                    'checked_in_at': existing_record.checked_in_at.isoformat() if existing_record and existing_record.checked_in_at else None,
+                    'check_in_method': method,
+                    'status': existing_record.status if existing_record else 'present',
+                }
+                return Response(resp_data, status=status.HTTP_200_OK)
+
+            if SalesAttendanceApproval.objects.filter(
                 user=activity.user, date=today, approval_type='check_in', status__in=['pending', 'approved']
             ).exists():
                 return Response({'detail': 'Start selfie check-in has already been submitted for today.'}, status=status.HTTP_400_BAD_REQUEST)

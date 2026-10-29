@@ -233,6 +233,9 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
     violations = serializers.SerializerMethodField()
     attendance = serializers.SerializerMethodField()
     attendance_approvals = serializers.SerializerMethodField()
+    is_checked_in = serializers.SerializerMethodField()
+    check_in_method = serializers.SerializerMethodField()
+    check_in_required = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesDailyActivity
@@ -244,15 +247,37 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'target_name', 'target_number',
             'location_link', 'from_date', 'to_date',
             'self_vehicle',
-            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations', 'attendance', 'attendance_approvals',
+            'photos', 'odometer_reading', 'timings', 'event_photo_slots', 'inventory_items', 'allocations', 'violations', 'attendance', 'attendance_approvals', 'is_checked_in', 'check_in_method', 'check_in_required',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'attendance', 'attendance_approvals', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'attendance', 'attendance_approvals', 'is_checked_in', 'check_in_method', 'check_in_required', 'created_at', 'updated_at']
 
     def get_attendance_approvals(self, obj):
         approvals = obj.attendance_approvals.all()
         return SalesAttendanceApprovalSerializer(approvals, many=True, context=self.context).data
 
+
+    def get_is_checked_in(self, obj):
+        from attendance.models import EmployeeAttendanceRecord
+        date = obj.activity_date or timezone.localdate()
+        return EmployeeAttendanceRecord.objects.filter(
+            user=obj.user,
+            date=date,
+            checked_in_at__isnull=False,
+        ).exists()
+
+    def get_check_in_method(self, obj):
+        from attendance.models import EmployeeAttendanceRecord
+        date = obj.activity_date or timezone.localdate()
+        record = EmployeeAttendanceRecord.objects.filter(
+            user=obj.user,
+            date=date,
+            checked_in_at__isnull=False,
+        ).order_by('-checked_in_at').first()
+        return record.check_in_method if record else None
+
+    def get_check_in_required(self, obj):
+        return not self.get_is_checked_in(obj)
 
     def get_attendance(self, obj):
         from attendance.models import EmployeeAttendanceRecord
@@ -315,19 +340,22 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             
             if obj.name == "Daily Field Operations":
                 start_selfie_photo = next((p for p in photos if p.photo_type == 'start_selfie'), None)
+                from attendance.models import EmployeeAttendanceRecord
+                attendance_rec = EmployeeAttendanceRecord.objects.filter(
+                    user=obj.user,
+                    date=last_date,
+                    checked_in_at__isnull=False,
+                ).order_by('-checked_in_at').first()
+
                 if start_selfie_photo:
-                    from attendance.models import EmployeeAttendanceRecord
-                    # If they checked in via QR, the attendance record's checked_in_at will be BEFORE the selfie capture time
-                    is_qr_checkin = EmployeeAttendanceRecord.objects.filter(
-                        user=obj.user,
-                        date=last_date,
-                        checked_in_at__lt=start_selfie_photo.captured_at
-                    ).exists()
-                    
+                    # If they checked in via QR, attendance record's checked_in_at will be BEFORE the selfie capture time
+                    is_qr_checkin = (attendance_rec and attendance_rec.check_in_method == 'qr' and attendance_rec.checked_in_at < start_selfie_photo.captured_at)
                     if not is_qr_checkin:
                         violations.append({'type': 'sales_check_in_selfie', 'description': 'Checked in with start selfie instead of QR code.'})
                 else:
-                    violations.append({'type': 'sales_missing_photo', 'description': 'Missing start_selfie photo.'})
+                    # Only flag missing start selfie if employee has not checked in at all
+                    if not (attendance_rec and attendance_rec.checked_in_at):
+                        violations.append({'type': 'sales_missing_photo', 'description': 'Missing start_selfie photo.'})
                     
                 if 'end_selfie' not in photo_types:
                     violations.append({'type': 'sales_missing_photo', 'description': 'Missing end_selfie photo (did not check out).'})
@@ -494,6 +522,10 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
     activities = SalesDailyActivitySerializer(many=True, read_only=True)
     date = serializers.DateField(source='plan_date', required=False)
     photos = serializers.SerializerMethodField()
+    attendance = serializers.SerializerMethodField()
+    is_checked_in = serializers.SerializerMethodField()
+    check_in_method = serializers.SerializerMethodField()
+    check_in_required = serializers.SerializerMethodField()
     custom_reminders = SalesPlanReminderSerializer(many=True, required=False)
 
     class Meta:
@@ -501,16 +533,60 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'user_name', 'plan_date', 'date', 'type',
             'start_time', 'end_time', 'place', 'description', 'status', 'self_vehicle',
-            'photos','reminder_two_days_before_sent',
+            'photos', 'attendance', 'is_checked_in', 'check_in_method', 'check_in_required',
+            'reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'activities', 'custom_reminders', 'created_at', 'updated_at',
         ]
         read_only_fields = [
-            'id', 'user', 'user_name', 'photos', 'activities',
+            'id', 'user', 'user_name', 'photos', 'attendance', 'is_checked_in', 'check_in_method', 'check_in_required', 'activities',
             'reminder_two_days_before_sent',
             'reminder_one_day_before_sent', 'reminder_day_of_event_sent',
             'created_at', 'updated_at'
         ]
+
+    def get_attendance(self, obj):
+        from attendance.models import EmployeeAttendanceRecord
+        date = obj.plan_date or timezone.localdate()
+        record = EmployeeAttendanceRecord.objects.filter(
+            user=obj.user,
+            date=date,
+        ).order_by('-checked_in_at').first()
+        if not record:
+            return None
+        return {
+            'record_id': str(record.id),
+            'status': record.status,
+            'status_display': record.get_status_display(),
+            'checked_in_at': record.checked_in_at.isoformat() if record.checked_in_at else None,
+            'checked_out_at': record.checked_out_at.isoformat() if record.checked_out_at else None,
+            'check_in_method': record.check_in_method,
+            'check_in_method_display': record.get_check_in_method_display() if record.check_in_method else None,
+            'check_out_method': record.check_out_method,
+            'check_out_method_display': record.get_check_out_method_display() if record.check_out_method else None,
+        }
+
+    def get_is_checked_in(self, obj):
+        from attendance.models import EmployeeAttendanceRecord
+        date = obj.plan_date or timezone.localdate()
+        return EmployeeAttendanceRecord.objects.filter(
+            user=obj.user,
+            date=date,
+            checked_in_at__isnull=False,
+        ).exists()
+
+    def get_check_in_method(self, obj):
+        from attendance.models import EmployeeAttendanceRecord
+        date = obj.plan_date or timezone.localdate()
+        record = EmployeeAttendanceRecord.objects.filter(
+            user=obj.user,
+            date=date,
+            checked_in_at__isnull=False,
+        ).order_by('-checked_in_at').first()
+        return record.check_in_method if record else None
+
+    def get_check_in_required(self, obj):
+        return not self.get_is_checked_in(obj)
 
     def get_photos(self, obj):
         try:
