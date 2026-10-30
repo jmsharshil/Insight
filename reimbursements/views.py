@@ -240,7 +240,7 @@ class ReimbursementDetailAPIView(APIView):
             try:
                 from django.contrib.auth import get_user_model
                 from core.utils import get_role_filter_q
-                from .utils import send_reimbursement_whatsapp_notification, get_reimbursement_proof_url
+                from .utils import send_reimbursement_whatsapp_notification, get_reimbursement_proof_url, send_reimbursement_update_whatsapp_notification
 
                 User = get_user_model()
                 applicant_name = updated.user.name or updated.user.email or 'Staff Member'
