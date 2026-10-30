@@ -144,6 +144,99 @@ def send_reimbursement_whatsapp_notification(reimbursement, approver, note_prefi
     except Exception as e:
         logger.error("[WA REIMB] Failed to send reimbursement_claim_ to %s: %s", approver.id, e)
 
+def send_reimbursement_update_whatsapp_notification(reimbursement, approver, old_amount=None):
+    """
+    Sends WhatsApp notification to an approver when a pending reimbursement claim's
+    amount is updated by the claimant.
+
+    Uses the Meta template 'reimbursement_claim_update_' which has the same body
+    parameters and quick-reply buttons (Approve / Reject) as 'reimbursement_claim_'.
+
+    Parameters (same order as reimbursement_claim_):
+        {{1}} applicant_name
+        {{2}} title
+        {{3}} amount  (new amount, with old amount noted in description)
+        {{4}} expense_date
+        {{5}} description  (includes old amount context + proof URL)
+    Buttons:
+        index 0 -> quick_reply payload: reimb_approve:<uuid>
+        index 1 -> quick_reply payload: reimb_reject:<uuid>
+    """
+    if not approver or not getattr(approver, 'phone', None):
+        return
+
+    from chat.notifications import send_whatsapp_with_fallback
+
+    raw_applicant_name = getattr(reimbursement.user, 'name', None) or getattr(reimbursement.user, 'email', 'Staff Member')
+    applicant_name = " ".join(str(raw_applicant_name).split())[:60]
+
+    title_text = " ".join(str(reimbursement.title or 'Expense Claim').split())[:60]
+    amount_str = f"{reimbursement.amount:.2f}" if reimbursement.amount is not None else "0.00"
+    expense_date_str = str(reimbursement.expense_date or timezone.now().date())
+
+    proof_url = get_reimbursement_proof_url(reimbursement)
+    raw_desc = " ".join(str(reimbursement.description or '').split())
+
+    # Build description parameter — include old amount context + proof link
+    desc_parts = []
+    if old_amount is not None:
+        old_fmt = f"{old_amount:.2f}"
+        desc_parts.append(f"Amount updated from Rs.{old_fmt} to Rs.{amount_str}")
+    if raw_desc:
+        desc_parts.append(raw_desc[:150])
+    if proof_url:
+        desc_parts.append(f"Doc: {proof_url}")
+    description_text = " | ".join(desc_parts)[:300] if desc_parts else "No description provided"
+    description_text = " ".join(description_text.split())  # ensure single-line
+
+    fallback_body = (
+        f"[UPDATED CLAIM] {applicant_name} updated their reimbursement claim '{title_text}' "
+        f"(Rs.{amount_str}) on {expense_date_str}. "
+        f"{description_text}"
+    )
+
+    components = [
+        {
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": applicant_name},    # {{1}}
+                {"type": "text", "text": title_text},         # {{2}}
+                {"type": "text", "text": amount_str},         # {{3}}
+                {"type": "text", "text": expense_date_str},   # {{4}}
+                {"type": "text", "text": description_text},   # {{5}}
+            ]
+        },
+        {
+            "type": "button",
+            "sub_type": "quick_reply",
+            "index": "0",
+            "parameters": [{"type": "payload", "payload": f"reimb_approve:{reimbursement.id}"}]
+        },
+        {
+            "type": "button",
+            "sub_type": "quick_reply",
+            "index": "1",
+            "parameters": [{"type": "payload", "payload": f"reimb_reject:{reimbursement.id}"}]
+        },
+    ]
+
+    try:
+        send_whatsapp_with_fallback(
+            to=approver.phone,
+            template_name="reimbursement_claim_update_",
+            language_code="en",
+            components=components,
+            fallback_body=fallback_body,
+            user_id=str(approver.id),
+        )
+        logger.info(
+            "[WA REIMB] Sent reimbursement_claim_update_ to %s (%s) for claim %s",
+            getattr(approver, 'name', approver.id), approver.phone, reimbursement.id
+        )
+    except Exception as e:
+        logger.error("[WA REIMB] Failed to send reimbursement_claim_update_ to %s: %s", approver.id, e)
+
+
 
 def send_reimbursement_status_whatsapp_to_applicant(reimbursement, status_action, reviewer_name="Admin"):
     """

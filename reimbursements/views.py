@@ -128,7 +128,7 @@ class ReimbursementListCreateAPIView(APIView):
             from django.contrib.auth import get_user_model
             from chat.notifications import send_system_notification
             from core.utils import get_role_filter_q
-            from .utils import send_reimbursement_whatsapp_notification, get_reimbursement_proof_url
+            from .utils import send_reimbursement_whatsapp_notification, send_reimbursement_update_whatsapp_notification, get_reimbursement_proof_url
             User = get_user_model()
 
             applicant_name = request.user.name or request.user.email
@@ -225,12 +225,99 @@ class ReimbursementDetailAPIView(APIView):
         if reimb.status != 'pending':
             return Response({'success': False, 'message': f'Cannot edit claim with status {reimb.status}.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Capture old amount before update to detect changes
+        old_amount = reimb.amount
+
         serializer = ReimbursementUpdateSerializer(reimb, data=request.data, partial=True)
         if not serializer.is_valid():
             return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer.save()
-        return Response({'success': True, 'message': 'Reimbursement updated.', 'data': ReimbursementSerializer(reimb).data})
+        updated = serializer.save()
+
+        # ── Re-notify approvers if amount changed ────────────────────────────
+        amount_changed = ('amount' in request.data) and (updated.amount != old_amount)
+        if amount_changed:
+            try:
+                from django.contrib.auth import get_user_model
+                from core.utils import get_role_filter_q
+                from .utils import send_reimbursement_whatsapp_notification, get_reimbursement_proof_url
+
+                User = get_user_model()
+                applicant_name = updated.user.name or updated.user.email or 'Staff Member'
+                old_fmt = f"{old_amount:.2f}"
+                new_fmt = f"{updated.amount:.2f}"
+
+                notif_title = 'Reimbursement Claim Updated'
+                notif_body = (
+                    f"{applicant_name} updated their reimbursement claim '{updated.title}': "
+                    f"amount changed from Rs.{old_fmt} to Rs.{new_fmt}. Please review and approve or reject."
+                )
+                notif_meta = {
+                    'reimbursement_id': str(updated.id),
+                    'type': 'reimbursement_claim',
+                    'route': f"/reimbursements/{updated.id}",
+                    'proof_url': get_reimbursement_proof_url(updated),
+                    'amount_changed': True,
+                    'old_amount': old_fmt,
+                    'new_amount': new_fmt,
+                    'skip_whatsapp': True,
+                }
+
+                # Gather all approvers (super_admin + accountant), exclude claimant
+                target_qs = User.objects.filter(
+                    get_role_filter_q(['super_admin', 'accountant']),
+                    is_active=True
+                )
+                if updated.branch:
+                    branch_accountants = User.objects.filter(
+                        get_role_filter_q(['accountant']),
+                        is_active=True
+                    ).filter(
+                        Q(branch=updated.branch) | Q(branches=updated.branch)
+                    )
+                    target_qs = target_qs | branch_accountants
+
+                all_approvers = list(target_qs.distinct())
+                other_approvers = [u for u in all_approvers if u.id != updated.user_id]
+                target_users = other_approvers if other_approvers else all_approvers
+
+                logger.info(
+                    "[Reimbursement] Amount changed %s -> %s for claim %s; notifying %d approvers.",
+                    old_fmt, new_fmt, updated.id, len(target_users)
+                )
+
+                for u in target_users:
+                    # In-app / email notification
+                    try:
+                        send_system_notification(
+                            user_id=str(u.id),
+                            title=notif_title,
+                            body=notif_body,
+                            metadata=notif_meta,
+                            notification_type='payroll',
+                        )
+                    except Exception as notif_err:
+                        logger.error("[Reimbursement] In-app notify to %s failed: %s", u.id, notif_err)
+
+                    # WhatsApp: reimbursement_claim_update_ template with Approve / Reject buttons
+                    try:
+                        send_reimbursement_update_whatsapp_notification(
+                            updated,
+                            u,
+                            old_amount=old_amount,
+                        )
+                    except Exception as wa_err:
+                        logger.error("[Reimbursement] WhatsApp to approver %s failed: %s", u.id, wa_err)
+
+            except Exception as e:
+                logger.error("[Reimbursement] Failed to send amount-change notifications for %s: %s", pk, e)
+
+        return Response({
+            'success': True,
+            'message': 'Reimbursement updated.' + (' Approvers have been notified of the amount change.' if amount_changed else ''),
+            'amount_changed': amount_changed,
+            'data': ReimbursementSerializer(updated).data,
+        })
 
     def delete(self, request, pk):
         reimb = self._get_object(request, pk)
