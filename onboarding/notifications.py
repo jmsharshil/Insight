@@ -314,7 +314,7 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
             else:
                 recipients = [u for u in base_qs if getattr(u, 'phone', None) and str(u.phone).strip()]
 
-    components, _ = build_payment_approve_reject_components(admission)
+    components, fallback_body = build_payment_approve_reject_components(admission)
 
     for user in recipients:
         phone = getattr(user, 'phone', None)
@@ -327,6 +327,7 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
                 language_code="en",
                 components=components,
                 user_id=str(user.id),
+                fallback_body=fallback_body,
             )
             logger.info(
                 "[WA ADMISSION] Sent payment_approve_reject (Level %s) to %s (%s) for admission %s",

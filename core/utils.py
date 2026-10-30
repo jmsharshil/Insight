@@ -347,23 +347,32 @@ def _get_sender() -> WhatsAppSender:
 
 import requests
 
-def log_template_to_crm(phone_number: str, template_text: str):
+def log_template_to_crm(phone_number: str, template_text: str, message_id: str = None):
     """
     Sends a log of the outbound template to the CRM so it appears in the chat history.
+    Includes the wamid (message_id) from Meta API and an IST timestamp.
     """
-    # Our CRM Webhook URL 
+    import pytz
+    from django.utils import timezone as _tz
+    IST = pytz.timezone("Asia/Kolkata")
+    now_ist = _tz.now().astimezone(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+
+    # Our CRM Webhook URL
     crm_webhook_url = "https://whatsappcrmsaas-emdke9dnb4f8bne6.centralindia-01.azurewebsites.net/webhook/"
     payload = {
         "is_insight_log": True,
         "phone": phone_number,
         "content": template_text,
         "bot_name": "Insights",
-        "phone_number_id": "1168578376348442"
+        "phone_number_id": "1168578376348442",
+        "timestamp": now_ist,
     }
+    if message_id:
+        payload["message_id"] = message_id
     try:
         # Fire-and-forget request with a short timeout to prevent blocking your logic
         requests.post(crm_webhook_url, json=payload, timeout=5)
-        logger.info(f"[CRM LOG] Forwarded outbound template for {phone_number} to CRM")
+        logger.info(f"[CRM LOG] Forwarded outbound template for {phone_number} to CRM (wamid={message_id})")
     except Exception as e:
         logger.error(f"[CRM LOG] Failed to forward outbound template to CRM: {e}")
 
@@ -395,12 +404,17 @@ def _run_whatsapp_send(*, method: str, **send_kwargs):
     try:
         result = fn(**send_kwargs)
         
-        # [NEW STEP] Call the logger function to notify the CRM
+        # Log to CRM: extract wamid from Meta API response and include IST timestamp
         if method == "send_template" and send_kwargs.get("to"):
             to = send_kwargs.get("to")
             template_name = send_kwargs.get("template_name", "unknown")
             template_text = fallback_body if fallback_body else f"Sent WhatsApp template: {template_name}"
-            log_template_to_crm(to, template_text)
+            wamid = None
+            if isinstance(result, dict):
+                messages = result.get("messages", [])
+                if messages:
+                    wamid = messages[0].get("id")
+            log_template_to_crm(to, template_text, message_id=wamid)
             
         return result
     except WhatsAppAPIError as exc:
