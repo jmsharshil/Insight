@@ -160,9 +160,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # Ensure late entry threshold deductions are evaluated and synchronized for this month
     try:
         from leave.utils import check_late_entry_threshold
-        check_late_entry_threshold(faculty_profile.user, month, year)
+        if getattr(faculty_profile, 'user', None):
+            check_late_entry_threshold(faculty_profile.user, month, year)
     except Exception as e:
-        logger.error(f"Error checking late entry threshold for faculty {faculty_profile.id}: {e}")
+        logger.error(f"Error checking late entry threshold for faculty {getattr(faculty_profile, 'id', None)}: {e}")
 
     from .models import PaySlip, SessionLatePenaltyLog, LateEntryPolicy
     from faculty.models import SessionReport, FacultyQRScanLog
@@ -598,9 +599,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # Ensure late entry threshold deductions are evaluated and synchronized for this month
     try:
         from leave.utils import check_late_entry_threshold
-        check_late_entry_threshold(user, month, year)
+        if getattr(faculty_profile, 'user', None):
+            check_late_entry_threshold(faculty_profile.user, month, year)
     except Exception as e:
-        logger.error(f"Error checking late entry threshold for user {user.id}: {e}")
+        logger.error(f"Error checking late entry threshold for faculty {getattr(faculty_profile, 'id', None)}: {e}")
 
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
@@ -863,9 +865,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     # Ensure late entry threshold deductions are evaluated and synchronized for this month
     try:
         from leave.utils import check_late_entry_threshold
-        check_late_entry_threshold(faculty_profile.user, month, year)
+        if getattr(faculty_profile, 'user', None):
+            check_late_entry_threshold(faculty_profile.user, month, year)
     except Exception as e:
-        logger.error(f"Error checking late entry threshold in preview for faculty {faculty_profile.id}: {e}")
+        logger.error(f"Error checking late entry threshold in preview for faculty {getattr(faculty_profile, 'id', None)}: {e}")
 
     from .models import LateEntryPolicy
     from faculty.models import SessionReport, FacultyQRScanLog
@@ -1096,9 +1099,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     # Ensure late entry threshold deductions are evaluated and synchronized for this month
     try:
         from leave.utils import check_late_entry_threshold
-        check_late_entry_threshold(user, month, year)
+        if getattr(faculty_profile, 'user', None):
+            check_late_entry_threshold(faculty_profile.user, month, year)
     except Exception as e:
-        logger.error(f"Error checking late entry threshold for user {user.id}: {e}")
+        logger.error(f"Error checking late entry threshold in preview for faculty {getattr(faculty_profile, 'id', None)}: {e}")
 
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=faculty_profile.user,
@@ -1570,9 +1574,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     # Ensure late entry threshold deductions are evaluated and synchronized for this month
     try:
         from leave.utils import check_late_entry_threshold
-        check_late_entry_threshold(user, month, year)
+        if user:
+            check_late_entry_threshold(user, month, year)
     except Exception as e:
-        logger.error(f"Error checking late entry threshold for user {user.id}: {e}")
+        logger.error(f"Error checking late entry threshold for user {getattr(user, 'id', None)}: {e}")
 
     approved_leaves = LeaveApplication.objects.filter(
         applied_by=user,
