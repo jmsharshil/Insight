@@ -8,8 +8,8 @@ import uuid
 from auth_user.models import User
 
 FORM_TYPE_CHOICES = [
-    ('contact', 'Contact Us'),
-    ('inquiry', 'Inquiry Form'),
+    ('contact', 'Inquiry Form'),
+    ('inquiry', 'Enrollment Form'),
     ('admission', 'Admission Form'),
     # 'registration' removed — handled by onboarding app
 ]
