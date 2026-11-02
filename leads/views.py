@@ -2803,16 +2803,29 @@ class LeadTransferRequestReviewView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
+        # Mark the super admin's lead reassignment notification as read
+        # (the frontend still calls this endpoint when the admin acknowledges the notification)
+        lead_id = request.data.get('lead_id') or pk
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='lead_reassigned',
+                record_id=str(lead_id),
+                user=request.user,
+                is_final=True,
+            )
+        except Exception as exc:
+            logger.error(f"Failed to mark lead reassignment notification as read: {exc}")
+
         return Response(
             {
-                "success": False,
+                "success": True,
                 "message": (
-                    "Lead transfer approval is no longer required. "
-                    "Use POST /api/leads/transfer-requests/ to reassign a lead directly. "
-                    "Super admins are notified automatically."
+                    "Notification marked as read. "
+                    "Lead transfer approval is no longer required — reassignment is immediate."
                 ),
             },
-            status=status.HTTP_410_GONE,
+            status=status.HTTP_200_OK,
         )
 
 

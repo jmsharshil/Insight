@@ -472,6 +472,16 @@ def mark_approval_notification_as_read(
                 elif step in (1, '1'):
                     qs = qs.exclude(data__step='super_admin_final')
 
+        elif approval_type == 'lead_reassigned':
+            # Mark super admin notification as read when lead reassignment is acknowledged
+            lead_q = Q(data__lead_id=str_id) | Q(data__type='lead_reassigned')
+            if str_id:
+                lead_q = Q(data__lead_id=str_id)
+            qs = qs.filter(lead_q)
+            if user:
+                uid = getattr(user, 'id', user)
+                qs = qs.filter(user_id=uid)
+
         else:
             logger.warning("[WA APPROVAL] Unknown approval_type '%s'", approval_type)
             return 0
@@ -854,6 +864,16 @@ def mark_approval_notification_as_read(
                 elif step in (1, '1'):
                     qs = qs.exclude(data__step='super_admin_final')
 
+        elif approval_type == 'lead_reassigned':
+            # Mark super admin notification as read when lead reassignment is acknowledged
+            lead_q = Q(data__lead_id=str_id) | Q(data__type='lead_reassigned')
+            if str_id:
+                lead_q = Q(data__lead_id=str_id)
+            qs = qs.filter(lead_q)
+            if user:
+                uid = getattr(user, 'id', user)
+                qs = qs.filter(user_id=uid)
+
         else:
             logger.warning("[WA APPROVAL] Unknown approval_type '%s'", approval_type)
             return 0
@@ -993,6 +1013,16 @@ def mark_approval_notification_as_read(
                     qs = qs.filter(user_id=uid)
                 elif step in (1, '1'):
                     qs = qs.exclude(data__step='super_admin_final')
+
+        elif approval_type == 'lead_reassigned':
+            # Mark super admin notification as read when lead reassignment is acknowledged
+            lead_q = Q(data__lead_id=str_id) | Q(data__type='lead_reassigned')
+            if str_id:
+                lead_q = Q(data__lead_id=str_id)
+            qs = qs.filter(lead_q)
+            if user:
+                uid = getattr(user, 'id', user)
+                qs = qs.filter(user_id=uid)
 
         else:
             logger.warning("[WA APPROVAL] Unknown approval_type '%s'", approval_type)
