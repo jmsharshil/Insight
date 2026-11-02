@@ -2536,9 +2536,6 @@ from .serializers import LeadTransferRequestSerializer, LeadTransferApprovalSeri
 from .models import LeadTransferRequest
 from auth_user.models import User
 
-# ==============================================================================
-# OLD CODE (Preserved as commented code - request-to-approve lead transfer flow)
-# ==============================================================================
 # class LeadTransferRequestListCreateView(APIView):
 #     permission_classes = [IsAuthenticated]
 # 
@@ -2636,7 +2633,7 @@ from auth_user.models import User
 #             return Response(LeadTransferRequestSerializer(transfer_request).data)
 #             
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-# ==============================================================================
+#
 
 class LeadTransferRequestListCreateView(APIView):
     """
