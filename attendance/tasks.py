@@ -265,6 +265,14 @@ def detect_missing_scans(branch_id, date_str=None):
     date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date() if isinstance(date_str, str) else date_str
 
     try:
+        from leave.models import PublicHoliday
+        h_q = Q(date=date_obj)
+        if branch_id:
+            h_q &= (Q(branch_id=branch_id) | Q(branch__isnull=True))
+        if PublicHoliday.objects.filter(h_q).exists():
+            logger.info(f"[detect_missing_scans] Date {date_obj} is a public holiday for branch {branch_id}. Skipping.")
+            return
+
         SP = apps.get_model('students', 'Student')
         students = SP.objects.filter(
             branch_id=branch_id, is_active=True
@@ -714,12 +722,29 @@ def auto_mark_student_absentees():
             ).values_list('student_id', flat=True)
         )
 
+        from leave.models import PublicHoliday
+        today_holidays = list(PublicHoliday.objects.filter(date=today))
+
         total_marked = 0
 
         for slot in past_slots:
             batch = slot.batch
             if not batch:
                 continue
+
+            batch_branch = getattr(batch, 'branch', None)
+            batch_branch_id = batch_branch.id if batch_branch else None
+            batch_org_id = getattr(batch_branch, 'organization_id', None)
+
+            # Skip slot if today is a public holiday for this branch / organization
+            if today_holidays:
+                is_holiday_slot = any(
+                    (h.branch_id == batch_branch_id if h.branch_id else True) and
+                    (h.organization_id == batch_org_id if h.organization_id else True)
+                    for h in today_holidays
+                )
+                if is_holiday_slot:
+                    continue
 
             # Collect enrolled student IDs for this batch
             enrolled_student_ids = set(

@@ -38,7 +38,10 @@ class PaySlipSerializer(serializers.ModelSerializer):
     employee_id = serializers.SerializerMethodField()
     user_id = serializers.SerializerMethodField()
     late_logs = SessionLatePenaltyLogSerializer(many=True, read_only=True)
+    extra_shift_allowance = serializers.DecimalField(source='bonus', max_digits=12, decimal_places=2, read_only=True)
+    odometer_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     reimbursement_notes = serializers.SerializerMethodField()
+    odometer_notes = serializers.SerializerMethodField()
 
     class Meta:
         model = PaySlip
@@ -48,7 +51,10 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
-            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'reimbursement_notes', 'net_salary', 'leaves_taken', 'working_days',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'extra_shift_allowance',
+            'reimbursements_amount', 'reimbursement_notes',
+            'odometer_amount', 'odometer_notes',
+            'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'is_manually_adjusted', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]
@@ -75,6 +81,10 @@ class PaySlipSerializer(serializers.ModelSerializer):
                     'description': reimbursement.description or '',
                     'expense': float(reimbursement.amount),
                 })
+        return notes
+
+    def get_odometer_notes(self, obj):
+        notes = []
         if hasattr(obj, 'odometer_readings'):
             for reading in obj.odometer_readings.all():
                 activity_date = reading.activity.activity_date if hasattr(reading, 'activity') and reading.activity else ''
@@ -82,7 +92,9 @@ class PaySlipSerializer(serializers.ModelSerializer):
                 notes.append({
                     'date': str(activity_date),
                     'event': event_name,
+                    'vehicle_type': getattr(reading, 'vehicle_type', ''),
                     'kms': float(reading.total_kms),
+                    'rate_per_km': float(reading.expense_per_km) if hasattr(reading, 'expense_per_km') else 0.0,
                     'expense': float(reading.total_expense)
                 })
         return notes
@@ -200,6 +212,7 @@ class PayrollGenerateSerializer(serializers.Serializer):
 class PaySlipAdjustSerializer(serializers.Serializer):
     """PATCH /api/v1/payroll/{id}/payslips/{slip_id}/ — adjust payslip amounts."""
     bonus = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
+    extra_shift_allowance = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
     other_deductions = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
     deduction_note = serializers.CharField(max_length=300, required=False, allow_blank=True)
     leave_deductions = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
@@ -239,7 +252,10 @@ class MyPaySlipSerializer(PaySlipSerializer):
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'other_deductions', 'deduction_note',
-            'attendance_bonus', 'leave_encashment', 'bonus', 'reimbursements_amount', 'reimbursement_notes', 'net_salary', 'leaves_taken', 'working_days',
+            'attendance_bonus', 'leave_encashment', 'bonus', 'extra_shift_allowance',
+            'reimbursements_amount', 'reimbursement_notes',
+            'odometer_amount', 'odometer_notes',
+            'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'is_manually_adjusted', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
         ]

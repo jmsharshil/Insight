@@ -276,6 +276,11 @@ def notify_users_by_role(
             notification_type=notification_type,
         )
 
+def mark_approval_notification_as_read(*args, **kwargs):
+    from chat.notifications import mark_approval_notification_as_read as _fn
+    return _fn(*args, **kwargs)
+
+
 #whatsapp task
 """
 Wires WhatsApp sending into your existing scheduler.services.TaskScheduler

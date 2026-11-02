@@ -858,19 +858,25 @@ Rejects an odometer reading claim with an optional/mandatory reason.
 Bulk processes **all pending** `OdometerReading` records for a given `user_id` in a specific `month`/`year`. This is the recommended manager workflow for monthly settlement (avoids approving dozens of daily records individually). 
 
 - Filters: `status='pending'`, `activity__activity_date__year=year`, `__month=month`, respects branch scoping and `ODOMETER_APPROVER_ROLES`.
-- For approve: calls `calculate_totals(override_expense_per_km=...)` (or uses vehicle rate), sets `approved_by`, `approved_at`, `status='approved'` on **all** matching records.
+- **Negative KM ("Minus KM") & Deductions**:
+  - Supports passing `minus_kms` (e.g. `15.00`) to directly deduct unaccepted distance from the employee's travel claims.
+  - Kilometers are deducted across the pending readings (starting from the most recent). If the deduction exceeds positive claims, negative kilometers are supported and calculated (e.g. `-15 km` @ ₹5/km = `-₹75.00`), automatically adjusting the total reimbursement accordingly.
+  - Supports passing negative `total_kms` directly as an override.
+- For approve: calls `calculate_totals(override_expense_per_km=..., override_total_kms=...)` (or uses vehicle rate: bike=₹5/km, car=₹12/km), sets `approved_by`, `approved_at`, `status='approved'` on **all** matching records.
+- **Dedicated Payroll Integration**: Approved travel expenses are linked to the user's monthly `PaySlip`. Travel allowances are tracked distinctly via `odometer_amount` and `odometer_notes` (separated from general expense reimbursements in `reimbursements_amount`). Linked draft payslips immediately update `net_salary`.
 - For reject: sets `rejected_by`, `rejected_at`, `status='rejected'`, `rejection_reason`.
 - Sends **one** aggregated `notification_type='sales'` (with total kms/expense summary) instead of per-reading notifications.
-- Serializers: `MonthlyOdometerApproveSerializer` (`user_id`, `month`, `year`, optional `expense_per_km`), `MonthlyOdometerRejectSerializer` (`user_id`, `month`, `year`, optional `rejection_reason`).
-- Response aggregates count of updated records, total expense, etc.
+- Serializers: `MonthlyOdometerApproveSerializer` (`user_id`, `month`, `year`, optional `expense_per_km`, optional `total_kms`, optional `minus_kms`), `MonthlyOdometerRejectSerializer` (`user_id`, `month`, `year`, optional `rejection_reason`).
+- Response aggregates count of updated records, total kms, total expense, etc.
 
-#### Monthly Approve Request Body Example
+#### Monthly Approve Request Body Example (with Minus Kms)
 ```json
 {
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "month": 9,
   "year": 2025,
-  "expense_per_km": 7.50
+  "expense_per_km": 5.00,
+  "minus_kms": 15.00
 }
 ```
 

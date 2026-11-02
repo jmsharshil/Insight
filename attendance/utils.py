@@ -1262,3 +1262,147 @@ def build_attendance_location_details(record):
     }
 
 
+
+
+def fix_attendance_for_holiday(holiday):
+    """
+    Fixes attendance records when a PublicHoliday is created or updated:
+    Works for past dates ("date is gone") that were declared afterwards,
+    RESTRICTED TO THE CURRENT YEAR ONLY.
+
+    1. Checks if holiday.date is in the current year. If from a previous year, skips.
+    2. Updates EmployeeAttendanceRecord with status='absent' on holiday.date to 'public_holiday'.
+    3. For staff who had no record at all on this date (past date), creates an EmployeeAttendanceRecord with status='public_holiday'.
+    4. Updates AttendanceRecord (student attendance) with status='absent' on holiday.date to 'public_holiday'.
+    5. Removes auto-generated ViolationRecords on holiday.date (e.g. no_show, missing_checkin_scan).
+    6. Unblocks QR code for students whose violations have been cleared.
+    Returns a dict with the counts of updated/created/deleted records.
+    """
+    from .models import AttendanceRecord, EmployeeAttendanceRecord, ViolationRecord
+    from django.db.models import Q
+    from django.utils import timezone
+    import logging
+    logger = logging.getLogger(__name__)
+
+    target_date = holiday.date
+    current_year = timezone.localtime(timezone.now()).year
+
+    # Current year restriction: only fix attendance for the current year
+    if target_date.year != current_year:
+        logger.info(
+            f"[HOLIDAY FIX] Holiday on {target_date} ({holiday.name}) is in year {target_date.year}, "
+            f"which is not the current year ({current_year}). Retrospective fix skipped."
+        )
+        return {
+            'employee_updated': 0,
+            'employee_created': 0,
+            'student_updated': 0,
+            'violations_removed': 0,
+            'skipped_reason': 'not_current_year',
+        }
+
+    branch = getattr(holiday, 'branch', None)
+    organization = getattr(holiday, 'organization', None)
+
+    # 1. Update existing EmployeeAttendanceRecord with status='absent'
+    emp_filter = Q(date=target_date, status='absent')
+    if branch:
+        emp_filter &= Q(branch=branch)
+    elif organization:
+        emp_filter &= (Q(user__organization=organization) | Q(branch__organization=organization))
+
+    emp_updated = EmployeeAttendanceRecord.objects.filter(emp_filter).update(status='public_holiday')
+
+    # Also for past dates: create public_holiday records for active staff who had no record at all on this date
+    emp_created = 0
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        staff_filter = Q(is_active=True)
+        if branch:
+            staff_filter &= Q(branch=branch)
+        elif organization:
+            staff_filter &= (Q(organization=organization) | Q(branch__organization=organization))
+
+        staff_users = list(
+            User.objects.filter(staff_filter)
+            .exclude(role__in=['student', 'parents', 'faculty', 'super_admin'])
+            .select_related('branch')
+        )
+        existing_user_ids = set(
+            EmployeeAttendanceRecord.objects.filter(
+                date=target_date,
+                user__in=staff_users
+            ).values_list('user_id', flat=True)
+        )
+        new_records = [
+            EmployeeAttendanceRecord(
+                user=u,
+                branch=u.branch or branch,
+                date=target_date,
+                status='public_holiday'
+            )
+            for u in staff_users if u.id not in existing_user_ids and (u.branch or branch)
+        ]
+        if new_records:
+            created_objs = EmployeeAttendanceRecord.objects.bulk_create(new_records, ignore_conflicts=True)
+            emp_created = len(created_objs)
+    except Exception as staff_err:
+        logger.warning(f"Failed creating missing staff holiday records: {staff_err}")
+
+    # 2. Update AttendanceRecord (student attendance) with status='absent'
+    std_filter = Q(date=target_date, status='absent')
+    if branch:
+        std_filter &= Q(branch=branch)
+    elif organization:
+        std_filter &= (Q(branch__organization=organization) | Q(student__branch__organization=organization))
+
+    std_updated = AttendanceRecord.objects.filter(std_filter).update(status='public_holiday')
+
+    # 3. Clean up auto-generated violations on the holiday date
+    v_filter = Q(date=target_date, logged_by_admin=False)
+    if branch:
+        v_filter &= (Q(student__branch=branch) | Q(user__branch=branch))
+    elif organization:
+        v_filter &= (
+            Q(student__branch__organization=organization) |
+            Q(user__organization=organization) |
+            Q(user__branch__organization=organization)
+        )
+
+    affected_student_ids = list(
+        ViolationRecord.objects.filter(v_filter)
+        .exclude(student__isnull=True)
+        .values_list('student_id', flat=True)
+        .distinct()
+    )
+    v_deleted, _ = ViolationRecord.objects.filter(v_filter).delete()
+
+    # Re-evaluate QR block for any affected students
+    if affected_student_ids:
+        try:
+            from students.models import Student
+            for sid in affected_student_ids:
+                if not should_block_qr(sid):
+                    Student.objects.filter(id=sid).update(qr_blocked=False)
+        except Exception as e:
+            logger.warning(f"Failed to recheck QR blocks after holiday fix: {e}")
+
+    logger.info(
+        f"[HOLIDAY FIX] Holiday on {target_date} ({holiday.name}): "
+        f"fixed {emp_updated} absent employee records, created {emp_created} missing employee holiday records, "
+        f"{std_updated} student records, removed {v_deleted} automatic violations."
+    )
+
+    try:
+        from payroll.utils import sync_payslips_for_attendance_change
+        sync_payslips_for_attendance_change(target_date=target_date, branch=getattr(holiday, 'branch', None))
+    except Exception as ps_err:
+        logger.error(f"[HOLIDAY FIX] Failed to sync payslips after holiday fix: {ps_err}")
+
+    return {
+        'employee_updated': emp_updated,
+        'employee_created': emp_created,
+        'student_updated': std_updated,
+        'violations_removed': v_deleted,
+    }

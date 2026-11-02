@@ -162,7 +162,7 @@ class DashboardSummaryAPIView(SafeAPIView):
         for b in branches:
             b_records = AttendanceRecord.objects.filter(date=target_date, branch=b)
             b_present = b_records.filter(status__in=['present', 'late', 'half_day']).count()
-            b_total = b_records.exclude(status='on_leave').count()
+            b_total = b_records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).count()
             b_pct = round((b_present / b_total) * 100, 2) if b_total > 0 else 0.0
             branch_wise.append({
                 'branch_id': str(b.id),
@@ -275,7 +275,7 @@ class StudentAttendanceListAPIView(SafeAPIView):
             if date_to_parsed:
                 records = records.filter(date__lte=date_to_parsed)
 
-            total_days = records.exclude(status='on_leave').count()
+            total_days = records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).count()
             present_count = records.filter(status__in=['present', 'late', 'half_day']).count()
             absent_count = records.filter(status='absent').count()
             late_count = records.filter(status='late').count()
@@ -423,7 +423,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         if status_filter:
             records = records.filter(status=status_filter)
 
-        total_days = records.exclude(status='on_leave').count()
+        total_days = records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).count()
         present_count = records.filter(status__in=['present', 'late', 'half_day']).count()
         absent_count = records.filter(status='absent').count()
         late_count = records.filter(status='late').count()
@@ -530,7 +530,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
             if timezone.datetime(year=y, month=m, day=1).date() < creation_date and (first_attendance_date is None or first_attendance_date.month != m or first_attendance_date.year != y):
                 continue
 
-            m_records = AttendanceRecord.objects.filter(student=s, date__year=y, date__month=m).exclude(status='on_leave')
+            m_records = AttendanceRecord.objects.filter(student=s, date__year=y, date__month=m).exclude(status__in=['on_leave', 'holiday', 'public_holiday'])
             m_total = m_records.count()
             m_present = m_records.filter(status__in=['present', 'late', 'half_day']).count()
             m_pct = round((m_present / m_total) * 100, 2) if m_total > 0 else 0.0
@@ -549,7 +549,7 @@ class StudentAttendanceDetailAPIView(SafeAPIView):
         if s.batch:
             slots = list(TimetableSlot.objects.filter(batch=s.batch).select_related('subject'))
             
-            for r in records.exclude(status='on_leave'):
+            for r in records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']):
                 day_slots = []
                 for slot in slots:
                     if slot.day_of_week == r.date.weekday() or slot.session_date == r.date:
@@ -1189,12 +1189,12 @@ class AttendanceAnalyticsAPIView(SafeAPIView):
         if date_to:
             records = records.filter(date__lte=date_to)
 
-        total_days = records.exclude(status='on_leave').count()
+        total_days = records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).count()
         present_count = records.filter(status__in=['present', 'late', 'half_day']).count()
         avg_attendance = round((present_count / total_days) * 100, 2) if total_days > 0 else 0.0
 
         daily_trend = []
-        daily_records = records.exclude(status='on_leave').values('date').annotate(
+        daily_records = records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).values('date').annotate(
             present=Count('id', filter=Q(status__in=['present', 'late', 'half_day'])),
             total=Count('id')
         ).order_by('date')
@@ -1237,7 +1237,7 @@ class AttendanceAnalyticsAPIView(SafeAPIView):
             })
 
         branch_comparison = []
-        branch_records = records.exclude(status='on_leave').values('branch__name').annotate(
+        branch_records = records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).values('branch__name').annotate(
             present=Count('id', filter=Q(status__in=['present', 'late', 'half_day'])),
             total=Count('id')
         )
@@ -1249,7 +1249,7 @@ class AttendanceAnalyticsAPIView(SafeAPIView):
                 })
 
         batch_comparison = []
-        batch_records = records.exclude(status='on_leave').values('batch__name', 'batch__batch_code').annotate(
+        batch_records = records.exclude(status__in=['on_leave', 'holiday', 'public_holiday']).values('batch__name', 'batch__batch_code').annotate(
             present=Count('id', filter=Q(status__in=['present', 'late', 'half_day'])),
             total=Count('id')
         )
@@ -1267,7 +1267,7 @@ class AttendanceAnalyticsAPIView(SafeAPIView):
         for f in faculties:
             f_batches = list(f.batch_assignments.values_list('batch_id', flat=True))
             if len(f_batches) > 0:
-                f_records = records.filter(batch_id__in=f_batches).exclude(status='on_leave')
+                f_records = records.filter(batch_id__in=f_batches).exclude(status__in=['on_leave', 'holiday', 'public_holiday'])
                 f_total = f_records.count()
                 f_present = f_records.filter(status__in=['present', 'late', 'half_day']).count()
                 if f_total > 0:
@@ -1335,7 +1335,7 @@ class DefaulterStudentsAPIView(SafeAPIView):
 
         defaulter_list = []
         for s in student_qs:
-            records = AttendanceRecord.objects.filter(student=s).exclude(status='on_leave')
+            records = AttendanceRecord.objects.filter(student=s).exclude(status__in=['on_leave', 'holiday', 'public_holiday'])
             total = records.count()
             present = records.filter(status__in=['present', 'late', 'half_day']).count()
             pct = round((present / total) * 100, 2) if total > 0 else 0.0
@@ -1829,7 +1829,7 @@ class BatchWiseAttendanceAPIView(SafeAPIView):
 
         batch_wise_data = []
         for b in batches:
-            b_records = records_qs.filter(batch=b).exclude(status='on_leave')
+            b_records = records_qs.filter(batch=b).exclude(status__in=['on_leave', 'holiday', 'public_holiday'])
             total = b_records.count()
             present = b_records.filter(status__in=['present', 'late', 'half_day']).count()
             absent = b_records.filter(status='absent').count()

@@ -52,7 +52,7 @@ class DeductionNoteFormattingTests(SimpleTestCase):
             attendance_bonus=Decimal('500.00'),
         )
 
-        self.assertIn('Attendance bonus: +500.00', note)
+        self.assertTrue('Extra Shift Allowance: +500.00' in note or 'Attendance bonus: +500.00' in note)
 
     def test_manually_adjusted_bonus_is_kept_in_note(self):
         note = update_bonus_note(

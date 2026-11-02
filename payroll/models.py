@@ -98,6 +98,14 @@ class PaySlip(models.Model):
     class Meta:
         db_table = 'payroll_payslips'
 
+    @property
+    def odometer_amount(self):
+        """Total approved travel expense from linked odometer readings."""
+        from decimal import Decimal
+        if hasattr(self, 'odometer_readings'):
+            return sum((r.total_expense for r in self.odometer_readings.all() if getattr(r, 'status', None) == 'approved'), Decimal('0.00'))
+        return Decimal('0.00')
+
     def __str__(self):
         name = self.faculty.user.name if self.faculty else (self.user.name if self.user else 'Unknown')
         return f"{name} — {self.payroll_run}"

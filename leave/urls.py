@@ -3,7 +3,7 @@ from .views import (
     LeaveListCreateView, LeaveDetailView, LeaveApproveView, LeaveRejectView,
     LeavePolicyView, LeavePolicyDetailView, LeaveBalanceView, LeaveBalanceUserView,
     LateEntryListCreateView, LateEntryDetailView,
-    PublicHolidayListCreateView, PublicHolidayDetailView,
+    PublicHolidayListCreateView, PublicHolidayDetailView, PublicHolidayExcelUploadView, PublicHolidayExcelTemplateView,
     StudentLeaveListCreateView, StudentLeaveDetailView,
     StudentLeaveApproveView, StudentLeaveRejectView,
 )
@@ -17,6 +17,8 @@ urlpatterns = [
     path('leave/late-entries/', LateEntryListCreateView.as_view(), name='late-entries'),
     path('leave/late-entries/<uuid:entry_id>/', LateEntryDetailView.as_view(), name='late-entry-detail'),
     path('leave/public-holidays/', PublicHolidayListCreateView.as_view(), name='public-holidays'),
+    path('leave/public-holidays/upload/', PublicHolidayExcelUploadView.as_view(), name='public-holiday-excel-upload'),
+    path('leave/public-holidays/template/', PublicHolidayExcelTemplateView.as_view(), name='public-holiday-excel-template'),
     path('leave/public-holidays/<uuid:holiday_id>/', PublicHolidayDetailView.as_view(), name='public-holiday-detail'),
     path('leave/<uuid:leave_id>/', LeaveDetailView.as_view(), name='leave-detail'),
     path('leave/<uuid:leave_id>/approve/', LeaveApproveView.as_view(), name='leave-approve'),

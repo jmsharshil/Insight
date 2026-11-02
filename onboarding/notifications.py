@@ -511,6 +511,16 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             'date': timezone.now().date().isoformat(),
             'note': reject_note,
         })
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='admission',
+                record_id=admission.id,
+                is_final=True,
+            )
+        except Exception as notif_e:
+            logger.error("[WA ADMISSION] Failed to mark notification as read: %s", notif_e)
+
         send_whatsapp_text(
             to=sender_wa_id,
             body=f"❌ Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) has been REJECTED by {approver_name}."
@@ -580,6 +590,17 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     note=level1_note,
                 )
 
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='admission',
+                    record_id=admission.id,
+                    user=approver,
+                    step=1,
+                )
+            except Exception as notif_e:
+                logger.error("[WA ADMISSION] Failed to mark notification as read: %s", notif_e)
+
             send_whatsapp_text(
                 to=sender_wa_id,
                 body=(
@@ -604,6 +625,8 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                     branch=admission.branch if getattr(admission, 'branch', None) else None,
                     email_subject=f'Final Approval Required: Admission #{admission.id}',
+                    metadata={'admission_id': str(admission.id), 'step': 'level_2_approval'},
+                    notification_type='admission',
                 )
             except Exception as exc:
                 logger.error("[WA ADMISSION] Failed to notify super_admin of level 1 approval: %s", exc)
@@ -652,6 +675,16 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 'date': timezone.now().date().isoformat(),
                 'note': final_note,
             })
+
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='admission',
+                    record_id=admission.id,
+                    is_final=True,
+                )
+            except Exception as notif_e:
+                logger.error("[WA ADMISSION] Failed to mark notification as read: %s", notif_e)
 
             # Synchronize Payment status to verified and link student
             from fees.models import Payment
@@ -713,3 +746,69 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             return True
 
     return False
+
+
+
+def send_new_admission_completed_notification(admission, student):
+    """
+    Sends notification when an admission is completed and the Student profile has been created.
+    Notifies super_admin, branch_manager, admin_senior_executive, accountant, counsellor,
+    and specifically the assigned counsellor (if any).
+    """
+    try:
+        from core.utils import notify_users_by_role
+        from chat.notifications import send_system_notification
+
+        student_name = f"{student.first_name} {student.surname or ''}".strip()
+        adm_no = student.admission_number or f"ADM-{admission.id}"
+        course_display = getattr(student, 'get_course_display', lambda: student.course)() if hasattr(student, 'get_course_display') else (student.course or '')
+
+        branch = student.branch or getattr(admission, 'branch', None)
+        org = getattr(branch, 'organization', None) if branch else None
+
+        title = f"New Admission Completed: {student_name}"
+        body = (
+            f"Admission #{admission.id} completed. "
+            f"Student {student_name} enrolled with Admission No: {adm_no} for {course_display}."
+        )
+        metadata = {
+            "admission_id": str(admission.id),
+            "student_id": str(student.id),
+            "admission_number": str(adm_no),
+            "route": f"/students/{student.id}",
+            "type": "new_admission_completed",
+            "skip_whatsapp": True,
+        }
+
+        # 1. Notify administrative roles in the branch/org
+        roles_to_notify = ['super_admin', 'branch_manager', 'admin_senior_executive', 'accountant', 'counsellor']
+        notify_users_by_role(
+            roles=roles_to_notify,
+            title=title,
+            body=body,
+            organization=org,
+            branch=branch,
+            metadata=metadata,
+            notification_type='admission',
+        )
+
+        # 2. Targeted notification for the assigned counsellor if assigned
+        assigned_counsellor = getattr(student, 'assigned_counsellor', None) or getattr(admission, 'assigned_counsellor', None)
+        if assigned_counsellor and hasattr(assigned_counsellor, 'id'):
+            try:
+                counsellor_title = f"Admission Enrolled: {student_name}"
+                counsellor_body = f"Your student {student_name} has been enrolled! Admission No: {adm_no} ({course_display})."
+                send_system_notification(
+                    user_id=str(assigned_counsellor.id),
+                    title=counsellor_title,
+                    body=counsellor_body,
+                    metadata=metadata,
+                    notification_type='admission',
+                )
+            except Exception as c_err:
+                logger.error("[NEW ADMISSION NOTIF] Failed notifying counsellor %s: %s", assigned_counsellor.id, c_err)
+
+        logger.info("[NEW ADMISSION NOTIF] New admission notification sent for student %s (admission %s)", adm_no, admission.id)
+
+    except Exception as e:
+        logger.error("[NEW ADMISSION NOTIF] Error sending new admission notification: %s", e)

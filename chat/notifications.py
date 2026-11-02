@@ -347,6 +347,146 @@ def notify_new_message(*, room_id: str, message_id: str, sender_name: str, conte
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
 
+
+def mark_approval_notification_as_read(
+    *,
+    approval_type: str,
+    record_id,
+    user=None,
+    step=None,
+    is_final: bool = False,
+    exclude_user=None,
+) -> int:
+    """
+    Marks the corresponding unread approval request notification(s) in NotificationHistory
+    as read when an approval request is acted on / approved (e.g. via WhatsApp).
+
+    Parameters:
+    - approval_type: 'leave' | 'student_leave' | 'reimbursement' | 'admission' | 'sales_attendance'
+    - record_id: Primary key / ID of the approval item (leave, reimbursement, etc.)
+    - user: Optional specific approver User instance or ID whose notification to mark read
+    - step: Optional step (e.g. 1, 2, 'parent_approval')
+    - is_final: If True, marks all approvers' pending notifications for this record as read
+    - exclude_user: Optional User instance or ID to exclude (e.g. the applicant, so their status notifications stay unread)
+
+    Returns the number of notifications updated.
+    """
+    try:
+        from auth_user.models import NotificationHistory
+
+        str_id = str(record_id or "").strip()
+        if not str_id:
+            return 0
+
+        qs = NotificationHistory.objects.filter(is_read=False)
+
+        if exclude_user:
+            ex_id = getattr(exclude_user, 'id', exclude_user)
+            if ex_id:
+                qs = qs.exclude(user_id=ex_id)
+
+        if approval_type == 'leave':
+            leave_q = Q(data__leave_id=str_id)
+            if str_id.isdigit():
+                leave_q |= Q(data__leave_id=int(str_id))
+            qs = qs.filter(leave_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step:
+                    step_val = int(step) if str(step).isdigit() else step
+                    qs = qs.filter(Q(data__approval_step=step_val) | Q(data__approval_step=str(step)))
+
+            # Exclude final status outcome notifications to ensure applicant updates are untouched
+            qs = qs.exclude(data__status__in=['approved', 'rejected'])
+
+        elif approval_type == 'student_leave':
+            sl_q = Q(data__student_leave_id=str_id)
+            if str_id.isdigit():
+                sl_q |= Q(data__student_leave_id=int(str_id))
+            qs = qs.filter(sl_q)
+
+            if user:
+                uid = getattr(user, 'id', user)
+                qs = qs.filter(user_id=uid)
+            elif not is_final and step:
+                qs = qs.filter(data__step=str(step))
+
+            qs = qs.exclude(data__status__in=['approved', 'rejected'])
+
+        elif approval_type == 'reimbursement':
+            reimb_q = Q(data__reimbursement_id=str_id)
+            if str_id.isdigit():
+                reimb_q |= Q(data__reimbursement_id=int(str_id))
+            qs = qs.filter(reimb_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1'):
+                    qs = qs.filter(data__type='reimbursement_created')
+
+            qs = qs.exclude(data__type__in=['reimbursement_approved', 'reimbursement_rejected'])
+
+        elif approval_type == 'admission':
+            adm_q = (
+                Q(data__admission_id=str_id) |
+                Q(body__icontains=f"admission #{str_id}") |
+                Q(title__icontains=f"Admission #{str_id}")
+            )
+            if str_id.isdigit():
+                adm_q |= Q(data__admission_id=int(str_id))
+            qs = qs.filter(adm_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1', 'level_1'):
+                    qs = qs.filter(
+                        Q(data__step='level_1_approval') |
+                        Q(title__icontains='Admission Payment Proof Submitted')
+                    )
+
+        elif approval_type == 'sales_attendance':
+            sales_q = (
+                Q(data__approval_id=str_id) |
+                Q(data__sales_attendance_id=str_id) |
+                Q(data__attendance_id=str_id)
+            )
+            if str_id.isdigit():
+                sales_q |= (
+                    Q(data__approval_id=int(str_id)) |
+                    Q(data__sales_attendance_id=int(str_id)) |
+                    Q(data__attendance_id=int(str_id))
+                )
+            qs = qs.filter(sales_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1'):
+                    qs = qs.exclude(data__step='super_admin_final')
+
+        else:
+            logger.warning("[WA APPROVAL] Unknown approval_type '%s'", approval_type)
+            return 0
+
+        count = qs.update(is_read=True)
+        logger.info(
+            "[WA APPROVAL] Marked %d notification(s) as read for type=%s, id=%s (is_final=%s)",
+            count, approval_type, str_id, is_final,
+        )
+        return count
+
+    except Exception as e:
+        logger.error("[WA APPROVAL] Error marking notifications as read: %s", e)
+        return 0
+
 #whatapp notifiation 
 from core.utils import queue_whatsapp_media, queue_whatsapp_template, queue_whatsapp_text 
 
@@ -589,3 +729,282 @@ def send_system_notification(
 
     thread = threading.Thread(target=_send_task, daemon=True)
     thread.start()
+
+def mark_approval_notification_as_read(
+    *,
+    approval_type: str,
+    record_id,
+    user=None,
+    step=None,
+    is_final: bool = False,
+    exclude_user=None,
+) -> int:
+    """
+    Marks the corresponding unread approval request notification(s) in NotificationHistory
+    as read when an approval request is acted on / approved (e.g. via WhatsApp).
+
+    Parameters:
+    - approval_type: 'leave' | 'student_leave' | 'reimbursement' | 'admission' | 'sales_attendance'
+    - record_id: Primary key / ID of the approval item (leave, reimbursement, etc.)
+    - user: Optional specific approver User instance or ID whose notification to mark read
+    - step: Optional step (e.g. 1, 2, 'parent_approval')
+    - is_final: If True, marks all approvers' pending notifications for this record as read
+    - exclude_user: Optional User instance or ID to exclude (e.g. the applicant, so their status notifications stay unread)
+
+    Returns the number of notifications updated.
+    """
+    try:
+        from auth_user.models import NotificationHistory
+
+        str_id = str(record_id or "").strip()
+        if not str_id:
+            return 0
+
+        qs = NotificationHistory.objects.filter(is_read=False)
+
+        if exclude_user:
+            ex_id = getattr(exclude_user, 'id', exclude_user)
+            if ex_id:
+                qs = qs.exclude(user_id=ex_id)
+
+        if approval_type == 'leave':
+            leave_q = Q(data__leave_id=str_id)
+            if str_id.isdigit():
+                leave_q |= Q(data__leave_id=int(str_id))
+            qs = qs.filter(leave_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step:
+                    step_val = int(step) if str(step).isdigit() else step
+                    qs = qs.filter(Q(data__approval_step=step_val) | Q(data__approval_step=str(step)))
+
+            # Exclude final status outcome notifications to ensure applicant updates are untouched
+            qs = qs.exclude(data__status__in=['approved', 'rejected'])
+
+        elif approval_type == 'student_leave':
+            sl_q = Q(data__student_leave_id=str_id)
+            if str_id.isdigit():
+                sl_q |= Q(data__student_leave_id=int(str_id))
+            qs = qs.filter(sl_q)
+
+            if user:
+                uid = getattr(user, 'id', user)
+                qs = qs.filter(user_id=uid)
+            elif not is_final and step:
+                qs = qs.filter(data__step=str(step))
+
+            qs = qs.exclude(data__status__in=['approved', 'rejected'])
+
+        elif approval_type == 'reimbursement':
+            reimb_q = Q(data__reimbursement_id=str_id)
+            if str_id.isdigit():
+                reimb_q |= Q(data__reimbursement_id=int(str_id))
+            qs = qs.filter(reimb_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1'):
+                    qs = qs.filter(data__type='reimbursement_created')
+
+            qs = qs.exclude(data__type__in=['reimbursement_approved', 'reimbursement_rejected'])
+
+        elif approval_type == 'admission':
+            adm_q = (
+                Q(data__admission_id=str_id) |
+                Q(body__icontains=f"admission #{str_id}") |
+                Q(title__icontains=f"Admission #{str_id}")
+            )
+            if str_id.isdigit():
+                adm_q |= Q(data__admission_id=int(str_id))
+            qs = qs.filter(adm_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1', 'level_1'):
+                    qs = qs.filter(
+                        Q(data__step='level_1_approval') |
+                        Q(title__icontains='Admission Payment Proof Submitted')
+                    )
+
+        elif approval_type == 'sales_attendance':
+            sales_q = (
+                Q(data__approval_id=str_id) |
+                Q(data__sales_attendance_id=str_id) |
+                Q(data__attendance_id=str_id)
+            )
+            if str_id.isdigit():
+                sales_q |= (
+                    Q(data__approval_id=int(str_id)) |
+                    Q(data__sales_attendance_id=int(str_id)) |
+                    Q(data__attendance_id=int(str_id))
+                )
+            qs = qs.filter(sales_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1'):
+                    qs = qs.exclude(data__step='super_admin_final')
+
+        else:
+            logger.warning("[WA APPROVAL] Unknown approval_type '%s'", approval_type)
+            return 0
+
+        count = qs.update(is_read=True)
+        logger.info(
+            "[WA APPROVAL] Marked %d notification(s) as read for type=%s, id=%s (is_final=%s)",
+            count, approval_type, str_id, is_final,
+        )
+        return count
+
+    except Exception as e:
+        logger.error("[WA APPROVAL] Error marking notifications as read: %s", e)
+        return 0
+
+
+def mark_approval_notification_as_read(
+    *,
+    approval_type: str,
+    record_id,
+    user=None,
+    step=None,
+    is_final: bool = False,
+    exclude_user=None,
+) -> int:
+    """
+    Marks the corresponding unread approval request notification(s) in NotificationHistory
+    as read when an approval request is acted on / approved (e.g. via WhatsApp).
+
+    Parameters:
+    - approval_type: 'leave' | 'student_leave' | 'reimbursement' | 'admission' | 'sales_attendance'
+    - record_id: Primary key / ID of the approval item (leave, reimbursement, etc.)
+    - user: Optional specific approver User instance or ID whose notification to mark read
+    - step: Optional step (e.g. 1, 2, 'parent_approval')
+    - is_final: If True, marks all approvers' pending notifications for this record as read
+    - exclude_user: Optional User instance or ID to exclude (e.g. the applicant, so their status notifications stay unread)
+
+    Returns the number of notifications updated.
+    """
+    try:
+        from auth_user.models import NotificationHistory
+
+        str_id = str(record_id or "").strip()
+        if not str_id:
+            return 0
+
+        qs = NotificationHistory.objects.filter(is_read=False)
+
+        if exclude_user:
+            ex_id = getattr(exclude_user, 'id', exclude_user)
+            if ex_id:
+                qs = qs.exclude(user_id=ex_id)
+
+        if approval_type == 'leave':
+            leave_q = Q(data__leave_id=str_id)
+            if str_id.isdigit():
+                leave_q |= Q(data__leave_id=int(str_id))
+            qs = qs.filter(leave_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step:
+                    step_val = int(step) if str(step).isdigit() else step
+                    qs = qs.filter(Q(data__approval_step=step_val) | Q(data__approval_step=str(step)))
+
+            # Exclude final status outcome notifications to ensure applicant updates are untouched
+            qs = qs.exclude(data__status__in=['approved', 'rejected'])
+
+        elif approval_type == 'student_leave':
+            sl_q = Q(data__student_leave_id=str_id)
+            if str_id.isdigit():
+                sl_q |= Q(data__student_leave_id=int(str_id))
+            qs = qs.filter(sl_q)
+
+            if user:
+                uid = getattr(user, 'id', user)
+                qs = qs.filter(user_id=uid)
+            elif not is_final and step:
+                qs = qs.filter(data__step=str(step))
+
+            qs = qs.exclude(data__status__in=['approved', 'rejected'])
+
+        elif approval_type == 'reimbursement':
+            reimb_q = Q(data__reimbursement_id=str_id)
+            if str_id.isdigit():
+                reimb_q |= Q(data__reimbursement_id=int(str_id))
+            qs = qs.filter(reimb_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1'):
+                    qs = qs.filter(data__type='reimbursement_created')
+
+            qs = qs.exclude(data__type__in=['reimbursement_approved', 'reimbursement_rejected'])
+
+        elif approval_type == 'admission':
+            adm_q = (
+                Q(data__admission_id=str_id) |
+                Q(body__icontains=f"admission #{str_id}") |
+                Q(title__icontains=f"Admission #{str_id}")
+            )
+            if str_id.isdigit():
+                adm_q |= Q(data__admission_id=int(str_id))
+            qs = qs.filter(adm_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1', 'level_1'):
+                    qs = qs.filter(
+                        Q(data__step='level_1_approval') |
+                        Q(title__icontains='Admission Payment Proof Submitted')
+                    )
+
+        elif approval_type == 'sales_attendance':
+            sales_q = (
+                Q(data__approval_id=str_id) |
+                Q(data__sales_attendance_id=str_id) |
+                Q(data__attendance_id=str_id)
+            )
+            if str_id.isdigit():
+                sales_q |= (
+                    Q(data__approval_id=int(str_id)) |
+                    Q(data__sales_attendance_id=int(str_id)) |
+                    Q(data__attendance_id=int(str_id))
+                )
+            qs = qs.filter(sales_q)
+
+            if not is_final:
+                if user:
+                    uid = getattr(user, 'id', user)
+                    qs = qs.filter(user_id=uid)
+                elif step in (1, '1'):
+                    qs = qs.exclude(data__step='super_admin_final')
+
+        else:
+            logger.warning("[WA APPROVAL] Unknown approval_type '%s'", approval_type)
+            return 0
+
+        count = qs.update(is_read=True)
+        logger.info(
+            "[WA APPROVAL] Marked %d notification(s) as read for type=%s, id=%s (is_final=%s)",
+            count, approval_type, str_id, is_final,
+        )
+        return count
+
+    except Exception as e:
+        logger.error("[WA APPROVAL] Error marking notifications as read: %s", e)
+        return 0

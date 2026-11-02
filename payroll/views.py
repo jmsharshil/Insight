@@ -608,10 +608,14 @@ class PayslipAdjustView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
 
         d = ser.validated_data
-        for field in ['bonus', 'other_deductions', 'deduction_note', 'leave_deductions']:
+        for field in ['other_deductions', 'deduction_note', 'leave_deductions']:
             if field in d:
                 setattr(ps, field, d[field])
-        if 'bonus' in d:
+        if 'extra_shift_allowance' in d:
+            ps.bonus = d['extra_shift_allowance']
+            ps.deduction_note = update_bonus_note(ps.deduction_note, ps.bonus)
+        elif 'bonus' in d:
+            ps.bonus = d['bonus']
             ps.deduction_note = update_bonus_note(ps.deduction_note, ps.bonus)
 
         # Mark as manually adjusted so regeneration won't wipe these values
@@ -619,8 +623,10 @@ class PayslipAdjustView(APIView):
 
         # Recompute net salary
         reimb_amt = getattr(ps, 'reimbursements_amount', Decimal('0')) or Decimal('0')
-        ps.net_salary = (
-            ps.basic_salary + ps.hour_based_amount + ps.bonus + reimb_amt
+        odometer_amt = getattr(ps, 'odometer_amount', Decimal('0')) or Decimal('0')
+        ps.net_salary = max(
+            Decimal('0.00'),
+            ps.basic_salary + ps.hour_based_amount + ps.bonus + reimb_amt + odometer_amt
             - ps.late_penalty - ps.absence_deductions - ps.leave_deductions - ps.other_deductions
         )
         ps.save()

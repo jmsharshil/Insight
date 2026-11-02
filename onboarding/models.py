@@ -241,6 +241,15 @@ class Admission(models.Model):
             models.Index(fields=['bank_account']),
         ]
 
+    @property
+    def phone_mother(self):
+        """Map phone_mother to phone_father_2 stored in the database."""
+        return self.phone_father_2
+
+    @phone_mother.setter
+    def phone_mother(self, value):
+        self.phone_father_2 = value or ''
+
     def __str__(self):
         return f"{self.first_name} {self.surname} | {self.course} | {self.status}"
 

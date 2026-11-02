@@ -28,6 +28,41 @@ def validate_percentage(value):
         raise serializers.ValidationError("Percentage must be between 0 and 100.")
     return value
 
+def normalize_phone_for_comparison(val):
+    if not val:
+        return ''
+    digits = ''.join(c for c in str(val) if c.isdigit())
+    if len(digits) >= 10:
+        return digits[-10:]
+    return digits
+
+
+def validate_admission_phone_uniqueness(phone_student, phone_father, phone_mother):
+    """
+    Validates that student phone no., father's phone no., and mother's phone no.
+    are all distinct from each other for admissions.
+    """
+    norm_student = normalize_phone_for_comparison(phone_student)
+    norm_father = normalize_phone_for_comparison(phone_father)
+    norm_mother = normalize_phone_for_comparison(phone_mother)
+
+    errors = {}
+    if norm_student and norm_father and norm_student == norm_father:
+        errors['phone_father'] = "Father's phone number cannot be the same as the student's phone number."
+    if norm_student and norm_mother and norm_student == norm_mother:
+        errors['phone_mother'] = "Mother's phone number cannot be the same as the student's phone number."
+        errors['phone_father_2'] = errors['phone_mother']
+    if norm_father and norm_mother and norm_father == norm_mother:
+        errors['phone_mother'] = "Mother's phone number cannot be the same as father's phone number."
+        errors['phone_father_2'] = errors['phone_mother']
+
+    if errors:
+        errors['non_field_errors'] = [
+            "Student phone number, father's phone number, and mother's phone number must all be different."
+        ]
+        raise serializers.ValidationError(errors)
+
+
 
 def _validate_file(file, allowed_types, max_size_mb=5):
     if file.content_type not in allowed_types:
@@ -70,6 +105,7 @@ class AdmissionSerializer(serializers.Serializer):
     phone_student_2 = serializers.CharField(max_length=15, required=False, allow_blank=True)
     phone_father    = serializers.CharField(max_length=15, required=False, allow_blank=True, allow_null=True)
     phone_father_2  = serializers.CharField(max_length=15, required=False, allow_blank=True)
+    phone_mother    = serializers.CharField(max_length=15, required=False, allow_blank=True, allow_null=True)
 
     # ── Address ───────────────────────────────────────────────────────────────
     street    = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -170,6 +206,9 @@ class AdmissionSerializer(serializers.Serializer):
     def validate_phone_father_2(self, value):
         return validate_phone(value) if value else value
 
+    def validate_phone_mother(self, value):
+        return validate_phone(value) if value else value
+
     def validate_tenth_percentage(self, value):
         return validate_percentage(value)
 
@@ -191,6 +230,15 @@ class AdmissionSerializer(serializers.Serializer):
     # ── Cross-field validation ────────────────────────────────────────────────
 
     def validate(self, data):
+        # Cross-validate student, father, and mother phone uniqueness
+        phone_student = data.get('phone_student')
+        phone_father = data.get('phone_father')
+        phone_mother = data.get('phone_mother') or data.get('phone_father_2')
+        validate_admission_phone_uniqueness(phone_student, phone_father, phone_mother)
+
+        if 'phone_mother' in data and not data.get('phone_father_2'):
+            data['phone_father_2'] = data['phone_mother']
+
         course        = data.get('course')
         group_module  = data.get('group_module')
         batch_attempt = data.get('batch_attempt')
@@ -276,6 +324,7 @@ class BranchInfoSerializer(serializers.Serializer):
 
 class AdmissionListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    phone_mother = serializers.CharField(source='phone_father_2', read_only=True)
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
@@ -307,7 +356,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Admission
         fields = [
-            'id', 'branch', 'first_name', 'surname', 'email', 'phone_student',
+            'id', 'branch', 'first_name', 'surname', 'email', 'phone_student', 'phone_father', 'phone_father_2', 'phone_mother',
             'gender', 'gender_display',
             'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'payment_choice', 'payment_choice_display', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
@@ -318,6 +367,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
 
 class AdmissionDetailSerializer(serializers.ModelSerializer):
     branch = BranchInfoSerializer(read_only=True)
+    phone_mother = serializers.CharField(source='phone_father_2', read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
     category_display = serializers.CharField(source="get_category_display", read_only=True)
@@ -353,6 +403,8 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
 
 class AdmissionUpdateSerializer(serializers.ModelSerializer):
     """Partial-update serializer for PUT / PATCH."""
+    phone_mother = serializers.CharField(max_length=15, required=False, allow_blank=True, allow_null=True)
+
     class Meta:
         model = Admission
         exclude = ['submitted_at', 'updated_at']
@@ -363,6 +415,21 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
         for field in self.fields.values():
             field.required = False
 
+    def validate_phone_student(self, value):
+        return validate_phone(value) if value else value
+
+    def validate_phone_student_2(self, value):
+        return validate_phone(value) if value else value
+
+    def validate_phone_father(self, value):
+        return validate_phone(value) if value else value
+
+    def validate_phone_father_2(self, value):
+        return validate_phone(value) if value else value
+
+    def validate_phone_mother(self, value):
+        return validate_phone(value) if value else value
+
     def validate_payment_choice(self, value):
         if not value:
             return value
@@ -370,6 +437,24 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
         if val in ('cheque', 'check'):
             return 'cheque'
         return val
+
+    def validate(self, data):
+        data = super().validate(data)
+        phone_student = data.get('phone_student') or getattr(self.instance, 'phone_student', None)
+        phone_father = data.get('phone_father') or getattr(self.instance, 'phone_father', None)
+        phone_mother = (
+            data.get('phone_mother')
+            or data.get('phone_father_2')
+            or getattr(self.instance, 'phone_father_2', None)
+        )
+        validate_admission_phone_uniqueness(phone_student, phone_father, phone_mother)
+
+        if 'phone_mother' in data:
+            if not data.get('phone_father_2'):
+                data['phone_father_2'] = data['phone_mother']
+            data.pop('phone_mother', None)
+
+        return data
 
 # ── Admission Document Upload Serializer ──────────────────────────────────────
 

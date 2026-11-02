@@ -143,8 +143,12 @@ class OdometerApproveSerializer(serializers.Serializer):
         help_text="Optional reimbursement rate override per kilometer (defaults to vehicle_type rate: ₹5/km for bike, ₹12/km for car)."
     )
     total_kms = serializers.DecimalField(
-        max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
-        help_text="Optional override for the total kilometers traveled."
+        max_digits=10, decimal_places=2, required=False, allow_null=True,
+        help_text="Optional override for the total kilometers traveled (supports negative values)."
+    )
+    minus_kms = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True,
+        help_text="Optional kilometers to deduct (minus km) from this reading."
     )
 
 
@@ -165,8 +169,12 @@ class MonthlyOdometerApproveSerializer(serializers.Serializer):
         help_text="Optional reimbursement rate override per kilometer for ALL daily readings in the month (defaults to vehicle_type rate)."
     )
     total_kms = serializers.DecimalField(
-        max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True,
-        help_text="Optional override for the total kilometers traveled for ALL daily readings in the month."
+        max_digits=10, decimal_places=2, required=False, allow_null=True,
+        help_text="Optional override for the total kilometers traveled for daily readings in the month."
+    )
+    minus_kms = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True,
+        help_text="Optional kilometers to deduct (minus km) across pending readings in the month."
     )
 
 
@@ -952,6 +960,18 @@ class LeadListSerializer(serializers.ModelSerializer):
     # ── Assignment display ───────────────────────────────────────────────
     assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, allow_null=True)
+    can_edit         = serializers.SerializerMethodField()
+
+    def get_can_edit(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return False
+        user_role = getattr(request.user, 'role', None)
+        if user_role in {'sales_senior_executive', 'branch_manager', 'super_admin'}:
+            return True
+        if user_role in {'front_desk', 'receptionist', 'counsellor', 'tele_caller', 'sales_executive'}:
+            return bool(obj.assigned_to_id == request.user.id)
+        return False
 
     class Meta:
         model = Lead
@@ -960,7 +980,7 @@ class LeadListSerializer(serializers.ModelSerializer):
             'phone_student', 'course', 'current_stage', 'current_stage_display', 'location', 'note', 'created_at',
             'contacted_at', 'interested_at', 'followup_set_at', 'converted_at', 'lost_at', 'followup_date', 'visit_date', 'is_visited', 'visit_set_at',
             'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'stage_display',
-            'assigned_to_id', 'assigned_to_name',
+            'assigned_to_id', 'assigned_to_name', 'can_edit',
         ]
 
 
@@ -990,6 +1010,18 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, allow_null=True)
     assignment_history = LeadAssignmentLogSerializer(source='assignment_logs', many=True, read_only=True)
+    can_edit         = serializers.SerializerMethodField()
+
+    def get_can_edit(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None) or not request.user.is_authenticated:
+            return False
+        user_role = getattr(request.user, 'role', None)
+        if user_role in {'sales_senior_executive', 'branch_manager', 'super_admin'}:
+            return True
+        if user_role in {'front_desk', 'receptionist', 'counsellor', 'tele_caller', 'sales_executive'}:
+            return bool(obj.assigned_to_id == request.user.id)
+        return False
 
     class Meta:
         model = Lead

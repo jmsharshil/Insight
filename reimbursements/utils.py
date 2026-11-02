@@ -501,6 +501,17 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
         reimb.approved_at = None
         reimb.save()
 
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='reimbursement',
+                record_id=reimb.id,
+                is_final=True,
+                exclude_user=reimb.user,
+            )
+        except Exception as notif_e:
+            logger.error("[WA REIMB] Failed to mark notification as read: %s", notif_e)
+
         send_whatsapp_text(
             to=sender_wa_id,
             body=f"❌ You have REJECTED the reimbursement claim '{reimb.title}' (₹{reimb.amount}) for {applicant_name}."
@@ -557,6 +568,17 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             reimb.rejection_reason = ''
             reimb.save()
 
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='reimbursement',
+                    record_id=reimb.id,
+                    is_final=True,
+                    exclude_user=reimb.user,
+                )
+            except Exception as notif_e:
+                logger.error("[WA REIMB] Failed to mark notification as read: %s", notif_e)
+
             send_whatsapp_text(
                 to=sender_wa_id,
                 body=f"✅ You have APPROVED the reimbursement claim '{reimb.title}' (₹{reimb.amount}) for {applicant_name}. Amount will be credited in monthly payroll."
@@ -604,6 +626,18 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             reimb.rejected_at = None
             reimb.rejection_reason = ''
             reimb.save()
+
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='reimbursement',
+                    record_id=reimb.id,
+                    user=approver,
+                    step=1,
+                    exclude_user=reimb.user,
+                )
+            except Exception as notif_e:
+                logger.error("[WA REIMB] Failed to mark notification as read: %s", notif_e)
 
             send_whatsapp_text(
                 to=sender_wa_id,

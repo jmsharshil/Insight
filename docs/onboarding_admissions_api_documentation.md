@@ -145,6 +145,11 @@ POST `/approve/`:
 - **GET** `/api/v1/admissions/<id>/` — Full detail (tries matching admission ID or linked `lead.id`). Includes history. `AdmissionDetailSerializer`.
 - **PATCH/PUT/POST** `/api/v1/admissions/<id>/` — Update form (partial OK). Triggers bank assignment/email on first complete submit if `form_pending`. Uses `AdmissionUpdateSerializer`.
 
+> [!IMPORTANT]
+> **Phone Number Uniqueness Requirement**:
+> In all new admission submissions and updates, `phone_student`, `phone_father`, and `phone_mother` (also stored as `phone_father_2`) must all be **different from each other**. If any two numbers match, the API rejects the request with HTTP 400 Bad Request:
+> - `"Student phone number, father's phone number, and mother's phone number must all be different."`
+
 **Example Request Body (form completion):**
 ```json
 {
@@ -156,6 +161,7 @@ POST `/approve/`:
   "email_parent": "ramesh@example.com",
   "phone_student": "9876543210",
   "phone_father": "9876543211",
+  "phone_mother": "9876543212",
   "dob": "2005-04-15",
   "category": "gen",
   "street": "123 MG Road",

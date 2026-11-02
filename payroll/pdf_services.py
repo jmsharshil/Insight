@@ -110,6 +110,9 @@ def _reportlab_payslip_pdf(context):
     reimb_amt = context.get('reimbursements_amount', 0)
     if reimb_amt and float(reimb_amt) > 0:
         t_data.append([Paragraph('Expense Reimbursements', label_style), Paragraph(str(reimb_amt), ParagraphStyle('R', parent=value_style, alignment=TA_RIGHT))])
+    odometer_amt = context.get('odometer_amount', 0)
+    if odometer_amt and float(odometer_amt) != 0:
+        t_data.append([Paragraph('Odometer Travel Allowance', label_style), Paragraph(str(odometer_amt), ParagraphStyle('R', parent=value_style, alignment=TA_RIGHT))])
     t_data += [
         [Paragraph('<b>Deductions</b>', label_style), Paragraph('<b>Amount (Rs.)</b>', ParagraphStyle('R', parent=label_style, alignment=TA_RIGHT))],
         [Paragraph('Total Deductions', label_style), Paragraph(str(context.get('total_deductions', 0)), ParagraphStyle('R', parent=value_style, alignment=TA_RIGHT))],
@@ -227,8 +230,32 @@ def generate_payslip_pdf(payslip):
         role = payslip.faculty.employment_type if payslip.faculty else (payslip.user.role if payslip.user else 'N/A')
         
         reimb_amount = getattr(payslip, 'reimbursements_amount', 0) or 0
+        odometer_amount = getattr(payslip, 'odometer_amount', 0) or 0
         gross_salary = payslip.basic_salary + payslip.hour_based_amount + payslip.bonus + payslip.attendance_bonus + payslip.leave_encashment
         total_deductions = payslip.late_penalty + payslip.absence_deductions + payslip.leave_deductions + payslip.retention_deduction + payslip.other_deductions
+
+        reimb_notes = []
+        if hasattr(payslip, 'reimbursements'):
+            for r in payslip.reimbursements.all():
+                reimb_notes.append({
+                    'date': str(r.expense_date or ''),
+                    'event': r.title or 'Reimbursement',
+                    'description': r.description or '',
+                    'expense': float(r.amount),
+                })
+        odometer_notes = []
+        if hasattr(payslip, 'odometer_readings'):
+            for r in payslip.odometer_readings.all():
+                act_date = r.activity.activity_date if hasattr(r, 'activity') and r.activity else ''
+                event_name = r.activity.name if hasattr(r, 'activity') and r.activity else 'General Travel'
+                odometer_notes.append({
+                    'date': str(act_date),
+                    'event': event_name,
+                    'vehicle_type': getattr(r, 'vehicle_type', '').capitalize(),
+                    'kms': float(r.total_kms),
+                    'rate_per_km': float(r.expense_per_km) if hasattr(r, 'expense_per_km') else 0.0,
+                    'expense': float(r.total_expense),
+                })
         
         raw_sig_url = 'https://insightsinstitutes.blob.core.windows.net/media/WhatsApp%20Image%202026-05-28%20at%2010.00.48%20PM.jpeg'
         processed_sig_url = raw_sig_url
@@ -270,7 +297,11 @@ def generate_payslip_pdf(payslip):
             'attendance_bonus': payslip.attendance_bonus,
             'leave_encashment': payslip.leave_encashment,
             'bonus': payslip.bonus,
+            'extra_shift_allowance': payslip.bonus,
             'reimbursements_amount': reimb_amount,
+            'odometer_amount': odometer_amount,
+            'reimbursement_notes': reimb_notes,
+            'odometer_notes': odometer_notes,
             'gross_salary': gross_salary,
             
             'late_penalty': payslip.late_penalty,

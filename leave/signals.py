@@ -8,7 +8,7 @@ member whenever a LeavePolicy is saved (created or updated).
 import logging
 from decimal import Decimal
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -115,3 +115,70 @@ def sync_leave_balances_on_policy_save(sender, instance, created, **kwargs):
         f"Balances created={created_count}, updated={updated_count}, "
         f"eligible_users={len(eligible_user_ids)}, year={year}"
     )
+
+
+@receiver(post_save, sender='leave.PublicHoliday')
+def fix_attendance_on_holiday_save(sender, instance, created, **kwargs):
+    """
+    Fired after every PublicHoliday save (creation or update).
+    Corrects any existing attendance records on the holiday date that were
+    previously marked as 'absent' to 'public_holiday'.
+    """
+    try:
+        from attendance.utils import fix_attendance_for_holiday
+        fix_attendance_for_holiday(instance)
+    except Exception as e:
+        logger.error(f"[LEAVE SIGNAL] Failed fixing attendance for holiday {instance.id}: {e}")
+
+
+
+@receiver(post_delete, sender='leave.PublicHoliday')
+def sync_payslips_on_holiday_delete(sender, instance, **kwargs):
+    """Update payslips when a public holiday is removed."""
+    try:
+        from payroll.utils import sync_payslips_for_attendance_change
+        sync_payslips_for_attendance_change(
+            target_date=instance.date,
+            branch=getattr(instance, 'branch', None)
+        )
+    except Exception as e:
+        logger.error(f"[LEAVE SIGNAL] Error syncing payslips on holiday delete: {e}")
+
+
+@receiver(post_save, sender='leave.LeaveApplication')
+@receiver(post_delete, sender='leave.LeaveApplication')
+def sync_payslip_on_leave_application_change(sender, instance, **kwargs):
+    """Update payslips when employee leave application is approved, changed, or deleted."""
+    try:
+        from payroll.utils import sync_payslips_for_attendance_change
+        user = getattr(instance, 'applied_by', None)
+        if instance.from_date:
+            sync_payslips_for_attendance_change(
+                user=user,
+                target_date=instance.from_date,
+                branch=getattr(user, 'branch', None)
+            )
+        if instance.to_date and (instance.from_date is None or instance.to_date.month != instance.from_date.month or instance.to_date.year != instance.from_date.year):
+            sync_payslips_for_attendance_change(
+                user=user,
+                target_date=instance.to_date,
+                branch=getattr(user, 'branch', None)
+            )
+    except Exception as e:
+        logger.error(f"[LEAVE SIGNAL] Error syncing payslip on leave application change: {e}")
+
+
+@receiver(post_save, sender='leave.LateEntryRecord')
+@receiver(post_delete, sender='leave.LateEntryRecord')
+def sync_payslip_on_late_entry_change(sender, instance, **kwargs):
+    """Update payslip when late entry record is added or removed."""
+    try:
+        from payroll.utils import sync_payslips_for_attendance_change
+        user = getattr(instance, 'user', None)
+        sync_payslips_for_attendance_change(
+            user=user,
+            target_date=instance.date,
+            branch=getattr(user, 'branch', None)
+        )
+    except Exception as e:
+        logger.error(f"[LEAVE SIGNAL] Error syncing payslip on late entry change: {e}")

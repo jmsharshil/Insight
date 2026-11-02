@@ -157,6 +157,17 @@ class StudentService:
                 "batch can be assigned manually."
             )
 
+        # Notify staff and admins about new admission completed / student created
+        try:
+            from onboarding.notifications import send_new_admission_completed_notification
+            transaction.on_commit(
+                lambda: send_new_admission_completed_notification(admission=admission, student=student)
+            )
+        except Exception as exc:
+            logger.error(
+                f"Failed to schedule new admission completed notification for student {student.admission_number}: {exc}"
+            )
+
         logger.info(f"Student created: {student.admission_number} from admission {admission.id}")
         return student
 

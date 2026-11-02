@@ -52,6 +52,24 @@ RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}
 
 # Roles that can see all leads and reassign them
 SENIOR_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
+
+def _can_modify_lead(user, lead):
+    """
+    Determines if user has write/mutation access to a lead:
+    - Senior roles (sales_senior_executive, branch_manager, super_admin): True
+    - Front Desk: Can view ALL leads, but can ONLY modify/edit/status-update leads assigned to them.
+    - Junior sales roles (counsellor, tele_caller, sales_executive): Can only modify leads assigned to them.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    user_role = getattr(user, 'role', None)
+    if user_role in SENIOR_ROLES:
+        return True
+    if user_role in ('front_desk', 'receptionist'):
+        return bool(lead and lead.assigned_to_id == user.id)
+    if user_role in RESTRICTED_ROLES:
+        return bool(lead and lead.assigned_to_id == user.id)
+    return False
 SALES_ROLES = {
     'sales_senior_executive', 'sales_executive', 'counsellor',
     'tele_caller', 'senior_tele_caller', 'telecaller',
@@ -1387,6 +1405,15 @@ class OdometerReadingApproveView(APIView):
 
         expense_per_km = serializer.validated_data.get('expense_per_km')
         total_kms = serializer.validated_data.get('total_kms')
+        minus_kms = serializer.validated_data.get('minus_kms')
+
+        if minus_kms is not None:
+            base_kms = total_kms if total_kms is not None else (
+                reading.total_kms if reading.total_kms is not None and reading.total_kms != Decimal('0.00') else (
+                    Decimal(str(reading.end_kms)) - Decimal(str(reading.start_kms)) if reading.start_kms is not None and reading.end_kms is not None else Decimal('0.00')
+                )
+            )
+            total_kms = Decimal(str(base_kms)) - abs(Decimal(str(minus_kms)))
 
         reading.status = 'approved'
         reading.approved_by = request.user
@@ -1518,6 +1545,7 @@ class MonthlyOdometerApproveView(APIView):
         year = serializer.validated_data['year']
         expense_per_km = serializer.validated_data.get('expense_per_km')
         override_total_kms = serializer.validated_data.get('total_kms')
+        minus_kms = serializer.validated_data.get('minus_kms')
 
         try:
             from auth_user.models import User
@@ -1545,15 +1573,43 @@ class MonthlyOdometerApproveView(APIView):
         total_expense = Decimal('0')
         updated_count = 0
 
-        # ── Step 1: Approve all pending readings ─────────────────────────────
-        for reading in readings:
+        readings_list = list(readings)
+
+        # ── Step 1: Approve all pending readings with minus_kms / total_kms adjustment ──
+        deduct_remaining = abs(Decimal(str(minus_kms))) if minus_kms is not None else Decimal('0.00')
+
+        if override_total_kms is not None and len(readings_list) == 1:
+            readings_list[0].total_kms = Decimal(str(override_total_kms))
+        else:
+            for r in readings_list:
+                if r.start_kms is not None and r.end_kms is not None and (r.total_kms in (None, Decimal('0.00')) or r.status != 'approved'):
+                    r.total_kms = Decimal(str(r.end_kms)) - Decimal(str(r.start_kms))
+
+        if deduct_remaining > 0:
+            for r in reversed(readings_list):
+                if deduct_remaining <= 0:
+                    break
+                if r.total_kms > 0:
+                    d = min(r.total_kms, deduct_remaining)
+                    r.total_kms -= d
+                    deduct_remaining -= d
+            if deduct_remaining > 0:
+                # Deduct remaining kms directly from the last reading (allows negative km)
+                readings_list[-1].total_kms -= deduct_remaining
+                deduct_remaining = Decimal('0.00')
+        elif override_total_kms is not None and len(readings_list) > 1:
+            current_sum = sum(r.total_kms for r in readings_list)
+            diff = Decimal(str(override_total_kms)) - current_sum
+            readings_list[-1].total_kms += diff
+
+        for reading in readings_list:
             reading.status = 'approved'
             reading.approved_by = request.user
             reading.approved_at = timezone.now()
             reading.rejected_by = None
             reading.rejected_at = None
             reading.rejection_reason = ''
-            reading.save(override_expense_per_km=expense_per_km, override_total_kms=override_total_kms)
+            reading.save(override_expense_per_km=expense_per_km, override_total_kms=reading.total_kms)
             total_kms_sum += reading.total_kms
             total_expense += reading.total_expense
             updated_count += 1
@@ -1577,14 +1633,13 @@ class MonthlyOdometerApproveView(APIView):
             if existing_payslip:
                 payroll_run = existing_payslip.payroll_run
 
-                # Add newly approved expense to existing payslip totals
-                existing_payslip.reimbursements_amount = (
-                    existing_payslip.reimbursements_amount + total_expense
-                )
-                existing_payslip.net_salary = (
+                # NOTE: Odometer travel expense is kept separate from general reimbursements_amount
+                # Net salary updates by total_expense
+                existing_payslip.net_salary = max(
+                    Decimal('0.00'),
                     existing_payslip.net_salary + total_expense
                 )
-                existing_payslip.save(update_fields=['reimbursements_amount', 'net_salary'])
+                existing_payslip.save(update_fields=['net_salary'])
 
                 # Link each newly approved reading (unlinked ones only) to this payslip
                 OdometerReading.objects.filter(
@@ -1650,7 +1705,7 @@ class MonthlyOdometerApproveView(APIView):
             'success': True,
             'message': (
                 f"Monthly travel expense approved for {staff_name} ({month}/{year}). "
-                f"Approved {updated_count} daily records — {total_kms} km = \u20b9{total_expense}. "
+                f"Approved {updated_count} daily records — {total_kms_sum} km = \u20b9{total_expense}. "
                 f"{payroll_note}"
             ),
             'data': {
@@ -1659,7 +1714,7 @@ class MonthlyOdometerApproveView(APIView):
                 'month': month,
                 'year': year,
                 'records_approved': updated_count,
-                'total_kms': float(total_kms),
+                'total_kms': float(total_kms_sum),
                 'total_expense': float(total_expense),
                 'payslip_linked': payslip_linked,
                 'payslip_id': payslip_id,
@@ -1987,6 +2042,16 @@ class LeadStatusUpdateView(APIView):
                 },
                 status=status.HTTP_404_NOT_FOUND
             )
+        # Check modify permission: Front Desk and restricted roles can only update assigned leads
+        if not _can_modify_lead(request.user, lead):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Permission denied. You can only view this lead; status updates are restricted to assigned leads."
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         # Validate input
         serializer = LeadStageUpdateSerializer(data=request.data)
         if not serializer.is_valid():
@@ -2263,7 +2328,7 @@ class LeadDetailView(APIView):
                 {"success": False, "message": "Lead not found."},
                 status=status.HTTP_404_NOT_FOUND
             )
-        serializer = LeadDetailSerializer(lead)
+        serializer = LeadDetailSerializer(lead, context={'request': request})
         return Response(
             {"success": True, "data": serializer.data},
             status=status.HTTP_200_OK
@@ -2276,6 +2341,16 @@ class LeadDetailView(APIView):
             return Response(
                 {"success": False, "message": "Lead not found."},
                 status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Front Desk and restricted roles can only edit assigned leads
+        if not _can_modify_lead(request.user, lead):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Permission denied. You can only view this lead; edit access is restricted to assigned leads."
+                },
+                status=status.HTTP_403_FORBIDDEN
             )
 
         serializer = LeadUpdateSerializer(lead, data=request.data, partial=partial)
@@ -2316,6 +2391,16 @@ class LeadDetailView(APIView):
             return Response(
                 {"success": False, "message": "Lead not found."},
                 status=status.HTTP_404_NOT_FOUND
+            )
+
+        user_role = getattr(request.user, 'role', None)
+        if user_role in ('front_desk', 'receptionist') or not _can_modify_lead(request.user, lead):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Permission denied. You do not have permission to delete this lead."
+                },
+                status=status.HTTP_403_FORBIDDEN
             )
 
         lead.delete()

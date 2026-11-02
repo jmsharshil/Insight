@@ -630,9 +630,9 @@ class OdometerReading(models.Model):
 
     def calculate_totals(self, override_expense_per_km=None, override_total_kms=None):
         if override_total_kms is not None:
-            self.total_kms = max(Decimal('0.00'), Decimal(str(override_total_kms)))
+            self.total_kms = Decimal(str(override_total_kms))
         elif self.start_kms is not None and self.end_kms is not None and (self.total_kms in (None, Decimal('0.00')) or self.status != 'approved'):
-            self.total_kms = max(Decimal('0.00'), Decimal(str(self.end_kms)) - Decimal(str(self.start_kms)))
+            self.total_kms = Decimal(str(self.end_kms)) - Decimal(str(self.start_kms))
         elif self.start_kms is None or self.end_kms is None:
             self.total_kms = Decimal('0.00')
 
@@ -645,7 +645,7 @@ class OdometerReading(models.Model):
             rate = VEHICLE_RATES.get(vtype, Decimal('5.00'))
             self.expense_per_km = rate
 
-        if self.total_kms:
+        if self.total_kms is not None:
             self.total_expense = (self.total_kms * self.expense_per_km).quantize(Decimal('0.01'))
         else:
             self.total_expense = Decimal('0.00')

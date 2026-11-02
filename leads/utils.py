@@ -805,6 +805,19 @@ def handle_sales_attendance_whatsapp_approval(sender_wa_id, payload_str, text_st
     if action == 'approve':
         success, msg = apply_sales_attendance_approval(approval, approver)
         if success:
+            is_final = (approval.status != 'cmo_approved')
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='sales_attendance',
+                    record_id=approval.id,
+                    user=approver if not is_final else None,
+                    step=1 if not is_final else None,
+                    is_final=is_final,
+                    exclude_user=approval.user,
+                )
+            except Exception as notif_e:
+                logger.error("[WA SALES ATT] Failed to mark notification as read: %s", notif_e)
             if approval.status == 'cmo_approved':
                 send_whatsapp_text(
                     to=sender_wa_id,
@@ -823,6 +836,16 @@ def handle_sales_attendance_whatsapp_approval(sender_wa_id, payload_str, text_st
         reason = f"Rejected via WhatsApp by {approver.name}"
         success, msg = apply_sales_attendance_rejection(approval, approver, reason=reason)
         if success:
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='sales_attendance',
+                    record_id=approval.id,
+                    is_final=True,
+                    exclude_user=approval.user,
+                )
+            except Exception as notif_e:
+                logger.error("[WA SALES ATT] Failed to mark notification as read: %s", notif_e)
             send_whatsapp_text(
                 to=sender_wa_id,
                 body=f"❌ You have REJECTED sales {approval_type_disp.lower()} for {applicant_name} ({approval.date})."

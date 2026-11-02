@@ -70,6 +70,7 @@ def build_deduction_note(
     retention_percentage=Decimal('0'),
     sunday_deduction=Decimal('0'),
     attendance_bonus=Decimal('0'),
+    attendance_bonus_label=None,
 ):
     """Build a concise deduction note with accurate per-minute late-checkin details."""
     notes = []
@@ -78,7 +79,8 @@ def build_deduction_note(
     leave_dates = leave_dates or []
 
     if attendance_bonus > 0:
-        notes.append(f"Attendance bonus: +{_fmt_currency(attendance_bonus)}")
+        lbl = attendance_bonus_label or "Extra Shift Allowance"
+        notes.append(f"{lbl}: +{_fmt_currency(attendance_bonus)}")
 
     if late_penalty > 0:
         date_suffix = f" on {', '.join(late_dates)}" if late_dates else ""
@@ -109,17 +111,21 @@ def build_deduction_note(
     return ", ".join(notes)[:300]
 
 
-def update_bonus_note(note, bonus_amount):
-    """Keep the manually-set bonus amount in the payslip deduction note."""
-    note = re.sub(r'(?:^|, )Bonus: \+\d+(?:\.\d{2})?', '', note or '').strip(', ')
+def update_bonus_note(note, bonus_amount, label=None):
+    """Keep the manually-set bonus / extra shift allowance amount in the payslip deduction note."""
+    has_legacy_bonus = bool(re.search(r'(?:^|, )Bonus: \+', note or ''))
+    if label is None:
+        label = "Bonus" if has_legacy_bonus else "Extra Shift Allowance"
+    pattern = r'(?:^|, )(?:Bonus|Extra Shift Allowance): \+\d+(?:\.\d{2})?'
+    cleaned = re.sub(pattern, '', note or '').strip(', ')
     if bonus_amount <= 0:
-        return note[:300]
+        return cleaned[:300]
 
-    bonus_note = f"Bonus: +{_fmt_currency(Decimal(bonus_amount))}"
-    if not note:
-        return bonus_note
-    available_note_length = max(0, 300 - len(bonus_note) - 2)
-    return f"{note[:available_note_length]}, {bonus_note}"
+    allowance_note = f"{label}: +{_fmt_currency(Decimal(bonus_amount))}"
+    if not cleaned:
+        return allowance_note
+    available_note_length = max(0, 300 - len(allowance_note) - 2)
+    return f"{cleaned[:available_note_length]}, {allowance_note}"
 
 
 def get_subject_hourly_rate(faculty_profile, subject, month, year):
@@ -718,21 +724,20 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
-        absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
-        absent_days += Decimal(attendance_half_days) * Decimal('0.5')
-        
-        absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
-        absence_deductions = absent_days * absence_deduction_rate
+        if working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
+            absent_days = Decimal(30)
+            absence_deductions = basic_salary if 'basic_salary' in locals() and basic_salary > 0 else fac_salary
+        else:
+            absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
+            absent_days += Decimal(attendance_half_days) * Decimal('0.5')
+            absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+            absence_deductions = min(fac_salary if fac_salary else Decimal(0), absent_days * absence_deduction_rate)
     else:
         absent_days = Decimal(0)
         absence_deductions = Decimal(0)
 
-    # 8.5 Attendance Bonus & Salary Retention
+    # 8.5 Attendance Bonus & Salary Retention (30-day base payroll, no 31st day auto-bonus)
     attendance_bonus = Decimal(0)
-    if working_days > 0:
-        attendance_percentage = (Decimal(days_with_attendance) / Decimal(working_days)) * 100
-        if attendance_percentage > Decimal(80):
-            attendance_bonus = daily_rate
 
     basic_salary = fac_salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
 
@@ -789,7 +794,27 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     )
 
     # 10. Create PaySlip
-    PaySlip.objects.filter(payroll_run=payroll_run, faculty=faculty_profile, is_manually_adjusted=False).delete()
+    existing_ps = PaySlip.objects.filter(payroll_run=payroll_run, faculty=faculty_profile).first()
+    manual_bonus = Decimal(0)
+    manual_other_deductions = Decimal(0)
+    was_manually_adjusted = False
+    if existing_ps:
+        if existing_ps.is_manually_adjusted:
+            manual_bonus = existing_ps.bonus
+            manual_other_deductions = existing_ps.other_deductions
+            was_manually_adjusted = True
+        existing_ps.delete()
+
+    if was_manually_adjusted:
+        bonus = manual_bonus
+        other_deductions = manual_other_deductions
+        net = max(Decimal(0), net + bonus - other_deductions)
+        is_manually_adjusted = True
+    else:
+        bonus = Decimal(0)
+        other_deductions = Decimal(0)
+        is_manually_adjusted = False
+
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=faculty_profile,
@@ -803,9 +828,12 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         absence_deductions=absence_deductions,
         leave_deductions=applied_leave_deductions,
         retention_deduction=retention_deduction,
+        other_deductions=other_deductions,
+        bonus=bonus,
+        is_manually_adjusted=is_manually_adjusted,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
-        reimbursements_amount=total_reimbursements,
+        reimbursements_amount=reimbursements_total,
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
@@ -1305,18 +1333,19 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
-        absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
-        absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
-        absence_deductions = absent_days * absence_deduction_rate
+        if working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
+            absent_days = Decimal(30)
+            absence_deductions = fac_salary if fac_salary else Decimal(0)
+        else:
+            absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
+            absence_deduction_rate = policy.absence_deduction_per_day if policy and policy.absence_deduction_per_day > 0 else daily_rate
+            absence_deductions = min(fac_salary if fac_salary else Decimal(0), absent_days * absence_deduction_rate)
     else:
         absent_days = Decimal(0)
         absence_deductions = Decimal(0)
 
+    # 30-day base payroll: no automatic 1-day bonus for >80% attendance
     attendance_bonus = Decimal(0)
-    if working_days > 0:
-        attendance_percentage = (Decimal(days_with_attendance) / Decimal(working_days)) * 100
-        if attendance_percentage > Decimal(80):
-            attendance_bonus = daily_rate
 
     basic_salary = fac_salary if faculty_profile.employment_type == 'full_time' else Decimal(0)
 
@@ -1486,7 +1515,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             retention_deduction=retention_deduction,
             attendance_bonus=attendance_bonus,
             leave_encashment=leave_encashment,
-            reimbursements_amount=total_reimbursements,
+            reimbursements_amount=reimbursements_total,
             deduction_note=deduction_note_str,
             net_salary=net,
             leaves_taken=leaves_taken,
@@ -1495,6 +1524,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         )
         if reimbs:
             reimbs.update(payslip=payslip, payroll_run=payroll_run)
+        if odometer_readings:
+            odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
         if odometer_readings:
             odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
         return payslip
@@ -1673,24 +1704,22 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
-        absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
-        absent_days += Decimal(half_days_count) * Decimal('0.5')
-        
-        absence_deduction_rate = daily_rate
-        absence_deductions = absent_days * absence_deduction_rate
+        if working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
+            absent_days = Decimal(30)
+            absence_deductions = basic_salary if basic_salary > 0 else Decimal(0)
+        else:
+            absent_days = Decimal(max(0, working_days_passed - reg_attended - valid_hd_count - full_day_leaves_count))
+            absent_days += Decimal(half_days_count) * Decimal('0.5')
+            absence_deduction_rate = daily_rate
+            absence_deductions = min(basic_salary if basic_salary > 0 else Decimal('9999999'), absent_days * absence_deduction_rate)
     else:
         absent_days = Decimal(0)
         absence_deductions = Decimal(0)
         
     absence_deductions += sunday_deduction  # include Sunday shortfall deduction for HK/security
 
-    # 7. Attendance bonus
-    attendance_bonus = Decimal(0)
-    if working_days > 0:
-        attendance_percentage = (Decimal(days_attended) / Decimal(working_days)) * 100
-        if attendance_percentage > Decimal(80):
-            attendance_bonus = daily_rate
-    attendance_bonus += sunday_bonus  # extra day bonus if 3+ Sundays attended
+    # 7. Extra shift allowance / Sunday bonus (30-day base payroll, no automatic 31st day bonus)
+    attendance_bonus = sunday_bonus  # extra day bonus if 3+ Sundays attended
 
     # 8. Retention deduction
     # 8. Leave encashment (March)
@@ -1722,7 +1751,16 @@ def compute_payslip_for_user(user, month, year, payroll_run):
 
     # 11. Create PaySlip
     # Delete existing payslip for this user in this payroll run (for regeneration)
-    PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True, is_manually_adjusted=False).delete()
+    existing_ps = PaySlip.objects.filter(payroll_run=payroll_run, user=user, faculty__isnull=True).first()
+    manual_bonus = Decimal(0)
+    manual_other_deductions = Decimal(0)
+    was_manually_adjusted = False
+    if existing_ps:
+        if existing_ps.is_manually_adjusted:
+            manual_bonus = existing_ps.bonus
+            manual_other_deductions = existing_ps.other_deductions
+            was_manually_adjusted = True
+        existing_ps.delete()
 
     late_penalty_minutes = total_shortfall_penalty_minutes
 
@@ -1747,6 +1785,16 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     total_reimbursements = reimbursements_total + odometer_total
     net = max(Decimal(0), net + total_reimbursements)
 
+    if was_manually_adjusted:
+        bonus = manual_bonus
+        other_deductions = manual_other_deductions
+        net = max(Decimal(0), net + bonus - other_deductions)
+        is_manually_adjusted = True
+    else:
+        bonus = Decimal(0)
+        other_deductions = Decimal(0)
+        is_manually_adjusted = False
+
     payslip = PaySlip.objects.create(
         payroll_run=payroll_run,
         faculty=None,
@@ -1758,9 +1806,12 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         absence_deductions=absence_deductions,
         leave_deductions=leave_deductions,
         retention_deduction=retention_deduction,
+        other_deductions=other_deductions,
+        bonus=bonus,
+        is_manually_adjusted=is_manually_adjusted,
         attendance_bonus=attendance_bonus,
         leave_encashment=leave_encashment,
-        reimbursements_amount=total_reimbursements,
+        reimbursements_amount=reimbursements_total,
         deduction_note=deduction_note_str,
         net_salary=net,
         leaves_taken=int(leave_days),
@@ -1773,3 +1824,115 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
 
     return payslip
+
+
+def sync_payslips_for_attendance_change(user=None, target_date=None, branch=None, month=None, year=None):
+    """
+    Automatically recomputes and updates payslips whenever any change related
+    to attendance occurs (attendance check-in/out, status change, public holiday,
+    leave approval, late entry, etc.).
+
+    Args:
+        user: Optional User instance, user ID, or FacultyProfile.
+        target_date: Optional date/datetime indicating when attendance changed.
+        branch: Optional Branch instance or branch ID.
+        month: Optional integer month (1-12).
+        year: Optional integer year (e.g. 2026).
+    """
+    from datetime import date, datetime
+    from django.db import models
+    from django.contrib.auth import get_user_model
+    from .models import PayrollRun, PaySlip
+    User = get_user_model()
+
+    if target_date is not None:
+        if isinstance(target_date, str):
+            try:
+                target_date = datetime.strptime(str(target_date)[:10], '%Y-%m-%d').date()
+            except Exception:
+                target_date = None
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+
+    if target_date is not None:
+        m = target_date.month
+        y = target_date.year
+    elif month and year:
+        m = int(month)
+        y = int(year)
+    else:
+        from django.utils import timezone
+        now = timezone.localtime(timezone.now()).date()
+        m = now.month
+        y = now.year
+
+    # Resolve user
+    user_obj = None
+    if user is not None:
+        if hasattr(user, 'role') or isinstance(user, User):
+            user_obj = user
+        elif hasattr(user, 'user') and (hasattr(user.user, 'role') or isinstance(getattr(user, 'user'), User)):
+            user_obj = user.user
+        else:
+            try:
+                user_obj = User.objects.filter(id=user).first()
+            except Exception:
+                user_obj = None
+
+    if user_obj and getattr(user_obj, 'role', '') in ['student', 'parent']:
+        return
+
+    # Find non-disbursed payroll runs
+    runs_qs = PayrollRun.objects.filter(month=m, year=y, is_disbursed=False)
+
+    if branch:
+        branch_id = getattr(branch, 'id', branch)
+        runs_qs = runs_qs.filter(branch_id=branch_id)
+    elif user_obj and getattr(user_obj, 'branch_id', None):
+        user_branch_id = user_obj.branch_id
+        runs_qs = runs_qs.filter(
+            models.Q(branch_id=user_branch_id) | models.Q(payslips__user=user_obj)
+        ).distinct()
+    elif user_obj:
+        runs_qs = runs_qs.filter(payslips__user=user_obj).distinct()
+
+    runs = list(runs_qs)
+    if not runs:
+        return
+
+    from faculty.models import FacultyProfile
+    for run in runs:
+        try:
+            if user_obj:
+                fp = None
+                try:
+                    fp = FacultyProfile.objects.filter(user=user_obj, is_active=True).first()
+                except Exception:
+                    fp = None
+                if not fp and getattr(user_obj, 'role', '') == 'faculty':
+                    fp = getattr(user_obj, 'faculty_profile', None)
+                if not fp and hasattr(user_obj, 'faculty_profile') and user_obj.faculty_profile:
+                    fp = user_obj.faculty_profile
+
+                if fp:
+                    compute_payslip_for_faculty(fp, m, y, run)
+                elif user_obj.role in EMPLOYEE_ROLES or getattr(user_obj, 'role', '') not in ['student', 'parent']:
+                    compute_payslip_for_user(user_obj, m, y, run)
+            else:
+                # Update all employees in this run (e.g. for holiday or branch-wide attendance change)
+                faculty_list = FacultyProfile.objects.filter(branch=run.branch, is_active=True)
+                for fp in faculty_list:
+                    compute_payslip_for_faculty(fp, m, y, run)
+
+                staff_users = User.objects.filter(
+                    branch=run.branch, role__in=EMPLOYEE_ROLES, is_active=True
+                ).exclude(id__in=faculty_list.values_list('user_id', flat=True))
+                for u in staff_users:
+                    compute_payslip_for_user(u, m, y, run)
+
+            total = sum(s.net_salary for s in run.payslips.all())
+            run.total_amount = total
+            run.save(update_fields=['total_amount'])
+            logger.info(f"[PAYSLIP SYNC] Updated payroll run {run.id} ({m}/{y}) on attendance change.")
+        except Exception as err:
+            logger.error(f"[PAYSLIP SYNC] Failed updating payroll run {run.id}: {err}", exc_info=True)

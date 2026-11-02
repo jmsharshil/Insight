@@ -597,6 +597,8 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
                 body=f"Payment details submitted for admission #{admission.id} ({admission.first_name} {admission.surname}). Level 1 approval required.",
                 organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                 branch=admission.branch if getattr(admission, 'branch', None) else None,
+                metadata={'admission_id': str(admission.id), 'step': 'level_1_approval'},
+                notification_type='admission',
             )
         except Exception as exc:
             logger.error(f"Failed to dispatch Level 1 system notification for admission {admission.id}: {exc}")

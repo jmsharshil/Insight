@@ -11,7 +11,7 @@
 
 - **Stage updates** create immutable `LeadStage` entries.
 - **Assignment** creates `LeadAssignmentLog`.
-- **Assignment**: Pure round-robin via `leads.signals.auto_assign_lead` (pre_save signal). Uses `form_type` (`contact` → `tele_caller` role, `inquiry` → `counsellor` role) with `get_role_filter_q`. Does **not** override existing `assigned_to`. Calls `notify_new_lead_assignment`.
+- **Assignment**: Pure round-robin via `leads.signals.auto_assign_lead` (pre_save signal). Uses `form_type` (`contact` → auto-assigned strictly to users whose **primary role** is `tele_caller` / `telecaller`, excluding those where telecaller is only a secondary role; `inquiry` → `counsellor` role) with `get_role_filter_q`. Does **not** override existing `assigned_to`. Calls `notify_new_lead_assignment`.
 - **Conversion** (`converted` stage): **Auto-conversion signal to `onboarding.Admission` is now commented out** (manual CRM → Admission onboarding flow preferred via new `Admission` model in `admissions/models.py`).
 - New sales models integrated: `SalesDailyPlan`, `SalesDailyActivity`, `SalesActivityPhoto`, `OdometerReading` (payroll linkage, approval workflow, vehicle rates).
 
@@ -47,7 +47,7 @@
 WEB FORM (Contact/Inquiry) ──► Lead (new) 
           │
           ▼
-**auto_assign_lead** (pre_save signal, pure round-robin by `form_type` via `get_role_filter_q` → tele_caller/counsellor)
+**auto_assign_lead** (pre_save signal, round-robin by `form_type`: `contact` → strictly primary `tele_caller`, `inquiry` → `counsellor`)
           │
           ▼
 Counsellor/Telecaller assignment + `notify_new_lead_assignment` (system notif)

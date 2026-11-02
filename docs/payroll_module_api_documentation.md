@@ -16,24 +16,38 @@
 - Per-subject hourly rates via `SubjectHourlyRate` (effective_from) or fallback to `faculty.hourly_rate` / `user.hourly_rate`.
 - **Extra hours logic**: Compares monthly chapter minutes vs allocated (`Chapter.duration_hours`); auto-creates `ExtraHoursApproval` (pending); only payable if approved.
 - Visiting-faculty late-entry penalties: aggregate daily delays from QR + sessions and use `LateEntryPolicy` (grace, deduction_per_minute, max_deduction). Other faculty and regular staff do not receive late-entry deductions; paper-checker late-submission penalties remain separate.
-- Absence = (working_days - attended) + half-days; Sunday attendance counts as full day.
+- **Strict 30-Day Base Payroll**: All full-time salaries are calculated on a fixed 30-day base (`daily_rate = basic_salary / 30`). In 31-day months (e.g. October, 31 days), full attendance yields the standard full 30-day salary with **no extra day added as bonus**. In February (28/29 days), attending all working days yields the full 30-day salary.
+- Absence = (working_days - attended) + half-days; deducted at `daily_rate = basic_salary / 30`. Sunday attendance counts as full day.
 - Deductions: unpaid leaves, salary_retention_percentage, other.
-- Bonuses: attendance (>80%), leave_encashment (March only, from LeaveBalance).
+- **Shift Allowances & Reconciliations**: Sunday shift additions are categorized under **Extra Shift Allowance** (`bonus`). Automatic >80% 31st-day attendance bonuses are disabled in favor of the strict 30-day base.
+- **Odometer Travel vs Reimbursements**: Approved travel odometer allowances are kept separate from general staff expense reimbursements; general claims populate `reimbursements_amount`, while approved travel claims link via `odometer_readings` (`odometer_amount`), both credited cleanly into `net_salary`.
 - Creates `PaySlip` (faculty FK), `SessionLatePenaltyLog`s; updates `PayrollRun.total_amount` via signal.
-- **Regenerates** on draft payroll access.
+- **Regenerates** on draft payroll access and automatically updates on live attendance/leave changes via signals.
 
 ### `compute_payslip_for_user(user, month, year, payroll_run)`
 - **Simplified calculator for non-faculty** (all `EMPLOYEE_ROLES`).
+- **Strict 30-Day Base Payroll**: Payout is strictly on a 30-day base (`daily_rate = basic_salary / 30`). Working full working days in any month (including 31-day months and 28/29-day February) pays the full 30-day basic salary without artificial 31st-day bonus increments. Absence deductions are calculated as `absent_days * daily_rate`. Full-month absence caps the deduction at `basic_salary`.
 - **Special case for `paper_checker`** (v2 recheck/CheckerQuery integration):
   - Counts `MarkSheet` where `paper_checker=user`, `is_submitted=True`, `checked_at` in month, **excluding** open `queries` (CheckerQuery.status='open') or recheck_requests with status in ['approval_pending', 'approved'].
   - Uses `user.per_paper_rate` (default 50); `sessions_conducted` = papers_checked.
   - Late penalty: 5 days grace after `exam.scheduled_date`; bracketed % penalty (5%,10%,15%...) folded into `late_penalty`.
   - No attendance/leave/sunday/absence for this role; payment = (papers * rate) - penalties - retention.
-- For other staff (`house_keeping`/`security` have Sunday rules: 2 required; <2 = deduction, >=3 = bonus day).
+- For other staff (`house_keeping`/`security` have Sunday rules: 2 required; <2 = deduction, >=3 = extra day shift allowance).
 - Uses `EmployeeAttendanceRecord` and `LeaveApplication`.
-- Handles base/hourly, unpaid leaves, absence, retention (`salary_retention_percentage`), attendance_bonus (>80%), leave_encashment (March). Late-entry deductions apply only to visiting faculty; paper-checker late-submission penalties remain separate.
+- Handles base/hourly, unpaid leaves, absence, retention (`salary_retention_percentage`), leave_encashment (March). Late-entry deductions apply only to visiting faculty; paper-checker late-submission penalties remain separate.
+- **Odometer vs General Reimbursements**: `reimbursements_amount` is preserved strictly for general expense claims; approved travel odometer allowances are tracked via `odometer_amount` and linked `odometer_readings`. Both are added to `net_salary`.
 - Deletes old payslip on regen; creates new with `user` FK (`faculty=null`); updates run total via signal.
 - **Blocks payment** for unresolved CheckerQuery/RecheckRequest (per results v2 + answer-key gate).
+
+### `sync_payslips_for_attendance_change(user=None, target_date=None, branch=None, month=None, year=None)`
+- **Real-Time Automatic Payslip Synchronization**:
+- Automatically triggered via Django signals whenever any attendance, shift, leave, or holiday modification occurs:
+  - `EmployeeAttendanceRecord` post_save & post_delete (check-in, check-out, manual corrections, status changes).
+  - `FacultyQRScanLog` & `SessionReport` post_save & post_delete (faculty timetable sessions and QR scans).
+  - `LeaveApplication` post_save & post_delete (approved, cancelled, or modified leaves).
+  - `PublicHoliday` post_save & post_delete (holidays created/edited/deleted, including bulk Excel uploads).
+  - `LateEntryRecord` post_save & post_delete.
+- Finds all open/draft/pending_approval `PayrollRun`s covering the affected user and target month/year, and immediately recalculates the affected `PaySlip`s so accounting dashboards remain live and up to date without manual regeneration.
 
 ### `preview_payslip_for_faculty(faculty_profile, month, year)`
 - Read-only preview for faculty (no DB write).
@@ -65,9 +79,9 @@ EMPLOYEE_ROLES = [
 | Model | Purpose |
 |-------|---------|
 | `PayrollRun` | Monthly batch (per branch/month/year). Status + `total_amount`, `notes`. Auto-regen on draft. |
-| `PaySlip` | Per-employee (fields: basic_salary, total_session_hours, hour_based_amount, late_penalty, absence_deductions, leave_deductions, retention_deduction, other_deductions, bonus, attendance_bonus, leave_encashment, reimbursements_amount, net_salary, sessions_conducted, deduction_note, working_days, leaves_taken, is_disbursed). Links to **either** `faculty` or `user`. Note: `reimbursements_amount` includes approved general `Reimbursement` claims plus approved `OdometerReading` travel expenses (`total_kms * expense_per_km`). |
+| `PaySlip` | Per-employee (fields: basic_salary, total_session_hours, hour_based_amount, late_penalty, absence_deductions, leave_deductions, retention_deduction, other_deductions, bonus / extra_shift_allowance, attendance_bonus, leave_encashment, reimbursements_amount, odometer_amount, net_salary, sessions_conducted, deduction_note, working_days, leaves_taken, is_disbursed). Links to **either** `faculty` or `user`. Note: `reimbursements_amount` stores only approved general expense reimbursements. Approved travel claims are separately computed via property `odometer_amount` and serialized via `odometer_notes`, with both credited to `net_salary`. |
 | `Reimbursement` | Staff expense claims (`reimbursements` module); approved unpaid claims are automatically linked to `payslip` & `payroll_run`, added to `net_salary` via `reimbursements_amount`, and marked `is_paid=True` upon disbursal. See [reimbursements_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/reimbursements_module_api_documentation.md). |
-| `OdometerReading` | Daily travel expense claims (`leads` module); approved travel expenses (`total_kms * expense_per_km`) are aggregated into `reimbursements_amount` alongside staff reimbursements on the employee's `PaySlip`, linked to the `payroll_run`, and marked `is_paid=True` upon payroll disbursal. See [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md). |
+| `OdometerReading` | Daily travel expense claims (`leads` module); approved travel expenses (`total_kms * expense_per_km`) are kept distinct from general reimbursements, accessible via `PaySlip.odometer_amount` and `odometer_notes`, linked to the `payroll_run`, and marked `is_paid=True` upon payroll disbursal. Supports negative kilometers (`minus_kms`) for deductions. See [sales_module_api_documentation.md](file:///c:/Users/Admin/OneDrive%20-%20JMS%20Advisory%20Services%20Private%20Limited/Desktop/Insight/docs/sales_module_api_documentation.md). |
 | `LateEntryPolicy` | Branch config (grace_period_minutes, deduction_per_minute, max_deduction_per_session, absence_deduction_per_day, late_entry_threshold, auto_halfday_deduction). |
 | `SessionLatePenaltyLog` | Audit trail for faculty late sessions (linked to SessionReport). |
 | `ExtraHoursApproval` | Auto-created for faculty overtime vs chapter allocation; status=pending/approved/rejected. |
@@ -157,7 +171,7 @@ Cross-references `auth_user_procedure_guide.md` (role matrix, exam_supervisor/pa
 ### Step 3: Review, List & Adjust Payslips
 - **GET** `/payroll/<run_id>/` — detail (regens draft).
 - **GET** `/payroll/<run_id>/payslips/` — list with late_logs, derived fields (faculty_name, per_paper_rate, employment_type, total_salary_sum in response).
-- **PATCH** `/payroll/<run_id>/payslips/<slip_id>/` — bonus/other_deductions/deduction_note/leave_deductions; auto net_salary + run total recalc (accountant/super only; not if disbursed). Bonus changes are reflected in `deduction_note`; generated attendance bonuses are also noted there.
+- **PATCH** `/payroll/<run_id>/payslips/<slip_id>/` — `extra_shift_allowance` (or `bonus`), `other_deductions`, `deduction_note`, `leave_deductions`; auto `net_salary` + run total recalc (accountant/super only; prohibited if disbursed). Net salary formula: `basic_salary + hour_based_amount + bonus + reimbursements_amount + odometer_amount - late_penalty - absence_deductions - leave_deductions - other_deductions`. Adjustments update `deduction_note` with `Extra Shift Allowance: +XX.XX`.
 - DELETE payslip (super only).
 
 ### Step 4: Extra Hours, Preview & Paper-Checker Specifics
@@ -190,7 +204,7 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
 - **GET/PATCH/DELETE** `/api/v1/payroll/<run_id>/` — detail (auto-regen draft), update notes/status (limited), delete draft/pending.
 - **GET** `/api/v1/payroll/<run_id>/payslips/` — payslips list (with late_logs; regens draft; extra `total_salary_sum` in response).
 
-**Payslip Serializer Fields:** id, faculty/user_id, faculty_name, employee_id, basic_salary, total_session_hours, hour_based_amount, late_penalty, absence_deductions, leave_deductions, retention_deduction, other_deductions, bonus, attendance_bonus, leave_encashment, net_salary, sessions_conducted, leaves_taken, working_days, is_disbursed, deduction_note, late_logs, hourly_rate, per_paper_rate, employment_type, salary, session_hours.
+**Payslip Serializer Fields:** `id`, `faculty`/`user_id`, `faculty_name`, `employee_id`, `basic_salary`, `total_session_hours`, `hour_based_amount`, `late_penalty`, `absence_deductions`, `leave_deductions`, `retention_deduction`, `other_deductions`, `bonus`, `extra_shift_allowance`, `attendance_bonus`, `leave_encashment`, `reimbursements_amount`, `odometer_amount`, `reimbursement_notes`, `odometer_notes`, `net_salary`, `sessions_conducted`, `leaves_taken`, `working_days`, `is_disbursed`, `deduction_note`, `late_logs`, `hourly_rate`, `per_paper_rate`, `employment_type`, `salary`, `session_hours`.
 
 ### Extra Hours & Late Policy
 - **GET** `/payroll/extra-hours/` (paginated, filters); **PATCH** `/payroll/extra-hours/<id>/` `{status: "approved"}` (super only; triggers recalc if draft).
@@ -204,7 +218,9 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
 **GET `/payroll/my/`** (any authenticated employee role).
 - Resolves via FacultyProfile or User.
 - Returns employee info (incl. role), summary (total_payslips, total_net_earned, total_disbursed), list of payslips (MyPaySlipSerializer with payroll_month/year/status/branch_name).
-- Each payslip includes `reimbursement_notes`: approved expense claims are listed with date, title, description, and amount; travel claims include date, event, kilometres, and expense.
+- **Separate Expense & Travel Notes**:
+  - `reimbursement_notes`: list of approved expense claims (`date`, `event`, `description`, `expense`).
+  - `odometer_notes`: list of approved travel claims (`date`, `event`, `vehicle_type`, `kms`, `rate_per_km`, `expense`).
 - Supports ?year=&month=&status= filters. 404 if no history.
 
 ### Approve / Disburse

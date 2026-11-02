@@ -111,6 +111,10 @@ class LeaveListCreateView(APIView):
         return paginate_queryset(qs, request, LeaveApplicationListSerializer, serializer_context={'request': request})
 
     def post(self, request):
+        # Delegate to Excel upload if an excel or csv file is present in request
+        if request.FILES.get('file') or request.FILES.get('excel_file') or request.FILES.get('excel'):
+            return PublicHolidayExcelUploadView().post(request)
+
         role = _user_role(request.user)
         if role in LEAVE_APPLY_EXCLUDE:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
@@ -1009,6 +1013,7 @@ class LateEntryDetailView(APIView):
 
 class PublicHolidayListCreateView(APIView):
     # permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['year']
     search_fields = ['name']
@@ -1039,6 +1044,17 @@ class PublicHolidayListCreateView(APIView):
         organization = getattr(request.user, 'organization', None)
 
         d = ser.validated_data
+        from django.utils import timezone
+        today = timezone.localtime(timezone.now()).date()
+        current_year = today.year
+
+        # If date is in the past (date is gone), allow declaration for current year only
+        if d['date'] < today and d['date'].year < current_year:
+            return Response({
+                'success': False,
+                'message': f"Cannot declare past holidays for previous years ({d['date'].year}). Past holidays are allowed for the current year ({current_year}) only."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         if PublicHoliday.objects.filter(organization=organization, date=d['date']).exists():
             return Response({'success': False, 'message': 'Holiday already exists for this date.'}, status=status.HTTP_409_CONFLICT)
 
@@ -1050,6 +1066,13 @@ class PublicHolidayListCreateView(APIView):
                 year=d['date'].year,
                 created_by=request.user
             )
+
+            # Fix any existing absent attendance records on this holiday date
+            try:
+                from attendance.utils import fix_attendance_for_holiday
+                fix_attendance_for_holiday(holiday)
+            except Exception as fix_err:
+                logger.error(f"Failed to fix attendance on holiday creation: {fix_err}")
 
             # Notify all active users in the organization
             from django.contrib.auth import get_user_model
@@ -1075,6 +1098,349 @@ class PublicHolidayListCreateView(APIView):
         except Exception as e:
             return Response({'success': False, 'message': f'Database error: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
+
+
+
+def parse_date_value(val):
+    """Parses Excel serial dates, datetime/date objects, or common string date formats."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    s = str(val).strip()
+    if not s or s.lower() == 'nan':
+        return None
+    # Excel serial number (float or int)
+    try:
+        fval = float(s)
+        if 20000 < fval < 60000:
+            import openpyxl.utils.datetime as op_dt
+            parsed = op_dt.from_excel(fval)
+            if isinstance(parsed, (datetime, date)):
+                return parsed.date() if isinstance(parsed, datetime) else parsed
+    except Exception:
+        pass
+    # String date parsing
+    for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d.%m.%Y', '%d %b %Y', '%d %B %Y'):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+class PublicHolidayExcelUploadView(APIView):
+    """
+    POST /api/leave/public-holidays/upload/
+    Upload Excel (.xlsx, .xls) or CSV (.csv) containing public holidays.
+    Expected columns:
+      - Date (required): e.g. YYYY-MM-DD, DD-MM-YYYY, or Excel date
+      - Name (required): Holiday name (e.g. Diwali, Independence Day)
+      - Branch (optional): Branch ID or Name for branch-specific holidays
+    """
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request):
+        role = _user_role(request.user)
+        if role not in HOLIDAY_EDIT_ROLES and not getattr(request.user, 'is_superuser', False):
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        file_obj = request.FILES.get('file') or request.FILES.get('excel_file') or request.FILES.get('excel')
+        if not file_obj:
+            return Response({
+                'success': False,
+                'message': 'No file uploaded. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file with holidays.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        filename = file_obj.name.lower()
+        rows = []
+        try:
+            if filename.endswith('.xlsx'):
+                import openpyxl
+                wb = openpyxl.load_workbook(file_obj, data_only=True)
+                ws = wb.active
+                for r in ws.iter_rows(values_only=True):
+                    if any(cell is not None and str(cell).strip() != '' for cell in r):
+                        rows.append(list(r))
+            elif filename.endswith('.csv'):
+                import csv, io
+                content = file_obj.read()
+                try:
+                    text = content.decode('utf-8')
+                except UnicodeDecodeError:
+                    text = content.decode('latin-1')
+                reader = csv.reader(io.StringIO(text))
+                for r in reader:
+                    if any(str(cell).strip() != '' for cell in r):
+                        rows.append(r)
+            elif filename.endswith('.xls'):
+                import pandas as pd
+                df = pd.read_excel(file_obj)
+                headers = [str(c) for c in df.columns]
+                rows.append(headers)
+                for r in df.itertuples(index=False):
+                    rows.append(list(r))
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'Unsupported file format. Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as read_err:
+            logger.error(f"Error reading holiday file: {read_err}")
+            return Response({
+                'success': False,
+                'message': f"Failed to read file: {str(read_err)}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not rows:
+            return Response({
+                'success': False,
+                'message': 'The uploaded file is empty or contains no readable rows.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Detect headers
+        header_row = [str(c).strip().lower().replace('_', ' ').replace('-', ' ') for c in rows[0]]
+        date_idx = None
+        name_idx = None
+        branch_idx = None
+
+        date_aliases = ['date', 'holiday date', 'holidaydate', 'day']
+        name_aliases = ['name', 'holiday name', 'holidayname', 'holiday', 'title', 'reason', 'description']
+        branch_aliases = ['branch', 'branch name', 'branch id']
+
+        for idx, h in enumerate(header_row):
+            if date_idx is None and any(alias in h for alias in date_aliases):
+                date_idx = idx
+            elif name_idx is None and any(alias in h for alias in name_aliases):
+                name_idx = idx
+            elif branch_idx is None and any(alias in h for alias in branch_aliases):
+                branch_idx = idx
+
+        if date_idx is not None and name_idx is not None:
+            start_index = 1
+        else:
+            p0 = parse_date_value(rows[0][0]) if len(rows[0]) > 0 else None
+            if p0 is not None:
+                date_idx = 0
+                name_idx = 1
+                start_index = 0
+            else:
+                date_idx = 0
+                name_idx = 1
+                start_index = 1
+
+        today = timezone.localtime(timezone.now()).date()
+        current_year = today.year
+        organization = getattr(request.user, 'organization', None)
+
+        created_holidays = []
+        updated_holidays = []
+        skipped_holidays = []
+        row_errors = []
+
+        data_rows = rows[start_index:]
+        for row_num, row in enumerate(data_rows, start=start_index + 1):
+            if len(row) <= max(date_idx, name_idx):
+                continue
+            raw_date = row[date_idx]
+            raw_name = row[name_idx]
+
+            if (raw_date is None or str(raw_date).strip() == '') and (raw_name is None or str(raw_name).strip() == ''):
+                continue
+
+            parsed_date = parse_date_value(raw_date)
+            if not parsed_date:
+                row_errors.append({
+                    'row': row_num,
+                    'date': str(raw_date),
+                    'error': f"Invalid date: '{raw_date}'. Expected format YYYY-MM-DD or DD-MM-YYYY."
+                })
+                continue
+
+            holiday_name = str(raw_name).strip() if raw_name is not None else ''
+            if not holiday_name or holiday_name.lower() == 'nan':
+                row_errors.append({
+                    'row': row_num,
+                    'date': str(parsed_date),
+                    'error': "Holiday name is required."
+                })
+                continue
+
+            # Current year restriction for past dates
+            if parsed_date < today and parsed_date.year < current_year:
+                row_errors.append({
+                    'row': row_num,
+                    'date': str(parsed_date),
+                    'error': f"Cannot declare past holidays for previous years ({parsed_date.year}). Past holidays are allowed for current year ({current_year}) only."
+                })
+                continue
+
+            # Branch resolution
+            branch_obj = None
+            if branch_idx is not None and len(row) > branch_idx and row[branch_idx]:
+                raw_b = str(row[branch_idx]).strip()
+                if raw_b and raw_b.lower() != 'nan':
+                    from branch.models import Branch
+                    try:
+                        branch_obj = Branch.objects.filter(id=raw_b).first() or Branch.objects.filter(name__iexact=raw_b).first()
+                    except Exception:
+                        branch_obj = None
+
+            # Check if holiday exists
+            existing = PublicHoliday.objects.filter(organization=organization, date=parsed_date).first()
+            if existing:
+                needs_save = False
+                update_fields = []
+                if existing.name != holiday_name:
+                    existing.name = holiday_name
+                    needs_save = True
+                    update_fields.append('name')
+                if branch_obj and existing.branch != branch_obj:
+                    existing.branch = branch_obj
+                    needs_save = True
+                    update_fields.append('branch')
+
+                if needs_save:
+                    existing.save(update_fields=update_fields)
+                    updated_holidays.append({
+                        'id': str(existing.id),
+                        'date': str(existing.date),
+                        'name': existing.name,
+                        'status': 'updated'
+                    })
+                    try:
+                        from attendance.utils import fix_attendance_for_holiday
+                        fix_attendance_for_holiday(existing)
+                    except Exception as e:
+                        logger.error(f"Failed to fix attendance on holiday update: {e}")
+                else:
+                    skipped_holidays.append({
+                        'id': str(existing.id),
+                        'date': str(existing.date),
+                        'name': existing.name,
+                        'status': 'already_exists'
+                    })
+            else:
+                new_holiday = PublicHoliday.objects.create(
+                    organization=organization,
+                    branch=branch_obj,
+                    date=parsed_date,
+                    name=holiday_name,
+                    year=parsed_date.year,
+                    created_by=request.user if request.user.is_authenticated else None
+                )
+                created_holidays.append({
+                    'id': str(new_holiday.id),
+                    'date': str(new_holiday.date),
+                    'name': new_holiday.name,
+                    'status': 'created'
+                })
+                try:
+                    from attendance.utils import fix_attendance_for_holiday
+                    fix_attendance_for_holiday(new_holiday)
+                except Exception as e:
+                    logger.error(f"Failed to fix attendance on holiday create: {e}")
+
+        # Send notifications if any holidays created
+        if created_holidays:
+            try:
+                from django.contrib.auth import get_user_model
+                from chat.notifications import send_system_notification
+                User = get_user_model()
+                users_qs = User.objects.filter(is_active=True)
+                if organization:
+                    users_qs = users_qs.filter(organization=organization)
+                
+                holiday_count = len(created_holidays)
+                body = (
+                    f"A new public holiday '{created_holidays[0]['name']}' has been added on {created_holidays[0]['date']}."
+                    if holiday_count == 1 else
+                    f"{holiday_count} new public holidays have been uploaded and scheduled."
+                )
+                for uid in users_qs.values_list('id', flat=True):
+                    send_system_notification(
+                        user_id=str(uid),
+                        title="New Public Holidays",
+                        body=body,
+                        metadata={"type": "public_holiday", "count": holiday_count}
+                    )
+            except Exception as notif_err:
+                logger.error(f"Failed to send holiday notifications: {notif_err}")
+
+        total_processed = len(created_holidays) + len(updated_holidays) + len(skipped_holidays)
+        status_code = status.HTTP_201_CREATED if created_holidays else status.HTTP_200_OK
+
+        return Response({
+            'success': True,
+            'message': (
+                f"Holiday upload processed: {len(created_holidays)} created, "
+                f"{len(updated_holidays)} updated, {len(skipped_holidays)} skipped"
+                + (f", {len(row_errors)} errors." if row_errors else ".")
+            ),
+            'summary': {
+                'total_rows': len(data_rows),
+                'processed': total_processed,
+                'created': len(created_holidays),
+                'updated': len(updated_holidays),
+                'skipped': len(skipped_holidays),
+                'errors_count': len(row_errors),
+            },
+            'created_holidays': created_holidays,
+            'updated_holidays': updated_holidays,
+            'skipped_holidays': skipped_holidays,
+            'errors': row_errors,
+        }, status=status_code)
+
+
+class PublicHolidayExcelTemplateView(APIView):
+    """
+    GET /api/leave/public-holidays/template/
+    Download a sample Excel template for uploading public holidays.
+    """
+    def get(self, request):
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from django.http import HttpResponse
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Public Holidays"
+
+        headers = ["Date", "Holiday Name", "Description (Optional)"]
+        ws.append(headers)
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+        alignment = Alignment(horizontal="center", vertical="center")
+
+        for col_num in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = alignment
+
+        from django.utils import timezone
+        year = timezone.localtime(timezone.now()).year
+        sample_rows = [
+            [f"{year}-01-26", "Republic Day", "National Holiday"],
+            [f"{year}-08-15", "Independence Day", "National Holiday"],
+            [f"{year}-10-02", "Gandhi Jayanti", "National Holiday"],
+        ]
+        for r in sample_rows:
+            ws.append(r)
+
+        ws.column_dimensions['A'].width = 18
+        ws.column_dimensions['B'].width = 30
+        ws.column_dimensions['C'].width = 30
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response['Content-Disposition'] = 'attachment; filename="public_holidays_template.xlsx"'
+        wb.save(response)
+        return response
 
 class PublicHolidayDetailView(APIView):
     # permission_classes = [IsAuthenticated]
@@ -1107,11 +1473,32 @@ class PublicHolidayDetailView(APIView):
             holiday.name = request.data['name']
         if 'date' in request.data:
             from datetime import date as _date
-            holiday.date = request.data['date']
-            if isinstance(holiday.date, str):
-                holiday.date = _date.fromisoformat(holiday.date)
-            holiday.year = holiday.date.year
+            from django.utils import timezone
+            new_date = request.data['date']
+            if isinstance(new_date, str):
+                new_date = _date.fromisoformat(new_date)
+
+            today = timezone.localtime(timezone.now()).date()
+            current_year = today.year
+
+            # If date is in the past (date is gone), allow declaration for current year only
+            if new_date < today and new_date.year < current_year:
+                return Response({
+                    'success': False,
+                    'message': f"Cannot update past holidays to previous years ({new_date.year}). Past holidays are allowed for the current year ({current_year}) only."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            holiday.date = new_date
+            holiday.year = new_date.year
         holiday.save()
+
+        # Fix any existing absent attendance records on the updated holiday date
+        try:
+            from attendance.utils import fix_attendance_for_holiday
+            fix_attendance_for_holiday(holiday)
+        except Exception as fix_err:
+            logger.error(f"Failed to fix attendance on holiday update: {fix_err}")
+
         return Response({'success': True, 'message': 'Holiday updated.', 'data': PublicHolidaySerializer(holiday).data})
 
     def delete(self, request, holiday_id):

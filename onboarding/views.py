@@ -518,6 +518,19 @@ class AdmissionListView(APIView):
         admission_id = data.get('id') or data.get('admission_id')
 
         if not admission_id:
+            # Validate student, father, and mother phone uniqueness before creating records
+            phone_student = data.get('phone_student')
+            phone_father = data.get('phone_father')
+            phone_mother = data.get('phone_mother') or data.get('phone_father_2')
+            from .serializers import validate_admission_phone_uniqueness
+            from rest_framework import serializers as drf_serializers
+            try:
+                validate_admission_phone_uniqueness(phone_student, phone_father, phone_mother)
+            except drf_serializers.ValidationError as ve:
+                return Response(
+                    {'success': False, 'message': 'Please fix the phone number errors.', 'errors': ve.detail},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # ── No id provided: auto-create a converted Lead + Admission ────────
             # This supports the case where a student fills the admission form
             # without a pre-existing lead/admission ID (e.g. walk-in / direct form).
@@ -597,7 +610,9 @@ class AdmissionListView(APIView):
                     qualification=lead.qualification,
                     reference=lead.reference,
                     father_name=lead.father_name,
+                    mother_name=data.get('mother_name', ''),
                     phone_father=lead.phone_father,
+                    phone_father_2=data.get('phone_mother') or data.get('phone_father_2', ''),
                     street=lead.street,
                     apartment=lead.apartment,
                     city=lead.city,
@@ -1081,6 +1096,8 @@ class AdmissionApproveView(APIView):
                         organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                         branch=admission.branch if getattr(admission, 'branch', None) else None,
                         email_subject=f'Final Approval Required: Admission #{admission.id}',
+                        metadata={'admission_id': str(admission.id), 'step': 'level_2_approval'},
+                        notification_type='admission',
                     )
                 except Exception as exc:
                     logger.error(f"Failed to notify super_admin of level 1 approval for admission {admission.id}: {exc}")

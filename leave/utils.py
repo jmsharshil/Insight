@@ -463,6 +463,18 @@ def handle_student_leave_whatsapp_approval(sender_wa_id, payload_str, text_str="
             app.received_by = parent_user
         app.save(update_fields=['parent_consulted', 'parent_signature_date', 'received_by'])
 
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='student_leave',
+                record_id=app.id,
+                user=parent_user,
+                step='parent_approval',
+                exclude_user=getattr(app.student, 'user', None),
+            )
+        except Exception as notif_e:
+            logger.error("[WA LEAVE APPROVAL] Failed to mark notification as read: %s", notif_e)
+
         # Confirm approval to parent via leave_status_update_ template
         try:
             from chat.notifications import send_whatsapp_with_fallback
@@ -524,6 +536,19 @@ def handle_student_leave_whatsapp_approval(sender_wa_id, payload_str, text_str="
             app.reviewed_by = parent_user
         app.reviewed_at = now
         app.save(update_fields=['status', 'rejection_reason', 'reviewed_by', 'reviewed_at'])
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='student_leave',
+                record_id=app.id,
+                user=parent_user,
+                step='parent_approval',
+                is_final=True,
+                exclude_user=getattr(app.student, 'user', None),
+            )
+        except Exception as notif_e:
+            logger.error("[WA LEAVE APPROVAL] Failed to mark notification as read: %s", notif_e)
 
         parent_name = getattr(parent_user, 'name', 'Parent') if parent_user else 'Parent'
         rejection_reason = "Rejected by parent via WhatsApp"
@@ -1074,6 +1099,17 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         app.reviewed_at = now
         app.save(update_fields=['status', 'rejection_reason', 'reviewed_by', 'reviewed_at'])
 
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='leave',
+                record_id=app.id,
+                is_final=True,
+                exclude_user=app.applied_by,
+            )
+        except Exception as notif_e:
+            logger.error("[WA EMP LEAVE] Failed to mark notification as read: %s", notif_e)
+
         send_whatsapp_text(
             to=sender_wa_id,
             body=f"❌ You have REJECTED the leave request for {applicant_name} ({app.from_date} to {app.to_date})."
@@ -1122,6 +1158,17 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         app.reviewed_at = now
         app.save()
 
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='leave',
+                record_id=app.id,
+                is_final=True,
+                exclude_user=app.applied_by,
+            )
+        except Exception as notif_e:
+            logger.error("[WA EMP LEAVE] Failed to mark notification as read: %s", notif_e)
+
         finalize_leave_approval(app, approver, now)
 
         send_whatsapp_text(
@@ -1143,6 +1190,18 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
             app.first_approver = approver
             app.first_approved_at = now
             app.save(update_fields=['first_approver', 'first_approved_at'])
+
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='leave',
+                    record_id=app.id,
+                    user=approver,
+                    step=1,
+                    exclude_user=app.applied_by,
+                )
+            except Exception as notif_e:
+                logger.error("[WA EMP LEAVE] Failed to mark notification as read: %s", notif_e)
 
             send_whatsapp_text(
                 to=sender_wa_id,
@@ -1178,6 +1237,18 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
             app.first_approved_at = now
             app.save(update_fields=['first_approver', 'first_approved_at'])
 
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='leave',
+                    record_id=app.id,
+                    user=approver,
+                    step=1,
+                    exclude_user=app.applied_by,
+                )
+            except Exception as notif_e:
+                logger.error("[WA EMP LEAVE] Failed to mark notification as read: %s", notif_e)
+
             send_whatsapp_text(
                 to=sender_wa_id,
                 body=f"✅ Step 1 approval recorded for {applicant_name}. Awaiting Super Admin final approval."
@@ -1200,6 +1271,17 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
             app.reviewed_by = approver
             app.reviewed_at = now
             app.save()
+
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='leave',
+                    record_id=app.id,
+                    is_final=True,
+                    exclude_user=app.applied_by,
+                )
+            except Exception as notif_e:
+                logger.error("[WA EMP LEAVE] Failed to mark notification as read: %s", notif_e)
 
             finalize_leave_approval(app, approver, now)
 
@@ -1226,6 +1308,18 @@ def handle_employee_leave_whatsapp_approval(sender_wa_id, payload_str, text_str=
         app.first_approver = approver
         app.first_approved_at = now
         app.save(update_fields=['first_approver', 'first_approved_at'])
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='leave',
+                record_id=app.id,
+                user=approver,
+                step=1,
+                exclude_user=app.applied_by,
+            )
+        except Exception as notif_e:
+            logger.error("[WA EMP LEAVE] Failed to mark notification as read: %s", notif_e)
 
         send_whatsapp_text(
             to=sender_wa_id,

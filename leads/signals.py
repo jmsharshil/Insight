@@ -16,33 +16,38 @@ logger = logging.getLogger(__name__)
 @receiver(pre_save, sender='leads.Lead')
 def auto_assign_lead(sender, instance, **kwargs):
     """
-    Automatically assign new leads using round-robin logic.
-    - contact form -> tele_caller
-    - inquiry form -> counsellor
+    Automatically assign new leads:
+    - Telecaller leads (contact form) are auto-assigned via round-robin,
+      considering ONLY active users with primary role as 'tele_caller'.
+    - Counsellor leads (inquiry form / others) are NOT auto-assigned;
+      they remain unassigned so Front Desk can assign them manually.
     Does not override if assigned_to is already set.
     """
     if instance.id is None and instance.assigned_to is None:
-        role_to_assign = None
+        # Only contact form leads (telecaller leads) are auto-assigned
         if instance.form_type == 'contact':
-            role_to_assign = 'tele_caller'
-        elif instance.form_type == 'inquiry':
-            role_to_assign = 'counsellor'
-        
-        if role_to_assign:
             User = get_user_model()
-            from core.utils import get_role_filter_q
-            # Fetch active users of the required role, order by ID for consistent round-robin
-            users = User.objects.filter(get_role_filter_q(role_to_assign), is_active=True).order_by('id')
-            
-            if users.exists():
-                users_list = list(users)
-                # Find the most recently created lead that was assigned to this role for this form type
+            # Telecaller leads: consider only users with PRIMARY role as tele_caller
+            users = User.objects.filter(role='tele_caller', is_active=True)
+
+            if instance.branch:
+                branch_telecallers = users.filter(branch=instance.branch)
+                if branch_telecallers.exists():
+                    users = branch_telecallers
+                elif getattr(instance.branch, 'organization', None):
+                    org_telecallers = users.filter(organization=instance.branch.organization)
+                    if org_telecallers.exists():
+                        users = org_telecallers
+
+            users_list = list(users.order_by('id'))
+            if users_list:
+                # Find the most recently created contact lead that was assigned to a primary tele_caller
                 last_lead = sender.objects.filter(
-                    get_role_filter_q(role_to_assign, prefix='assigned_to__'),
-                    form_type=instance.form_type,
+                    assigned_to__role='tele_caller',
+                    form_type='contact',
                 ).order_by('-created_at').first()
                 
-                if last_lead and last_lead.assigned_to:
+                if last_lead and last_lead.assigned_to and last_lead.assigned_to in users_list:
                     try:
                         last_idx = users_list.index(last_lead.assigned_to)
                         next_idx = (last_idx + 1) % len(users_list)

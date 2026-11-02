@@ -1,4 +1,6 @@
-from django.db.models.signals import post_save
+import logging
+logger = logging.getLogger(__name__)
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
 from .models import FacultyProfile
@@ -35,3 +37,37 @@ def sync_faculty_profile_to_user(sender, instance, **kwargs):
 
     if updated_fields:
         user.save(update_fields=updated_fields)
+
+
+
+@receiver(post_save, sender='faculty.FacultyQRScanLog')
+@receiver(post_delete, sender='faculty.FacultyQRScanLog')
+def sync_payslip_on_faculty_scan(sender, instance, **kwargs):
+    """Update faculty payslip when QR scan check-in/out changes."""
+    try:
+        from payroll.utils import sync_payslips_for_attendance_change
+        scan_date = instance.scanned_at.date() if instance.scanned_at else None
+        user = getattr(instance.faculty, 'user', None)
+        sync_payslips_for_attendance_change(
+            user=user,
+            target_date=scan_date,
+            branch=getattr(instance.faculty, 'branch', None)
+        )
+    except Exception as e:
+        logger.error(f"[FACULTY SCAN SIGNAL] Error syncing payslip for faculty {getattr(instance, 'faculty_id', None)}: {e}")
+
+
+@receiver(post_save, sender='faculty.SessionReport')
+@receiver(post_delete, sender='faculty.SessionReport')
+def sync_payslip_on_session_report_change(sender, instance, **kwargs):
+    """Update faculty payslip when session report hours or duration changes."""
+    try:
+        from payroll.utils import sync_payslips_for_attendance_change
+        user = getattr(instance.faculty, 'user', None)
+        sync_payslips_for_attendance_change(
+            user=user,
+            target_date=instance.session_date,
+            branch=getattr(instance.faculty, 'branch', None)
+        )
+    except Exception as e:
+        logger.error(f"[SESSION REPORT SIGNAL] Error syncing payslip for faculty {getattr(instance, 'faculty_id', None)}: {e}")

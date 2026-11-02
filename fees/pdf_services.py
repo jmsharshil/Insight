@@ -57,23 +57,43 @@ def _reportlab_receipt_pdf(context):
 
     elements = []
 
+    inst_name_style = ParagraphStyle('InstName', parent=styles['Normal'],
+                                     fontSize=12, textColor=orange, fontName='Helvetica-Bold', leading=14)
+    inst_sub_style = ParagraphStyle('InstSub', parent=styles['Normal'],
+                                    fontSize=8.5, textColor=HexColor('#555555'), fontName='Helvetica-Bold', leading=11)
+    inst_addr_style = ParagraphStyle('InstAddr', parent=styles['Normal'],
+                                     fontSize=7.5, textColor=HexColor('#333333'), leading=10)
+    inst_contact_style = ParagraphStyle('InstContact', parent=styles['Normal'],
+                                        fontSize=7.5, textColor=orange, fontName='Helvetica-Bold', leading=10)
+
     # Header: Institute info
+    header_left = [
+        Paragraph('INSIGHT INSTITUTE OF PROFESSIONAL STUDIES', inst_name_style),
+        Paragraph('(Exclusively for CS - Since 2012)', inst_sub_style),
+        Spacer(1, 1 * mm),
+        Paragraph('<b>ADDRESS:</b> SF/201, RATNA HIGH STREET, BESIDE CROMA,<br/>'
+                  'NEAR NARANPURA CROSS ROAD, ANKUR ROAD,<br/>'
+                  'NARANPURA, AHMEDABAD : 380013.', inst_addr_style),
+        Spacer(1, 1 * mm),
+        Paragraph('77780 50578 | 99745 45456 &nbsp;|&nbsp; '
+                  '<font color="#666666" name="Helvetica">www.insightinstitute.com &bull; insightinstitute.ips@gmail.com</font>', inst_contact_style),
+    ]
+
     header_data = [
         [
-            Paragraph('<b>77780 50578 | 99745 45456</b><br/>'
-                      'www.insightinstitute.com<br/>'
-                      'insightinstitute.ips@gmail.com', small_style),
+            header_left,
             Paragraph('<b>INSIGHT</b><br/>Institute of Professional Studies',
-                      ParagraphStyle('Logo', parent=heading_style, fontSize=14, alignment=TA_RIGHT)),
+                      ParagraphStyle('Logo', parent=heading_style, fontSize=13, alignment=TA_RIGHT)),
         ]
     ]
-    header_table = Table(header_data, colWidths=[doc.width * 0.5, doc.width * 0.5])
+    header_table = Table(header_data, colWidths=[doc.width * 0.72, doc.width * 0.28])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LINEBELOW', (0, 0), (-1, 0), 2, orange),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
     ]))
     elements.append(header_table)
-    elements.append(Spacer(1, 8 * mm))
+    elements.append(Spacer(1, 5 * mm))
 
     # Title bar
     title_data = [[Paragraph('RECEIPT', title_style)]]
@@ -167,26 +187,24 @@ def _reportlab_receipt_pdf(context):
     elements.append(Spacer(1, 15 * mm))
 
     # Footer
+    footer_note_style = ParagraphStyle('FooterNote', parent=styles['Normal'],
+                                       fontSize=8, textColor=HexColor('#666666'),
+                                       fontName='Helvetica-Oblique', leading=11)
     footer_data = [
         [
             Paragraph(
-                '<b>Vastral Branch:</b><br/>'
-                '(Parth Classes) 212, Siddhi Vinayak Complex,<br/>'
-                'Nr. Nirant Chokdi, Vastral Road, A\'bad - 382413<br/><br/>'
-                '<b>INSIGHT INSTITUTE:</b><br/>'
-                'INSIGHT HOUSE, 1st Floor, Bunglow No-2,<br/>'
-                'Shreeji Society, Behind Gautam Nagar Bus Stand,<br/>'
-                'Naranpura, Ahmedabad - 380013', small_style),
+                '<b>Note:</b> This is an electronically generated receipt.<br/>'
+                'No physical signature is required.', footer_note_style),
             Paragraph(
                 'FOR, Insight Institute of Professional Studies<br/><br/><br/>'
-                '<i>(Digitally Signed)</i><br/><br/>'
+                '<i>(Electronically Generated)</i><br/><br/>'
                 '<b>Authorised Signatory</b>',
                 ParagraphStyle('Footer', parent=small_style, alignment=TA_RIGHT)),
         ]
     ]
     footer_table = Table(footer_data, colWidths=[doc.width * 0.55, doc.width * 0.45])
     footer_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     elements.append(footer_table)
 

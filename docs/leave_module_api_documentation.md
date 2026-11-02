@@ -44,9 +44,25 @@ Apply for a new leave.
 Managerial endpoints (multi-approver: ASE → BM).
 
 ### 4. Public Holidays
-**`GET /api/v1/leave/public-holidays/`**
-**`POST /api/v1/leave/public-holidays/`**
-**`GET / PATCH / DELETE /api/v1/leave/public-holidays/<uuid>/`**
+**`GET /api/v1/leave/public-holidays/`** — List public holidays (supports filters: `year`, `month`, `branch_id`).
+**`POST /api/v1/leave/public-holidays/`** — Create individual public holiday.
+**`GET / PATCH / DELETE /api/v1/leave/public-holidays/<uuid>/`** — Detail, update, or remove holiday.
+
+#### **Excel Bulk Upload & Template APIs (New)**
+- **`POST /api/v1/leave/public-holidays/upload-excel/`** (`PublicHolidayExcelUploadView`)
+  - **Upload Format:** Multipart file (`.xlsx`, `.xls`, or `.csv`) via `file` field.
+  - **Allowed Roles:** `super_admin`, `branch_manager`, `admin_senior_executive`.
+  - **Supported Columns:**
+    - `Date` (required, e.g., `YYYY-MM-DD` or standard Excel date formats).
+    - `Name` / `Holiday Name` (required).
+    - `Description` / `Note` (optional).
+    - `Branch` / `Branch ID` / `Branch Name` (optional; defaults to user's branch or global).
+  - **Automatic Side Effects**:
+    1. Validates and bulk upserts `PublicHoliday` records.
+    2. Automatically corrects `EmployeeAttendanceRecord` for employees scheduled on holiday dates to `present` (via `fix_attendance_for_holiday`).
+    3. Triggers real-time payslip synchronization (`sync_payslips_for_attendance_change`) to update all affected draft payroll runs immediately.
+- **`GET /api/v1/leave/public-holidays/excel-template/`** (`PublicHolidayExcelTemplateView`)
+  - Downloads a sample pre-formatted Excel template (`public_holiday_upload_template.xlsx`) with sample rows and column headers ready for editing and upload.
 
 ### 5. Late Entries
 **`GET /api/v1/leave/late-entries/`**
