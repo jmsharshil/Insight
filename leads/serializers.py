@@ -116,6 +116,7 @@ class OdometerReadingSerializer(serializers.ModelSerializer):
             'start_kms', 'end_kms', 'total_kms', 'expense_per_km', 'total_expense',
             'status', 'approved_by', 'approved_by_name', 'approved_at',
             'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
+            'adjustment_reason',
             'payroll_run', 'payslip', 'is_paid',
             'start_odometer_photo', 'end_odometer_photo',
             'created_at', 'updated_at'
@@ -150,6 +151,10 @@ class OdometerApproveSerializer(serializers.Serializer):
         max_digits=10, decimal_places=2, required=False, allow_null=True,
         help_text="Optional kilometers to deduct (minus km) from this reading."
     )
+    adjustment_reason = serializers.CharField(
+        required=False, allow_blank=True, default="",
+        help_text="Reason for km adjustment (e.g. why minus kms were deducted)."
+    )
 
 
 class OdometerRejectSerializer(serializers.Serializer):
@@ -175,6 +180,10 @@ class MonthlyOdometerApproveSerializer(serializers.Serializer):
     minus_kms = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, allow_null=True,
         help_text="Optional kilometers to deduct (minus km) across pending readings in the month."
+    )
+    adjustment_reason = serializers.CharField(
+        required=False, allow_blank=True, default="",
+        help_text="Reason for km adjustment (e.g. why minus kms were deducted)."
     )
 
 

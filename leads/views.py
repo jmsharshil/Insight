@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from core.pagination import paginate_queryset
 
 from rest_framework.views import APIView
@@ -1406,6 +1407,7 @@ class OdometerReadingApproveView(APIView):
         expense_per_km = serializer.validated_data.get('expense_per_km')
         total_kms = serializer.validated_data.get('total_kms')
         minus_kms = serializer.validated_data.get('minus_kms')
+        adjustment_reason = serializer.validated_data.get('adjustment_reason', '')
 
         if minus_kms is not None:
             base_kms = total_kms if total_kms is not None else (
@@ -1421,6 +1423,7 @@ class OdometerReadingApproveView(APIView):
         reading.rejected_by = None
         reading.rejected_at = None
         reading.rejection_reason = ''
+        reading.adjustment_reason = adjustment_reason
         # save with optional overrides; updates totals via calculate_totals
         reading.save(override_expense_per_km=expense_per_km, override_total_kms=total_kms)
 
@@ -1546,6 +1549,7 @@ class MonthlyOdometerApproveView(APIView):
         expense_per_km = serializer.validated_data.get('expense_per_km')
         override_total_kms = serializer.validated_data.get('total_kms')
         minus_kms = serializer.validated_data.get('minus_kms')
+        adjustment_reason = serializer.validated_data.get('adjustment_reason', '')
 
         try:
             from auth_user.models import User
@@ -1609,6 +1613,7 @@ class MonthlyOdometerApproveView(APIView):
             reading.rejected_by = None
             reading.rejected_at = None
             reading.rejection_reason = ''
+            reading.adjustment_reason = adjustment_reason
             reading.save(override_expense_per_km=expense_per_km, override_total_kms=reading.total_kms)
             total_kms_sum += reading.total_kms
             total_expense += reading.total_expense

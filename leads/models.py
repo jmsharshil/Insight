@@ -599,6 +599,10 @@ class OdometerReading(models.Model):
     )
     rejected_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
+    adjustment_reason = models.TextField(
+        blank=True,
+        help_text="Reason for km adjustment (e.g. why minus kms were deducted during approval)"
+    )
 
     # Monthly Payroll Integration
     payroll_run = models.ForeignKey(
