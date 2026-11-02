@@ -724,7 +724,13 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
-        if working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
+        is_month_completed = (
+            year == today.year
+            and month == today.month
+            and today.day >= last_day_of_month
+        )
+
+        if is_month_completed and working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
             absent_days = Decimal(30)
             absence_deductions = basic_salary if 'basic_salary' in locals() and basic_salary > 0 else fac_salary
         else:
@@ -1333,7 +1339,14 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not fac_user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
-        if working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
+        last_day_of_month = calendar.monthrange(year, month)[1]
+        is_month_completed = (
+            year == today.year
+            and month == today.month
+            and today.day >= last_day_of_month
+        )
+
+        if is_month_completed and working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
             absent_days = Decimal(30)
             absence_deductions = fac_salary if fac_salary else Decimal(0)
         else:
@@ -1704,7 +1717,13 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         reg_attended = len({d for d in attended_working_days if d not in half_day_leave_dates})
         full_day_leaves_count = len({d for d in leave_dates_in_month if (not user.is_day_off(d) if has_custom_sched else d.weekday() < 5)})
 
-        if working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
+        is_month_completed = (
+            year == today.year
+            and month == today.month
+            and today.day >= last_day_of_month
+        )
+
+        if is_month_completed and working_days_passed > 0 and (reg_attended + valid_hd_count + full_day_leaves_count) == 0:
             absent_days = Decimal(30)
             absence_deductions = basic_salary if basic_salary > 0 else Decimal(0)
         else:
