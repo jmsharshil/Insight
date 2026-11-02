@@ -103,48 +103,69 @@ def _assign_fee_structure(admission):
     if admission.fee_structure:
         return
 
-    if not admission.course or not admission.batch_attempt or not admission.attempt_year:
+    if not admission.course or not admission.batch_attempt:
         return
-        
+
     from fees.models import FeeStructure
-    
+    from django.utils import timezone as _tz
+
     level_name_map = {
         'cseet': 'cseet',
         'cs_executive': 'executive',
         'cs_professional': 'professional'
     }
     level_query = level_name_map.get(admission.course)
-    
-    if level_query:
-        filters = {
+
+    if not level_query:
+        return
+
+    # Attempt year: use admission.attempt_year if set, otherwise fall back to current year
+    attempt_year = admission.attempt_year or _tz.now().year
+
+    def _search(extra_filters):
+        """Search FeeStructure with given extra filters, trying level/course/batch relations."""
+        base_filters = {
             'attempt': admission.batch_attempt,
-            'year': admission.attempt_year,
             'is_active': True,
+            **extra_filters,
         }
+        qs = FeeStructure.objects.filter(**base_filters).order_by('-created_at')
+        result = qs.filter(level__name__icontains=level_query).first()
+        if result is None:
+            result = qs.filter(course__name__icontains=level_query).first()
+        if result is None:
+            result = qs.filter(batch__course__name__icontains=level_query).first()
+        return result
 
-        fs = None
-        # 1. First try matching with student's specific group_module
+    fs = None
+
+    # 1. Try with specific group_module + exact year
+    if admission.course != 'cseet' and admission.group_module:
+        fs = _search({'group_module': admission.group_module, 'year': attempt_year})
+
+    # 2. Exact year, no group_module filter
+    if fs is None:
+        fs = _search({'year': attempt_year})
+
+    # 3. If attempt_year was defaulted and still nothing found, try without year constraint
+    if fs is None and not admission.attempt_year:
         if admission.course != 'cseet' and admission.group_module:
-            module_filters = {**filters, 'group_module': admission.group_module}
-            base_queryset = FeeStructure.objects.filter(**module_filters).order_by('-created_at')
-            fs = base_queryset.filter(level__name__icontains=level_query).first()
-            if fs is None:
-                fs = base_queryset.filter(course__name__icontains=level_query).first()
-            if fs is None:
-                fs = base_queryset.filter(batch__course__name__icontains=level_query).first()
-
-        # 2. Fallback to general/combined fee structure for the level, attempt, and year
+            fs = _search({'group_module': admission.group_module})
         if fs is None:
-            base_queryset = FeeStructure.objects.filter(**filters).order_by('-created_at')
-            fs = base_queryset.filter(level__name__icontains=level_query).first()
-            if fs is None:
-                fs = base_queryset.filter(course__name__icontains=level_query).first()
-            if fs is None:
-                fs = base_queryset.filter(batch__course__name__icontains=level_query).first()
+            qs = FeeStructure.objects.filter(
+                attempt=admission.batch_attempt,
+                is_active=True,
+            ).order_by('-year', '-created_at')
+            result = qs.filter(level__name__icontains=level_query).first()
+            if result is None:
+                result = qs.filter(course__name__icontains=level_query).first()
+            if result is None:
+                result = qs.filter(batch__course__name__icontains=level_query).first()
+            fs = result
 
-        if fs:
-            admission.fee_structure = fs
-            admission.save(update_fields=['fee_structure'])
+    if fs:
+        admission.fee_structure = fs
+        admission.save(update_fields=['fee_structure'])
 
 
 def _get_module_fee(fee_structure, group_module):
@@ -187,29 +208,74 @@ def _setup_payment_bank_and_notify(admission):
     from decimal import Decimal
     payment_amount = _get_bank_selection_amount(admission)
 
-    # Calculate amount_to_pay:
-    # - If student chose 'token': use fee_structure.token_amount.
-    # - If student chose 'full_payment': use selected module fee without deducting token fee.
-    # - Otherwise fallback to payment_amount.
-    if getattr(admission, 'fee_structure', None):
-        fs = admission.fee_structure
+    # ── Determine amount_to_pay from fee structure ────────────────────────────
+    # Priority order:
+    #   1. fee_structure + payment_type = 'token'  → token_amount
+    #   2. fee_structure + payment_type = 'full_payment' → module/total fee
+    #   3. fee_structure + payment_type unset → module/total fee (treat as full)
+    #   4. No fee_structure but payment_amount > 0 → use payment_amount
+    #   5. Fallback to hard-coded defaults by course (never 1 Rs)
+    fs = getattr(admission, 'fee_structure', None)
+    if fs:
         if admission.payment_type == 'token':
             amount_to_pay = Decimal(str(fs.token_amount or 0))
+            # If token_amount is 0, fall back to module fee so we never send 0
+            if amount_to_pay <= 0:
+                amount_to_pay = _get_module_fee(fs, admission.group_module)
         elif admission.payment_type == 'full_payment':
             amount_to_pay = _get_module_fee(fs, admission.group_module)
         else:
-            amount_to_pay = Decimal(str(payment_amount))
+            # payment_type not set — treat as full payment from fee structure
+            amount_to_pay = _get_module_fee(fs, admission.group_module)
+            # If module fee resolves to 0 but payment_amount is set, prefer that
+            if amount_to_pay <= 0 and Decimal(str(payment_amount)) > 0:
+                amount_to_pay = Decimal(str(payment_amount))
     else:
         amount_to_pay = Decimal(str(payment_amount))
 
-    # Fallback to default amounts if the resulting amount is zero or negative
+    # Fallback to hard-coded defaults if the resulting amount is still zero/negative.
+    # Normalize course key so we never fall through to 1 Rs.
     if amount_to_pay <= 0:
         default_course_fees = {
             'cseet': Decimal('1000'),
             'cs_executive': Decimal('2000'),
             'cs_professional': Decimal('5000'),
         }
-        amount_to_pay = default_course_fees.get(admission.course, Decimal('1'))
+        normalized_course = (admission.course or '').strip().lower().replace(' ', '_').replace('-', '_')
+        amount_to_pay = (
+            default_course_fees.get(normalized_course)
+            or default_course_fees.get(admission.course or '')
+        )
+        if not amount_to_pay:
+            # Last resort: minimum 1000 Rs rather than 1 Rs
+            logger.warning(
+                f"Could not determine fee amount for admission {admission.id} "
+                f"(course={admission.course!r}, fee_structure={getattr(fs, 'id', None)}). "
+                f"Using minimum fallback of 1000."
+            )
+            amount_to_pay = Decimal('1000')
+
+    # ── Auto-correct stale 1-Rs Razorpay link ────────────────────────────────
+    # If a Razorpay link was previously generated with 1 Rs (a bug) and the
+    # correct fee is higher, reset the link so it will be regenerated below.
+    existing_rp_link = admission.razorpay_payment_link or ''
+    if existing_rp_link and amount_to_pay > Decimal('1'):
+        existing_amount = None
+        for entry in (admission.payment_history or []):
+            if entry.get('event') == 'payment_link_created':
+                try:
+                    existing_amount = Decimal(str(entry.get('amount', 0)))
+                except Exception:
+                    pass
+                break
+        if existing_amount is not None and existing_amount <= Decimal('1'):
+            logger.info(
+                f"Admission {admission.id}: stale 1-Rs Razorpay link detected "
+                f"(was {existing_amount}, now {amount_to_pay}). Regenerating link."
+            )
+            admission.razorpay_payment_link = None
+            admission.razorpay_payment_link_id = None
+            admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
 
     assigned_bank = getattr(admission, 'bank_account', None)
     if not assigned_bank:
@@ -262,7 +328,11 @@ def _setup_payment_bank_and_notify(admission):
             if not razorpay_link_url:
                 import time
                 unique_ref = f"ADM_{admission.id}_{int(time.time())}"
-                payment_type_label = "Token" if admission.payment_type == 'token' else "Full Payment"
+                payment_type_label = (
+                    "Token" if admission.payment_type == 'token'
+                    else "Installment/Finance" if admission.payment_type == 'finance'
+                    else "Full Payment"
+                )
                 
                 response = create_payment_link(
                     amount=amount_to_pay,
@@ -521,7 +591,7 @@ class AdmissionListView(APIView):
             # Validate student, father, and mother phone uniqueness before creating records
             phone_student = data.get('phone_student')
             phone_father = data.get('phone_father')
-            phone_mother = data.get('phone_mother') or data.get('phone_father_2')
+            phone_mother = data.get('mother_phone') or data.get('phone_mother') or data.get('phone_father_2')
             from .serializers import validate_admission_phone_uniqueness
             from rest_framework import serializers as drf_serializers
             try:
@@ -612,7 +682,7 @@ class AdmissionListView(APIView):
                     father_name=lead.father_name,
                     mother_name=data.get('mother_name', ''),
                     phone_father=lead.phone_father,
-                    phone_father_2=data.get('phone_mother') or data.get('phone_father_2', ''),
+                    phone_father_2=data.get('mother_phone') or data.get('phone_mother') or data.get('phone_father_2', ''),
                     street=lead.street,
                     apartment=lead.apartment,
                     city=lead.city,

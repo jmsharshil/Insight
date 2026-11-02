@@ -1494,7 +1494,7 @@ class MyFeesAPIView(APIView):
                 'finance_notice': finance_notice,
                 'payment_types': [
                     {'key': 'full_payment', 'label': 'Full Payment'},
-                    {'key': 'finance', 'label': 'Finance (No Immediate Payment)'},
+                    {'key': 'finance', 'label': 'Installment/Finance (No Immediate Payment)'},
                 ],
                 'payment_choices': [
                     {'key': 'online', 'label': 'Online Transfer (Razorpay)'},
@@ -1635,13 +1635,13 @@ class MyFeesAPIView(APIView):
                     'amount_due': float(amount_due),
                     'status': 'finance_selected',
                     'date': timezone.now().date().isoformat(),
-                    'note': 'Student opted for Finance option for remaining fees.',
+                    'note': 'Student opted for Installment/Finance option for remaining fees.',
                 })
 
             return Response({
                 'success': True,
                 'payment_type': 'finance',
-                'message': 'Finance option selected. No immediate payment is required. Our finance team will assist you with the process.',
+                'message': 'Installment/Finance option selected. No immediate payment is required. Our finance team will assist you with the process.',
                 'data': {
                     'student_id': str(student.id),
                     'admission_id': getattr(student, 'admission_id', None),

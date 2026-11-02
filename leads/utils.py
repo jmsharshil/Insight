@@ -42,8 +42,14 @@ class LeadService:
             # ── Step 2: Remove form_type from data — already in validated_data ─
             # Set initial stage based on form type
             form_type = validated_data.get('form_type')
-            initial_stage = 'interested' if form_type == 'inquiry' else STAGE_NEW
+            # Inquiry forms ? converted immediately; an Admission is auto-created below.
+            initial_stage = 'converted' if form_type == 'inquiry' else STAGE_NEW
             validated_data['current_stage'] = initial_stage
+
+            # Stamp converted_at for inquiry leads
+            if initial_stage == 'converted':
+                from django.utils import timezone as _tz
+                validated_data['converted_at'] = _tz.now().date()
 
             # ── Step 2b: Extract assigned_to before creating the Lead ──────────
             # It is already resolved to a User instance (or None) by the serializer.
@@ -82,6 +88,18 @@ class LeadService:
                     f"Lead {lead.id} assigned to {lead.assigned_to} at creation."
                 )
 
+            # ── Step 7: Auto-create Admission for inquiry form submissions ────────
+            # Inquiry forms carry full student details, so we immediately create
+            # an Admission record and notify the student with an admission-form link.
+            if form_type == 'inquiry':
+                try:
+                    LeadService.auto_create_admission_for_lead(lead, changed_by=user)
+                except Exception as _exc:
+                    logger.error(
+                        f"auto_create_admission_for_lead failed for lead {lead.id}: {_exc}"
+                    )
+                    # Non-fatal — the lead was created successfully.
+
             logger.info(f"Lead created successfully — ID: {lead.id} | Form: {lead.form_type}")
 
             return lead
@@ -92,6 +110,173 @@ class LeadService:
             raise
 
     # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def auto_create_admission_for_lead(lead, changed_by=None):
+        """
+        Auto-create an Admission record from a converted Lead and send the
+        student their admission-form link via email and WhatsApp.
+
+        Called automatically when:
+          - An inquiry form is submitted (create_lead, form_type='inquiry')
+          - A CRM user manually moves a lead to the 'converted' stage
+
+        Args:
+            lead       : Lead instance (already saved, current_stage='converted')
+            changed_by : User | None — the actor (None for public form submissions)
+
+        Returns:
+            Admission instance, or None if one already exists.
+        """
+        from django.conf import settings
+        from onboarding.models import Admission, AdmissionStatusHistory
+
+        # Idempotent: skip if an Admission already exists for this lead
+        if Admission.objects.filter(lead=lead).exists():
+            logger.info(f"Admission already exists for lead {lead.id} — skipping auto-create.")
+            return None
+
+        auto_note = (
+            f"Auto-created from converted lead #{lead.id} "
+            f"(inquiry form submission). Waiting for student to submit the admission form."
+        )
+        assigned_counsellor = lead.assigned_to
+
+        admission = Admission(
+            id=lead.id,
+            lead=lead,
+            branch=lead.branch,
+            status='form_pending',
+            note=auto_note,
+            assigned_counsellor=assigned_counsellor,
+            first_name=lead.first_name,
+            surname=lead.surname or '',
+            father_name=lead.father_name or '',
+            mother_name='',
+            dob=None,
+            category='gen',
+            email=lead.email or '',
+            email_parent='',
+            phone_student=lead.phone_student or '',
+            phone_student_2='',
+            phone_father=lead.phone_father or '',
+            phone_father_2='',
+            street=lead.street or '',
+            apartment=lead.apartment or '',
+            city=lead.city or '',
+            state=lead.state or '',
+            pincode='',
+            country=lead.country or 'India',
+            course=lead.course or 'cseet',
+            group_module=lead.group_module or 'full',
+            batch_attempt=lead.batch_attempt or 'june',
+            location=lead.location or '',
+            qualification=lead.qualification or 'appearing_12',
+            reference=lead.reference or 'none',
+            consent=True,
+            tenth_medium=lead.tenth_medium or 'cbse',
+            tenth_school=lead.tenth_school or '',
+            tenth_coaching=lead.tenth_coaching or '',
+            tenth_percentage=lead.tenth_percentage or 0,
+            tenth_percentile=lead.tenth_percentile or 0,
+            twelfth_medium=lead.twelfth_medium or 'cbse',
+            twelfth_school=lead.twelfth_school or '',
+            twelfth_coaching=lead.twelfth_coaching or '',
+            twelfth_percentage=lead.twelfth_percentage or 0,
+            twelfth_percentile=lead.twelfth_percentile or 0,
+            grad_university=getattr(lead, 'grad_university', '') or '',
+            grad_college=getattr(lead, 'grad_college', '') or '',
+            grad_last_sem=getattr(lead, 'grad_last_sem', '') or '',
+        )
+        admission.save()
+
+        AdmissionStatusHistory.objects.create(
+            admission=admission,
+            status='form_pending',
+            changed_by=changed_by,
+            note=auto_note,
+        )
+
+        counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
+        logger.info(
+            f"Admission {admission.id} auto-created from lead {lead.id} "
+            f"(inquiry form), counsellor: {counsellor_name}"
+        )
+
+        # ── Send admission-form link to student ───────────────────────────────
+        admission_link = (
+            f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://127.0.0.1:5173')}"
+            f"/insight/student/admission-form?id={lead.id}"
+        )
+        button_url_path = f"insight/student/admission-form?id={lead.id}"
+        org_name = (
+            getattr(admission.branch.organization, 'name', 'Insight Institute of Professional Studies')
+            if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None)
+            else 'Insight Institute of Professional Studies'
+        )
+        student_name = admission.first_name or 'Student'
+        text_content = (
+            f"Hello {student_name},\n\n"
+            f"Thank you for filling the inquiry form with {org_name}. "
+            f"We have received your details and are ready to proceed with your admission.\n\n"
+            f"Please tap the link below to complete your admission form and upload the required documents:\n\n"
+            f"{admission_link}\n\n"
+            f"If you have any questions, feel free to reach out.\n\n"
+            f"Best Regards,\n{org_name}"
+        )
+
+        if admission.email:
+            try:
+                from core.sender import send_email
+                send_email(
+                    to=admission.email,
+                    subject="Complete Your Admission Process",
+                    text=text_content,
+                    template="emails/admission_process.html",
+                    template_context={
+                        'student_name': student_name,
+                        'admission_link': admission_link,
+                        'primary_color': '#ed7c31',
+                        'org_name': org_name,
+                    },
+                    organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                )
+                logger.info(f"Admission form email sent to {admission.email} for lead {lead.id}")
+            except Exception as exc:
+                logger.error(f"Failed to send admission form email to {admission.email}: {exc}")
+
+        if admission.phone_student:
+            try:
+                from chat.notifications import send_whatsapp_with_fallback
+                send_whatsapp_with_fallback(
+                    to=admission.phone_student,
+                    template_name="admission_process",
+                    language_code="en",
+                    components=[
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": student_name},
+                                {"type": "text", "text": org_name},
+                                {"type": "text", "text": str(lead.id)},
+                            ],
+                        },
+                        {
+                            "type": "button",
+                            "sub_type": "url",
+                            "index": 0,
+                            "parameters": [
+                                {"type": "text", "text": button_url_path}
+                            ],
+                        },
+                    ],
+                    fallback_body=text_content,
+                )
+                logger.info(f"Admission form WhatsApp sent to {admission.phone_student} for lead {lead.id}")
+            except Exception as exc:
+                logger.error(f"Failed to send admission form WhatsApp to {admission.phone_student}: {exc}")
+
+        return admission
 
     @staticmethod
     def update_stage(lead_id: int, new_stage: str, user, note: str = '') -> Lead:

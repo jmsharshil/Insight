@@ -200,6 +200,24 @@ class Student(models.Model):
         return f"{self.first_name} {self.surname}".strip()
 
     @property
+    def phone_mother(self):
+        """Map phone_mother to phone_father_2 stored in the database."""
+        return self.phone_father_2
+
+    @phone_mother.setter
+    def phone_mother(self, value):
+        self.phone_father_2 = value or ''
+
+    @property
+    def mother_phone(self):
+        """Map mother_phone to phone_father_2 stored in the database."""
+        return self.phone_father_2
+
+    @mother_phone.setter
+    def mother_phone(self, value):
+        self.phone_father_2 = value or ''
+
+    @property
     def has_photo(self):
         return bool(self.photo)
 

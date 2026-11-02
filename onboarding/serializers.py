@@ -233,9 +233,11 @@ class AdmissionSerializer(serializers.Serializer):
         # Cross-validate student, father, and mother phone uniqueness
         phone_student = data.get('phone_student')
         phone_father = data.get('phone_father')
-        phone_mother = data.get('phone_mother') or data.get('phone_father_2')
+        phone_mother = data.get('mother_phone') or data.get('phone_mother') or data.get('phone_father_2')
         validate_admission_phone_uniqueness(phone_student, phone_father, phone_mother)
 
+        if 'mother_phone' in data and not data.get('phone_father_2'):
+            data['phone_father_2'] = data['mother_phone']
         if 'phone_mother' in data and not data.get('phone_father_2'):
             data['phone_father_2'] = data['phone_mother']
 
@@ -325,6 +327,7 @@ class BranchInfoSerializer(serializers.Serializer):
 class AdmissionListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     phone_mother = serializers.CharField(source='phone_father_2', read_only=True)
+    mother_phone = serializers.CharField(source='phone_father_2', read_only=True)
     branch = BranchInfoSerializer(read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
@@ -356,7 +359,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Admission
         fields = [
-            'id', 'branch', 'first_name', 'surname', 'email', 'phone_student', 'phone_father', 'phone_father_2', 'phone_mother',
+            'id', 'branch', 'first_name', 'surname', 'email', 'phone_student', 'phone_father', 'phone_father_2', 'phone_mother', 'mother_phone',
             'gender', 'gender_display',
             'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'payment_choice', 'payment_choice_display', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
@@ -368,6 +371,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
 class AdmissionDetailSerializer(serializers.ModelSerializer):
     branch = BranchInfoSerializer(read_only=True)
     phone_mother = serializers.CharField(source='phone_father_2', read_only=True)
+    mother_phone = serializers.CharField(source='phone_father_2', read_only=True)
     assigned_counsellor = CounsellorInfoSerializer(read_only=True)
 
     category_display = serializers.CharField(source="get_category_display", read_only=True)
@@ -404,6 +408,7 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
 class AdmissionUpdateSerializer(serializers.ModelSerializer):
     """Partial-update serializer for PUT / PATCH."""
     phone_mother = serializers.CharField(max_length=15, required=False, allow_blank=True, allow_null=True)
+    mother_phone = serializers.CharField(max_length=15, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Admission
@@ -443,11 +448,17 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
         phone_student = data.get('phone_student') or getattr(self.instance, 'phone_student', None)
         phone_father = data.get('phone_father') or getattr(self.instance, 'phone_father', None)
         phone_mother = (
-            data.get('phone_mother')
+            data.get('mother_phone')
+            or data.get('phone_mother')
             or data.get('phone_father_2')
             or getattr(self.instance, 'phone_father_2', None)
         )
         validate_admission_phone_uniqueness(phone_student, phone_father, phone_mother)
+
+        if 'mother_phone' in data:
+            if not data.get('phone_father_2'):
+                data['phone_father_2'] = data['mother_phone']
+            data.pop('mother_phone', None)
 
         if 'phone_mother' in data:
             if not data.get('phone_father_2'):

@@ -27,7 +27,7 @@ ADMISSION_STATUS_CHOICES = [
 PAYMENT_TYPE_CHOICES = [
     ('full_payment', 'Full Payment'),
     ('token', 'Token Payment'),
-    ('finance', 'Finance'),
+    ('finance', 'Installment/Finance'),
 ]
 
 PAYMENT_CHOICE_CHOICES = [
@@ -365,13 +365,13 @@ class Admission(models.Model):
     @property
     def token_payment_terms_note(self):
         """
-        Notice for token payment: remaining fees must be paid in 15 days or considered as finance.
+        Notice for token payment: remaining fees must be paid in 15 days or considered as Installment/Finance.
         """
         if self.payment_type == 'token':
             remaining = self.remaining_fees
             if remaining > 0:
-                return f"In 15 days you have to pay remaining fees (₹{float(remaining):,.0f}) otherwise it will be considered as Finance."
-            return "In 15 days you have to pay remaining fees otherwise it will be considered as Finance."
+                return f"In 15 days you have to pay remaining fees (₹{float(remaining):,.0f}) otherwise it will be considered as Installment/Finance."
+            return "In 15 days you have to pay remaining fees otherwise it will be considered as Installment/Finance."
         return None
 
     def add_payment_history_entry(self, event: str, data: dict):

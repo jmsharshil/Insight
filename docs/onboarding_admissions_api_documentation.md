@@ -147,7 +147,7 @@ POST `/approve/`:
 
 > [!IMPORTANT]
 > **Phone Number Uniqueness Requirement**:
-> In all new admission submissions and updates, `phone_student`, `phone_father`, and `phone_mother` (also stored as `phone_father_2`) must all be **different from each other**. If any two numbers match, the API rejects the request with HTTP 400 Bad Request:
+> In all new admission submissions and updates, `phone_student`, `phone_father`, and `mother_phone` / `phone_mother` (stored in `phone_father_2`) must all be **different from each other**. Both `mother_phone` and `phone_mother` are accepted and returned by all admission endpoints. If any two numbers match, the API rejects the request with HTTP 400 Bad Request:
 > - `"Student phone number, father's phone number, and mother's phone number must all be different."`
 
 **Example Request Body (form completion):**
@@ -161,7 +161,7 @@ POST `/approve/`:
   "email_parent": "ramesh@example.com",
   "phone_student": "9876543210",
   "phone_father": "9876543211",
-  "phone_mother": "9876543212",
+  "mother_phone": "9876543212",
   "dob": "2005-04-15",
   "category": "gen",
   "street": "123 MG Road",

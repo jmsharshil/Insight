@@ -2071,151 +2071,12 @@ class LeadStatusUpdateView(APIView):
         admission_created = False
         if new_stage == 'converted' and old_stage != 'converted':
             try:
-                from onboarding.models import Admission
-                from onboarding.utils import AdmissionService
-
-                # Check if an admission already exists for this lead
-                if not Admission.objects.filter(lead=lead).exists():
-                    # Build admission data from lead fields
-                    admission_data = {
-                        'lead_id':          lead.id,
-                        'first_name':       lead.first_name,
-                        'surname':          lead.surname or '',
-                        'father_name':      lead.father_name or '',
-                        'mother_name':      '',
-                        'dob':              None,
-                        'category':         'gen',
-                        'email':            lead.email or '',
-                        'email_parent':     '',
-                        'phone_student':    lead.phone_student or '',
-                        'phone_student_2':  '',
-                        'phone_father':     lead.phone_father or '',
-                        'phone_father_2':   '',
-                        'street':           lead.street or '',
-                        'apartment':        lead.apartment or '',
-                        'city':             lead.city or '',
-                        'state':            lead.state or '',
-                        'pincode':          '',
-                        'country':          lead.country or 'India',
-                        'course':           lead.course or 'cseet',
-                        'group_module':     lead.group_module or 'full',
-                        'batch_attempt':    lead.batch_attempt or 'june',
-                        'location':         lead.location or '',
-                        'qualification':    lead.qualification or 'appearing_12',
-                        'reference':        lead.reference or 'none',
-                        'consent':          True,
-                        'tenth_medium':     lead.tenth_medium or 'cbse',
-                        'tenth_school':     lead.tenth_school or '',
-                        'tenth_coaching':   lead.tenth_coaching or '',
-                        'tenth_percentage': lead.tenth_percentage or 0,
-                        'tenth_percentile': lead.tenth_percentile or 0,
-                        'twelfth_medium':   lead.twelfth_medium or 'cbse',
-                        'twelfth_school':   lead.twelfth_school or '',
-                        'twelfth_coaching': lead.twelfth_coaching or '',
-                        'twelfth_percentage': lead.twelfth_percentage or 0,
-                        'twelfth_percentile': lead.twelfth_percentile or 0,
-                        'grad_university':  lead.grad_university or '',
-                        'grad_college':     lead.grad_college or '',
-                        'grad_last_sem':    lead.grad_last_sem or '',
-                    }
-
-                    # ── AUTO-ASSIGN COUNSELLOR VIA ROUND-ROBIN (commented out: now manual) ──
-                    # The block below previously auto-assigned a counsellor to the Admission
-                    # record when a lead was converted. This has been replaced by manual
-                    # assignment on the Lead itself (Lead.assigned_to). The Admission is now
-                    # created with assigned_counsellor=None and must be set manually.
-                    #
-                    # assigned_counsellor = AdmissionService.get_next_counsellor()
-                    assigned_counsellor = lead.assigned_to
- 
-
-                    # Create Admission with status='form_pending' (no credentials yet)
-                    counsellor_name = assigned_counsellor.name if assigned_counsellor else 'Unassigned'
-                    auto_note = f'Auto-created from converted lead #{lead.id}. Waiting for student to submit the admission form.'
-                    
-                    admission = Admission(
-                        id=lead.id,
-                        lead=lead,
-                        branch=lead.branch,
-                        status='form_pending',
-                        note=auto_note,
-                        assigned_counsellor=assigned_counsellor,
-                        **{k: v for k, v in admission_data.items() if k != 'lead_id'},
-                    )
-                    admission.save()
-
-                    from onboarding.models import AdmissionStatusHistory
-                    AdmissionStatusHistory.objects.create(
-                        admission=admission,
-                        status='form_pending',
-                        changed_by=request.user if request.user.is_authenticated else None,
-                        note=auto_note,
-                    )
-
-                    admission_created = True
-                    logger.info(
-                        f"Admission {admission.id} auto-created from converted lead {lead.id}, "
-                        f"assigned to counsellor: {counsellor_name}"
-                    )
-                    
-                    admission_link = f"{settings.FRONTEND_BASE_URL}/insight/student/admission-form?id={lead.id}"
-                    button_url_path = f"insight/student/admission-form?id={lead.id}"
-                    org_name = getattr(admission.branch.organization, 'name', 'Insight Institute of Professional Studies') if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None) else 'Insight Institute of Professional Studies'
-                    student_name = admission.first_name or "Student"
-                    text_content = f"Hello {student_name},\n\nYour inquiry with {org_name} has been processed and we're ready to proceed with your admission.\n\nTap below to complete your admission form and upload the required documents:\n\n{admission_link}\n\nIf you have any questions, feel free to reach out.\n\nBest Regards,\n{org_name}"
-
-                    if admission.email:
-                        try:
-                            subject = "Complete Your Admission Process"
-                            template_context = {
-                                'student_name': student_name,
-                                'admission_link': admission_link,
-                                'primary_color': '#ed7c31',
-                                'org_name': org_name,
-                            }
-                            
-                            send_email(
-                                to=admission.email,
-                                subject=subject,
-                                text=text_content,
-                                template="emails/admission_process.html",
-                                template_context=template_context,
-                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                            )
-                            logger.info(f"Admission form email sent to {admission.email}")
-                        except Exception as e:
-                            logger.error(f"Failed to send admission form email to {admission.email}: {e}")
-
-                    if admission.phone_student:
-                        try:
-                            send_whatsapp_with_fallback(
-                                to=admission.phone_student,
-                                template_name="admission_process",
-                                language_code="en",
-                                components=[
-                                    {
-                                        "type": "body",
-                                        "parameters": [
-                                            {"type": "text", "text": student_name},
-                                            {"type": "text", "text": org_name},
-                                            {"type": "text", "text": str(lead.id)},
-                                        ],
-                                    },
-                                    {
-                                        "type": "button",
-                                        "sub_type": "url",
-                                        "index": 0,
-                                        "parameters": [
-                                            {"type": "text", "text": button_url_path}
-                                        ],
-                                    },
-                                ],
-                                fallback_body=text_content,
-                            )
-                            logger.info(f"Admission form WhatsApp sent to {admission.phone_student}")
-                        except Exception as e:
-                            logger.error(f"Failed to send admission form WhatsApp to {admission.phone_student}: {e}")
-
+                from .utils import LeadService as _LS
+                _adm = _LS.auto_create_admission_for_lead(
+                    lead,
+                    changed_by=request.user if request.user.is_authenticated else None,
+                )
+                admission_created = _adm is not None
             except Exception as e:
                 logger.error(f"Error creating admission for lead {lead.id}: {str(e)}")
                 return Response(
@@ -2675,103 +2536,287 @@ from .serializers import LeadTransferRequestSerializer, LeadTransferApprovalSeri
 from .models import LeadTransferRequest
 from auth_user.models import User
 
+# ==============================================================================
+# OLD CODE (Preserved as commented code - request-to-approve lead transfer flow)
+# ==============================================================================
+# class LeadTransferRequestListCreateView(APIView):
+#     permission_classes = [IsAuthenticated]
+# 
+#     def get(self, request):
+#         if request.user.role not in SENIOR_ROLES:
+#             return Response({"error": "Permission denied. Only senior roles can view transfer requests."}, status=status.HTTP_403_FORBIDDEN)
+#         
+#         status_filter = request.query_params.get('status')
+#         queryset = LeadTransferRequest.objects.all()
+#         if status_filter:
+#             queryset = queryset.filter(status=status_filter)
+#             
+#         return paginate_queryset(queryset, request, LeadTransferRequestSerializer)
+# 
+#     def post(self, request):
+#         lead_id = request.data.get('lead_id')
+#         try:
+#             lead = Lead.objects.get(id=lead_id)
+#         except Lead.DoesNotExist:
+#             return Response({"error": "Lead not found."}, status=status.HTTP_404_NOT_FOUND)
+#         
+#         if lead.assigned_to != request.user:
+#             return Response({"error": "You can only request transfer for leads assigned to you."}, status=status.HTTP_403_FORBIDDEN)
+#             
+#         reason = request.data.get('reason', '')
+#         
+#         transfer_request = LeadTransferRequest.objects.create(
+#             lead=lead,
+#             requested_by=request.user,
+#             reason=reason
+#         )
+#         
+#         serializer = LeadTransferRequestSerializer(transfer_request)
+#         return Response(serializer.data, status=status.HTTP_201_CREATED)
+# 
+# 
+# class LeadTransferRequestReviewView(APIView):
+#     permission_classes = [IsAuthenticated]
+# 
+#     def patch(self, request, pk):
+#         if request.user.role not in SENIOR_ROLES:
+#             return Response({"error": "Permission denied. Only senior roles can review transfer requests."}, status=status.HTTP_403_FORBIDDEN)
+#             
+#         try:
+#             transfer_request = LeadTransferRequest.objects.get(id=pk)
+#         except LeadTransferRequest.DoesNotExist:
+#             return Response({"error": "Request not found."}, status=status.HTTP_404_NOT_FOUND)
+#             
+#         if transfer_request.status != 'pending':
+#             return Response({"error": "Only pending requests can be reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+#             
+#         serializer = LeadTransferApprovalSerializer(data=request.data)
+#         if serializer.is_valid():
+#             status_decision = serializer.validated_data['status']
+#             assigned_to_id = serializer.validated_data.get('assigned_to')
+#             
+#             transfer_request.status = status_decision
+#             transfer_request.reviewed_by = request.user
+#             
+#             if status_decision == 'approved':
+#                 lead = transfer_request.lead
+#                 old_assignee = lead.assigned_to
+#                 try:
+#                     new_assignee = User.objects.get(id=assigned_to_id)
+#                 except User.DoesNotExist:
+#                     return Response({"error": "Counsellor not found."}, status=status.HTTP_404_NOT_FOUND)
+#                     
+#                 lead.assigned_to = new_assignee
+#                 lead.save()
+#                 
+#                 LeadAssignmentLog.objects.create(
+#                     lead=lead,
+#                     assigned_from=old_assignee,
+#                     assigned_to=new_assignee,
+#                     changed_by=request.user,
+#                     note=f"Approved transfer request #{transfer_request.id}"
+#                 )
+#                 
+#                 transfer_request.assigned_to = new_assignee
+#                 
+#                 from chat.notifications import send_system_notification
+#                 try:
+#                     send_system_notification(
+#                         user_id=str(new_assignee.id),
+#                         title='Lead Transferred',
+#                         body=f"A lead transfer has been approved. You are now assigned to: {lead.first_name} {lead.surname or ''}.",
+#                         metadata={'type': 'lead_transferred', 'lead_id': str(lead.id)},
+#                     )
+#                 except Exception as e:
+#                     import logging
+#                     logger = logging.getLogger(__name__)
+#                     logger.error(f"Failed to notify new assignee on transfer for lead {lead.id}: {e}")
+#             
+#             transfer_request.save()
+#             return Response(LeadTransferRequestSerializer(transfer_request).data)
+#             
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# ==============================================================================
+
 class LeadTransferRequestListCreateView(APIView):
+    """
+    POST /api/leads/transfer-requests/
+        Immediately reassign a lead to a new counsellor and notify super admins.
+        No approval step is required.
+
+    GET /api/leads/transfer-requests/
+        List lead reassignment history (senior roles only).
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        """List reassignment history — visible to senior roles."""
         if request.user.role not in SENIOR_ROLES:
-            return Response({"error": "Permission denied. Only senior roles can view transfer requests."}, status=status.HTTP_403_FORBIDDEN)
-        
-        status_filter = request.query_params.get('status')
-        queryset = LeadTransferRequest.objects.all()
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-            
+            return Response(
+                {"error": "Permission denied. Only senior roles can view transfer history."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        queryset = LeadAssignmentLog.objects.select_related(
+            'lead', 'assigned_from', 'assigned_to', 'changed_by'
+        ).order_by('-created_at')
+
+        lead_id = request.query_params.get('lead_id')
+        if lead_id:
+            queryset = queryset.filter(lead_id=lead_id)
+
         return paginate_queryset(queryset, request, LeadTransferRequestSerializer)
 
     def post(self, request):
+        """
+        Directly reassign a lead — no approval required.
+        The current assignee (or any senior role) can request a reassignment.
+        Super admins are notified immediately.
+
+        Body:
+            {
+                "lead_id": <int>,
+                "assigned_to": "<user-uuid>",   # new counsellor
+                "reason": "Optional reason"      # optional
+            }
+        """
         lead_id = request.data.get('lead_id')
+        new_assignee_id = request.data.get('assigned_to')
+        reason = (request.data.get('reason') or '').strip()
+        user = request.user
+
+        # ── Lead lookup ────────────────────────────────────────────────────────
         try:
             lead = Lead.objects.get(id=lead_id)
         except Lead.DoesNotExist:
-            return Response({"error": "Lead not found."}, status=status.HTTP_404_NOT_FOUND)
-        
-        if lead.assigned_to != request.user:
-            return Response({"error": "You can only request transfer for leads assigned to you."}, status=status.HTTP_403_FORBIDDEN)
-            
-        reason = request.data.get('reason', '')
-        
-        transfer_request = LeadTransferRequest.objects.create(
-            lead=lead,
-            requested_by=request.user,
-            reason=reason
+            return Response({"success": False, "error": "Lead not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # ── Permission: must be the current assignee OR a senior role ──────────
+        is_senior = user.role in SENIOR_ROLES or getattr(user, 'is_superuser', False)
+        if lead.assigned_to != user and not is_senior:
+            return Response(
+                {"success": False, "error": "You can only request reassignment for leads assigned to you."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Resolve new assignee ───────────────────────────────────────────────
+        if not new_assignee_id:
+            return Response(
+                {"success": False, "error": "assigned_to (user ID) is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            new_assignee = User.objects.get(id=new_assignee_id)
+        except User.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Target counsellor not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        old_assignee = lead.assigned_to
+        if old_assignee == new_assignee:
+            return Response(
+                {"success": False, "error": "Lead is already assigned to this counsellor."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Apply reassignment immediately ─────────────────────────────────────
+        auto_note = (
+            reason
+            or f"Reassignment requested by {user.name}: "
+               f"{'Unassigned' if not old_assignee else old_assignee.name} "
+               f"→ {new_assignee.name}."
         )
-        
-        serializer = LeadTransferRequestSerializer(transfer_request)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        lead.assigned_to = new_assignee
+        lead.updated_by = user
+        lead.save(update_fields=['assigned_to', 'updated_by', 'updated_at'])
+
+        LeadAssignmentLog.objects.create(
+            lead=lead,
+            assigned_from=old_assignee,
+            assigned_to=new_assignee,
+            changed_by=user,
+            note=auto_note,
+        )
+
+        logger.info(
+            f"Lead {lead.id} directly reassigned: "
+            f"{old_assignee} → {new_assignee} (requested by {user}). Reason: {reason or 'N/A'}"
+        )
+
+        # ── Notify new assignee ────────────────────────────────────────────────
+        try:
+            from chat.notifications import send_system_notification
+            send_system_notification(
+                user_id=str(new_assignee.id),
+                title='Lead Assigned to You',
+                body=(
+                    f"Lead for {lead.first_name} {lead.surname or ''} has been reassigned to you"
+                    f"{f' by {user.name}' if user != new_assignee else ''}."
+                ),
+                metadata={'type': 'lead_reassigned', 'lead_id': str(lead.id)},
+            )
+        except Exception as exc:
+            logger.error(f"Failed to notify new assignee {new_assignee.id} for lead {lead.id}: {exc}")
+
+        # ── Notify super admins (unless the requester is a super admin) ────────
+        try:
+            from core.utils import notify_users_by_role
+            notify_users_by_role(
+                roles=['super_admin'],
+                title='Lead Reassigned',
+                body=(
+                    f"Lead [{lead.first_name} {lead.surname or ''}] (ID: {lead.id}) was reassigned "
+                    f"from {old_assignee.name if old_assignee else 'Unassigned'} "
+                    f"to {new_assignee.name} by {user.name}."
+                    + (f" Reason: {reason}" if reason else "")
+                ),
+                organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
+                branch=lead.branch if getattr(lead, 'branch', None) else None,
+                metadata={'type': 'lead_reassigned', 'lead_id': str(lead.id)},
+            )
+        except Exception as exc:
+            logger.error(f"Failed to notify super admins of lead {lead.id} reassignment: {exc}")
+
+        return Response(
+            {
+                "success": True,
+                "message": "Lead reassigned successfully. Super admins have been notified.",
+                "data": {
+                    "lead_id":            lead.id,
+                    "assigned_from_id":   str(old_assignee.id)    if old_assignee    else None,
+                    "assigned_from_name": old_assignee.name        if old_assignee    else "Unassigned",
+                    "assigned_to_id":     str(new_assignee.id),
+                    "assigned_to_name":   new_assignee.name,
+                    "reassigned_by":      user.name,
+                    "reason":             reason or None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LeadTransferRequestReviewView(APIView):
+    """
+    DEPRECATED: Lead reassignment no longer requires approval.
+    Use POST /api/leads/transfer-requests/ to reassign directly.
+    Super admins are notified automatically.
+    """
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
-        if request.user.role not in SENIOR_ROLES:
-            return Response({"error": "Permission denied. Only senior roles can review transfer requests."}, status=status.HTTP_403_FORBIDDEN)
-            
-        try:
-            transfer_request = LeadTransferRequest.objects.get(id=pk)
-        except LeadTransferRequest.DoesNotExist:
-            return Response({"error": "Request not found."}, status=status.HTTP_404_NOT_FOUND)
-            
-        if transfer_request.status != 'pending':
-            return Response({"error": "Only pending requests can be reviewed."}, status=status.HTTP_400_BAD_REQUEST)
-            
-        serializer = LeadTransferApprovalSerializer(data=request.data)
-        if serializer.is_valid():
-            status_decision = serializer.validated_data['status']
-            assigned_to_id = serializer.validated_data.get('assigned_to')
-            
-            transfer_request.status = status_decision
-            transfer_request.reviewed_by = request.user
-            
-            if status_decision == 'approved':
-                lead = transfer_request.lead
-                old_assignee = lead.assigned_to
-                try:
-                    new_assignee = User.objects.get(id=assigned_to_id)
-                except User.DoesNotExist:
-                    return Response({"error": "Counsellor not found."}, status=status.HTTP_404_NOT_FOUND)
-                    
-                lead.assigned_to = new_assignee
-                lead.save()
-                
-                LeadAssignmentLog.objects.create(
-                    lead=lead,
-                    assigned_from=old_assignee,
-                    assigned_to=new_assignee,
-                    changed_by=request.user,
-                    note=f"Approved transfer request #{transfer_request.id}"
-                )
-                
-                transfer_request.assigned_to = new_assignee
-                
-                from chat.notifications import send_system_notification
-                try:
-                    send_system_notification(
-                        user_id=str(new_assignee.id),
-                        title='Lead Transferred',
-                        body=f"A lead transfer has been approved. You are now assigned to: {lead.first_name} {lead.surname or ''}.",
-                        metadata={'type': 'lead_transferred', 'lead_id': str(lead.id)},
-                    )
-                except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.error(f"Failed to notify new assignee on transfer for lead {lead.id}: {e}")
-            
-            transfer_request.save()
-            return Response(LeadTransferRequestSerializer(transfer_request).data)
-            
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "success": False,
+                "message": (
+                    "Lead transfer approval is no longer required. "
+                    "Use POST /api/leads/transfer-requests/ to reassign a lead directly. "
+                    "Super admins are notified automatically."
+                ),
+            },
+            status=status.HTTP_410_GONE,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
