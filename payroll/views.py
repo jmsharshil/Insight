@@ -583,6 +583,38 @@ class PayrollPayslipsView(APIView):
         })
 
 
+class PayslipDetailView(APIView):
+    """GET /api/v1/payslips/{payslip_id}/"""
+
+    def get(self, request, payslip_id):
+        role = _user_role(request.user)
+        slips = PaySlip.objects.select_related(
+            'payroll_run', 'payroll_run__branch', 'faculty__user', 'user',
+        ).prefetch_related(
+            'late_logs', 'reimbursements', 'odometer_readings__activity',
+        )
+
+        if getattr(request.user, 'organization', None):
+            slips = slips.filter(payroll_run__branch__organization=request.user.organization)
+
+        try:
+            payslip = slips.get(id=payslip_id)
+        except PaySlip.DoesNotExist:
+            return Response({'success': False, 'message': 'Payslip not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if role in PAYROLL_VIEW_ROLES:
+            pass
+        elif role == 'faculty':
+            owns_faculty_payslip = payslip.faculty and payslip.faculty.user_id == request.user.id
+            owns_user_payslip = payslip.user_id == request.user.id
+            if not (owns_faculty_payslip or owns_user_payslip):
+                return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        elif payslip.user_id != request.user.id:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        return Response({'success': True, 'data': PaySlipSerializer(payslip).data})
+
+
 class PayslipAdjustView(APIView):
     """PATCH, DELETE /api/v1/payroll/{payroll_id}/payslips/{slip_id}/"""
     # permission_classes = [IsAuthenticated]

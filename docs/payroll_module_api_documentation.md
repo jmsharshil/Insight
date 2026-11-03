@@ -139,6 +139,7 @@ FACULTY PATH:                                 PAPER_CHECKER / STAFF PATH:
 - Extra hours auto-detected only for faculty (creates pending ExtraHoursApproval).
 - Drafts **regenerate on every GET/POST/detail/payslips access** to reflect latest attendance/queries/leaves.
 - Faculty self-preview; `/my/` works for **all** roles (faculty or user-based payslip).
+- A standalone payslip detail endpoint is available at `/payslips/<payslip_id>/`.
 - Strict role guards (`PAYROLL_*_ROLES` constants in views.py); `{success, data}` everywhere.
 
 ---
@@ -171,6 +172,7 @@ Cross-references `auth_user_procedure_guide.md` (role matrix, exam_supervisor/pa
 ### Step 3: Review, List & Adjust Payslips
 - **GET** `/payroll/<run_id>/` — detail (regens draft).
 - **GET** `/payroll/<run_id>/payslips/` — list with late_logs, derived fields (faculty_name, per_paper_rate, employment_type, total_salary_sum in response).
+- **GET** `/payslips/<payslip_id>/` — retrieve one payslip by ID with all payslip breakdown fields, late logs, reimbursement notes, and odometer notes.
 - **PATCH** `/payroll/<run_id>/payslips/<slip_id>/` — `extra_shift_allowance` (or `bonus`), `other_deductions`, `deduction_note`, `leave_deductions`; auto `net_salary` + run total recalc (accountant/super only; prohibited if disbursed). Net salary formula: `basic_salary + hour_based_amount + bonus + reimbursements_amount + odometer_amount - late_penalty - absence_deductions - leave_deductions - other_deductions`. Adjustments update `deduction_note` with `Extra Shift Allowance: +XX.XX`.
 - DELETE payslip (super only).
 
@@ -203,6 +205,33 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
   - POST: `{"branch_id": "uuid", "month": 6, "year": 2026}`.
 - **GET/PATCH/DELETE** `/api/v1/payroll/<run_id>/` — detail (auto-regen draft), update notes/status (limited), delete draft/pending.
 - **GET** `/api/v1/payroll/<run_id>/payslips/` — payslips list (with late_logs; regens draft; extra `total_salary_sum` in response).
+
+### Payslip Detail (`/payslips/<payslip_id>/`)
+- **GET** `/api/v1/payslips/<payslip_id>/`
+- Returns the complete `PaySlipSerializer` representation for the requested payslip.
+- Access is organization-aware:
+  - `accountant`, `super_admin`, and `branch_manager` may retrieve payslips in their organization.
+  - Faculty and employee users may retrieve only their own payslip.
+- Returns `404` when the payslip does not exist or is outside the user's organization.
+- Returns `403` when the authenticated user tries to access another employee's payslip.
+- Example success response:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": "4a2c1f7a-6f68-4f59-9c8e-7a3f6b8e1234",
+      "faculty_name": "Example Faculty",
+      "employee_id": "EMP001",
+      "basic_salary": "30000.00",
+      "net_salary": "29500.00",
+      "is_disbursed": false,
+      "late_logs": [],
+      "reimbursement_notes": [],
+      "odometer_notes": []
+    }
+  }
+  ```
+- For employee-owned payslips, `faculty_name` may be empty and the identity information is resolved from the linked employee user.
 
 **Payslip Serializer Fields:** `id`, `faculty`/`user_id`, `faculty_name`, `employee_id`, `basic_salary`, `total_session_hours`, `hour_based_amount`, `late_penalty`, `absence_deductions`, `leave_deductions`, `retention_deduction`, `other_deductions`, `bonus`, `extra_shift_allowance`, `attendance_bonus`, `leave_encashment`, `reimbursements_amount`, `odometer_amount`, `reimbursement_notes`, `odometer_notes`, `net_salary`, `sessions_conducted`, `leaves_taken`, `working_days`, `is_disbursed`, `deduction_note`, `late_logs`, `hourly_rate`, `per_paper_rate`, `employment_type`, `salary`, `session_hours`.
 
