@@ -135,6 +135,10 @@ class ExtraHoursApproval(models.Model):
     payroll_month = models.IntegerField()
     payroll_year = models.IntegerField()
     extra_minutes = models.IntegerField()
+    approved_extra_minutes = models.IntegerField(null=True, blank=True)
+    non_approved_extra_minutes = models.IntegerField(default=0)
+    daily_details = models.JSONField(default=list, blank=True)
+    approval_reason = models.TextField(blank=True, default='')
     status = models.CharField(
         max_length=20,
         choices=[('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected')],

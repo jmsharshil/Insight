@@ -228,13 +228,16 @@ class ExtraHoursApprovalSerializer(serializers.ModelSerializer):
         model = ExtraHoursApproval
         fields = [
             'id', 'faculty', 'faculty_name', 'chapter', 'chapter_name', 'subject_name',
-            'payroll_month', 'payroll_year', 'extra_minutes', 'status',
+            'payroll_month', 'payroll_year', 'extra_minutes', 'non_approved_extra_minutes',
+            'daily_details', 'approval_reason', 'status',
             'approved_by', 'approved_by_name', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 class ExtraHoursApprovalUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=['pending', 'approved', 'rejected'])
+    non_approved_extra_minutes = serializers.IntegerField(required=False, min_value=0)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
 
 
 class MyPaySlipSerializer(PaySlipSerializer):

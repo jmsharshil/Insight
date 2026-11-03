@@ -9,6 +9,84 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def normalize_extra_minutes(extra_minutes):
+    """Round monthly extra time down to complete hours; fewer than 5 hours are unpaid."""
+    minutes = max(int(extra_minutes or 0), 0)
+    whole_hours = minutes // 60
+    if whole_hours < 5:
+        return 0
+    return whole_hours * 60
+
+
+def get_faculty_shift_hours(faculty_profile, session_date=None):
+    user = getattr(faculty_profile, 'user', None)
+    if user and hasattr(user, 'get_working_hours_for_date') and session_date:
+        try:
+            hours = Decimal(str(user.get_working_hours_for_date(session_date)))
+            if hours > 0:
+                return hours
+        except Exception:
+            pass
+    hours = Decimal(str(getattr(user, 'working_hours', 0) or 0))
+    return hours if hours > 0 else Decimal('8')
+
+
+def payable_extra_minutes(extra_minutes, faculty_profile, session_date=None):
+    """
+    Convert approved whole hours to 0.5/1/1.5-day units.
+    Payment minutes use the shift length, so only half/full-day units are paid.
+    """
+    normalized = normalize_extra_minutes(extra_minutes)
+    if not normalized:
+        return 0
+
+    shift_hours = get_faculty_shift_hours(faculty_profile, session_date)
+    shift_minutes = shift_hours * 60
+    whole_hours = Decimal(normalized) / Decimal(60)
+    half_threshold = Decimal('5')
+    full_shift_threshold = max(half_threshold, shift_hours)
+
+    if whole_hours < half_threshold:
+        return 0
+
+    units = Decimal('0.5')
+    if whole_hours >= full_shift_threshold:
+        units = (whole_hours / full_shift_threshold * 2).to_integral_value(rounding='ROUND_FLOOR') * Decimal('0.5')
+
+    return int((units * shift_minutes).to_integral_value(rounding='ROUND_HALF_UP'))
+
+
+def build_daily_extra_details(sessions, faculty_profile, chapter, allocated_minutes, previous_minutes=0):
+    """Build extra-time details in chronological session order."""
+    carried = Decimal(previous_minutes)
+    remaining_allocation = max(Decimal(allocated_minutes) - carried, Decimal(0))
+    daily = defaultdict(int)
+
+    for session in sorted(sessions, key=lambda item: (item.session_date, str(item.id))):
+        if chapter not in list(session.chapters.all()):
+            continue
+        chapter_count = session.chapters.count()
+        if chapter_count <= 0:
+            continue
+        actual = min(Decimal(session.duration_minutes), Decimal(720))
+        chapter_minutes = actual / chapter_count
+        allocated_here = min(chapter_minutes, remaining_allocation)
+        remaining_allocation -= allocated_here
+        extra_here = max(chapter_minutes - allocated_here, Decimal(0))
+        if extra_here:
+            daily[str(session.session_date)] += int(extra_here.to_integral_value(rounding='ROUND_HALF_UP'))
+
+    return [
+        {
+            'date': date_value,
+            'extra_minutes': minutes,
+            'extra_hours': round(minutes / 60, 2),
+            'payable_extra_minutes': payable_extra_minutes(minutes, faculty_profile),
+        }
+        for date_value, minutes in sorted(daily.items())
+    ]
+
+
 def _fmt_currency(value):
     return format(value.quantize(Decimal('0.01')), '.2f')
 
@@ -262,13 +340,21 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 payroll_year=year,
                 defaults={'extra_minutes': int(extra_mins)}
             )
+            approval.daily_details = build_daily_extra_details(
+                sessions, faculty_profile, chap, allocated_mins, prev_mins
+            )
             
             if approval.status == 'pending' and approval.extra_minutes != int(extra_mins):
                 approval.extra_minutes = int(extra_mins)
-                approval.save(update_fields=['extra_minutes'])
-                
+                approval.save(update_fields=['extra_minutes', 'daily_details', 'updated_at'])
+            elif approval.daily_details:
+                approval.save(update_fields=['daily_details', 'updated_at'])
+
             if approval.status == 'approved':
-                payable_mins += Decimal(approval.extra_minutes)
+                approved_mins = approval.approved_extra_minutes
+                if approved_mins is None:
+                    approved_mins = approval.extra_minutes
+                payable_mins += Decimal(payable_extra_minutes(approved_mins, faculty_profile))
 
         hours = payable_mins / Decimal(60)
         subject_hours[chap.subject_id] += hours
@@ -991,9 +1077,23 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 payroll_month=month,
                 payroll_year=year
             ).first()
+            if not approval:
+                approval = ExtraHoursApproval.objects.create(
+                    faculty=faculty_profile,
+                    chapter=chap,
+                    payroll_month=month,
+                    payroll_year=year,
+                    extra_minutes=int(monthly_mins - remaining_allocated_mins),
+                    daily_details=build_daily_extra_details(
+                        sessions, faculty_profile, chap, allocated_mins, prev_mins
+                    ),
+                )
             
             if approval and approval.status == 'approved':
-                payable_mins += Decimal(approval.extra_minutes)
+                approved_mins = approval.approved_extra_minutes
+                if approved_mins is None:
+                    approved_mins = approval.extra_minutes
+                payable_mins += Decimal(payable_extra_minutes(approved_mins, faculty_profile))
 
         hours = payable_mins / Decimal(60)
         subject_hours[chap.subject_id] += hours

@@ -1045,9 +1045,31 @@ class ExtraHoursApprovalUpdateView(APIView):
             return Response({'success': False, 'message': 'Validation failed.', 'errors': ser.errors}, status=status.HTTP_400_BAD_REQUEST)
             
         status_val = ser.validated_data['status']
+        non_approved_minutes = ser.validated_data.get('non_approved_extra_minutes', 0)
+        reason = ser.validated_data.get('reason', '').strip()
+
+        if non_approved_minutes > approval.extra_minutes:
+            return Response({
+                'success': False,
+                'message': 'Non-approved extra minutes cannot exceed requested extra minutes.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        approved_minutes = approval.extra_minutes - non_approved_minutes
+        if status_val == 'approved' and non_approved_minutes > 0 and not reason:
+            return Response({
+                'success': False,
+                'message': 'A reason is required when partially approving extra hours.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         approval.status = status_val
         if status_val == 'approved':
             approval.approved_by = request.user
+            approval.approved_extra_minutes = approved_minutes
+        approval.non_approved_extra_minutes = (
+            0 if status_val != 'approved' else non_approved_minutes
+        )
+        if reason:
+            approval.approval_reason = reason
             
         approval.save()
         

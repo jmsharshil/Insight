@@ -178,6 +178,18 @@ Cross-references `auth_user_procedure_guide.md` (role matrix, exam_supervisor/pa
 
 ### Step 4: Extra Hours, Preview & Paper-Checker Specifics
 - **GET/PATCH** `/payroll/extra-hours/<id>/` (list + update status=approved/rejected by super_admin; recalc on draft payroll).
+- Extra hours are calculated from the first day of each month and shown by session date in `daily_details`.
+- Each approval records requested `extra_minutes`, excluded `non_approved_extra_minutes`, resulting approved minutes, and an optional/required `approval_reason`.
+- Monthly extra time is counted in complete hours. Totals below 5 hours are unpaid; values such as 65 minutes count as 1 hour, 90 minutes count as 1 hour, and 120 minutes count as 2 hours.
+- Approved extra time is paid only in half-day/full-day units (`0.5`, `1`, `1.5`, `2`, ...). Five hours is one half-day; a full day requires the employee's shift length (for example 8 or 9 hours). Partial approval must include a reason.
+- Approval example:
+  ```json
+  {
+    "status": "approved",
+    "non_approved_extra_minutes": 120,
+    "reason": "Approved 5 hours after excluding 2 hours from the 7-hour request"
+  }
+  ```
 - **GET** `/faculty/<id>/salary-preview/?month=&year=` — full preview dict (no DB write; includes all computed fields like total_session_hours, absence etc.).
 - For paper_checkers: payroll driven purely by submitted MarkSheets in month (with query/recheck exclusion + scheduled_date-based late % penalty).
 
@@ -236,7 +248,50 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
 **Payslip Serializer Fields:** `id`, `faculty`/`user_id`, `faculty_name`, `employee_id`, `basic_salary`, `total_session_hours`, `hour_based_amount`, `late_penalty`, `absence_deductions`, `leave_deductions`, `retention_deduction`, `other_deductions`, `bonus`, `extra_shift_allowance`, `attendance_bonus`, `leave_encashment`, `reimbursements_amount`, `odometer_amount`, `reimbursement_notes`, `odometer_notes`, `net_salary`, `sessions_conducted`, `leaves_taken`, `working_days`, `is_disbursed`, `deduction_note`, `late_logs`, `hourly_rate`, `per_paper_rate`, `employment_type`, `salary`, `session_hours`.
 
 ### Extra Hours & Late Policy
-- **GET** `/payroll/extra-hours/` (paginated, filters); **PATCH** `/payroll/extra-hours/<id>/` `{status: "approved"}` (super only; triggers recalc if draft).
+- **GET** `/payroll/extra-hours/` — paginated monthly extra-hours requests with faculty, chapter, requested hours, daily session breakdown, approval status, and approval details.
+- **PATCH** `/payroll/extra-hours/<id>/` — approve, partially approve, or reject a request (Super Admin only; triggers payslip recalculation when the payroll is still a draft).
+
+  Approval response fields:
+  - `extra_minutes`: total extra minutes detected for the faculty and chapter in the month.
+  - `non_approved_extra_minutes`: minutes to subtract from the requested total. Approved minutes are calculated internally as `extra_minutes - non_approved_extra_minutes`. If omitted, no minutes are excluded.
+  - `daily_details`: extra work grouped by session date, including `date`, `extra_minutes`, `extra_hours`, and `payable_extra_minutes`.
+  - `approval_reason`: mandatory when approved minutes are less than the requested minutes; recommended for rejection.
+
+  Approve the complete request:
+  ```json
+  {
+    "status": "approved"
+  }
+  ```
+
+  Partially approve 5 hours and explain the reduction:
+  ```json
+  {
+    "status": "approved",
+    "non_approved_extra_minutes": 120,
+    "reason": "Approved 5 hours; remaining extra hours were excluded because they were not verified."
+  }
+  ```
+
+  Reject the request:
+  ```json
+  {
+    "status": "rejected",
+    "reason": "Session proof was not available for the reported extra hours."
+  }
+  ```
+
+  Monthly extra-hour processing rules:
+  - Requests begin accumulating from the first session date of the payroll month.
+  - Minutes are shown for each actual session date so approvers can reduce the total or verify individual days.
+  - Only complete hourly units are paid.
+  - `5-59 minutes` is unpaid; `60-119 minutes` counts as 1 hour; `120-179 minutes` counts as 2 hours.
+  - The monthly normalized total must reach 5 hours before it qualifies for half-day payment.
+  - Approved monthly extras are payable only in half-day or full-day increments: `0.5`, `1`, `1.5`, `2`, and so on.
+  - 5 hours equals `0.5 day`.
+  - A full shift length, such as 8 or 9 hours according to the employee schedule, equals `1 day`.
+  - Each additional half/full-day unit uses those same increments and contains no intermediate `0.25` or `0.75` day values.
+  - If partial approval changes the normalized monthly hours, the payslip uses the remaining approved amount; a reason is required for any reduction.
 - Late policy CRUD as above (serializer includes branch_name, all policy fields).
 
 ### Faculty Endpoints
