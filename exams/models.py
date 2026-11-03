@@ -255,6 +255,27 @@ class SubjectPaper(models.Model):
         return f"{self.subject.name} - {label}"
 
 
+class SupervisorDutyLog(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='supervisor_duty_logs')
+    supervisor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='exam_supervisor_duty_logs')
+    start_photo = models.ImageField(upload_to='exam_supervisor/start/%Y/%m/', null=True, blank=True)
+    end_photo = models.ImageField(upload_to='exam_supervisor/end/%Y/%m/', null=True, blank=True)
+    start_submitted_at = models.DateTimeField(null=True, blank=True)
+    end_submitted_at = models.DateTimeField(null=True, blank=True)
+    payable_hours = models.DecimalField(max_digits=3, decimal_places=1, default=0)
+    late_minutes = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'exam_supervisor_duty_logs'
+        unique_together = ('exam', 'supervisor')
+
+    def __str__(self):
+        return f"{self.supervisor_id} - {self.exam_id}"
+
+
 class ExamSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='sessions')

@@ -1761,6 +1761,49 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     late_penalty = Decimal(0)
     late_dates = []
     total_shortfall_penalty_minutes = 0
+    supervisor_duty_pay = Decimal(0)
+
+    if getattr(user, 'role', '') == 'exam_supervisor' or 'exam_supervisor' in (user.additional_roles or []):
+        from exams.models import SupervisorDutyLog
+        from payroll.models import LateEntryPolicy
+
+        duty_logs = SupervisorDutyLog.objects.filter(
+            supervisor=user,
+            exam__scheduled_date__year=year,
+            exam__scheduled_date__month=month,
+            late_minutes__gt=0,
+        )
+        policy = LateEntryPolicy.objects.filter(branch=user.branch, is_active=True).first()
+        if policy and policy.deduction_per_minute > 0:
+            late_penalty = sum(
+                (Decimal(log.late_minutes) * policy.deduction_per_minute for log in duty_logs),
+                Decimal(0),
+            )
+            if policy.max_deduction_per_session > 0:
+                late_penalty = sum(
+                    (min(Decimal(log.late_minutes) * policy.deduction_per_minute, policy.max_deduction_per_session) for log in duty_logs),
+                    Decimal(0),
+                )
+            late_dates = [str(log.exam.scheduled_date) for log in duty_logs]
+        elif user.salary and user.salary > 0 and duty_logs.exists():
+            work_minutes = Decimal(user.working_hours or 8) * Decimal(60)
+            deduction_per_minute = (user.salary / Decimal(30)) / work_minutes
+            late_penalty = sum(
+                (Decimal(log.late_minutes) * deduction_per_minute for log in duty_logs),
+                Decimal(0),
+            )
+    if getattr(user, 'role', '') == 'exam_supervisor' and user.employment_type not in ('part_time', 'visiting'):
+        from exams.models import SupervisorDutyLog
+        duty_logs = SupervisorDutyLog.objects.filter(
+            supervisor=user,
+            exam__scheduled_date__year=year,
+            exam__scheduled_date__month=month,
+            start_submitted_at__isnull=False,
+        )
+        supervisor_duty_pay = sum(
+            (log.payable_hours * (user.hourly_rate or Decimal(0)) for log in duty_logs),
+            Decimal(0),
+        )
 
     from datetime import date
     today = date.today()
@@ -1854,10 +1897,10 @@ def compute_payslip_for_user(user, month, year, payroll_run):
 
     # 9. Net salary before retention
     if user.employment_type == 'full_time':
-        net_before_retention = (basic_salary + hour_based_amount + attendance_bonus + leave_encashment
+        net_before_retention = (basic_salary + hour_based_amount + supervisor_duty_pay + attendance_bonus + leave_encashment
                                - late_penalty - absence_deductions - leave_deductions)
     else:
-        net_before_retention = (hour_based_amount + attendance_bonus + leave_encashment
+        net_before_retention = (hour_based_amount + supervisor_duty_pay + attendance_bonus + leave_encashment
                                - late_penalty - absence_deductions)
 
     # 10. Retention deduction

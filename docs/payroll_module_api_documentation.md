@@ -294,6 +294,23 @@ All responses follow `{ "success": bool, "message": str, "data": {...} }` (or wi
   - If partial approval changes the normalized monthly hours, the payslip uses the remaining approved amount; a reason is required for any reduction.
 - Late policy CRUD as above (serializer includes branch_name, all policy fields).
 
+### Secondary Exam Supervisor Payroll
+- Use the user's primary salary payroll when `role=admin...` and `additional_roles` contains `exam_supervisor`.
+- In this case, supervisor duty is not hourly payroll. Part-time and visiting rules do not apply to the primary-role salary rule.
+- Supervisor check-in is deadline-based: for an exam starting at 12:15 PM, the required start-photo upload deadline is 12:00 PM.
+- No grace period is applied. A later timestamp is stored as late minutes and deducted using the branch late policy.
+- Early submission is accepted. The 15-minute required reporting window is not paid as extra overtime.
+- Upload a start photo before the deadline:
+  `POST /api/v1/exams/<exam_id>/supervisor-duty/photo/` with multipart fields `type=start`, `photo=<image>`.
+- Upload the end photo:
+  `POST /api/v1/exams/<exam_id>/supervisor-duty/photo/` with multipart fields `type=end`, `photo=<image>`.
+- Supervisor duty photo submission is separate from normal employee QR attendance and does not modify QR check-in/check-out records.
+- Exam creation and update accept `supervisor_hours`, mapping supervisor user IDs to one of `1.5`, `2`, `2.5`, or `3`.
+- The assigned hours are returned in the supervisor list as `payable_hours`.
+- Example: `"supervisor_hours": {"42": 2.5}`.
+- Primary-role exam supervisors receive exam-wise pay for the configured hours at their hourly rate.
+- Part-time and visiting supervisors keep their separate employment payroll rules and are not paid by these exam-duty assignments.
+
 ### Faculty Endpoints
 - **GET** `/faculty/<faculty_id>/payslips/` — historical payslips (filtered).
 - **GET** `/faculty/<faculty_id>/salary-preview/?month=...&year=...` — preview dict with all keys from `preview_payslip_for_faculty()` (basic_salary, total_session_hours, hour_based_amount, late_penalty, absence_deductions, leave_deductions, retention_deduction, attendance_bonus, leave_encashment, bonus=0, other_deductions=0, net_salary, leaves_taken, working_days, sessions_conducted).

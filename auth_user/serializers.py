@@ -66,7 +66,7 @@ class EmployeeFieldsMixin:
         is_employee = (role in all_employee_roles) or any(r in all_employee_roles for r in additional_roles)
         is_faculty = (role == 'faculty') or ('faculty' in additional_roles)
         is_paper_checker = (role == 'paper_checker') or ('paper_checker' in additional_roles)
-        is_exam_supervisor = (role == 'exam_supervisor') or ('exam_supervisor' in additional_roles)
+        is_exam_supervisor = role == 'exam_supervisor'
         is_examiner = (role == 'examiner') or ('examiner' in additional_roles)
 
         if not is_employee:
@@ -301,7 +301,7 @@ class EmployeeFieldsMixin:
         is_employee = (role in all_employee_roles) or any(r in all_employee_roles for r in additional_roles)
         is_faculty = (role == 'faculty') or ('faculty' in additional_roles)
         is_paper_checker = (role == 'paper_checker') or ('paper_checker' in additional_roles)
-        is_exam_supervisor = (role == 'exam_supervisor') or ('exam_supervisor' in additional_roles)
+        is_exam_supervisor = role == 'exam_supervisor'
         is_examiner = (role == 'examiner') or ('examiner' in additional_roles)
 
         if not is_employee:

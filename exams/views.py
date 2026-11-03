@@ -2,6 +2,7 @@ import logging
 from core.pagination import paginate_queryset
 import uuid
 import hashlib
+from datetime import datetime, timedelta
 from django.utils import timezone
 import decimal
 from django.db import transaction
@@ -21,6 +22,7 @@ from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
     SeatArrangement, MalpracticeReport, ScreenEvent,
     AnswerKeyDistributionLog, CheckerToken, SubjectPaper,
+    SupervisorDutyLog,
 )
 from .serializers import (
     ExamListSerializer, ExamCreateSerializer, QuestionSerializer,
@@ -1802,6 +1804,68 @@ class OMRUploadView(APIView):
         session.is_submitted = True
         session.submitted_at = tz.now()
         session.save(update_fields=['uploaded_answer_sheet', 'is_submitted', 'submitted_at'])
+
+
+class SupervisorDutyPhotoView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, exam_id):
+        duty_type = request.data.get('type', '').lower()
+        photo = request.FILES.get('photo')
+        if duty_type not in ('start', 'end') or not photo:
+            return Response(
+                {'success': False, 'message': 'type must be start or end and photo is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        exam = Exam.objects.filter(id=exam_id).first()
+        if not exam or not exam.supervisors.filter(id=request.user.id).exists():
+            return Response({'success': False, 'message': 'You are not assigned to this exam.'}, status=status.HTTP_403_FORBIDDEN)
+
+        roles = set(request.user.additional_roles or [])
+        roles.add(request.user.role)
+        if 'exam_supervisor' not in roles:
+            return Response({'success': False, 'message': 'Exam supervisor role required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        duty, _ = SupervisorDutyLog.objects.get_or_create(exam=exam, supervisor=request.user)
+        now = timezone.now()
+
+        if duty_type == 'start':
+            if duty.start_submitted_at:
+                return Response({'success': False, 'message': 'Start photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+            deadline_naive = datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)
+            deadline = timezone.make_aware(deadline_naive, timezone.get_current_timezone())
+            duty.start_photo = photo
+            duty.start_submitted_at = now
+            duty.late_minutes = max(0, int((now - deadline).total_seconds() // 60))
+            duty.save()
+        else:
+            if not duty.start_submitted_at:
+                return Response({'success': False, 'message': 'Upload the start photo first.'}, status=status.HTTP_400_BAD_REQUEST)
+            if duty.end_submitted_at:
+                return Response({'success': False, 'message': 'End photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+            duty.end_photo = photo
+            duty.end_submitted_at = now
+            duty.save()
+
+        return Response({
+            'success': True,
+            'message': f'{duty_type.title()} photo submitted.',
+            'data': {
+                'exam_id': str(exam.id),
+                'type': duty_type,
+                'submitted_at': now.isoformat(),
+                'deadline': (
+                    timezone.make_aware(
+                        datetime.combine(exam.scheduled_date, exam.start_time)
+                        - timedelta(minutes=15),
+                        timezone.get_current_timezone(),
+                    ).isoformat()
+                    if duty_type == 'start' else None
+                ),
+                'late_minutes': duty.late_minutes,
+            },
+        })
 
         return Response({
             'success': True,

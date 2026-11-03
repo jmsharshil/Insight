@@ -7,7 +7,8 @@ from .views import (
     MalpracticeView, MalpracticeDetailView, ExamScheduleView,
     SubjectPaperListCreateView, SubjectPaperDetailView,
     SubjectQuestionBankView, SubjectQuestionBankDetailView, ExamImportQuestionsView,
-    ExamUploadMaterialsView, ExamGraceMarksView, OMRUploadView, OMRBulkUploadView
+    ExamUploadMaterialsView,     ExamGraceMarksView, OMRUploadView, OMRBulkUploadView,
+    SupervisorDutyPhotoView,
 )
 
 urlpatterns = [
@@ -18,6 +19,7 @@ urlpatterns = [
     path('exams/', ExamListCreateView.as_view(), name='exam-list-create'),
     path('exams/<uuid:exam_id>/', ExamDetailView.as_view(), name='exam-detail'),
     path('exams/<uuid:exam_id>/schedule/', ExamScheduleView.as_view(), name='exam-schedule'),
+    path('exams/<uuid:exam_id>/supervisor-duty/photo/', SupervisorDutyPhotoView.as_view(), name='exam-supervisor-duty-photo'),
     path('exams/<uuid:exam_id>/upload-materials/', ExamUploadMaterialsView.as_view(), name='exam-upload-materials'),
     path('exams/<uuid:exam_id>/grace-marks/', ExamGraceMarksView.as_view(), name='exam-grace-marks'),
 

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 import datetime
+from decimal import Decimal
 from django.contrib.auth import get_user_model
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
@@ -336,8 +337,13 @@ class ExamListSerializer(serializers.ModelSerializer):
 
     def get_supervisors(self, obj):
         """Return list of exam supervisors with id and name for frontend display."""
+        duty_hours = {
+            log.supervisor_id: log.payable_hours
+            for log in obj.supervisor_duty_logs.select_related('supervisor')
+        }
         return [
-            {'id': user.id, 'name': user.name, 'email': user.email}
+            {'id': user.id, 'name': user.name, 'email': user.email,
+             'payable_hours': str(duty_hours.get(user.id, Decimal('0')))}
             for user in obj.supervisors.all()
         ]
 
@@ -388,6 +394,10 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         queryset=User.objects.filter(get_role_filter_q('exam_supervisor'), is_active=True),
         many=True, required=False, allow_empty=True, write_only=True
     )
+    supervisor_hours = serializers.DictField(
+        child=serializers.DecimalField(max_value=Decimal('3'), min_value=Decimal('1.5'), max_digits=2, decimal_places=1),
+        required=False,
+    )
     selected_papers = serializers.PrimaryKeyRelatedField(
         queryset=SubjectPaper.objects.all(),
         many=True, required=False, allow_empty=True
@@ -404,7 +414,7 @@ class ExamCreateSerializer(serializers.ModelSerializer):
             'geo_check_interval_minutes',
             'screen_lock_max_violations', 'screen_lock_action',
             'split_screen_max_warnings', 'split_screen_action',
-            'result_release_mode', 'paper_checkers', 'supervisors', 'selected_papers',
+            'result_release_mode', 'paper_checkers', 'supervisors', 'supervisor_hours', 'selected_papers',
         ]
 
     def validate(self, data):
@@ -423,17 +433,33 @@ class ExamCreateSerializer(serializers.ModelSerializer):
         radius = data.get('geo_radius_meters', 0)
         if radius > 0 and (not data.get('geo_lat') or not data.get('geo_lon')):
             raise serializers.ValidationError({"geo_lat": "Required when geo_radius > 0."})
+        supervisors = data.get('supervisors', [])
+        supervisor_hours = data.get('supervisor_hours', {})
+        allowed_hours = {Decimal('1.5'), Decimal('2'), Decimal('2.5'), Decimal('3')}
+        for supervisor in supervisors:
+            hours = Decimal(str(supervisor_hours.get(str(supervisor.id), '0')))
+            if hours == 0 or hours not in allowed_hours:
+                raise serializers.ValidationError({
+                    'supervisor_hours': 'Each supervisor must have 1.5, 2, 2.5, or 3 payable hours.'
+                })
         return data
 
     def create(self, validated_data):
         paper_checkers = validated_data.pop('paper_checkers', [])
         supervisors = validated_data.pop('supervisors', [])
+        supervisor_hours = validated_data.pop('supervisor_hours', {})
         selected_papers = validated_data.pop('selected_papers', [])
         exam = super().create(validated_data)
         if paper_checkers:
             exam.paper_checkers.set(paper_checkers)
         if supervisors:
             exam.supervisors.set(supervisors)
+            from .models import SupervisorDutyLog
+            for supervisor in supervisors:
+                hours = Decimal(str(supervisor_hours.get(str(supervisor.id), '0')))
+                SupervisorDutyLog.objects.update_or_create(
+                    exam=exam, supervisor=supervisor, defaults={'payable_hours': hours}
+                )
         if selected_papers:
             exam.selected_papers.set(selected_papers)
         return exam
@@ -441,12 +467,19 @@ class ExamCreateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         paper_checkers = validated_data.pop('paper_checkers', None)
         supervisors = validated_data.pop('supervisors', None)
+        supervisor_hours = validated_data.pop('supervisor_hours', {})
         selected_papers = validated_data.pop('selected_papers', None)
         exam = super().update(instance, validated_data)
         if paper_checkers is not None:
             exam.paper_checkers.set(paper_checkers)
         if supervisors is not None:
             exam.supervisors.set(supervisors)
+            from .models import SupervisorDutyLog
+            for supervisor in supervisors:
+                hours = Decimal(str(supervisor_hours.get(str(supervisor.id), '0')))
+                SupervisorDutyLog.objects.update_or_create(
+                    exam=exam, supervisor=supervisor, defaults={'payable_hours': hours}
+                )
         if selected_papers is not None:
             exam.selected_papers.set(selected_papers)
         return exam
