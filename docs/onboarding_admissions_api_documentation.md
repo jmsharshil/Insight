@@ -61,9 +61,35 @@ Full student onboarding record with:
 
 **Key Fields:**
 - `fee_structure` (FK to `fees.FeeStructure` — used for auto StudentFee)
+- `combo_offer` (when `true`, this admission is a CSEET + CS Executive combo and uses one combined `fee_structure`; no separate fee structures are required)
+- `combo_future_batch` (resolved future CS Executive batch)
 - `assigned_bank_id` (from `fees.BankAccount`, respects `max_payment_amount` thresholds)
 - `payment_screenshot`, `transaction_id`, `payment_amount`, `payment_submitted_at`
 - `assigned_counsellor`, `note`, `status_history`
+
+### CSEET + CS Executive Combo Offer
+
+For a combo admission, send:
+
+```json
+{
+  "combo_offer": true,
+  "course": "cseet",
+  "batch_attempt": "june",
+  "attempt_year": 2026,
+  "fee_structure": "fs-combo-uuid"
+}
+```
+
+The single `fee_structure` must cover both CSEET and the future CS Executive course. The API resolves and stores `combo_future_batch`; it does not create or require a second fee structure. The future attempt and year are read from that batch's `batch_attempt` and `attempt_year` fields.
+
+Future CS Executive mapping:
+
+| CSEET attempt | Future Executive attempt/year |
+|---|---|
+| June | June of the following year |
+| October | December of the same year |
+| February | December of the same year |
 
 ---
 

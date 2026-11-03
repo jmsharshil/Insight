@@ -198,6 +198,11 @@ class Admission(models.Model):
         null=True, blank=True,
         related_name='admissions',
     )
+    combo_offer = models.BooleanField(default=False)
+    combo_future_batch = models.ForeignKey(
+        'batches.Batch', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='combo_admissions',
+    )
     
     # ── Payment Options ───────────────────────────────────────────────────────
     payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPE_CHOICES, blank=True, null=True)

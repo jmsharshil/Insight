@@ -22,6 +22,53 @@ from .utils import AdmissionService
 logger = logging.getLogger(__name__)
 
 
+def resolve_combo_executive_course(admission):
+    """Resolve the future CS Executive batch for a CSEET combo."""
+    if not admission.combo_offer or admission.course != 'cseet' or not admission.batch_attempt:
+        return admission
+
+    source_attempt = admission.batch_attempt.strip().lower()
+    source_year = admission.attempt_year
+    if source_year is None and admission.submitted_at:
+        source_year = admission.submitted_at.year
+    if source_year is None:
+        source_year = timezone.now().year
+
+    if source_attempt == 'june':
+        future_attempt = 'june'
+        future_year = source_year + 1
+    elif source_attempt in {'oct', 'feb'}:
+        future_attempt = 'dec'
+        future_year = source_year
+    elif source_attempt == 'dec':
+        future_attempt = 'dec'
+        future_year = source_year + 1
+    else:
+        future_attempt = source_attempt
+        future_year = source_year
+
+    from batches.models import Batch
+    batch_qs = Batch.objects.filter(
+        batch_attempt=future_attempt,
+        attempt_year=future_year,
+        is_active=True,
+    )
+    from django.db.models import Q
+    batch_qs = batch_qs.filter(
+        Q(course__name__icontains='executive') |
+        Q(course__code__icontains='executive') |
+        Q(course__code__icontains='cs-exec') |
+        Q(course__name__icontains='cs executive')
+    )
+    if admission.branch_id:
+        batch = batch_qs.filter(branch=admission.branch).first() or batch_qs.filter(branch__isnull=True).first()
+    else:
+        batch = batch_qs.first()
+    admission.combo_future_batch = batch
+    admission.save(update_fields=['combo_future_batch'])
+    return admission
+
+
 def _get_bank_selection_amount(admission):
     from decimal import Decimal
     from django.db.models import Sum
@@ -759,6 +806,7 @@ class AdmissionListView(APIView):
             if getattr(admission, 'lead', None) and admission.lead.branch is None and admission.branch:
                 admission.lead.branch = admission.branch
                 admission.lead.save(update_fields=['branch'])
+            resolve_combo_executive_course(admission)
 
         except Exception as e:
             logger.error(f"Admission update error: {e}")
@@ -1024,6 +1072,7 @@ class AdmissionUpdateView(APIView):
             )
 
         serializer.save()
+        resolve_combo_executive_course(admission)
         try:
             from .utils import sync_admission_payment
             sync_admission_payment(admission, request=request)

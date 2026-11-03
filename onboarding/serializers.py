@@ -126,6 +126,7 @@ class AdmissionSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    combo_offer = serializers.BooleanField(required=False, default=False)
     payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
     payment_choice = serializers.ChoiceField(choices=PAYMENT_CHOICE_CHOICES + [('check', 'Cheque')], required=False, allow_null=True, allow_blank=True)
     icsi_fees_payment = serializers.ChoiceField(choices=ICSI_FEES_PAYMENT_CHOICES, required=False, allow_null=True)
@@ -395,10 +396,18 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     razorpay_payment_status = serializers.CharField(read_only=True)
     payment_history = serializers.SerializerMethodField()
     token_payment_terms_note = serializers.CharField(read_only=True)
+    combo_future_batch_attempt = serializers.SerializerMethodField()
+    combo_future_attempt_year = serializers.SerializerMethodField()
 
     def get_payment_history(self, obj):
         request = self.context.get('request')
         return obj.get_payment_history_list(request=request)
+
+    def get_combo_future_batch_attempt(self, obj):
+        return obj.combo_future_batch.batch_attempt if obj.combo_future_batch_id else None
+
+    def get_combo_future_attempt_year(self, obj):
+        return obj.combo_future_batch.attempt_year if obj.combo_future_batch_id else None
 
     class Meta:
         model = Admission
