@@ -79,6 +79,8 @@ Onboarding flow (form submission → fees bank select via `fees.utils`, payment,
 ### Step 1: Lead Capture
 Public or admin POST to create a contact or inquiry Lead (`new` stage, form_type=contact/inquiry). A Lead created automatically from a direct admission submission is recorded with `form_type=admission`.
 
+For `form_type=contact`, `branch` and `email` are optional. `email` may be omitted, blank, or `null`. If `branch` is omitted or `null`, assignment falls back to organisation-wide or available telecaller rules.
+
 ### Step 2: Assignment
 Automatic round-robin via signal on Lead save (`auto_assign_lead`). Uses `form_type` to select role (`tele_caller` for contact forms, `counsellor` for inquiries). `notify_new_lead_assignment` fires. Manual re-assignment via `/assign/` still supported (logs to `LeadAssignmentLog`).
 

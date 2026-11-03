@@ -750,7 +750,7 @@ class ContactSerializer(serializers.Serializer):
     branch        = serializers.UUIDField(required=False, allow_null=True)
     form_type     = serializers.ChoiceField(choices=FORM_TYPE_CHOICES)
     first_name    = serializers.CharField(max_length=100)
-    email         = serializers.EmailField()
+    email         = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     phone_student = serializers.CharField(max_length=15)
     course        = serializers.ChoiceField(choices=COURSE_TYPE_CHOICES)
     consent       = serializers.BooleanField()
