@@ -994,13 +994,38 @@ class LeadListSerializer(serializers.ModelSerializer):
 
 
 class LeadAssignmentLogSerializer(serializers.ModelSerializer):
-    assigned_from_name = serializers.CharField(source='assigned_from.name', read_only=True)
-    assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True)
-    changed_by_name = serializers.CharField(source='changed_by.name', read_only=True)
+    assigned_from = serializers.SerializerMethodField()
+    assigned_to = serializers.SerializerMethodField()
+    changed_by = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _user_details(user):
+        if not user:
+            return None
+        return {
+            'id': str(user.id),
+            'name': user.name,
+            'email': user.email,
+            'phone': getattr(user, 'phone', None),
+            'role': user.role,
+            'additional_roles': user.additional_roles or [],
+        }
+
+    def get_assigned_from(self, obj):
+        return self._user_details(obj.assigned_from)
+
+    def get_assigned_to(self, obj):
+        return self._user_details(obj.assigned_to)
+
+    def get_changed_by(self, obj):
+        return self._user_details(obj.changed_by)
 
     class Meta:
         model = LeadAssignmentLog
-        fields = '__all__'
+        fields = [
+            'id', 'lead', 'assigned_from', 'assigned_to', 'changed_by',
+            'note', 'changed_at',
+        ]
 
 
 class LeadDetailSerializer(serializers.ModelSerializer):
@@ -1018,8 +1043,34 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     # ── Assignment display ───────────────────────────────────────────────
     assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
     assigned_to_name = serializers.CharField(source='assigned_to.name', read_only=True, allow_null=True)
+    assigned_counsellor = serializers.SerializerMethodField()
+    assigned_telecaller = serializers.SerializerMethodField()
     assignment_history = LeadAssignmentLogSerializer(source='assignment_logs', many=True, read_only=True)
     can_edit         = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _assignment_user_details(user, expected_role):
+        if not user:
+            return None
+        roles = set(user.additional_roles or [])
+        roles.add(user.role)
+        role_aliases = {'tele_caller', 'telecaller'} if expected_role == 'tele_caller' else {'counsellor'}
+        if not roles.intersection(role_aliases):
+            return None
+        return {
+            'id': str(user.id),
+            'name': user.name,
+            'email': user.email,
+            'phone': getattr(user, 'phone', None),
+            'role': user.role,
+            'additional_roles': user.additional_roles or [],
+        }
+
+    def get_assigned_counsellor(self, obj):
+        return self._assignment_user_details(obj.assigned_to, 'counsellor')
+
+    def get_assigned_telecaller(self, obj):
+        return self._assignment_user_details(obj.assigned_to, 'tele_caller')
 
     def get_can_edit(self, obj):
         request = self.context.get('request')

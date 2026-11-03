@@ -62,6 +62,7 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 - `answer_key` (URL or `null` for students — governed by `_student_can_see_answer_key()` using `PublishedResult.published_at + 24h`)
 - `selected_papers` (full paper objects via nested `SubjectPaperSerializer`)
 - `paper_checkers`, `supervisors` (lists of `{id, name, email}`)
+- Each supervisor entry also includes `payable_hours`, using `1.5`, `2`, `2.5`, or `3`.
 - `questions_count`, `can_start_exam`, `is_upcoming`, `is_submitted`
 - `classroom`, `classroom_name` (from linked timetable slot)
 - `attendance_percentage` (post-exam only)
@@ -73,6 +74,109 @@ When scheduling a session, you can pass `exam_data` to automatically create an `
 **Methods:** `GET`, `PATCH`, `DELETE`
 
 **PATCH Request Body:** (Partial fields of Exam creation — also accepts `grace_marks`, `grace_marks_note`)
+
+**Assigning Exam Supervisors:**
+Create or update an exam with `supervisors` and `supervisor_hours`. `supervisor_hours` is keyed by supervisor user ID.
+
+```json
+{
+    "supervisors": ["user-uuid-1", "user-uuid-2"],
+    "supervisor_hours": {
+        "user-uuid-1": 2.5,
+        "user-uuid-2": 3
+    }
+}
+```
+
+Allowed `payable_hours` values are `1.5`, `2`, `2.5`, and `3`. Every assigned supervisor must have a configured value.
+
+### 1.3 Supervisor Duty Photos
+**Endpoint:** `POST /api/v1/exams/{exam_id}/supervisor-duty/photo/`
+**Content-Type:** `multipart/form-data`
+**Permission:** Authenticated user must be assigned to the exam and have `exam_supervisor` as either a primary or additional role.
+
+**Multipart Request Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---:|---|
+| `type` | string | Yes | `start` for the pre-exam photo, or `end` for the post-exam photo |
+| `photo` | file | Yes | Exam-start or exam-end image |
+
+**Start Photo Example:**
+
+```text
+type=start
+photo=@exam-start-photo.jpg
+```
+
+**Start Photo Success Response:**
+
+```json
+{
+    "success": true,
+    "message": "Start photo submitted.",
+    "data": {
+        "exam_id": "exam-uuid",
+        "type": "start",
+        "submitted_at": "2026-11-03T12:00:00+05:30",
+        "deadline": "2026-11-03T12:00:00+05:30",
+        "late_minutes": 0
+    }
+}
+```
+
+If the start photo is uploaded after the deadline, `late_minutes` contains the number of minutes late. The deadline is calculated as the exam `start_time` minus 15 minutes; there is no grace period.
+
+**End Photo Example:**
+
+```text
+type=end
+photo=@exam-end-photo.jpg
+```
+
+**End Photo Success Response:**
+
+```json
+{
+    "success": true,
+    "message": "End photo submitted.",
+    "data": {
+        "exam_id": "exam-uuid",
+        "type": "end",
+        "submitted_at": "2026-11-03T14:00:00+05:30",
+        "deadline": null,
+        "late_minutes": 0
+    }
+}
+```
+
+**Error Responses:**
+
+```json
+{"success": false, "message": "type must be start or end and photo is required."}
+```
+
+```json
+{"success": false, "message": "You are not assigned to this exam."}
+```
+
+```json
+{"success": false, "message": "Exam supervisor role required."}
+```
+
+```json
+{"success": false, "message": "Start photo already submitted."}
+```
+
+```json
+{"success": false, "message": "Upload the start photo first."}
+```
+
+```json
+{"success": false, "message": "End photo already submitted."}
+```
+
+Supervisor duty-photo submission is independent of normal QR attendance and does not create or modify QR check-in/check-out records. WhatsApp configuration is unrelated to these photo uploads.
 
 ### 1.4 Add Grace Marks
 **Endpoint:** `POST /api/v1/exams/{exam_id}/grace-marks/`

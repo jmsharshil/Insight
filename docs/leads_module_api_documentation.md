@@ -129,6 +129,12 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
 
 ### Lead Detail & Update
 - **GET** `/api/v1/leads/<lead_id>/` — Full + full stage/assignment history.
+- The response includes `assigned_counsellor` or `assigned_telecaller` when the current assignee has that role as a primary or additional role.
+- These objects contain `id`, `name`, `email`, `phone`, `role`, and `additional_roles`.
+- The existing `assigned_to_id` and `assigned_to_name` fields remain available for backward compatibility.
+- `assignment_history` contains every assignment/reassignment entry, ordered newest first.
+- Each history entry includes full `assigned_from`, `assigned_to`, and `changed_by` user details: `id`, `name`, `email`, `phone`, `role`, and `additional_roles`.
+- Each entry also includes `note` and `changed_at`. An unassigned side is returned as `null`.
 - **PATCH** `/api/v1/leads/<lead_id>/` — Update notes, details, or basic fields.
 
 **PATCH Example:**
