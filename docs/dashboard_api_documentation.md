@@ -17,6 +17,31 @@ It eliminates all static/demo data, using **optimized Django ORM aggregates**, `
 
 **Endpoint**: `GET /api/v1/dashboard/?refresh=true`
 
+## Result Comparison
+
+Every result-aware dashboard includes a `percentage_comparison` object. All values are percentages and the data is scoped to the dashboard role:
+
+- Management: published results for students in the user's organization/branch.
+- Faculty: published results for exams assigned to that faculty.
+- Student: published results for the logged-in student only.
+- Parent: published results for the linked student.
+- Paper checker: published results for exams containing papers assigned to the checker.
+- Exam supervisor: published results for exams supervised by the user.
+
+```json
+{
+  "present_percentage": 100.0,
+  "highest_marks_percentage": 82.5,
+  "lowest_marks_percentage": 41.0,
+  "average_marks_percentage": 63.75,
+  "pass_40_plus_percentage": 20.0,
+  "aggregate_50_plus_percentage": 35.0,
+  "exempt_60_plus_percentage": 45.0
+}
+```
+
+The percentage buckets are 40% inclusive to 50% exclusive, 50% inclusive to 60% exclusive, and 60% or higher, respectively.
+
 ## Role-Specific Dashboards
 
 ### 1. Management Dashboard (`super_admin`, `branch_manager`, `admin_*`, `accountant`)

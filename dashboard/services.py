@@ -29,6 +29,34 @@ def _get_cache_key(user):
     return f"dashboard:{user.role}:{user.id}:{branch_id}:{org_id}"
 
 
+def _result_percentage_comparison(queryset):
+    """Percentage-only result comparison shared by dashboards."""
+    percentages = [
+        round(float(value), 2)
+        for value in queryset.exclude(percentage__isnull=True).values_list('percentage', flat=True)
+    ]
+    total = len(percentages)
+    if not total:
+        return {
+            'present_percentage': 0,
+            'highest_marks_percentage': 0,
+            'lowest_marks_percentage': 0,
+            'average_marks_percentage': 0,
+            'pass_40_plus_percentage': 0,
+            'aggregate_50_plus_percentage': 0,
+            'exempt_60_plus_percentage': 0,
+        }
+    return {
+        'present_percentage': 100.0,
+        'highest_marks_percentage': round(max(percentages), 2),
+        'lowest_marks_percentage': round(min(percentages), 2),
+        'average_marks_percentage': round(sum(percentages) / total, 2),
+        'pass_40_plus_percentage': round(sum(40 <= value < 50 for value in percentages) * 100.0 / total, 2),
+        'aggregate_50_plus_percentage': round(sum(50 <= value < 60 for value in percentages) * 100.0 / total, 2),
+        'exempt_60_plus_percentage': round(sum(value >= 60 for value in percentages) * 100.0 / total, 2),
+    }
+
+
 def _branch_filter(user, model=None):
     """Optimized branch/organization filter based on role."""
     q = Q()
@@ -222,6 +250,9 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         'upcoming_exams': upcoming_exams,
         'exam_stats': _get_exam_stats(bq),
         'result_delay_stats': _get_result_delay_stats(bq),
+        'percentage_comparison': _result_percentage_comparison(
+            PublishedResult.objects.filter(student__in=student_qs, exam__is_deleted=False)
+        ),
         'attendance_trend': _get_attendance_trend(bq, 7),  # last 7 days
         'fee_collection_trend': _get_fee_trend(user, 30),
         'lead_pipeline': lead_pipeline,
@@ -394,6 +425,12 @@ def _get_faculty_dashboard(user, now, today, month_start):
         'today_schedule': today_sessions,
         'pending_tasks': pending_tasks,
         'exam_performance': _get_faculty_exam_performance(user, faculty),
+        'percentage_comparison': _result_percentage_comparison(
+            PublishedResult.objects.filter(
+                exam__faculty=faculty,
+                exam__is_deleted=False,
+            ) if faculty else PublishedResult.objects.none()
+        ),
         'recent_sessions': list(
             SessionReport.objects.filter(faculty=faculty)
             .select_related('batch', 'subject')
@@ -539,6 +576,12 @@ def _get_paper_checker_dashboard(user, now, today, month_start):
         },
         'pending_papers': pending_papers_formatted,
         'recent_checked_papers': recent_checked_formatted,
+        'percentage_comparison': _result_percentage_comparison(
+            PublishedResult.objects.filter(
+                exam__in=base_qs.values('exam_id').distinct(),
+                exam__is_deleted=False,
+            )
+        ),
     }
 
 
@@ -607,6 +650,12 @@ def _get_exam_supervisor_dashboard(user, now, today, month_start):
         'today_schedule': today_sessions,
         'upcoming_exams': upcoming_exams,
         'payroll_summary': payroll_summary,
+        'percentage_comparison': _result_percentage_comparison(
+            PublishedResult.objects.filter(
+                exam__in=supervised_exams_qs,
+                exam__is_deleted=False,
+            )
+        ),
     }
 
 
@@ -727,6 +776,9 @@ def _get_student_dashboard(user, now, today, month_start):
         },
         'upcoming_exams': upcoming,
         'recent_results': recent_results,
+        'percentage_comparison': _result_percentage_comparison(
+            PublishedResult.objects.filter(student=student, exam__is_deleted=False)
+        ),
         'timetable': _get_student_timetable(student),
         'fee_details': {
             'due_count': fees_due.get('count') or 0,

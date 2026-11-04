@@ -800,6 +800,18 @@ All endpoints:
 
 Groups **only by faculty** (overall stats across all subjects taught). Returns `faculty_id`, `faculty_name` + aggregates. No per-subject duplication.
 
+Each faculty row also includes the actual students behind the figures:
+
+- `present_students` — students with published results
+- `student_names` — names of those students
+- `highest_marks_students` — student(s) with the highest percentage
+- `lowest_marks_students` — student(s) with the lowest percentage
+- `pass_40_plus_students` — students scoring from 40% to below 50%
+- `aggregate_50_plus_students` — students scoring from 50% to below 60%
+- `exempt_60_plus_students` — students scoring 60% or more
+
+Students and parents can use the same endpoint. Results are restricted to the logged-in student for a student account, or only the linked students for a parent account.
+
 **Example use:** `?faculty_id=...` or with `subject_id` to narrow.
 
 **Response shape:** Similar to subject-wise but keyed by faculty (e.g. one row per faculty with overall pass % across their exams).

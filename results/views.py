@@ -56,6 +56,35 @@ def _is_valid_uuid(val):
         return False
 
 
+def _percentage_comparison_summary(queryset):
+    """Build percentage-only result comparisons for students, faculty and dashboards."""
+    percentages = [
+        round(float(value), 2)
+        for value in queryset.exclude(percentage__isnull=True).values_list('percentage', flat=True)
+    ]
+    if not percentages:
+        return {
+            'present_percentage': 0,
+            'highest_marks_percentage': 0,
+            'lowest_marks_percentage': 0,
+            'average_marks_percentage': 0,
+            'pass_40_plus_percentage': 0,
+            'aggregate_50_plus_percentage': 0,
+            'exempt_60_plus_percentage': 0,
+        }
+
+    total = len(percentages)
+    return {
+        'present_percentage': 100.0,
+        'highest_marks_percentage': round(max(percentages), 2),
+        'lowest_marks_percentage': round(min(percentages), 2),
+        'average_marks_percentage': round(sum(percentages) / total, 2),
+        'pass_40_plus_percentage': round(sum(40 <= value < 50 for value in percentages) * 100.0 / total, 2),
+        'aggregate_50_plus_percentage': round(sum(50 <= value < 60 for value in percentages) * 100.0 / total, 2),
+        'exempt_60_plus_percentage': round(sum(value >= 60 for value in percentages) * 100.0 / total, 2),
+    }
+
+
 def _parse_filter_date(val):
     if not val:
         return None, None
@@ -383,6 +412,13 @@ class PaperView(APIView):
                     exam_att_pct = round(total_attended / total_enrolled * 100, 2)
         except Exception:
             pass
+
+        comparison_qs = PublishedResult.objects.filter(
+            exam_id=exam_id,
+            exam__is_deleted=False,
+        )
+        if role == 'parents':
+            comparison_qs = comparison_qs.filter(student_id__in=linked_student_ids)
 
         return Response({
             'success': True, 'count': qs.count(),
@@ -789,6 +825,9 @@ class ResultView(APIView):
         return Response({
             'success': True, 'count': qs.count(),
             'exam_attendance_percentage': exam_att_pct,
+            'percentage_comparison': _percentage_comparison_summary(
+                comparison_qs
+            ),
             'data': PublishedResultSerializer(qs, many=True).data,
         })
 
@@ -1363,7 +1402,7 @@ class SubjectWiseResultView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = PublishedResult.objects.select_related(
@@ -1372,6 +1411,8 @@ class SubjectWiseResultView(APIView):
             exam__subject__isnull=False,
             exam__is_deleted=False,
         )
+        if role == 'faculty':
+            qs = qs.filter(exam__faculty__user=request.user)
 
         qs, err = apply_exam_filters_to_results(qs, request)
         if err:
@@ -1399,7 +1440,12 @@ class SubjectWiseResultView(APIView):
             lowest_marks=Min('marks_obtained'),
         ).order_by('-pass_percentage', '-average_marks')
 
-        data = list(annotated)
+        data = []
+        for row in annotated:
+            row['percentage_comparison'] = _percentage_comparison_summary(
+                qs.filter(exam__subject_id=row['subject_id'])
+            )
+            data.append(row)
         return Response({
             'success': True,
             'count': len(data),
@@ -1419,7 +1465,7 @@ class FacultyWiseResultView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = PublishedResult.objects.select_related(
@@ -1428,6 +1474,8 @@ class FacultyWiseResultView(APIView):
             exam__faculty__isnull=False,
             exam__is_deleted=False,
         )
+        if role == 'faculty':
+            qs = qs.filter(exam__faculty__user=request.user)
 
         qs, err = apply_exam_filters_to_results(qs, request)
         if err:
@@ -1454,7 +1502,12 @@ class FacultyWiseResultView(APIView):
             lowest_marks=Min('marks_obtained'),
         ).order_by('-pass_percentage', '-average_marks')
 
-        data = list(annotated)
+        data = []
+        for row in annotated:
+            row['percentage_comparison'] = _percentage_comparison_summary(
+                qs.filter(exam__faculty_id=row['faculty_id'])
+            )
+            data.append(row)
         return Response({
             'success': True,
             'count': len(data),
@@ -1473,7 +1526,7 @@ class BatchWiseResultView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = PublishedResult.objects.select_related(
@@ -1482,6 +1535,8 @@ class BatchWiseResultView(APIView):
             exam__batch__isnull=False,
             exam__is_deleted=False,
         )
+        if role == 'faculty':
+            qs = qs.filter(exam__faculty__user=request.user)
 
         qs, err = apply_exam_filters_to_results(qs, request)
         if err:
@@ -1509,7 +1564,12 @@ class BatchWiseResultView(APIView):
             lowest_marks=Min('marks_obtained'),
         ).order_by('-pass_percentage', '-average_marks')
 
-        data = list(annotated)
+        data = []
+        for row in annotated:
+            row['percentage_comparison'] = _percentage_comparison_summary(
+                qs.filter(exam__batch_id=row['batch_id'])
+            )
+            data.append(row)
         return Response({
             'success': True,
             'count': len(data),
@@ -1528,12 +1588,14 @@ class ResultAnalyticsView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty', 'exam__branch').filter(
             exam__is_deleted=False
         )
+        if role == 'faculty':
+            base_qs = base_qs.filter(exam__faculty__user=request.user)
         base_qs, err = apply_exam_filters_to_results(base_qs, request)
         if err:
             return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
@@ -1597,6 +1659,7 @@ class ResultAnalyticsView(APIView):
                     'pass_percentage': overall_pass_pct,
                     'average_percentage': round(overall['avg_percentage'] or 0, 2),
                     'average_marks': round(overall['avg_marks'] or 0, 2),
+                    'percentage_comparison': _percentage_comparison_summary(base_qs),
                 },
                 'top_subjects': list(subject_summary),
                 'top_faculty': list(faculty_summary),
@@ -1728,6 +1791,8 @@ class ResultExportView(APIView):
                 exam__faculty__isnull=False,
                 exam__is_deleted=False,
             )
+            if role == 'faculty':
+                qs = qs.filter(exam__faculty__user=request.user)
             qs, err = apply_exam_filters_to_results(qs, request)
             if err:
                 return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
