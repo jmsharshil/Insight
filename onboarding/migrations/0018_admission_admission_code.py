@@ -21,12 +21,16 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunSQL(
+            sql='DROP INDEX IF EXISTS admissions_admission_code_5999d9b8_like;',
+            reverse_sql=migrations.RunSQL.noop,
+        ),
         migrations.AddField(
             model_name='admission',
             name='admission_code',
             field=models.CharField(
                 blank=True,
-                db_index=True,
+                db_index=False,
                 editable=False,
                 help_text='Human-readable admission code (for example, IIPS-000001).',
                 max_length=30,
