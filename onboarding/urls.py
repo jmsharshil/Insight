@@ -4,12 +4,12 @@ from .views import AdmissionListView, AdmissionDetailView, AdmissionStatusUpdate
 urlpatterns = [
     path('admissions/', AdmissionListView.as_view()),
     path('admissions/razorpay-webhook/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),
-    path('admissions/<int:admission_id>/', AdmissionDetailView.as_view()),
-    path('admissions/<int:admission_id>/status/', AdmissionStatusUpdateView.as_view()),
-    path('admissions/<int:admission_id>/approve/',AdmissionApproveView.as_view(),name='admission-approve'),
-    path('admissions/<int:admission_id>/reject/',AdmissionRejectView.as_view(),name='admission-reject'),
-    path('admissions/<int:admission_id>/documents/',AdmissionDocumentUploadView.as_view(),  name='admission-documents'),
-    path('admissions/<int:admission_id>/payment/',AdmissionPaymentSubmitView.as_view(),  name='admission-payment'),
-    path('admissions/<int:admission_id>/setup/',  AdmissionPaymentSetupView.as_view(),   name='admission-payment-setup'),
+    path('admissions/<str:admission_id>/', AdmissionDetailView.as_view()),
+    path('admissions/<str:admission_id>/status/', AdmissionStatusUpdateView.as_view()),
+    path('admissions/<str:admission_id>/approve/',AdmissionApproveView.as_view(),name='admission-approve'),
+    path('admissions/<str:admission_id>/reject/',AdmissionRejectView.as_view(),name='admission-reject'),
+    path('admissions/<str:admission_id>/documents/',AdmissionDocumentUploadView.as_view(),  name='admission-documents'),
+    path('admissions/<str:admission_id>/payment/',AdmissionPaymentSubmitView.as_view(),  name='admission-payment'),
+    path('admissions/<str:admission_id>/setup/',  AdmissionPaymentSetupView.as_view(),   name='admission-payment-setup'),
 
 ]

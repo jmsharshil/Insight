@@ -325,7 +325,7 @@ POST /api/v1/fees/razorpay/webhook/test/
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `reference_id` | `string` | Yes | E.g. `"SF_<uuid>_token_full"` or `"ADM_<admission_id>"` |
+| `reference_id` | `string` | Yes | E.g. `"SF_<uuid>_token_full"` or `"ADM_<numeric_admission_id>"` |
 | `amount` | `number` | No | Amount in INR (default: `100`) |
 | `rp_payment_id` | `string` | No | Mock payment ID (auto-generated if omitted) |
 
@@ -367,9 +367,9 @@ When a student submits their admission form, the system **automatically** create
 
 **Trigger endpoints:**
 - `POST /api/v1/admissions/` — student submits their form
-- `PATCH /api/v1/admissions/<id>/` — form update that transitions status from `form_pending`
+- `PATCH /api/v1/admissions/<admission_code>/` — form update that transitions status from `form_pending`. Numeric IDs remain accepted.
 
-**Reference ID format:** `ADM_<admission_id>_<unix_timestamp>`
+**Reference ID format:** `ADM_<numeric_admission_id>_<unix_timestamp>`
 
 **Automated steps:**
 
@@ -430,7 +430,7 @@ Reference IDs passed to Razorpay must be globally unique per payment link.
 |---|---|---|
 | Student Fee — full | `SF_<uuid>_token_full` | `SF_3fa85f64-..._token_full` |
 | Student Fee — token | `SF_<uuid>_token_finance` | `SF_3fa85f64-..._token_finance` |
-| Admission | `ADM_<admission_id>_<unix_ts>` | `ADM_42_1724567890` |
+| Admission | `ADM_<numeric_admission_id>_<unix_ts>` | `ADM_42_1724567890` |
 
 Webhook processor routing by prefix:
 

@@ -67,6 +67,8 @@ Based on the student's selected `payment_type`:
 
 If the student is eligible for a link, the backend makes an API call to Razorpay via the `create_payment_link()` service.
 - **Reference ID:** Uniquely generated as `ADM_{id}_{timestamp}`.
+- `{id}` here is the internal numeric admission ID retained in Razorpay references for webhook compatibility.
+- Public admission API URLs and responses use the `IIPS-000001`-style `admission_code`; legacy numeric URLs continue to be accepted.
 - **Customer Info:** Populated with the student's name, email, and phone number.
 
 ## 5. Email & WhatsApp Setup Notification

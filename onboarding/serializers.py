@@ -326,6 +326,7 @@ class BranchInfoSerializer(serializers.Serializer):
 
 
 class AdmissionListSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source='admission_code', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     phone_mother = serializers.CharField(source='phone_father_2', read_only=True)
     mother_phone = serializers.CharField(source='phone_father_2', read_only=True)
@@ -360,7 +361,7 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Admission
         fields = [
-            'id', 'branch', 'first_name', 'surname', 'email', 'phone_student', 'phone_father', 'phone_father_2', 'phone_mother', 'mother_phone',
+            'id', 'admission_code', 'branch', 'first_name', 'surname', 'email', 'phone_student', 'phone_father', 'phone_father_2', 'phone_mother', 'mother_phone',
             'gender', 'gender_display',
             'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'payment_choice', 'payment_choice_display', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
@@ -399,6 +400,11 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     combo_future_batch_attempt = serializers.SerializerMethodField()
     combo_future_attempt_year = serializers.SerializerMethodField()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['id'] = instance.admission_code or str(instance.pk)
+        return data
+
     def get_payment_history(self, obj):
         request = self.context.get('request')
         return obj.get_payment_history_list(request=request)
@@ -422,7 +428,7 @@ class AdmissionUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Admission
         exclude = ['submitted_at', 'updated_at']
-        read_only_fields = ['id', 'lead', 'status']
+        read_only_fields = ['id', 'admission_code', 'lead', 'status']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

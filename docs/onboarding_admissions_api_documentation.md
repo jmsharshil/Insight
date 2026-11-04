@@ -102,7 +102,7 @@ LEAD (converted via CRM) ──► Admission (form_pending, full fields)
 **Bank round-robin** (`select_bank_accounts_for_payment()`) + Razorpay order creation + email with payment link/QR
           │
           ▼
-Student submits full form/docs (POST /admissions/<id>/ or /form/) + payment (screenshot or Razorpay callback)
+Student submits full form/docs (POST /admissions/<admission_code>/ or /form/) + payment (screenshot or Razorpay callback)
           │
           ▼
 `payment_pending` → `payment_verified` (Razorpay signature verify or manual)
@@ -167,9 +167,11 @@ POST `/approve/`:
 ## Complete API Reference
 
 ### List & Detail
+- Admission records have a public immutable `admission_code` in the format `IIPS-000001`.
+- API responses expose that code as `id`. The numeric database ID remains internal and is accepted by existing URLs for backward compatibility.
 - **GET** `/api/v1/admissions/` — Paginated list. Filters: `status`, `course`, `branch`, `attempt_year`; search on name/email/phone. Uses `AdmissionListSerializer`.
-- **GET** `/api/v1/admissions/<id>/` — Full detail (tries matching admission ID or linked `lead.id`). Includes history. `AdmissionDetailSerializer`.
-- **PATCH/PUT/POST** `/api/v1/admissions/<id>/` — Update form (partial OK). Triggers bank assignment/email on first complete submit if `form_pending`. Uses `AdmissionUpdateSerializer`.
+- **GET** `/api/v1/admissions/<admission_code>/` — Full detail using a code such as `IIPS-000001`. Includes history. `AdmissionDetailSerializer`.
+- **PATCH/PUT/POST** `/api/v1/admissions/<admission_code>/` — Update form (partial OK). Numeric IDs continue to work for existing integrations. Triggers bank assignment/email on first complete submit if `form_pending`. Uses `AdmissionUpdateSerializer`.
 
 > [!IMPORTANT]
 > **Phone Number Uniqueness Requirement**:
@@ -211,7 +213,7 @@ POST `/approve/`:
   "success": true,
   "message": "Your admission form has been submitted successfully. We have sent you an email with bank details for fee payment. Please check your inbox...",
   "data": {
-    "admission_id": "adm-uuid-001",
+    "admission_id": "IIPS-000001",
     "status": "payment_pending",
     "name": "Priya Shah",
     "assigned_counsellor": {"id": "coun-uuid", "name": "Counsellor Name", "email": "..."}
@@ -220,7 +222,7 @@ POST `/approve/`:
 ```
 
 ### Status, Approve, Reject
-- **PATCH** `/api/v1/admissions/<id>/status/` — General status update.
+- **PATCH** `/api/v1/admissions/<admission_code>/status/` — General status update.
 
 **Request:**
 ```json
@@ -235,11 +237,11 @@ POST `/approve/`:
 {
   "success": true,
   "message": "Admission status updated successfully.",
-  "data": {"admission_id": "adm-uuid-001", "status": "approval_pending", "note": "..."}
+  "data": {"admission_id": "IIPS-000001", "status": "approval_pending", "note": "..."}
 }
 ```
 
-- **POST** `/api/v1/admissions/<id>/approve/` — Main enrollment endpoint (handles `payment_submitted` → `enrolled` flow, user/student/fee creation).
+- **POST** `/api/v1/admissions/<admission_code>/approve/` — Main enrollment endpoint (handles `payment_submitted` → `enrolled` flow, user/student/fee creation).
 
 **Request:**
 ```json
@@ -255,7 +257,7 @@ POST `/approve/`:
   "success": true,
   "message": "Payment verified. Admission approved and student enrolled. Admission number: ADM-2026-001. Login credentials dispatched...",
   "data": {
-    "admission_id": "adm-uuid-001",
+    "admission_id": "IIPS-000001",
     "admission_status": "enrolled",
     "student_id": "stu-uuid-001",
     "admission_number": "ADM-2026-001",
@@ -264,7 +266,7 @@ POST `/approve/`:
 }
 ```
 
-- **POST** `/api/v1/admissions/<id>/reject/` 
+- **POST** `/api/v1/admissions/<admission_code>/reject/`
 
 **Request:**
 ```json
@@ -276,7 +278,7 @@ POST `/approve/`:
 **Response:** Success with status=`rejected`.
 
 ### Documents & Payment (Student-Facing)
-- **POST** `/api/v1/admissions/<id>/documents/` — Upload by `field_name` (e.g. "doc_photo", "doc_signature", "doc_twelfth_marksheet").
+- **POST** `/api/v1/admissions/<admission_code>/documents/` — Upload by `field_name` (e.g. "doc_photo", "doc_signature", "doc_twelfth_marksheet").
 
 **Multipart:**
 - `field_name`: "doc_photo"
@@ -291,7 +293,7 @@ POST `/approve/`:
 }
 ```
 
-- **POST** `/api/v1/admissions/<id>/payment/` — **Public** (no auth). 
+- **POST** `/api/v1/admissions/<admission_code>/payment/` — **Public** (no auth).
 
 **Multipart Form:**
 - `payment_screenshot`: file (proof)

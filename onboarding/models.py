@@ -103,6 +103,14 @@ def admission_document_path(instance, filename):
 
 
 class Admission(models.Model):
+    admission_code = models.CharField(
+        max_length=30,
+        unique=True,
+        editable=False,
+        db_index=True,
+        blank=True,
+        help_text="Human-readable admission code (for example, IIPS-000001).",
+    )
 
     # ── Optional back-link to a Lead ──────────────────────────────────────────
     # If the student had previously submitted an inquiry, link it here.
@@ -607,6 +615,19 @@ class Admission(models.Model):
                 item.setdefault('payment_proof', None)
 
         return history
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        if not self.admission_code:
+            sequence = self.pk
+            code = f"IIPS-{sequence:06d}"
+            while Admission.objects.filter(admission_code=code).exclude(pk=self.pk).exists():
+                sequence += 1
+                code = f"IIPS-{sequence:06d}"
+
+            Admission.objects.filter(pk=self.pk).update(admission_code=code)
+            self.admission_code = code
 
 
 class AdmissionStatusHistory(models.Model):

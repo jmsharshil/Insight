@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import apply_filters
 from django.conf import settings
+from django.db.models import Q
 
 from .models import Admission
 from .serializers import (AdmissionSerializer,AdmissionStatusUpdateSerializer,AdmissionListSerializer,AdmissionDetailSerializer,AdmissionUpdateSerializer,AdmissionDocumentUploadSerializer,)
@@ -133,7 +134,10 @@ def _get_admission(request, admission_id):
         )
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(branch__organization=request.user.organization)
-        return queryset.get(id=admission_id)
+        lookup = Q(admission_code=str(admission_id).upper())
+        if str(admission_id).isdigit():
+            lookup |= Q(id=int(admission_id))
+        return queryset.filter(lookup).first()
     except Admission.DoesNotExist:
         return None
  
@@ -762,9 +766,10 @@ class AdmissionListView(APIView):
         if admission_id:
             try:
                 from django.db.models import Q
-                admission = Admission.objects.filter(
-                    Q(id=admission_id) | Q(lead__id=admission_id)
-                ).first()
+                lookup = Q(admission_code=str(admission_id).upper())
+                if str(admission_id).isdigit():
+                    lookup |= Q(id=int(admission_id)) | Q(lead__id=int(admission_id))
+                admission = Admission.objects.filter(lookup).first()
                 if not admission:
                     return Response({'success': False, 'message': 'Admission not found for this ID.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -832,7 +837,7 @@ class AdmissionListView(APIView):
                     'Please check your inbox to complete the process.'
                 ),
                 'data': {
-                    'admission_id':            admission.id,
+                    'admission_id':            admission.admission_code,
                     'status':                  admission.status,
                     'status_display':          admission.get_status_display(),
                     'name':                    f"{admission.first_name} {admission.surname}".strip(),
@@ -996,7 +1001,10 @@ class AdmissionStatusUpdateView(APIView):
             queryset = Admission.objects.all()
             if getattr(request.user, 'organization', None):
                 queryset = queryset.filter(branch__organization=request.user.organization)
-            admission = queryset.get(id=admission_id)
+            lookup = Q(admission_code=str(admission_id).upper())
+            if str(admission_id).isdigit():
+                lookup |= Q(id=int(admission_id))
+            admission = queryset.filter(lookup).first()
         except Admission.DoesNotExist:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},
@@ -1045,7 +1053,7 @@ class AdmissionStatusUpdateView(APIView):
             {
                 'success': True,
                 'message': 'Admission status updated successfully.',
-                'data': {'admission_id': admission.id, 'status': admission.status, 'note': admission.note},
+                'data': {'admission_id': admission.admission_code, 'status': admission.status, 'note': admission.note},
             },
             status=status.HTTP_200_OK,
         )
@@ -1233,7 +1241,7 @@ class AdmissionApproveView(APIView):
                         'success': True,
                         'message': f'Level 1 payment approval completed by {role_label}. Pending Level 2 (final) approval by Super Admin.',
                         'data': {
-                            'admission_id': admission.id,
+                            'admission_id': admission.admission_code,
                             'admission_status': admission.status,
                             'status_display': admission.get_status_display(),
                             'approval_level': 1,
@@ -1281,7 +1289,7 @@ class AdmissionApproveView(APIView):
                             'Level 2 (final) approval must be performed by a Super Admin.'
                         ),
                         'data': {
-                            'admission_id': admission.id,
+                            'admission_id': admission.admission_code,
                             'admission_status': admission.status,
                             'status_display': admission.get_status_display(),
                             'required_role': 'super_admin',
@@ -1325,7 +1333,7 @@ class AdmissionApproveView(APIView):
                             'was not found. Please check server logs.'
                         ),
                         'data': {
-                            'admission_id': admission.id,
+                            'admission_id': admission.admission_code,
                             'admission_status': admission.status,
                             'status_display': admission.get_status_display(),
                         },
@@ -1353,7 +1361,7 @@ class AdmissionApproveView(APIView):
                             f'profile creation failed: {exc}'
                         ),
                         'data': {
-                            'admission_id': admission.id,
+                            'admission_id': admission.admission_code,
                             'admission_status': admission.status,
                             'status_display': admission.get_status_display(),
                         },
@@ -1477,7 +1485,7 @@ class AdmissionApproveView(APIView):
                         f"Login credentials dispatched to student and parent."
                     ),
                     'data': {
-                        'admission_id'    : admission.id,
+                        'admission_id'    : admission.admission_code,
                         'admission_status': admission.status,
                         'status_display'  : admission.get_status_display(),
                         'student_id'      : str(student.id),
@@ -1522,9 +1530,10 @@ class AdmissionPaymentSubmitView(APIView):
         from django.db.models import Q
 
         try:
-            admission = Admission.objects.filter(
-                Q(id=admission_id) | Q(lead__id=admission_id)
-            ).first()
+            lookup = Q(admission_code=str(admission_id).upper())
+            if str(admission_id).isdigit():
+                lookup |= Q(id=int(admission_id)) | Q(lead__id=int(admission_id))
+            admission = Admission.objects.filter(lookup).first()
         except Exception:
             admission = None
 
@@ -1575,7 +1584,7 @@ class AdmissionPaymentSubmitView(APIView):
                     'You will receive your login credentials via email once approved.'
                 ),
                 'data': {
-                    'admission_id':            admission.id,
+                    'admission_id':            admission.admission_code,
                     'status':                  admission.status,
                     'status_display':          admission.get_status_display(),
                     'transaction_id':          admission.transaction_id,
@@ -1669,7 +1678,7 @@ class AdmissionRejectView(APIView):
                 'success': True,
                 'message': 'Admission rejected.',
                 'data': {
-                    'admission_id': admission.id,
+                    'admission_id': admission.admission_code,
                     'status'      : admission.status,
                     'reason'      : reason,
                 },
@@ -1723,7 +1732,7 @@ class AdmissionDocumentUploadView(APIView):
                 'success': True,
                 'message': f"Document '{field_name}' uploaded successfully.",
                 'data'   : {
-                    'admission_id': admission.id,
+                    'admission_id': admission.admission_code,
                     'field_name'  : field_name,
                     'file_name'   : file.name,
                 },
@@ -1750,9 +1759,10 @@ class AdmissionPaymentSetupView(APIView):
 
         # ── Lookup ────────────────────────────────────────────────────────────
         try:
-            admission = Admission.objects.filter(
-                Q(id=admission_id) | Q(lead__id=admission_id)
-            ).first()
+            lookup = Q(admission_code=str(admission_id).upper())
+            if str(admission_id).isdigit():
+                lookup |= Q(id=int(admission_id)) | Q(lead__id=int(admission_id))
+            admission = Admission.objects.filter(lookup).first()
         except Exception:
             admission = None
 
@@ -1825,7 +1835,7 @@ class AdmissionPaymentSetupView(APIView):
                 'success': True,
                 'message': 'Payment setup completed.',
                 'data': {
-                    'admission_id':            admission.id,
+                    'admission_id':            admission.admission_code,
                     'status':                  admission.status,
                     'status_display':          admission.get_status_display(),
                     'payment_type':            admission.payment_type,
