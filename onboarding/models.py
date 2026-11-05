@@ -207,6 +207,13 @@ class Admission(models.Model):
         related_name='admissions',
     )
     combo_offer = models.BooleanField(default=False)
+    combo_fee_structure = models.ForeignKey(
+        'fees.FeeStructure',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='combo_admissions',
+    )
     combo_future_batch = models.ForeignKey(
         'batches.Batch', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='combo_admissions',

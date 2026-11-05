@@ -23,10 +23,10 @@ from .utils import AdmissionService
 logger = logging.getLogger(__name__)
 
 
-def resolve_combo_executive_course(admission):
-    """Resolve the future CS Executive batch for a CSEET combo."""
+def get_combo_future_attempt(admission):
+    """Return the future CS Executive attempt and year for a CSEET combo."""
     if not admission.combo_offer or admission.course != 'cseet' or not admission.batch_attempt:
-        return admission
+        return None
 
     source_attempt = admission.batch_attempt.strip().lower()
     source_year = admission.attempt_year
@@ -36,17 +36,24 @@ def resolve_combo_executive_course(admission):
         source_year = timezone.now().year
 
     if source_attempt == 'june':
-        future_attempt = 'june'
-        future_year = source_year + 1
-    elif source_attempt in {'oct', 'feb'}:
-        future_attempt = 'dec'
-        future_year = source_year
-    elif source_attempt == 'dec':
-        future_attempt = 'dec'
-        future_year = source_year + 1
-    else:
-        future_attempt = source_attempt
-        future_year = source_year
+        return 'june', source_year + 1
+    if source_attempt in {'oct', 'feb'}:
+        return 'dec', source_year
+    if source_attempt == 'dec':
+        return 'dec', source_year + 1
+    return source_attempt, source_year
+
+
+def resolve_combo_executive_course(admission):
+    """Resolve the future CS Executive batch for a CSEET combo."""
+    if not admission.combo_offer or admission.course != 'cseet' or not admission.batch_attempt:
+        return admission
+
+    future_attempt = None
+    future_year = None
+    target_attempt = get_combo_future_attempt(admission)
+    if target_attempt:
+        future_attempt, future_year = target_attempt
 
     from batches.models import Batch
     batch_qs = Batch.objects.filter(
@@ -77,9 +84,15 @@ def _get_bank_selection_amount(admission):
 
     fee_amount = None
 
-    if getattr(admission, 'fee_structure_id', None):
+    selected_fee_structure_id = None
+    if getattr(admission, 'combo_offer', False) and getattr(admission, 'combo_fee_structure_id', None):
+        selected_fee_structure_id = admission.combo_fee_structure_id
+    elif getattr(admission, 'fee_structure_id', None):
+        selected_fee_structure_id = admission.fee_structure_id
+
+    if selected_fee_structure_id:
         from fees.models import FeeStructure
-        fee_struct = FeeStructure.objects.filter(id=admission.fee_structure_id).first()
+        fee_struct = FeeStructure.objects.filter(id=selected_fee_structure_id).first()
         if fee_struct:
             fee_amount = fee_struct.total_amount
 
@@ -151,7 +164,10 @@ def _not_found():
 
 def _assign_fee_structure(admission):
     """Assign a matching FeeStructure only when the admission has none."""
-    if admission.fee_structure:
+    if admission.fee_structure and (
+        not admission.combo_offer
+        or admission.combo_fee_structure_id
+    ):
         return
 
     if not admission.course or not admission.batch_attempt:
@@ -181,6 +197,9 @@ def _assign_fee_structure(admission):
             **extra_filters,
         }
         qs = FeeStructure.objects.filter(**base_filters).order_by('-created_at')
+        qs = qs.exclude(is_combo=True).exclude(
+            Q(name__icontains='combo') | Q(description__icontains='combo')
+        )
         result = qs.filter(level__name__icontains=level_query).first()
         if result is None:
             result = qs.filter(course__name__icontains=level_query).first()
@@ -188,7 +207,29 @@ def _assign_fee_structure(admission):
             result = qs.filter(batch__course__name__icontains=level_query).first()
         return result
 
-    fs = None
+    if admission.combo_offer and admission.course == 'cseet' and not admission.combo_fee_structure:
+        combo_qs = FeeStructure.objects.filter(
+            attempt=admission.batch_attempt,
+            is_active=True,
+            year=attempt_year,
+        ).filter(is_combo=True)
+        if not combo_qs.exists() and not admission.attempt_year:
+            combo_qs = FeeStructure.objects.filter(
+                attempt=admission.batch_attempt,
+                is_active=True,
+            ).filter(is_combo=True)
+        if not combo_qs.exists():
+            combo_qs = FeeStructure.objects.filter(
+                attempt=admission.batch_attempt,
+                is_active=True,
+                year=attempt_year,
+            ).filter(Q(name__icontains='combo') | Q(description__icontains='combo'))
+        combo_qs = combo_qs.exclude(id=admission.fee_structure_id)
+        admission.combo_fee_structure = combo_qs.order_by('-created_at').first()
+        if admission.combo_fee_structure:
+            admission.save(update_fields=['combo_fee_structure'])
+
+    fs = admission.fee_structure
 
     # 1. Try with specific group_module + exact year
     if admission.course != 'cseet' and admission.group_module:
@@ -214,7 +255,7 @@ def _assign_fee_structure(admission):
                 result = qs.filter(batch__course__name__icontains=level_query).first()
             fs = result
 
-    if fs:
+    if fs and not admission.fee_structure:
         admission.fee_structure = fs
         admission.save(update_fields=['fee_structure'])
 
@@ -266,7 +307,9 @@ def _setup_payment_bank_and_notify(admission):
     #   3. fee_structure + payment_type unset → module/total fee (treat as full)
     #   4. No fee_structure but payment_amount > 0 → use payment_amount
     #   5. Fallback to hard-coded defaults by course (never 1 Rs)
-    fs = getattr(admission, 'fee_structure', None)
+    fs = getattr(admission, 'combo_fee_structure', None) if getattr(admission, 'combo_offer', False) else None
+    if fs is None:
+        fs = getattr(admission, 'fee_structure', None)
     if fs:
         if admission.payment_type == 'token':
             amount_to_pay = Decimal(str(fs.token_amount or 0))

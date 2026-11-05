@@ -36,7 +36,7 @@ class FeeStructureListSerializer(serializers.ModelSerializer):
                   'institute_fees_module_1', 'institute_fees_module_2',
                   'institute_fees_module_3', 'institute_fees_module_4',
                   'institute_fees_module_5',
-                  'is_active', 'created_at']
+                  'is_active', 'is_combo', 'created_at']
 
     def get_modules(self, obj):
         return obj.syllabus_modules
@@ -69,7 +69,7 @@ class FeeStructureCreateUpdateSerializer(serializers.ModelSerializer):
                   'institute_fees_module_1', 'institute_fees_module_2',
                   'institute_fees_module_3', 'institute_fees_module_4',
                   'institute_fees_module_5',
-                  'description', 'is_active']
+                  'description', 'is_active', 'is_combo']
 
     def validate(self, data):
         """Ensure total_amount is consistent with fee breakdown components.

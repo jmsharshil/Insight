@@ -60,8 +60,9 @@ Full student onboarding record with:
 **New Fields:** `razorpay_*` fields, full bank details, `admission_number`, `assigned_to` (counsellor from lead), `organization`/`branch` scoping.
 
 **Key Fields:**
-- `fee_structure` (FK to `fees.FeeStructure` — used for auto StudentFee)
-- `combo_offer` (when `true`, this admission is a CSEET + CS Executive combo and uses one combined `fee_structure`; no separate fee structures are required)
+- `fee_structure` (FK to the normal CSEET `fees.FeeStructure`)
+- `combo_offer` (when `true`, this admission is a CSEET + CS Executive combo)
+- `combo_fee_structure` (separate FK to the combo-specific FeeStructure; this structure's amount is the combo offer price)
 - `combo_future_batch` (resolved future CS Executive batch)
 - `assigned_bank_id` (from `fees.BankAccount`, respects `max_payment_amount` thresholds)
 - `payment_screenshot`, `transaction_id`, `payment_amount`, `payment_submitted_at`
@@ -77,11 +78,12 @@ For a combo admission, send:
   "course": "cseet",
   "batch_attempt": "june",
   "attempt_year": 2026,
-  "fee_structure": "fs-combo-uuid"
+  "fee_structure": "fs-cseet-uuid",
+  "combo_fee_structure": "fs-combo-uuid"
 }
 ```
 
-The single `fee_structure` must cover both CSEET and the future CS Executive course. The API resolves and stores `combo_future_batch`; it does not create or require a second fee structure. The future attempt and year are read from that batch's `batch_attempt` and `attempt_year` fields.
+`fee_structure` is the regular CSEET fee structure. `combo_fee_structure` is a separate fee structure containing the actual combo offer price, which does not need to equal the sum of the two regular courses. The API resolves and stores `combo_future_batch`; the future attempt and year are read from that batch's `batch_attempt` and `attempt_year` fields.
 
 Future CS Executive mapping:
 

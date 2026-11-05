@@ -121,6 +121,10 @@ class FeeStructure(models.Model):
     )
     description = models.TextField(blank=True)
     is_active   = models.BooleanField(default=True)
+    is_combo = models.BooleanField(
+        default=False,
+        help_text='Use this fee structure for CSEET + CS Executive combo admissions.',
+    )
     created_by  = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='created_fee_structures',
@@ -243,6 +247,8 @@ class FeeStructure(models.Model):
 
             base_parts = [branch_prefix, ct_upper, attempt_upper, year_str, gm_upper]
             base_prefix = '_'.join(p for p in base_parts if p)
+            if self.is_combo and 'COMBO' not in base_parts:
+                base_prefix = '_'.join(p for p in [base_prefix, 'COMBO'] if p)
 
             # Use base_prefix directly as the name (no sequence number suffix).
             # Only add a numeric suffix (_2, _3, ...) if the name already exists.

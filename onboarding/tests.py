@@ -193,6 +193,65 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         admission.refresh_from_db()
         self.assertEqual(admission.fee_structure, linked_structure)
 
+    def test_combo_admission_uses_separate_combo_fee_structure(self):
+        from onboarding.views import _assign_fee_structure
+
+        cseet_course = Course.objects.create(name='CSEET', code='CSEET-COMBO')
+        cseet_level = CourseLevel.objects.create(course=cseet_course, name='CSEET')
+        regular_structure = FeeStructure.objects.create(
+            name='CSEET June 2026',
+            course=cseet_course,
+            level=cseet_level,
+            attempt='june',
+            year=2026,
+            total_amount=10000,
+            token_amount=2000,
+            is_active=True,
+        )
+        combo_structure = FeeStructure.objects.create(
+            name='CSEET + CS Executive Combo June 2026',
+            course=cseet_course,
+            level=cseet_level,
+            attempt='june',
+            year=2026,
+            description='Combined CSEET and CS Executive offer',
+            is_combo=True,
+            total_amount=40000,
+            token_amount=5000,
+            is_active=True,
+        )
+        admission = _make_admission(
+            course='cseet',
+            batch_attempt='june',
+            attempt_year=2026,
+            combo_offer=True,
+            status='form_pending',
+        )
+
+        _assign_fee_structure(admission)
+
+        admission.refresh_from_db()
+        self.assertEqual(admission.fee_structure, regular_structure)
+        self.assertEqual(admission.combo_fee_structure, combo_structure)
+        self.assertNotEqual(admission.combo_fee_structure, regular_structure)
+
+    def test_auto_generated_combo_fee_structure_name_contains_combo(self):
+        cseet_course = Course.objects.create(name='CSEET', code='CSEET-COMBO-NAME')
+        cseet_level = CourseLevel.objects.create(course=cseet_course, name='CSEET')
+
+        combo_structure = FeeStructure.objects.create(
+            course=cseet_course,
+            level=cseet_level,
+            attempt='june',
+            year=2026,
+            is_combo=True,
+            total_amount=40000,
+            token_amount=5000,
+            is_active=True,
+        )
+
+        self.assertIn('COMBO', combo_structure.name)
+
     def test_admission_post_persists_submitted_fee_structure(self):
         from rest_framework.test import APIRequestFactory, force_authenticate
         from onboarding.views import AdmissionListView

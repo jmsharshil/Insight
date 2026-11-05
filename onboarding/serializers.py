@@ -126,6 +126,11 @@ class AdmissionSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    combo_fee_structure = serializers.PrimaryKeyRelatedField(
+        queryset=FeeStructure.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     combo_offer = serializers.BooleanField(required=False, default=False)
     payment_type  = serializers.ChoiceField(choices=PAYMENT_TYPE_CHOICES, required=False, allow_null=True)
     payment_choice = serializers.ChoiceField(choices=PAYMENT_CHOICE_CHOICES + [('check', 'Cheque')], required=False, allow_null=True, allow_blank=True)
