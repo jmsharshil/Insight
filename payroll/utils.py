@@ -105,6 +105,8 @@ def _get_reimbursements_for_user(user, payroll_run):
             user=user,
             status='approved',
             is_paid=False,
+            expense_date__year=payroll_run.year,
+            expense_date__month=payroll_run.month,
         ).filter(Q(payslip__isnull=True) | Q(payroll_run=payroll_run))
         total = sum((r.amount for r in reimbs), Decimal('0'))
         return reimbs, total

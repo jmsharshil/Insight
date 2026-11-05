@@ -75,6 +75,15 @@ class PaySlipSerializer(serializers.ModelSerializer):
         notes = []
         if hasattr(obj, 'reimbursements'):
             for reimbursement in obj.reimbursements.all():
+                if getattr(reimbursement, 'status', 'approved') != 'approved':
+                    continue
+                expense_date = reimbursement.expense_date
+                if (
+                    expense_date is None
+                    or expense_date.year != obj.payroll_run.year
+                    or expense_date.month != obj.payroll_run.month
+                ):
+                    continue
                 notes.append({
                     'date': str(reimbursement.expense_date or ''),
                     'event': reimbursement.title or 'Reimbursement',

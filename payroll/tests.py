@@ -13,6 +13,7 @@ class PaySlipReimbursementNotesTests(SimpleTestCase):
             title='Taxi fare',
             description='Travel to client meeting',
             amount=Decimal('450.00'),
+            status='approved',
         )
         activity = SimpleNamespace(
             activity_date=date(2026, 5, 13),
@@ -22,6 +23,9 @@ class PaySlipReimbursementNotesTests(SimpleTestCase):
             activity=activity,
             total_kms=Decimal('18.50'),
             total_expense=Decimal('92.50'),
+            status='approved',
+            vehicle_type='bike',
+            expense_per_km=Decimal('5.00'),
         )
 
         class RelatedItems:
@@ -34,6 +38,7 @@ class PaySlipReimbursementNotesTests(SimpleTestCase):
         payslip = SimpleNamespace(
             reimbursements=RelatedItems([reimbursement]),
             odometer_readings=RelatedItems([odometer_reading]),
+            payroll_run=SimpleNamespace(year=2026, month=5),
         )
 
         self.assertEqual(
@@ -45,13 +50,19 @@ class PaySlipReimbursementNotesTests(SimpleTestCase):
                     'description': 'Travel to client meeting',
                     'expense': 450.0,
                 },
-                {
-                    'date': '2026-05-13',
-                    'event': 'School visit',
-                    'kms': 18.5,
-                    'expense': 92.5,
-                },
             ],
+        )
+
+        self.assertEqual(
+            PaySlipSerializer().get_odometer_notes(payslip),
+            [{
+                'date': '2026-05-13',
+                'event': 'School visit',
+                'vehicle_type': 'bike',
+                'kms': 18.5,
+                'rate_per_km': 5.0,
+                'expense': 92.5,
+            }],
         )
 
     def test_personal_payslip_exposes_reimbursement_notes(self):
