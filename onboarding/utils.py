@@ -477,6 +477,14 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
         }
         pay_amount = default_course_fees.get(admission.course, Decimal('0'))
 
+    # Keep the admission amount in sync even when the proof form omits it.
+    # This prevents payment history and fee-payment records from recording 0.
+    if pay_amount and Decimal(str(pay_amount)) > 0 and (
+        not admission.payment_amount or Decimal(str(admission.payment_amount)) <= 0
+    ):
+        admission.payment_amount = pay_amount
+        admission.save(update_fields=['payment_amount', 'updated_at'])
+
     # Has payment details?
     has_payment_data = bool(
         admission.payment_screenshot or

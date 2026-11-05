@@ -405,6 +405,7 @@ def _run_whatsapp_send(*, method: str, **send_kwargs):
         raise ValueError(f"WhatsAppSender has no method '{method}'")
 
     fallback_body = send_kwargs.pop("fallback_body", None)
+    language_retry_attempted = send_kwargs.pop("_language_retry_attempted", False)
     
     try:
         result = fn(**send_kwargs)
@@ -431,6 +432,25 @@ def _run_whatsapp_send(*, method: str, **send_kwargs):
             # queue it now so the recipient still gets the message.
             to = send_kwargs.get("to")
             if fallback_body and to and method == "send_template":
+                current_language = send_kwargs.get("language_code", "en_US")
+                alternate_language = "en_US" if current_language == "en" else ("en" if current_language == "en_US" else None)
+                if alternate_language and not language_retry_attempted:
+                    try:
+                        queue_whatsapp_template(
+                            to=to,
+                            template_name=send_kwargs.get("template_name"),
+                            language_code=alternate_language,
+                            components=send_kwargs.get("components"),
+                            fallback_body=fallback_body,
+                            language_retry_attempted=True,
+                        )
+                        logger.info(
+                            "[WHATSAPP] Template language %s rejected; retrying approved-language variant %s",
+                            current_language, alternate_language,
+                        )
+                        return
+                    except Exception as retry_err:
+                        logger.error("[WHATSAPP] Failed to queue alternate template language: %s", retry_err)
                 try:
                     queue_whatsapp_text(to=to, body=fallback_body)
                     logger.info(
@@ -461,7 +481,8 @@ def queue_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, max_retri
 def queue_whatsapp_template(*, to: str, template_name: str, language_code: str = "en_US",
                              components: Optional[List[Dict[str, Any]]] = None,
                              delay_seconds: int = 0, max_retries: int = 3,
-                             fallback_body: Optional[str] = None):
+                             fallback_body: Optional[str] = None,
+                             language_retry_attempted: bool = False):
     """
     Queue a WhatsApp template message.
     If `fallback_body` is provided and the template send fails with a permanent
@@ -477,6 +498,8 @@ def queue_whatsapp_template(*, to: str, template_name: str, language_code: str =
     }
     if fallback_body:
         task_kwargs["fallback_body"] = fallback_body
+    if language_retry_attempted:
+        task_kwargs["_language_retry_attempted"] = True
     return TaskScheduler.schedule(
         task_type="whatsapp_send",
         task_kwargs=task_kwargs,

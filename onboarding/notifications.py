@@ -327,7 +327,6 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
                 language_code="en",
                 components=components,
                 user_id=str(user.id),
-                fallback_body=fallback_body,
             )
             logger.info(
                 "[WA ADMISSION] Sent payment_approve_reject (Level %s) to %s (%s) for admission %s",

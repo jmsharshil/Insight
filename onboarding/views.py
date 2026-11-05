@@ -393,6 +393,13 @@ def _setup_payment_bank_and_notify(admission):
 
     print("Amount to pay..........", amount_to_pay)
 
+    # Persist the resolved payable amount.  Admissions created before this fix
+    # could otherwise remain at 0 and later payment submissions/history records
+    # would all inherit that value.
+    if amount_to_pay > 0 and Decimal(str(admission.payment_amount or 0)) <= 0:
+        admission.payment_amount = amount_to_pay
+        admission.save(update_fields=['payment_amount', 'updated_at'])
+
     # Determine whether payment is online or offline:
     # If user selected 'cash' or 'cheque', do NOT generate Razorpay link.
     # If payment_choice is not set, default to online unless payment_type == 'finance'.
@@ -1207,6 +1214,14 @@ class AdmissionApproveView(APIView):
             # If not force_override, perform Level 1 approval:
             # Allowed for all level1_roles as well as super_admin / is_superuser
             if not force_override:
+                if user_has_payment_role(acting_user, {'super_admin'}):
+                    return Response(
+                        {
+                            'success': False,
+                            'message': 'Level 1 approval by an Accountant is required before Super Admin final approval.',
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 role_label = getattr(acting_user, 'get_role_display', lambda: role)() if acting_user else 'Staff'
                 actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Staff')
                 level1_note = note or f'Level 1 payment approval completed by {role_label}.'
@@ -1567,6 +1582,7 @@ class AdmissionPaymentSubmitView(APIView):
 
     def post(self, request, admission_id):
         from django.db.models import Q
+        from decimal import Decimal
 
         try:
             lookup = Q(admission_code=str(admission_id).upper())
@@ -1604,7 +1620,21 @@ class AdmissionPaymentSubmitView(APIView):
         admission.transaction_id       = serializer.validated_data['transaction_id']
         admission.payment_note         = serializer.validated_data.get('payment_note', '')
         admission.payment_submitted_at = timezone.now()
-        admission.payment_amount       = serializer.validated_data.get('payment_amount', None)
+        submitted_amount = serializer.validated_data.get('payment_amount')
+        if submitted_amount is None or Decimal(str(submitted_amount)) <= 0:
+            submitted_amount = admission.payment_amount
+        if submitted_amount is None or Decimal(str(submitted_amount)) <= 0:
+            if getattr(admission, 'fee_structure', None):
+                from .utils import get_module_fee
+                if admission.payment_type == 'token':
+                    submitted_amount = admission.fee_structure.token_amount or 0
+                elif admission.payment_type == 'full_payment':
+                    submitted_amount = get_module_fee(admission.fee_structure, admission.group_module)
+                else:
+                    submitted_amount = admission.total_fees
+            else:
+                submitted_amount = admission.total_fees
+        admission.payment_amount = submitted_amount or None
         admission.status               = 'approval_pending'
         admission.save(update_fields=[
             'payment_screenshot', 'transaction_id', 'payment_note',

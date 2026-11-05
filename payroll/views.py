@@ -516,6 +516,8 @@ class PayrollPayslipsView(APIView):
 
         role_filter = request.GET.get('role')
 
+        user_filter = request.GET.get("user_id") or request.GET.get("user")
+
         if pr.status == 'draft':
             try:
                 from faculty.models import FacultyProfile
@@ -560,6 +562,20 @@ class PayrollPayslipsView(APIView):
                 slips = slips.filter(faculty__isnull=False)
             else:
                 slips = slips.filter(get_role_filter_q(role_filter, prefix='user__'))
+
+        if user_filter:
+            from django.db.models import Q
+            try:
+                from uuid import UUID
+                UUID(str(user_filter))
+            except (TypeError, ValueError):
+                return Response(
+                    {'success': False, 'message': 'Invalid user id.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            slips = slips.filter(
+                Q(user_id=user_filter) | Q(faculty__user_id=user_filter)
+            )
                 
         serialized_data = PaySlipSerializer(slips, many=True).data
         

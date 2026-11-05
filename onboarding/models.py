@@ -592,6 +592,17 @@ class Admission(models.Model):
             item.setdefault('terms_note', self.token_payment_terms_note)
             item.setdefault('fee_terms_note', self.token_payment_terms_note)
 
+            expected_amount = Decimal(str(self.payment_amount or 0))
+            if expected_amount <= 0:
+                expected_amount = Decimal(str(self.fee_structure.token_amount or 0)) if p_type == 'token' else Decimal(str(self.total_fees or 0))
+            if expected_amount > 0:
+                for amount_key in ('amount', 'amount_to_pay'):
+                    try:
+                        if amount_key in item and Decimal(str(item.get(amount_key) or 0)) <= 0:
+                            item[amount_key] = float(expected_amount)
+                    except (TypeError, ValueError):
+                        item[amount_key] = float(expected_amount)
+
             # Dates
             item_date = item.get('date') or (item.get('timestamp')[:10] if item.get('timestamp') else None) or (item.get('created_at')[:10] if item.get('created_at') else None) or (item.get('paid_at')[:10] if item.get('paid_at') else None)
             if not item_date and self.submitted_at:
