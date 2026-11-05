@@ -19,6 +19,7 @@ from .serializers import (
 from .utils import (
     compute_payslip_for_faculty, compute_payslip_for_user, EMPLOYEE_ROLES,
     update_bonus_note,
+    get_pending_odometer_readings_for_payroll,
 )
 
 logger = logging.getLogger(__name__)
@@ -718,6 +719,17 @@ class PayrollApproveView(APIView):
         if pr.status not in ('draft', 'pending_approval'):
             return Response({'success': False, 'message': f'Cannot approve payroll in status: {pr.status}.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        pending_odometer = get_pending_odometer_readings_for_payroll(pr)
+        if pending_odometer.exists():
+            count = pending_odometer.count()
+            return Response({
+                'success': False,
+                'message': (
+                    f'Cannot approve payroll. {count} odometer reading(s) for '
+                    f'{pr.month}/{pr.year} are still pending approval or rejection.'
+                ),
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         pr.status = 'approved'
         pr.approved_by = request.user
         pr.approved_at = timezone.now()
@@ -762,6 +774,17 @@ class PayrollDisburseView(APIView):
 
         if pr.status != 'approved':
             return Response({'success': False, 'message': 'Payroll must be approved first.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pending_odometer = get_pending_odometer_readings_for_payroll(pr)
+        if pending_odometer.exists():
+            count = pending_odometer.count()
+            return Response({
+                'success': False,
+                'message': (
+                    f'Cannot disburse payroll. {count} odometer reading(s) for '
+                    f'{pr.month}/{pr.year} are still pending approval or rejection.'
+                ),
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         payslips = pr.payslips.select_related('faculty__user', 'user')
         payslips.update(is_disbursed=True)

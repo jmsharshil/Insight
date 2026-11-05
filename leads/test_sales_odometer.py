@@ -13,7 +13,10 @@ from auth_user.models import User, Organization, NotificationHistory
 from branch.models import Branch
 from leads.models import SalesDailyActivity, SalesActivityPhoto, OdometerReading
 from payroll.models import PayrollRun, PaySlip
-from payroll.utils import _get_odometer_expenses_for_user
+from payroll.utils import (
+    _get_odometer_expenses_for_user,
+    get_pending_odometer_readings_for_payroll,
+)
 
 # Valid 1x1 GIF for testing ImageField uploads
 TINY_GIF = (
@@ -386,6 +389,73 @@ class SalesActivityAndOdometerTests(TestCase):
         readings_qs, total_amount = _get_odometer_expenses_for_user(self.sales_user1, payroll_run)
         self.assertEqual(total_amount, Decimal('250.00'))
         self.assertEqual(readings_qs.count(), 1)
+
+    def test_previous_month_odometer_is_not_added_to_current_payroll(self):
+        october_date = datetime.date(2026, 10, 31)
+
+        october_activity = SalesDailyActivity.objects.create(
+            user=self.sales_user1,
+            activity_date=october_date,
+        )
+        OdometerReading.objects.create(
+            activity=october_activity,
+            user=self.sales_user1,
+            start_kms=Decimal('100.00'),
+            end_kms=Decimal('150.00'),
+            expense_per_km=Decimal('5.00'),
+            status='approved',
+            approved_at=timezone.now(),
+            is_paid=False,
+        )
+
+        november_payroll = PayrollRun.objects.create(
+            month=11,
+            year=2026,
+            branch=self.branch,
+            status='draft',
+        )
+        november_readings, november_total = _get_odometer_expenses_for_user(
+            self.sales_user1,
+            november_payroll,
+        )
+        self.assertEqual(november_total, Decimal('0'))
+        self.assertEqual(november_readings.count(), 0)
+
+        october_payroll = PayrollRun.objects.create(
+            month=10,
+            year=2026,
+            branch=self.branch,
+            status='draft',
+        )
+        october_readings, october_total = _get_odometer_expenses_for_user(
+            self.sales_user1,
+            october_payroll,
+        )
+        self.assertEqual(october_total, Decimal('250.00'))
+        self.assertEqual(october_readings.count(), 1)
+
+    def test_pending_odometer_blocks_approval_period(self):
+        activity = SalesDailyActivity.objects.create(
+            user=self.sales_user1,
+            activity_date=datetime.date(2026, 11, 5),
+        )
+        OdometerReading.objects.create(
+            activity=activity,
+            user=self.sales_user1,
+            start_kms=Decimal('100.00'),
+            end_kms=Decimal('150.00'),
+            expense_per_km=Decimal('5.00'),
+            status='pending',
+        )
+        payroll_run = PayrollRun.objects.create(
+            month=11,
+            year=2026,
+            branch=self.branch,
+            status='draft',
+        )
+
+        pending = get_pending_odometer_readings_for_payroll(payroll_run)
+        self.assertEqual(pending.count(), 1)
 
     def test_notification_history_sales_filter(self):
         """Test GET /api/auth/notifications/?type=sales."""

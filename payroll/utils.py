@@ -127,12 +127,29 @@ def _get_odometer_expenses_for_user(user, payroll_run):
             user=user,
             status='approved',
             is_paid=False,
+            activity__activity_date__year=payroll_run.year,
+            activity__activity_date__month=payroll_run.month,
         ).filter(Q(payslip__isnull=True) | Q(payroll_run=payroll_run))
         total = sum((r.total_expense for r in readings), Decimal('0'))
         return readings, total
     except Exception as e:
         logger.error(f"Error fetching odometer travel expenses for user {getattr(user, 'id', 'N/A')}: {e}")
         return None, Decimal('0')
+
+
+def get_pending_odometer_readings_for_payroll(payroll_run):
+    """
+    Return odometer readings that have not been approved or rejected for the
+    payroll branch and activity month.
+    """
+    from leads.models import OdometerReading
+
+    return OdometerReading.objects.filter(
+        user__branch=payroll_run.branch,
+        status='pending',
+        activity__activity_date__year=payroll_run.year,
+        activity__activity_date__month=payroll_run.month,
+    ).select_related('user', 'activity')
 
 
 def build_deduction_note(
