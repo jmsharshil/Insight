@@ -62,7 +62,7 @@ Full student onboarding record with:
 **Key Fields:**
 - `fee_structure` (FK to the normal CSEET `fees.FeeStructure`)
 - `combo_offer` (when `true`, this admission is a CSEET + CS Executive combo)
-- `combo_fee_structure` (separate FK to the combo-specific FeeStructure; this structure's amount is the combo offer price)
+- Combo fee structures use the same `fee_structure` field and are identified by `is_combo=true`
 - `combo_future_batch` (resolved future CS Executive batch)
 - `assigned_bank_id` (from `fees.BankAccount`, respects `max_payment_amount` thresholds)
 - `payment_screenshot`, `transaction_id`, `payment_amount`, `payment_submitted_at`
@@ -78,12 +78,11 @@ For a combo admission, send:
   "course": "cseet",
   "batch_attempt": "june",
   "attempt_year": 2026,
-  "fee_structure": "fs-cseet-uuid",
-  "combo_fee_structure": "fs-combo-uuid"
+  "fee_structure": "fs-combo-uuid"
 }
 ```
 
-`fee_structure` is the regular CSEET fee structure. `combo_fee_structure` is a separate fee structure containing the actual combo offer price, which does not need to equal the sum of the two regular courses. The API resolves and stores `combo_future_batch`; the future attempt and year are read from that batch's `batch_attempt` and `attempt_year` fields.
+`fee_structure` contains the selected fee structure for the admission. For a combo admission it should be the CSEET + CS Executive structure marked with `is_combo=true`; it does not need to equal the sum of the separate course prices. The API resolves and stores `combo_future_batch`; the future attempt and year are read from that batch's `batch_attempt` and `attempt_year` fields.
 
 Future CS Executive mapping:
 

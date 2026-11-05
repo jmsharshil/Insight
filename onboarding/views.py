@@ -85,9 +85,7 @@ def _get_bank_selection_amount(admission):
     fee_amount = None
 
     selected_fee_structure_id = None
-    if getattr(admission, 'combo_offer', False) and getattr(admission, 'combo_fee_structure_id', None):
-        selected_fee_structure_id = admission.combo_fee_structure_id
-    elif getattr(admission, 'fee_structure_id', None):
+    if getattr(admission, 'fee_structure_id', None):
         selected_fee_structure_id = admission.fee_structure_id
 
     if selected_fee_structure_id:
@@ -163,11 +161,8 @@ def _not_found():
 
 
 def _assign_fee_structure(admission):
-    """Assign a matching FeeStructure only when the admission has none."""
-    if admission.fee_structure and (
-        not admission.combo_offer
-        or admission.combo_fee_structure_id
-    ):
+    """Assign the regular or combo FeeStructure when the admission has none."""
+    if admission.fee_structure_id:
         return
 
     if not admission.course or not admission.batch_attempt:
@@ -197,9 +192,10 @@ def _assign_fee_structure(admission):
             **extra_filters,
         }
         qs = FeeStructure.objects.filter(**base_filters).order_by('-created_at')
-        qs = qs.exclude(is_combo=True).exclude(
-            Q(name__icontains='combo') | Q(description__icontains='combo')
-        )
+        if not admission.combo_offer:
+            qs = qs.exclude(is_combo=True).exclude(
+                Q(name__icontains='combo') | Q(description__icontains='combo')
+            )
         result = qs.filter(level__name__icontains=level_query).first()
         if result is None:
             result = qs.filter(course__name__icontains=level_query).first()
@@ -207,7 +203,7 @@ def _assign_fee_structure(admission):
             result = qs.filter(batch__course__name__icontains=level_query).first()
         return result
 
-    if admission.combo_offer and admission.course == 'cseet' and not admission.combo_fee_structure:
+    if admission.combo_offer and admission.course == 'cseet':
         combo_qs = FeeStructure.objects.filter(
             attempt=admission.batch_attempt,
             is_active=True,
@@ -224,10 +220,12 @@ def _assign_fee_structure(admission):
                 is_active=True,
                 year=attempt_year,
             ).filter(Q(name__icontains='combo') | Q(description__icontains='combo'))
-        combo_qs = combo_qs.exclude(id=admission.fee_structure_id)
-        admission.combo_fee_structure = combo_qs.order_by('-created_at').first()
-        if admission.combo_fee_structure:
-            admission.save(update_fields=['combo_fee_structure'])
+        fs = combo_qs.order_by('-created_at').first()
+        if fs:
+            admission.fee_structure = fs
+            admission.save(update_fields=['fee_structure'])
+            return
+        return
 
     fs = admission.fee_structure
 
@@ -307,9 +305,7 @@ def _setup_payment_bank_and_notify(admission):
     #   3. fee_structure + payment_type unset → module/total fee (treat as full)
     #   4. No fee_structure but payment_amount > 0 → use payment_amount
     #   5. Fallback to hard-coded defaults by course (never 1 Rs)
-    fs = getattr(admission, 'combo_fee_structure', None) if getattr(admission, 'combo_offer', False) else None
-    if fs is None:
-        fs = getattr(admission, 'fee_structure', None)
+    fs = getattr(admission, 'fee_structure', None)
     if fs:
         if admission.payment_type == 'token':
             amount_to_pay = Decimal(str(fs.token_amount or 0))

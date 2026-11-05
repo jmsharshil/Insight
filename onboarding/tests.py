@@ -193,7 +193,7 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         admission.refresh_from_db()
         self.assertEqual(admission.fee_structure, linked_structure)
 
-    def test_combo_admission_uses_separate_combo_fee_structure(self):
+    def test_combo_admission_uses_combo_fee_structure(self):
         from onboarding.views import _assign_fee_structure
 
         cseet_course = Course.objects.create(name='CSEET', code='CSEET-COMBO')
@@ -231,9 +231,8 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         _assign_fee_structure(admission)
 
         admission.refresh_from_db()
-        self.assertEqual(admission.fee_structure, regular_structure)
-        self.assertEqual(admission.combo_fee_structure, combo_structure)
-        self.assertNotEqual(admission.combo_fee_structure, regular_structure)
+        self.assertEqual(admission.fee_structure, combo_structure)
+        self.assertNotEqual(admission.fee_structure, regular_structure)
 
     def test_auto_generated_combo_fee_structure_name_contains_combo(self):
         cseet_course = Course.objects.create(name='CSEET', code='CSEET-COMBO-NAME')

@@ -31,9 +31,7 @@ def create_student_fee(student, acting_user=None):
         raise ValidationError("Student must be linked to an Admission.")
 
     admission = student.admission
-    fs = admission.combo_fee_structure if (
-        admission.combo_offer and admission.combo_fee_structure_id
-    ) else admission.fee_structure
+    fs = admission.fee_structure
 
     # Fallback to latest active FeeStructure matching student's course via level name
     if fs is None:
