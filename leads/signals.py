@@ -6,11 +6,33 @@
 # """
 
 import logging
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
+
+
+def _clear_affected_dashboard_caches(instance):
+    """Invalidate sales dashboards after lead counts or assignments change."""
+    from dashboard.services import clear_dashboard_cache
+
+    User = get_user_model()
+    users = User.objects.filter(is_active=True)
+    if getattr(instance, 'branch_id', None):
+        users = users.filter(branch_id=instance.branch_id)
+    elif getattr(instance, 'branch', None) and getattr(instance.branch, 'organization_id', None):
+        users = users.filter(organization_id=instance.branch.organization_id)
+
+    try:
+        affected_users = users.filter(role__in={
+            'sales_senior_executive', 'sales_executive', 'counsellor',
+            'tele_caller', 'front_desk',
+        })
+        for user in affected_users:
+            clear_dashboard_cache(user)
+    except Exception as exc:
+        logger.warning("Failed to clear lead dashboard cache: %s", exc)
 
 
 @receiver(pre_save, sender='leads.Lead')
@@ -81,6 +103,16 @@ def notify_new_lead_assignment(sender, instance, created, **kwargs):
             )
         except Exception as e:
             logger.error(f"Failed to notify user {instance.assigned_to.id} for new lead {instance.id}: {e}")
+
+
+@receiver(post_save, sender='leads.Lead')
+def clear_lead_dashboard_cache(sender, instance, **kwargs):
+    _clear_affected_dashboard_caches(instance)
+
+
+@receiver(post_delete, sender='leads.Lead')
+def clear_deleted_lead_dashboard_cache(sender, instance, **kwargs):
+    _clear_affected_dashboard_caches(instance)
 
 # @receiver(post_save, sender='leads.Lead')
 # def lead_status_changed(sender, instance, created, **kwargs):
