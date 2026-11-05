@@ -103,7 +103,13 @@ class PaySlip(models.Model):
         """Total approved travel expense from linked odometer readings."""
         from decimal import Decimal
         if hasattr(self, 'odometer_readings'):
-            return sum((r.total_expense for r in self.odometer_readings.all() if getattr(r, 'status', None) == 'approved'), Decimal('0.00'))
+            return sum((
+                r.total_expense
+                for r in self.odometer_readings.all()
+                if getattr(r, 'status', None) == 'approved'
+                and r.activity.activity_date.year == self.payroll_run.year
+                and r.activity.activity_date.month == self.payroll_run.month
+            ), Decimal('0.00'))
         return Decimal('0.00')
 
     def __str__(self):

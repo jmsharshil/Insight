@@ -87,7 +87,19 @@ class PaySlipSerializer(serializers.ModelSerializer):
         notes = []
         if hasattr(obj, 'odometer_readings'):
             for reading in obj.odometer_readings.all():
-                activity_date = reading.activity.activity_date if hasattr(reading, 'activity') and reading.activity else ''
+                activity_date = (
+                    reading.activity.activity_date
+                    if reading.activity and hasattr(reading.activity, 'activity_date')
+                    else None
+                )
+                if reading.status != 'approved':
+                    continue
+                if (
+                    activity_date is None
+                    or activity_date.year != obj.payroll_run.year
+                    or activity_date.month != obj.payroll_run.month
+                ):
+                    continue
                 event_name = reading.activity.name if hasattr(reading, 'activity') and reading.activity else 'General Travel'
                 notes.append({
                     'date': str(activity_date),
