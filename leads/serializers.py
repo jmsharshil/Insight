@@ -806,7 +806,7 @@ class InquirySerializer(ContactSerializer):
     phone_father = serializers.CharField(max_length=15)
     qualification = serializers.ChoiceField(choices=QUALIFICATION_TYPE_CHOICES)
     reference    = serializers.ChoiceField(choices=REFERENCE_TYPE_CHOICES)
-    location     = serializers.CharField(max_length=100)
+    location     = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     inquiry_date = serializers.DateField()
     reference_name = serializers.CharField(max_length=100,required=False,allow_blank=True)
 
