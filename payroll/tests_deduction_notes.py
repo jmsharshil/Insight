@@ -42,7 +42,7 @@ class DeductionNoteFormattingTests(SimpleTestCase):
         )
 
         self.assertIn('Absent (2 days)', note)
-        self.assertIn('Leave (1 day)', note)
+        self.assertIn('Unpaid leave (1 day)', note)
         self.assertIn('Retention (10%)', note)
         self.assertIn('Sunday Shortfall', note)
 

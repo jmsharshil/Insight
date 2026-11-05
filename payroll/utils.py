@@ -195,9 +195,9 @@ def build_deduction_note(
     if applied_leave_deductions > 0:
         leave_count = len(leave_dates)
         if leave_count > 0:
-            notes.append(f"Leave ({leave_count} day{'s' if leave_count != 1 else ''}): -{_fmt_currency(applied_leave_deductions)}")
+            notes.append(f"Unpaid leave ({leave_count} day{'s' if leave_count != 1 else ''}): -{_fmt_currency(applied_leave_deductions)}")
         else:
-            notes.append(f"Leave: -{_fmt_currency(applied_leave_deductions)}")
+            notes.append(f"Unpaid leave: -{_fmt_currency(applied_leave_deductions)}")
 
     if retention_deduction > 0:
         notes.append(f"Retention ({retention_percentage}%): -{_fmt_currency(retention_deduction)}")

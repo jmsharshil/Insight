@@ -42,6 +42,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
     odometer_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     reimbursement_notes = serializers.SerializerMethodField()
     odometer_notes = serializers.SerializerMethodField()
+    leave_notes = serializers.SerializerMethodField()
 
     class Meta:
         model = PaySlip
@@ -54,6 +55,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'attendance_bonus', 'leave_encashment', 'bonus', 'extra_shift_allowance',
             'reimbursements_amount', 'reimbursement_notes',
             'odometer_amount', 'odometer_notes',
+            'leave_notes',
             'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'is_manually_adjusted', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
@@ -118,6 +120,43 @@ class PaySlipSerializer(serializers.ModelSerializer):
                     'rate_per_km': float(reading.expense_per_km) if hasattr(reading, 'expense_per_km') else 0.0,
                     'expense': float(reading.total_expense)
                 })
+        return notes
+
+    def get_leave_notes(self, obj):
+        import calendar
+        import datetime
+        from decimal import Decimal
+        from leave.models import LeaveApplication
+
+        employee = obj.faculty.user if getattr(obj, 'faculty_id', None) and obj.faculty else obj.user
+        if not employee:
+            return []
+
+        month = obj.payroll_run.month
+        year = obj.payroll_run.year
+        month_start = datetime.date(year, month, 1)
+        month_end = month_start.replace(day=calendar.monthrange(year, month)[1])
+
+        leaves = LeaveApplication.objects.filter(
+            applied_by=employee,
+            status='approved',
+            from_date__lte=month_end,
+            to_date__gte=month_start,
+        ).order_by('from_date')
+
+        notes = []
+        for leave in leaves:
+            start = max(leave.from_date, month_start)
+            end = min(leave.to_date, month_end)
+            days = Decimal('0.5') if leave.is_half_day else Decimal(str((end - start).days + 1))
+            notes.append({
+                'date_from': str(start),
+                'date_to': str(end),
+                'leave_type': leave.leave_type,
+                'is_unpaid': leave.leave_type in ('unpaid', 'casual'),
+                'is_half_day': leave.is_half_day,
+                'days': float(days),
+            })
         return notes
 
 
@@ -279,6 +318,7 @@ class MyPaySlipSerializer(PaySlipSerializer):
             'attendance_bonus', 'leave_encashment', 'bonus', 'extra_shift_allowance',
             'reimbursements_amount', 'reimbursement_notes',
             'odometer_amount', 'odometer_notes',
+            'leave_notes',
             'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'is_manually_adjusted', 'late_logs',
             'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
