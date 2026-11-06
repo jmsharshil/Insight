@@ -1856,6 +1856,7 @@ def get_lead_queryset(request):
     if getattr(request.user, 'organization', None):
         from django.db.models import Q as _Q
         queryset = queryset.filter(
+            _Q(branch__isnull=True) |
             _Q(branch__organization=request.user.organization)
         )
 
@@ -1864,7 +1865,9 @@ def get_lead_queryset(request):
         role = getattr(user, 'role', None)
         if role != 'super_admin' and getattr(user, 'branch_id', None):
             # Keep branch-scoped lead lists aligned with role dashboards.
-            queryset = queryset.filter(branch_id=user.branch_id)
+            queryset = queryset.filter(
+                Q(branch__isnull=True) | Q(branch_id=user.branch_id)
+            )
         if role in RESTRICTED_ROLES:
             # These roles can ONLY see leads assigned to them
             queryset = queryset.filter(assigned_to=user)
