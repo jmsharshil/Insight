@@ -594,7 +594,11 @@ class Admission(models.Model):
 
             expected_amount = Decimal(str(self.payment_amount or 0))
             if expected_amount <= 0:
-                expected_amount = Decimal(str(self.fee_structure.token_amount or 0)) if p_type == 'token' else Decimal(str(self.total_fees or 0))
+                expected_amount = (
+                    Decimal(str(self.fee_structure.token_amount or 0))
+                    if p_type == 'token' and self.fee_structure
+                    else Decimal(str(self.total_fees or 0))
+                )
             if expected_amount > 0:
                 for amount_key in ('amount', 'amount_to_pay'):
                     try:

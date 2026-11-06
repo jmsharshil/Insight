@@ -871,6 +871,22 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertIn("15 days", entry['terms_note'])
         self.assertIsNotNone(entry['date'])
 
+    def test_payment_history_without_fee_structure(self):
+        admission = _make_admission(
+            fee_structure=None,
+            email='no_fee_structure@example.com',
+            phone_student='9876543201',
+            payment_type='token',
+            status='form_pending',
+        )
+        admission.add_payment_history_entry('test_entry', {'status': 'pending'})
+
+        history = admission.get_payment_history_list()
+
+        self.assertEqual(history[0]['total_fees'], 0.0)
+        self.assertEqual(history[0]['token_amount'], 0.0)
+        self.assertEqual(history[0]['remaining_fees'], 0.0)
+
     def test_payment_history_offline_check_proof_and_dates(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from onboarding.views import AdmissionPaymentSubmitView
