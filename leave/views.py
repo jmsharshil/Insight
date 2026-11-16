@@ -428,6 +428,17 @@ class LeaveApproveView(APIView):
         except Exception as att_err:
             logger.error(f"[Leave Approved] Failed to update EmployeeAttendanceRecord: {att_err}")
 
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='leave',
+                record_id=app.id,
+                is_final=True,
+                exclude_user=app.applied_by,
+            )
+        except Exception as notif_e:
+            logger.error(f"[Leave Finalise] mark_approval_notification_as_read error: {notif_e}")
+
         notify(
             str(app.applied_by.id),
             title="Leave Approved",
@@ -638,6 +649,17 @@ class LeaveRejectView(APIView):
         app.reviewed_by = request.user
         app.reviewed_at = timezone.now()
         app.save()
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='leave',
+                record_id=app.id,
+                is_final=True,
+                exclude_user=app.applied_by,
+            )
+        except Exception as notif_e:
+            logger.error(f"[Leave Reject] mark_approval_notification_as_read error: {notif_e}")
 
         # Push notification to applicant WITH reason
         notify(
@@ -1899,6 +1921,17 @@ class StudentLeaveApproveView(APIView):
             app.received_by = request.user
         app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'received_by'])
 
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='student_leave',
+                record_id=app.id,
+                is_final=True,
+                exclude_user=getattr(app.student, 'user', None),
+            )
+        except Exception as notif_e:
+            logger.error(f"[Student Leave Approve] mark_approval_notification_as_read error: {notif_e}")
+
         # Notify student and parents
         try:
             from students.models import ParentLink
@@ -1983,6 +2016,17 @@ class StudentLeaveRejectView(APIView):
         app.reviewed_at = now
         app.rejection_reason = rejection_reason
         app.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='student_leave',
+                record_id=app.id,
+                is_final=True,
+                exclude_user=getattr(app.student, 'user', None),
+            )
+        except Exception as notif_e:
+            logger.error(f"[Student Leave Reject] mark_approval_notification_as_read error: {notif_e}")
 
         # Notify student and parents
         try:

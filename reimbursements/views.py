@@ -376,6 +376,17 @@ class ReimbursementApproveAPIView(APIView):
             reimb.rejection_reason = ''
             reimb.save()
 
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='reimbursement',
+                    record_id=reimb.id,
+                    is_final=True,
+                    exclude_user=reimb.user,
+                )
+            except Exception as notif_e:
+                logger.error(f"Failed to mark reimbursement notification as read: {notif_e}")
+
             # Send in-app notification to applicant
             try:
                 send_system_notification(
@@ -423,6 +434,17 @@ class ReimbursementApproveAPIView(APIView):
             reimb.rejected_at = None
             reimb.rejection_reason = ''
             reimb.save()
+
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='reimbursement',
+                    record_id=reimb.id,
+                    step=1,
+                    exclude_user=reimb.user,
+                )
+            except Exception as notif_e:
+                logger.error(f"Failed to mark accountant reimbursement notification as read: {notif_e}")
 
             # In-app notification to applicant
             try:
@@ -528,6 +550,17 @@ class ReimbursementRejectAPIView(APIView):
         reimb.approved_by = None
         reimb.approved_at = None
         reimb.save()
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='reimbursement',
+                record_id=reimb.id,
+                is_final=True,
+                exclude_user=reimb.user,
+            )
+        except Exception as notif_e:
+            logger.error(f"Failed to mark reimbursement rejection notification as read: {notif_e}")
 
         # Send in-app notification to applicant
         try:

@@ -997,6 +997,20 @@ class LeadAssignmentLogSerializer(serializers.ModelSerializer):
     assigned_from = serializers.SerializerMethodField()
     assigned_to = serializers.SerializerMethodField()
     changed_by = serializers.SerializerMethodField()
+    assigned_from_id = serializers.SerializerMethodField()
+    assigned_from_name = serializers.SerializerMethodField()
+    assigned_to_id = serializers.SerializerMethodField()
+    assigned_to_name = serializers.SerializerMethodField()
+    changed_by_name = serializers.SerializerMethodField()
+    requested_by = serializers.SerializerMethodField()
+    requested_by_name = serializers.SerializerMethodField()
+    reviewed_by = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+    lead_name = serializers.SerializerMethodField()
+    reason = serializers.CharField(source='note', read_only=True)
+    status = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(source='changed_at', read_only=True)
+    updated_at = serializers.DateTimeField(source='changed_at', read_only=True)
 
     @staticmethod
     def _user_details(user):
@@ -1020,11 +1034,53 @@ class LeadAssignmentLogSerializer(serializers.ModelSerializer):
     def get_changed_by(self, obj):
         return self._user_details(obj.changed_by)
 
+    def get_assigned_from_id(self, obj):
+        return str(obj.assigned_from.id) if obj.assigned_from else None
+
+    def get_assigned_from_name(self, obj):
+        return obj.assigned_from.name if obj.assigned_from else "Unassigned"
+
+    def get_assigned_to_id(self, obj):
+        return str(obj.assigned_to.id) if obj.assigned_to else None
+
+    def get_assigned_to_name(self, obj):
+        return obj.assigned_to.name if obj.assigned_to else "Unassigned"
+
+    def get_changed_by_name(self, obj):
+        return obj.changed_by.name if obj.changed_by else None
+
+    def get_requested_by(self, obj):
+        return str(obj.changed_by.id) if obj.changed_by else None
+
+    def get_requested_by_name(self, obj):
+        return obj.changed_by.name if obj.changed_by else None
+
+    def get_reviewed_by(self, obj):
+        return str(obj.changed_by.id) if obj.changed_by else None
+
+    def get_reviewed_by_name(self, obj):
+        return obj.changed_by.name if obj.changed_by else None
+
+    def get_lead_name(self, obj):
+        if not obj.lead:
+            return None
+        name = f"{obj.lead.first_name} {obj.lead.surname or ''}".strip()
+        return name or f"Lead #{obj.lead_id}"
+
+    def get_status(self, obj):
+        return 'approved'
+
     class Meta:
         model = LeadAssignmentLog
         fields = [
-            'id', 'lead', 'assigned_from', 'assigned_to', 'changed_by',
-            'note', 'changed_at',
+            'id', 'lead', 'lead_name',
+            'assigned_from', 'assigned_from_id', 'assigned_from_name',
+            'assigned_to', 'assigned_to_id', 'assigned_to_name',
+            'changed_by', 'changed_by_name',
+            'requested_by', 'requested_by_name',
+            'reviewed_by', 'reviewed_by_name',
+            'note', 'reason', 'status',
+            'changed_at', 'created_at', 'updated_at',
         ]
 
 

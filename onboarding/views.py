@@ -1319,6 +1319,17 @@ class AdmissionApproveView(APIView):
                 except Exception as exc:
                     logger.error(f"Failed to dispatch Level 2 WhatsApp notification for admission {admission.id}: {exc}")
 
+                try:
+                    from chat.notifications import mark_approval_notification_as_read
+                    mark_approval_notification_as_read(
+                        approval_type='admission',
+                        record_id=admission.id,
+                        user=acting_user,
+                        step=1,
+                    )
+                except Exception as notif_e:
+                    logger.error(f"Failed to mark level 1 notification as read: {notif_e}")
+
                 return Response(
                     {
                         'success': True,
@@ -1558,6 +1569,16 @@ class AdmissionApproveView(APIView):
                 except Exception as exc:
                     logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
 
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='admission',
+                    record_id=admission.id,
+                    is_final=True,
+                )
+            except Exception as notif_e:
+                logger.error(f"Failed to mark level 2 notification as read: {notif_e}")
+
             return Response(
                 {
                     'success': True,
@@ -1757,6 +1778,16 @@ class AdmissionRejectView(APIView):
             status='rejected',
             note=f"Admission rejected: {reason}",
         )
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='admission',
+                record_id=admission.id,
+                is_final=True,
+            )
+        except Exception as notif_e:
+            logger.error(f"Failed to mark admission rejection notification as read: {notif_e}")
 
         actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Staff')
         admission.update_current_payment_history_entry('payment_rejected', {

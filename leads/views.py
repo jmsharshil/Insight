@@ -2300,7 +2300,7 @@ class LeadReassignView(APIView):
     permission_classes = [AllowAny]
 
     # Roles permitted to reassign leads
-    ALLOWED_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
+    ALLOWED_ROLES = {'front_desk', 'receptionist', 'sales_senior_executive', 'branch_manager', 'super_admin'}
 
     def patch(self, request, lead_id):
         # ── Role check (soft — returns 403 without changing permission_classes) ──
@@ -2316,7 +2316,7 @@ class LeadReassignView(APIView):
                 {
                     "success": False,
                     "message": (
-                        "Only Sales Senior Executives, Branch Managers, and "
+                        "Only Front Desk, Sales Senior Executives, Branch Managers, and "
                         "Super Admins can reassign leads."
                     ),
                 },
@@ -2543,7 +2543,7 @@ class LeadAssignView(APIView):
         )
 
 
-from .serializers import LeadTransferRequestSerializer, LeadTransferApprovalSerializer
+from .serializers import LeadTransferRequestSerializer, LeadTransferApprovalSerializer, LeadAssignmentLogSerializer
 from .models import LeadTransferRequest
 from auth_user.models import User
 
@@ -2650,35 +2650,54 @@ class LeadTransferRequestListCreateView(APIView):
     """
     POST /api/leads/transfer-requests/
         Immediately reassign a lead to a new counsellor and notify super admins.
-        No approval step is required.
+        No approval step is required (front desk and senior roles can reassign directly).
 
     GET /api/leads/transfer-requests/
-        List lead reassignment history (senior roles only).
+        List lead reassignment history.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """List reassignment history — visible to senior roles."""
-        if request.user.role not in SENIOR_ROLES:
-            return Response(
-                {"error": "Permission denied. Only senior roles can view transfer history."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        """List reassignment history — visible to front desk, senior roles, and admins."""
+        allowed_roles = SENIOR_ROLES | {'front_desk', 'receptionist'}
+        user_role = getattr(request.user, 'role', None)
+        is_senior_or_fd = user_role in allowed_roles or getattr(request.user, 'is_superuser', False)
 
         queryset = LeadAssignmentLog.objects.select_related(
             'lead', 'assigned_from', 'assigned_to', 'changed_by'
-        ).order_by('-created_at')
+        )
+
+        if not is_senior_or_fd:
+            # Junior roles can only view transfer history of leads assigned to or from them
+            queryset = queryset.filter(
+                Q(assigned_to=request.user) | Q(assigned_from=request.user) | Q(changed_by=request.user)
+            )
+
+        # Scoping by branch / organization
+        if getattr(request.user, 'organization', None):
+            queryset = queryset.filter(lead__branch__organization=request.user.organization)
+        if user_role != 'super_admin' and getattr(request.user, 'branch_id', None):
+            queryset = queryset.filter(
+                Q(lead__branch__isnull=True) | Q(lead__branch_id=request.user.branch_id)
+            )
+
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            if status_filter.lower() in ('pending', 'rejected'):
+                queryset = queryset.none()
 
         lead_id = request.query_params.get('lead_id')
         if lead_id:
             queryset = queryset.filter(lead_id=lead_id)
 
-        return paginate_queryset(queryset, request, LeadTransferRequestSerializer)
+        queryset = queryset.order_by('-changed_at')
+
+        return paginate_queryset(queryset, request, LeadAssignmentLogSerializer)
 
     def post(self, request):
         """
         Directly reassign a lead — no approval required.
-        The current assignee (or any senior role) can request a reassignment.
+        Front desk, the current assignee, or any senior role can reassign.
         Super admins are notified immediately.
 
         Body:
@@ -2699,11 +2718,15 @@ class LeadTransferRequestListCreateView(APIView):
         except Lead.DoesNotExist:
             return Response({"success": False, "error": "Lead not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # ── Permission: must be the current assignee OR a senior role ──────────
-        is_senior = user.role in SENIOR_ROLES or getattr(user, 'is_superuser', False)
-        if lead.assigned_to != user and not is_senior:
+        # ── Permission: front desk, receptionist, senior role, or current assignee ──
+        is_authorized = (
+            user.role in SENIOR_ROLES
+            or user.role in ('front_desk', 'receptionist')
+            or getattr(user, 'is_superuser', False)
+        )
+        if lead.assigned_to != user and not is_authorized:
             return Response(
-                {"success": False, "error": "You can only request reassignment for leads assigned to you."},
+                {"success": False, "error": "You do not have permission to reassign this lead."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -2731,7 +2754,7 @@ class LeadTransferRequestListCreateView(APIView):
         # ── Apply reassignment immediately ─────────────────────────────────────
         auto_note = (
             reason
-            or f"Reassignment requested by {user.name}: "
+            or f"Reassignment by {user.name}: "
                f"{'Unassigned' if not old_assignee else old_assignee.name} "
                f"→ {new_assignee.name}."
         )
@@ -2750,7 +2773,7 @@ class LeadTransferRequestListCreateView(APIView):
 
         logger.info(
             f"Lead {lead.id} directly reassigned: "
-            f"{old_assignee} → {new_assignee} (requested by {user}). Reason: {reason or 'N/A'}"
+            f"{old_assignee} → {new_assignee} (by {user}). Reason: {reason or 'N/A'}"
         )
 
         # ── Notify new assignee ────────────────────────────────────────────────
@@ -2929,6 +2952,19 @@ class SalesAttendanceApprovalApproveView(APIView):
         if not success:
             return Response({'success': False, 'message': msg}, status=status.HTTP_400_BAD_REQUEST)
 
+        is_final = (approval.status != 'cmo_approved')
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='sales_attendance',
+                record_id=approval.id,
+                step=1 if not is_final else None,
+                is_final=is_final,
+                exclude_user=approval.user,
+            )
+        except Exception as notif_e:
+            logger.error(f"Failed to mark sales attendance notification as read: {notif_e}")
+
         return Response({
             'success': True,
             'message': msg,
@@ -2962,6 +2998,17 @@ class SalesAttendanceApprovalRejectView(APIView):
         success, msg = apply_sales_attendance_rejection(approval, request.user, reason=reason)
         if not success:
             return Response({'success': False, 'message': msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='sales_attendance',
+                record_id=approval.id,
+                is_final=True,
+                exclude_user=approval.user,
+            )
+        except Exception as notif_e:
+            logger.error(f"Failed to mark sales attendance rejection notification as read: {notif_e}")
 
         return Response({
             'success': True,
