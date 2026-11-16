@@ -16,7 +16,7 @@ from branch.models import Branch
 from faculty.models import FacultyProfile, SessionReport, FacultyQRScanLog
 from batches.models import Subject, Batch, TimetableSlot, Course
 from leave.models import LeaveApplication
-from payroll.models import LateEntryPolicy, PayrollRun
+from payroll.models import LateEntryPolicy, PayrollRun, PaySlip
 from attendance.models import EmployeeAttendanceRecord
 from results.models import MarkSheet
 from exams.models import Exam
@@ -441,6 +441,35 @@ class RegularStaffTests(PayrollBaseTest):
         ps = compute_payslip_for_user(user, MONTH, YEAR, self.payroll_run)
         self.assertGreaterEqual(ps.net_salary, Decimal("0"))
         self.assertGreater(ps.retention_deduction, Decimal("0"))
+
+    def test_retention_refund_on_joining_anniversary(self):
+        user = self._make_staff(
+            "staff_ret_anniversary", "counsellor", "full_time",
+            salary=15000, retention=10,
+        )
+        user.joining_date = date(YEAR - 1, MONTH, 1)
+        user.save(update_fields=['joining_date'])
+
+        period = [(2025, month) for month in range(5, 13)] + [(2026, month) for month in range(1, 5)]
+        for year_value, month_value in period:
+            run = PayrollRun.objects.create(
+                branch=self.branch,
+                month=month_value,
+                year=year_value,
+                status='draft',
+                generated_by=self.admin_user,
+            )
+            PaySlip.objects.create(
+                payroll_run=run,
+                user=user,
+                retention_deduction=Decimal('100.00'),
+                net_salary=Decimal('900.00'),
+            )
+
+        ps = compute_payslip_for_user(user, MONTH, YEAR, self.payroll_run)
+
+        self.assertEqual(ps.retention_refund_amount, Decimal('1200.00'))
+        self.assertGreaterEqual(ps.net_salary, ps.retention_refund_amount)
 
 
 # ===========================================================================

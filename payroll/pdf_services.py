@@ -231,7 +231,9 @@ def generate_payslip_pdf(payslip):
         
         reimb_amount = getattr(payslip, 'reimbursements_amount', 0) or 0
         odometer_amount = getattr(payslip, 'odometer_amount', 0) or 0
-        gross_salary = payslip.basic_salary + payslip.hour_based_amount + payslip.bonus + payslip.attendance_bonus + payslip.leave_encashment
+        retention_refund_amount = getattr(payslip, 'retention_refund_amount', 0) or 0
+        gross_salary = (payslip.basic_salary + payslip.hour_based_amount + payslip.bonus
+                        + payslip.attendance_bonus + payslip.leave_encashment + retention_refund_amount)
         total_deductions = payslip.late_penalty + payslip.absence_deductions + payslip.leave_deductions + payslip.retention_deduction + payslip.other_deductions
 
         reimb_notes = []
@@ -299,6 +301,7 @@ def generate_payslip_pdf(payslip):
             'bonus': payslip.bonus,
             'extra_shift_allowance': payslip.bonus,
             'reimbursements_amount': reimb_amount,
+            'retention_refund_amount': retention_refund_amount,
             'odometer_amount': odometer_amount,
             'reimbursement_notes': reimb_notes,
             'odometer_notes': odometer_notes,

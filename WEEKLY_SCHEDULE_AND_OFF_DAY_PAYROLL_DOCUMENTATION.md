@@ -15,6 +15,7 @@ This document details the day-wise **Weekly Schedule** system, auto-calculation 
    - Excluded from required working days (`working_days` and `working_days_passed`).
    - Excluded from `absent_dates` and `absent_days`.
    - Excluded from late / shortfall delay penalties.
+7. **Joining-Date Retention Refund**: At the completion of one year from a staff member's joining date, the cumulative salary retention amount deducted during that year is given back in payroll.
 
 ---
 
@@ -164,6 +165,51 @@ if is_off_day:
 for d_date, d_delay in daily_delays.items():
     if has_custom_sched and user.is_day_off(d_date):
         continue  # Scheduled off day: no shortfall deduction or penalty
+```
+
+## 4A. Staff Salary Retention Refund
+
+Salary retention applies to the staff member as configured by `salary_retention_percentage` and is deducted from each eligible monthly payslip.
+
+### 4A.1 Eligibility Date
+
+The retention refund is calculated using the staff member's actual `joining_date` (`auth_user.User.joining_date`), not the payroll start date or account creation date.
+
+- The first refund becomes due when the staff member completes one year from the joining date.
+- Subsequent refunds, if the retention policy continues, are due on each subsequent yearly anniversary from the same joining date.
+- A staff member who does not have a joining date must not receive a retention refund until a valid joining date is configured.
+
+### 4A.2 Refund Amount
+
+For each anniversary:
+
+```text
+Retention refund amount =
+    Total retention_deduction recorded from payrolls during
+    the 12-month period ending on the joining-date anniversary
+```
+
+- The refund includes all retention deductions for that staff member in the applicable year.
+- The refund must not be multiplied by another retention percentage.
+- The refund must be excluded from the salary's recurring monthly retention deduction.
+- If an anniversary payslip has already been adjusted, regeneration must not create a duplicate refund.
+
+### 4A.3 Payroll Treatment
+
+The retention refund should be paid in the payroll period containing the staff member's joining-date anniversary.
+
+- Add the refund to the payslip's earnings / reimbursements.
+- Record the refund separately so that it is auditable and does not change the regular retention deduction.
+- The refund must not be reduced by attendance, leave, late, or other current-month deductions.
+- It must be paid as a one-time amount only after the full one-year retention period is complete.
+
+Example:
+
+```text
+Joining date: 01 January 2026
+First anniversary: 01 January 2027
+Refund period: January 2026 payroll through December 2026 payroll
+Refund amount: Sum of retention_deduction for that period
 ```
 
 ---

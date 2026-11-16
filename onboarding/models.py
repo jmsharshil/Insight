@@ -504,7 +504,7 @@ class Admission(models.Model):
             history.insert(0, {
                 'event': 'payment_link_created',
                 'payment_choice': self.payment_choice or 'online',
-                'amount': float(self.payment_amount or self.total_fees or 0),
+                'amount': float(self.payment_amount if self.payment_amount and self.payment_amount > 0 else self.total_fees or 0),
                 'razorpay_payment_link': self.razorpay_payment_link,
                 'razorpay_payment_link_id': self.razorpay_payment_link_id,
                 'status': 'paid' if self.is_razorpay_paid else 'pending',
@@ -565,7 +565,7 @@ class Admission(models.Model):
             history.append({
                 'event': 'payment_received' if self.razorpay_payment_id else 'payment_submitted',
                 'payment_choice': self.payment_choice or ('online' if self.razorpay_payment_id else 'offline'),
-                'amount': float(self.payment_amount or 0),
+                'amount': float(self.payment_amount if self.payment_amount and self.payment_amount > 0 else self.total_fees or 0),
                 'transaction_id': self.transaction_id or self.razorpay_payment_id,
                 'razorpay_payment_id': self.razorpay_payment_id,
                 'payment_screenshot': proof_url,
@@ -594,11 +594,12 @@ class Admission(models.Model):
 
             expected_amount = Decimal(str(self.payment_amount or 0))
             if expected_amount <= 0:
-                expected_amount = (
-                    Decimal(str(self.fee_structure.token_amount or 0))
-                    if p_type == 'token' and self.fee_structure
-                    else Decimal(str(self.total_fees or 0))
-                )
+                if p_type == 'token' and self.fee_structure and getattr(self.fee_structure, 'token_amount', None):
+                    expected_amount = Decimal(str(self.fee_structure.token_amount or 0))
+                    if expected_amount <= 0:
+                        expected_amount = Decimal(str(self.total_fees or 0))
+                else:
+                    expected_amount = Decimal(str(self.total_fees or 0))
             if expected_amount > 0:
                 for amount_key in ('amount', 'amount_to_pay'):
                     try:

@@ -2,11 +2,59 @@ import logging
 import calendar
 import re
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from collections import defaultdict
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _joining_anniversary(joining_date, anniversary_year):
+    """Return the joining anniversary for a year, clamping leap-day dates to month-end."""
+    if not joining_date:
+        return None
+    last_day = calendar.monthrange(anniversary_year, joining_date.month)[1]
+    return date(anniversary_year, joining_date.month, min(joining_date.day, last_day))
+
+
+def get_retention_refund_amount(user, faculty_profile, month, year):
+    """Return cumulative retention deductions for the completed joining-date year."""
+    joining_date = getattr(user, 'joining_date', None)
+    if not joining_date and faculty_profile is not None:
+        joining_date = getattr(faculty_profile, 'joining_date', None)
+    if not joining_date:
+        return Decimal('0')
+
+    anniversary = None
+    for anniversary_year in range(joining_date.year + 1, year + 1):
+        candidate = _joining_anniversary(joining_date, anniversary_year)
+        if candidate.year == year and candidate.month == month:
+            anniversary = candidate
+            break
+    if anniversary is None:
+        return Decimal('0')
+
+    previous_anniversary = _joining_anniversary(joining_date, anniversary.year - 1)
+    period_start = date(previous_anniversary.year, previous_anniversary.month, 1)
+    period_end = date(anniversary.year, anniversary.month, 1)
+
+    from django.db.models import Q, Sum
+    from payroll.models import PaySlip
+
+    month_query = Q(pk__isnull=True)
+    month = period_start.month
+    year_value = period_start.year
+    while (year_value, month) < (period_end.year, period_end.month):
+        month_query |= Q(payroll_run__year=year_value, payroll_run__month=month)
+        month += 1
+        if month == 13:
+            month = 1
+            year_value += 1
+
+    total = PaySlip.objects.filter(user=user).filter(month_query).aggregate(
+        total=Sum('retention_deduction')
+    )['total']
+    return Decimal(total or 0).quantize(Decimal('0.01'))
 
 
 def normalize_extra_minutes(extra_minutes):
@@ -880,7 +928,10 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     if faculty_profile.salary_retention_percentage > 0 and net_before_retention > 0:
         retention_deduction = net_before_retention * (faculty_profile.salary_retention_percentage / Decimal(100))
 
-    net = net_before_retention - retention_deduction
+    retention_refund = get_retention_refund_amount(
+        faculty_profile.user, faculty_profile, payroll_run.month, payroll_run.year
+    )
+    net = net_before_retention - retention_deduction + retention_refund
     net = max(net, Decimal(0))
 
     # Add approved expense reimbursements and travel odometer expenses
@@ -939,6 +990,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
         absence_deductions=absence_deductions,
         leave_deductions=applied_leave_deductions,
         retention_deduction=retention_deduction,
+        retention_refund_amount=retention_refund,
         other_deductions=other_deductions,
         bonus=bonus,
         is_manually_adjusted=is_manually_adjusted,
@@ -1506,7 +1558,10 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     if faculty_profile.salary_retention_percentage > 0 and net_before_retention > 0:
         retention_deduction = net_before_retention * (faculty_profile.salary_retention_percentage / Decimal(100))
 
-    net = net_before_retention - retention_deduction
+    retention_refund = get_retention_refund_amount(
+        faculty_profile.user, faculty_profile, month, year
+    )
+    net = net_before_retention - retention_deduction + retention_refund
     net = max(net, Decimal(0))
 
     return {
@@ -1519,6 +1574,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         'absence_deductions': str(round(absence_deductions, 2)),
         'leave_deductions': str(round(applied_leave_deductions, 2)),
         'retention_deduction': str(round(retention_deduction, 2)),
+        'retention_refund_amount': str(round(retention_refund, 2)),
         'attendance_bonus': str(round(attendance_bonus, 2)),
         'leave_encashment': str(round(leave_encashment, 2)),
         'bonus': "0.00",
@@ -1616,7 +1672,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         net_before_retention = paper_amount - late_penalty
         if getattr(user, 'salary_retention_percentage', 0) > 0 and net_before_retention > 0:
             retention_deduction = net_before_retention * (Decimal(user.salary_retention_percentage) / Decimal(100))
-        net = net_before_retention - retention_deduction
+        retention_refund = get_retention_refund_amount(user, None, payroll_run.month, payroll_run.year)
+        net = net_before_retention - retention_deduction + retention_refund
         net = max(net, Decimal(0))
 
         deduction_note_str = build_deduction_note(
@@ -1645,6 +1702,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
             absence_deductions=absence_deductions,
             leave_deductions=leave_deductions,
             retention_deduction=retention_deduction,
+            retention_refund_amount=retention_refund,
             attendance_bonus=attendance_bonus,
             leave_encashment=leave_encashment,
             reimbursements_amount=reimbursements_total,
@@ -1927,7 +1985,8 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     if getattr(user, 'salary_retention_percentage', 0) > 0 and net_before_retention > 0:
         retention_deduction = net_before_retention * (Decimal(user.salary_retention_percentage) / Decimal(100))
 
-    net = net_before_retention - retention_deduction
+    retention_refund = get_retention_refund_amount(user, None, payroll_run.month, payroll_run.year)
+    net = net_before_retention - retention_deduction + retention_refund
     net = max(net, Decimal(0))
 
     # 11. Create PaySlip
@@ -1987,6 +2046,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
         absence_deductions=absence_deductions,
         leave_deductions=leave_deductions,
         retention_deduction=retention_deduction,
+        retention_refund_amount=retention_refund,
         other_deductions=other_deductions,
         bonus=bonus,
         is_manually_adjusted=is_manually_adjusted,

@@ -1127,12 +1127,41 @@ class AdmissionUpdateView(APIView):
 
         serializer.save()
         resolve_combo_executive_course(admission)
+
+        # ── Recalculate payment_amount from fee structure whenever it is 0 or null ──
+        # This covers the case where admin selects / changes a fee_structure on the
+        # admission form but payment_amount was never set (or was left at 0), which
+        # caused payment_history entries to show amount = 0.
+        try:
+            from decimal import Decimal as _Dec
+            fee_or_type_updated = (
+                'fee_structure' in request.data
+                or 'payment_type' in request.data
+                or 'group_module' in request.data
+            )
+            admission.refresh_from_db()
+            current_amount = _Dec(str(admission.payment_amount or 0))
+            if (fee_or_type_updated or current_amount <= _Dec('0')) and getattr(admission, 'fee_structure', None):
+                fs = admission.fee_structure
+                if admission.payment_type == 'token':
+                    new_amount = _Dec(str(fs.token_amount or 0))
+                    if new_amount <= 0:
+                        new_amount = _get_module_fee(fs, admission.group_module)
+                else:
+                    new_amount = _get_module_fee(fs, admission.group_module)
+                if new_amount > _Dec('0') and (current_amount <= _Dec('0') or fee_or_type_updated):
+                    admission.payment_amount = new_amount
+                    admission.save(update_fields=['payment_amount', 'updated_at'])
+        except Exception as e:
+            logger.error(f"Error recalculating payment_amount in AdmissionUpdateView.patch: {e}")
+
         try:
             from .utils import sync_admission_payment
             sync_admission_payment(admission, request=request)
         except Exception as e:
             logger.error(f"Error syncing admission payment in AdmissionUpdateView.patch: {e}")
 
+        admission.refresh_from_db()
         return Response(
             {
                 'success': True,
