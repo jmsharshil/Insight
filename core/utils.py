@@ -260,9 +260,21 @@ def notify_users_by_role(
     qs = User.objects.filter(get_role_filter_q(roles), is_active=True)
 
     if branch:
-        qs = qs.filter(branch=branch)
+        from django.db.models import Q
+        if 'super_admin' in roles:
+            sa_q = get_role_filter_q(['super_admin'])
+            if organization:
+                sa_q &= (Q(organization=organization) | Q(organization__isnull=True))
+            qs = qs.filter(Q(branch=branch) | sa_q)
+        else:
+            qs = qs.filter(branch=branch)
     elif organization:
-        qs = qs.filter(organization=organization)
+        from django.db.models import Q
+        if 'super_admin' in roles:
+            sa_q = get_role_filter_q(['super_admin']) & (Q(organization=organization) | Q(organization__isnull=True))
+            qs = qs.filter(Q(organization=organization) | sa_q)
+        else:
+            qs = qs.filter(organization=organization)
 
     for user in qs:
         send_system_notification(

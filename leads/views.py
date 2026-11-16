@@ -2282,6 +2282,106 @@ class LeadDetailView(APIView):
         )
 
 
+def _send_lead_reassignment_notifications(lead, old_assignee, new_assignee, user, reason=None):
+    """
+    Sends in-app system notifications for direct lead reassignment / transfer:
+    - New assignee (if assigned and not self-assigned)
+    - Previous assignee (if previously assigned to someone else)
+    - Super admins (organization/system-wide, never excluded by branch filter)
+    - Branch manager (for the lead's branch, if not the actor)
+    """
+    from chat.notifications import send_system_notification
+    from core.utils import notify_users_by_role
+
+    lead_name = f"{lead.first_name} {lead.surname or ''}".strip()
+    reason_str = f" Reason: {reason}" if reason else ""
+    route = f"/leads/{lead.id}"
+    meta = {
+        'type': 'lead_reassigned',
+        'lead_id': str(lead.id),
+        'route': route,
+    }
+
+    # 1. Notify new assignee
+    if new_assignee:
+        try:
+            send_system_notification(
+                user_id=str(new_assignee.id),
+                title='Lead Assigned to You',
+                body=(
+                    f"Lead for {lead_name} has been assigned to you"
+                    f"{f' by {user.name}' if user != new_assignee else ''}."
+                    + reason_str
+                ),
+                metadata=meta,
+                route=route,
+                notification_type='leads',
+            )
+            logger.info(f"Notified new assignee {new_assignee.id} for lead {lead.id}")
+        except Exception as exc:
+            logger.error(f"Failed to notify new assignee {new_assignee.id} for lead {lead.id}: {exc}")
+
+    # 2. Notify previous assignee (if exists and different from current user and new assignee)
+    if old_assignee and old_assignee != user and old_assignee != new_assignee:
+        try:
+            send_system_notification(
+                user_id=str(old_assignee.id),
+                title='Lead Reassigned',
+                body=(
+                    f"Lead [{lead_name}] previously assigned to you was reassigned to "
+                    f"{new_assignee.name if new_assignee else 'Unassigned'} by {user.name}."
+                    + reason_str
+                ),
+                metadata=meta,
+                route=route,
+                notification_type='leads',
+            )
+            logger.info(f"Notified previous assignee {old_assignee.id} for lead {lead.id}")
+        except Exception as exc:
+            logger.error(f"Failed to notify previous assignee {old_assignee.id} for lead {lead.id}: {exc}")
+
+    # 3. Notify Super Admins (organization/system-wide)
+    try:
+        notify_users_by_role(
+            roles=['super_admin'],
+            title='Lead Reassigned',
+            body=(
+                f"Lead [{lead_name}] (ID: {lead.id}) was reassigned "
+                f"from {old_assignee.name if old_assignee else 'Unassigned'} "
+                f"to {new_assignee.name if new_assignee else 'Unassigned'} by {user.name}."
+                + reason_str
+            ),
+            organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
+            branch=None,
+            metadata=meta,
+            notification_type='leads',
+        )
+        logger.info(f"Notified super admins of lead {lead.id} reassignment")
+    except Exception as exc:
+        logger.error(f"Failed to notify super admins of lead {lead.id} reassignment: {exc}")
+
+    # 4. Notify Branch Manager of the lead's branch (if different from actor)
+    if getattr(lead, 'branch', None) and getattr(user, 'role', None) != 'branch_manager':
+        try:
+            notify_users_by_role(
+                roles=['branch_manager'],
+                title='Lead Reassigned',
+                body=(
+                    f"Lead [{lead_name}] (ID: {lead.id}) was reassigned "
+                    f"from {old_assignee.name if old_assignee else 'Unassigned'} "
+                    f"to {new_assignee.name if new_assignee else 'Unassigned'} by {user.name}."
+                    + reason_str
+                ),
+                organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
+                branch=lead.branch,
+                metadata=meta,
+                notification_type='leads',
+            )
+            logger.info(f"Notified branch manager of lead {lead.id} reassignment")
+        except Exception as exc:
+            logger.error(f"Failed to notify branch manager of lead {lead.id} reassignment: {exc}")
+
+
 # ── Lead Reassign View ──────────────────────────────────────────────────────
 
 class LeadReassignView(APIView):
@@ -2373,14 +2473,13 @@ class LeadReassignView(APIView):
             f"{previous_assignee} → {new_assignee} by {user}"
         )
 
-        if new_assignee:
-            from chat.notifications import send_system_notification
-            send_system_notification(
-                user_id=str(new_assignee.id),
-                title='Lead Assigned',
-                body=f"You have been assigned a lead: {lead.first_name} {lead.surname or ''}.",
-                metadata={'lead_id': str(lead.id)},
-            )
+        _send_lead_reassignment_notifications(
+            lead=lead,
+            old_assignee=previous_assignee,
+            new_assignee=new_assignee,
+            user=user,
+            reason=note,
+        )
 
         # ── Response ───────────────────────────────────────────────────
         return Response(
@@ -2523,7 +2622,9 @@ class LeadAssignView(APIView):
                 user_id=str(new_assignee.id),
                 title='Lead Assigned',
                 body=f"You have been assigned a new lead: {lead.first_name} {lead.surname or ''}.",
-                metadata={'lead_id': str(lead.id)},
+                metadata={'type': 'lead_assigned', 'lead_id': str(lead.id), 'route': f"/leads/{lead.id}"},
+                route=f"/leads/{lead.id}",
+                notification_type='leads',
             )
 
         # ── Response ─────────────────────────────────────────────────────────
@@ -2776,39 +2877,14 @@ class LeadTransferRequestListCreateView(APIView):
             f"{old_assignee} → {new_assignee} (by {user}). Reason: {reason or 'N/A'}"
         )
 
-        # ── Notify new assignee ────────────────────────────────────────────────
-        try:
-            from chat.notifications import send_system_notification
-            send_system_notification(
-                user_id=str(new_assignee.id),
-                title='Lead Assigned to You',
-                body=(
-                    f"Lead for {lead.first_name} {lead.surname or ''} has been reassigned to you"
-                    f"{f' by {user.name}' if user != new_assignee else ''}."
-                ),
-                metadata={'type': 'lead_reassigned', 'lead_id': str(lead.id)},
-            )
-        except Exception as exc:
-            logger.error(f"Failed to notify new assignee {new_assignee.id} for lead {lead.id}: {exc}")
-
-        # ── Notify super admins (unless the requester is a super admin) ────────
-        try:
-            from core.utils import notify_users_by_role
-            notify_users_by_role(
-                roles=['super_admin'],
-                title='Lead Reassigned',
-                body=(
-                    f"Lead [{lead.first_name} {lead.surname or ''}] (ID: {lead.id}) was reassigned "
-                    f"from {old_assignee.name if old_assignee else 'Unassigned'} "
-                    f"to {new_assignee.name} by {user.name}."
-                    + (f" Reason: {reason}" if reason else "")
-                ),
-                organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
-                branch=lead.branch if getattr(lead, 'branch', None) else None,
-                metadata={'type': 'lead_reassigned', 'lead_id': str(lead.id)},
-            )
-        except Exception as exc:
-            logger.error(f"Failed to notify super admins of lead {lead.id} reassignment: {exc}")
+        # ── Send notifications to new assignee, previous assignee, super admins, branch manager ──
+        _send_lead_reassignment_notifications(
+            lead=lead,
+            old_assignee=old_assignee,
+            new_assignee=new_assignee,
+            user=user,
+            reason=reason,
+        )
 
         return Response(
             {
