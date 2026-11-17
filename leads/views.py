@@ -67,7 +67,7 @@ def _can_modify_lead(user, lead):
     if user_role in SENIOR_ROLES:
         return True
     if user_role in ('front_desk', 'receptionist'):
-        return bool(lead and lead.assigned_to_id == user.id)
+        return bool(lead and (lead.assigned_to_id == user.id or lead.assigned_to_id is None))
     if user_role in RESTRICTED_ROLES:
         return bool(lead and lead.assigned_to_id == user.id)
     return False
@@ -1852,11 +1852,14 @@ def get_lead_queryset(request):
     """
     queryset = Lead.objects.all().order_by("-created_at")
 
-    # Scope by organisation when available
-    if getattr(request.user, 'organization', None):
+    # Scope by organisation when available (super admins see all leads)
+    if getattr(request.user, 'organization', None) and not (
+        getattr(request.user, 'is_superuser', False) or getattr(request.user, 'role', None) == 'super_admin'
+    ):
         from django.db.models import Q as _Q
         queryset = queryset.filter(
             _Q(branch__isnull=True) |
+            _Q(branch__organization__isnull=True) |
             _Q(branch__organization=request.user.organization)
         )
 
@@ -2041,10 +2044,7 @@ class LeadStatusUpdateView(APIView):
     def patch(self, request, lead_id):
         # Find lead
         try:
-            queryset = Lead.objects.all()
-            if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(branch__organization=request.user.organization)
-            lead = queryset.get(id=lead_id)
+            lead = Lead.objects.get(id=lead_id)
         except Lead.DoesNotExist:
             return Response(
                 {
@@ -2053,6 +2053,20 @@ class LeadStatusUpdateView(APIView):
                 },
                 status=status.HTTP_404_NOT_FOUND
             )
+
+        # Cross-organization check (skip for super_admin / superuser)
+        user = request.user
+        if user.is_authenticated and not (getattr(user, 'is_superuser', False) or getattr(user, 'role', None) == 'super_admin'):
+            user_org = getattr(user, 'organization', None)
+            lead_org = lead.branch.organization if getattr(lead, 'branch', None) else None
+            if user_org and lead_org and user_org != lead_org:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Lead not found."
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
         # Check modify permission: Front Desk and restricted roles can only update assigned leads
         if not _can_modify_lead(request.user, lead):
             return Response(
@@ -2425,15 +2439,21 @@ class LeadReassignView(APIView):
 
         # ── Fetch lead (all leads visible to senior roles) ──────────────────
         try:
-            queryset = Lead.objects.all()
-            if getattr(user, 'organization', None):
-                queryset = queryset.filter(branch__organization=user.organization)
-            lead = queryset.get(id=lead_id)
+            lead = Lead.objects.get(id=lead_id)
         except Lead.DoesNotExist:
             return Response(
                 {"success": False, "message": "Lead not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        if user.is_authenticated and not (getattr(user, 'is_superuser', False) or getattr(user, 'role', None) == 'super_admin'):
+            user_org = getattr(user, 'organization', None)
+            lead_org = lead.branch.organization if getattr(lead, 'branch', None) else None
+            if user_org and lead_org and user_org != lead_org:
+                return Response(
+                    {"success": False, "message": "Lead not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         # ── Validate input ─────────────────────────────────────────────
         serializer = LeadReassignSerializer(data=request.data)
@@ -2550,15 +2570,21 @@ class LeadAssignView(APIView):
 
         # ── Fetch lead ───────────────────────────────────────────────────────
         try:
-            queryset = Lead.objects.all()
-            if getattr(user, 'organization', None):
-                queryset = queryset.filter(branch__organization=user.organization)
-            lead = queryset.get(id=lead_id)
+            lead = Lead.objects.get(id=lead_id)
         except Lead.DoesNotExist:
             return Response(
                 {"success": False, "message": "Lead not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        if user.is_authenticated and not (getattr(user, 'is_superuser', False) or getattr(user, 'role', None) == 'super_admin'):
+            user_org = getattr(user, 'organization', None)
+            lead_org = lead.branch.organization if getattr(lead, 'branch', None) else None
+            if user_org and lead_org and user_org != lead_org:
+                return Response(
+                    {"success": False, "message": "Lead not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         # ── Guard: already assigned — use /reassign/ instead ─────────────────
         if lead.assigned_to is not None:
