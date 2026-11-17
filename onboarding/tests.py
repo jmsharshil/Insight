@@ -330,6 +330,7 @@ class AdmissionFeeStructureSelectionTest(TestCase):
             attempt_year=2027,
             fee_structure=fee_structure,
             payment_type='token',
+            payment_amount=Decimal('12000'),
             status='form_pending',
         )
         bank = BankAccount.objects.create(
@@ -351,6 +352,8 @@ class AdmissionFeeStructureSelectionTest(TestCase):
             _setup_payment_bank_and_notify(admission)
 
         self.assertEqual(create_payment_link.call_args.kwargs['amount'], 5000)
+        admission.refresh_from_db()
+        self.assertEqual(admission.payment_amount, Decimal('5000'))
 
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):
@@ -606,6 +609,55 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         mock_whatsapp.assert_called_once()
         self.assertEqual(mock_whatsapp.call_args.kwargs['template_name'], 'razorpay_link')
 
+    def test_full_payment_link_uses_fee_structure_total_amount(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        self.fee_structure.total_amount = Decimal('45000')
+        self.fee_structure.save(update_fields=['total_amount'])
+        admission = _make_admission(
+            email='full_total_amount@example.com',
+            course='cs_executive',
+            group_module='all',
+            batch_attempt='dec',
+            attempt_year=2027,
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            payment_amount=Decimal('40000'),
+            status='form_pending',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/full', 'id': 'plink_full'}},
+            ) as mock_create_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        self.assertEqual(mock_create_link.call_args.kwargs['amount'], Decimal('45000'))
+        admission.refresh_from_db()
+        self.assertEqual(admission.payment_amount, Decimal('45000'))
+
+    def test_online_link_amount_alone_does_not_create_pending_payment(self):
+        from fees.models import Payment
+        from onboarding.utils import sync_admission_payment
+
+        admission = _make_admission(
+            email='unpaid_online_link@example.com',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            payment_amount=Decimal('40000'),
+            status='payment_pending',
+        )
+
+        self.assertIsNone(sync_admission_payment(admission))
+        self.assertFalse(Payment.objects.filter(admission=admission).exists())
+
     def test_payment_choice_cash_or_cheque_skips_razorpay_link(self):
         from onboarding.views import _setup_payment_bank_and_notify
 
@@ -776,6 +828,7 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
 
     def test_razorpay_payment_paid_updates_flags_and_history(self):
         from fees.razorpay_service import process_payment_link_paid_event
+        from fees.models import Payment
 
         admission = _make_admission(
             fee_structure=self.fee_structure,
@@ -784,6 +837,14 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             status='payment_pending',
             razorpay_payment_link='https://razorpay.test/pay_test',
             razorpay_payment_link_id='plink_test_pay',
+        )
+        pending_payment = Payment.objects.create(
+            admission=admission,
+            amount=Decimal('40000'),
+            payment_mode='online',
+            transaction_ref='',
+            status='approval_pending',
+            payment_date=timezone.now().date(),
         )
 
         payload = {
@@ -815,6 +876,11 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertEqual(admission.razorpay_payment_status, 'paid')
         self.assertEqual(admission.razorpay_payment_id, 'pay_rzp_99999')
         self.assertEqual(float(admission.remaining_fees), 0.0)
+        from fees.models import Payment
+        payment = Payment.objects.get(admission=admission, transaction_ref='pay_rzp_99999')
+        self.assertEqual(payment.status, 'verified')
+        self.assertEqual(payment.id, pending_payment.id)
+        self.assertEqual(Payment.objects.filter(admission=admission).count(), 1)
 
         # Verify payment history contains payment_received or payment_approved
         history = admission.get_payment_history_list()
@@ -877,6 +943,48 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             ),
             1,
         )
+
+    def test_razorpay_payment_stays_verified_if_student_setup_fails(self):
+        from fees.models import Payment
+        from fees.razorpay_service import process_payment_link_paid_event
+
+        admission = _make_admission(
+            email='razorpay_student_setup_failure@example.com',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            status='payment_pending',
+        )
+        payload = {
+            'event': 'payment_link.paid',
+            'payload': {
+                'payment_link': {
+                    'entity': {
+                        'reference_id': f'ADM_{admission.id}_student_failure',
+                        'amount_paid': 4000000,
+                        'id': 'plink_student_failure',
+                    }
+                },
+                'payment': {
+                    'entity': {'id': 'pay_rzp_student_failure', 'amount': 4000000}
+                },
+            },
+        }
+
+        with (
+            patch(
+                'onboarding.utils.AdmissionService._create_user_accounts',
+                side_effect=RuntimeError('test account failure'),
+            ),
+            patch('fees.services.send_payment_receipt'),
+            patch('fees.razorpay_service.send_admission_payment_notification'),
+            patch('fees.razorpay_service.transfer_payment_to_linked_account'),
+        ):
+            result = process_payment_link_paid_event(payload)
+
+        self.assertTrue(result['success'])
+        payment = Payment.objects.get(admission=admission, transaction_ref='pay_rzp_student_failure')
+        self.assertEqual(payment.status, 'verified')
 
     def test_razorpay_partial_and_final_captures_keep_actual_payment_amounts(self):
         from fees.razorpay_service import process_payment_link_paid_event
@@ -1034,8 +1142,8 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
 
         admission.refresh_from_db()
         self.assertEqual(admission.total_fees, Decimal('45000'))
-        self.assertEqual(admission.payment_amount, Decimal('45000'))
-        self.assertEqual(mock_create_link.call_args.kwargs['amount'], Decimal('45000'))
+        self.assertEqual(admission.payment_amount, Decimal('50000'))
+        self.assertEqual(mock_create_link.call_args.kwargs['amount'], Decimal('50000'))
 
         student_user = User.objects.create_user(
             username='icsi_payment_student',

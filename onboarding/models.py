@@ -304,6 +304,8 @@ class Admission(models.Model):
         if hasattr(self, 'student_profile') and self.student_profile:
             try:
                 from fees.models import Payment
+                if Payment.objects.filter(admission=self, status='verified').exists():
+                    return True
                 if Payment.objects.filter(student=self.student_profile, status='verified').exists():
                     return True
                 if Payment.objects.filter(student=self.student_profile).exists():

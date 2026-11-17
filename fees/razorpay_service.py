@@ -629,6 +629,13 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                     transaction_ref=rp_payment_id,
                 ).first()
                 is_new_transaction = existing_payment is None
+                if existing_payment is None:
+                    existing_payment = Payment.objects.filter(
+                        admission=admission,
+                        status='approval_pending',
+                        payment_mode='online',
+                        transaction_ref='',
+                    ).order_by('-created_at').first()
                 previous_total = Payment.objects.filter(
                     admission=admission,
                     status='verified',
@@ -673,22 +680,34 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                         role='student',
                     ).first()
                     if not student_user:
-                        AdmissionService._create_user_accounts(admission)
+                        try:
+                            AdmissionService._create_user_accounts(admission)
+                        except Exception as exc:
+                            logger.error(
+                                f"[Razorpay] Student account creation failed for admission {adm_id}: {exc}"
+                            )
                         student_user = AuthUser.objects.filter(
                             email__iexact=admission.email,
                             role='student',
                         ).first()
                     if not student_user:
-                        raise RuntimeError(
-                            f"Student login account could not be created for admission {adm_id}."
+                        logger.error(
+                            f"[Razorpay] No student account available for admission {adm_id}; "
+                            "recording the captured payment without a student link."
                         )
 
                     if not student:
-                        student = StudentService.create_from_admission(
-                            admission=admission,
-                            user=student_user,
-                            acting_user=None,
-                        )
+                        if student_user:
+                            try:
+                                student = StudentService.create_from_admission(
+                                    admission=admission,
+                                    user=student_user,
+                                    acting_user=None,
+                                )
+                            except Exception as exc:
+                                logger.error(
+                                    f"[Razorpay] Student profile creation failed for admission {adm_id}: {exc}"
+                                )
 
                     if payment is None:
                         payment = Payment.objects.filter(
@@ -713,6 +732,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                     payment.student = student or payment.student
                     payment.amount = transaction_amount
                     payment.payment_mode = 'online'
+                    payment.transaction_ref = rp_payment_id
                     payment.status = 'verified'
                     payment.verified_at = payment.verified_at or now
                     payment.payment_date = now.date()
@@ -778,7 +798,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 admission.save(update_fields=['payment_history', 'updated_at'])
 
             if is_new_transaction:
-                if payment_created_here:
+                if payment:
                     try:
                         send_payment_receipt(payment)
                     except Exception as exc:

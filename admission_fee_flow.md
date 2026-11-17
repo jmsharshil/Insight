@@ -14,7 +14,7 @@ sequenceDiagram
     
     activate System
     System->>System: 3. Auto-link matching Fee Structure
-    System->>System: 4. Calculate amount (Total - Token)
+    System->>System: 4. Calculate payable amount from FeeStructure
     System->>Razorpay: 5. Generate Payment Link
     Razorpay-->>System: Returns short_url
     System->>Student: 6. Email sent with Razorpay link
@@ -56,11 +56,11 @@ When the backend receives the form submission, the system automatically runs the
 After the fee structure is linked, the system computes the amount the student needs to pay.
 
 Based on the student's selected `payment_type`:
-- **Token Payment (`token`):** The Razorpay link amount is dynamically set to the `FeeStructure.token_amount`.
+- **Token Payment (`token`):** The Razorpay link amount is strictly the `FeeStructure.token_amount`; any amount submitted by the client is ignored.
   - The remaining fee is calculated as: `Module Fee - Token Amount`.
   - The system automatically generates the 15-day policy notice:
     > *"In 15 days you have to pay remaining fees (₹XX,XXX) otherwise it will be considered as Finance."*
-- **Full Payment (`full_payment`):** The Razorpay link amount is set to the fee of the student's selected module (e.g., `institute_fees_module_1` for Module 1, `institute_fees_module_2` for Module 2, or `institute_fees_all_modules` for both/all) **without deducting the token fee**.
+- **Full Payment (`full_payment`):** The Razorpay link amount is strictly the `FeeStructure.total_amount`; any amount submitted by the client is ignored.
 
 > [!IMPORTANT]
 > The Razorpay payment link will **only be generated and sent** if the student selected **"Full Payment"** (`full_payment`) or **"Token Payment"** (`token`) on the admission form. If they select **"Finance"** (`finance`), no payment link is created.
@@ -84,8 +84,8 @@ The setup message includes:
 ## 6. Post-Payment Confirmation & Receipt
 When the student pays the token amount via Razorpay:
 1. **Webhook Event (`payment_link.paid`):**
-   - Records the captured amount and transaction ID in the admission, verified `Payment`, and payment history.
-   - Enrolls the admission and creates the student profile; webhook retries can recover profile creation if it was incomplete.
+   - Automatically verifies the captured amount and transaction ID in the admission, `Payment`, and payment history; Razorpay payments do not require manual approval.
+   - Enrolls the admission and creates the student profile; account/profile creation failures do not undo payment verification.
 2. **Payment Receipt Email & WhatsApp:**
    - Automatically sends an official PDF receipt.
    - Highlights the 15-day remaining fee notice:
@@ -93,4 +93,4 @@ When the student pays the token amount via Razorpay:
 3. **API & Admin Visibility:**
    - Both `remaining_fees` and `token_payment_terms_note` are exposed in `AdmissionListSerializer` and `AdmissionDetailSerializer` for frontend display.
 
-For `payment_link.partially_paid`, each captured transaction is recorded, but enrollment waits until Razorpay reports `payment_link.paid`.
+For `payment_link.partially_paid`, each captured transaction is recorded as verified, but enrollment waits until Razorpay reports `payment_link.paid`. Manual approval remains for offline payment proofs.

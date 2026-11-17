@@ -285,8 +285,8 @@ def _setup_payment_bank_and_notify(admission):
 
     # ── Determine amount_to_pay from fee structure ────────────────────────────
     # Priority order:
-    #   1. fee_structure + payment_type = 'token'  → token_amount (or payment_amount)
-    #   2. fee_structure + payment_type = 'full_payment' → module/total fee
+    #   1. fee_structure + payment_type = 'token'  → token_amount
+    #   2. fee_structure + payment_type = 'full_payment' → total_amount
     #   3. fee_structure + payment_type = 'finance' → token / down payment (or 0)
     #   4. fee_structure + payment_type unset → if payment_amount set use that, else module/total fee
     #   5. No fee_structure but payment_amount > 0 → use payment_amount
@@ -298,16 +298,9 @@ def _setup_payment_bank_and_notify(admission):
 
     if fs:
         if admission.payment_type == 'token':
-            if curr_pmt_amt > 0 and (total_module_fee <= 0 or curr_pmt_amt < total_module_fee):
-                amount_to_pay = curr_pmt_amt
-            elif token_val > 0:
-                amount_to_pay = token_val
-            elif total_module_fee > Decimal('5000'):
-                amount_to_pay = Decimal('5000')
-            else:
-                amount_to_pay = total_module_fee
+            amount_to_pay = token_val
         elif admission.payment_type == 'full_payment':
-            amount_to_pay = total_module_fee
+            amount_to_pay = Decimal(str(fs.total_amount or 0))
         elif admission.payment_type == 'finance':
             if curr_pmt_amt > 0 and (total_module_fee <= 0 or curr_pmt_amt < total_module_fee):
                 amount_to_pay = curr_pmt_amt
@@ -329,7 +322,8 @@ def _setup_payment_bank_and_notify(admission):
 
     # Fallback to hard-coded defaults if the resulting amount is still zero/negative.
     # Normalize course key so we never fall through to 1 Rs.
-    if amount_to_pay <= 0 and admission.payment_type != 'finance':
+    has_configured_payment_amount = fs and admission.payment_type in ('token', 'full_payment')
+    if amount_to_pay <= 0 and admission.payment_type != 'finance' and not has_configured_payment_amount:
         default_course_fees = {
             'cseet': Decimal('1000'),
             'cs_executive': Decimal('2000'),
@@ -354,7 +348,7 @@ def _setup_payment_bank_and_notify(admission):
     # amount_to_pay (e.g. was 1 Rs, or was full fee and student changed to token),
     # reset the link so a fresh link with correct amount is created.
     existing_rp_link = admission.razorpay_payment_link or ''
-    if existing_rp_link and amount_to_pay > 0:
+    if existing_rp_link:
         existing_amount = None
         for entry in (admission.payment_history or []):
             if entry.get('event') == 'payment_link_created':
@@ -399,14 +393,17 @@ def _setup_payment_bank_and_notify(admission):
     print("Amount to pay..........", amount_to_pay)
 
     # Persist the resolved payable amount.
-    if amount_to_pay > 0:
+    if has_configured_payment_amount or amount_to_pay > 0:
         curr_amt = Decimal(str(admission.payment_amount or 0))
-        needs_amount_update = (
-            curr_amt <= Decimal('0')
-            or (admission.payment_type == 'full_payment' and curr_amt != amount_to_pay)
-            or (admission.payment_type == 'token' and (curr_amt >= total_module_fee or curr_amt != amount_to_pay))
-            or (curr_amt > total_module_fee and total_module_fee > Decimal('0'))
-        )
+        if has_configured_payment_amount:
+            needs_amount_update = curr_amt != amount_to_pay
+        else:
+            needs_amount_update = (
+                curr_amt <= Decimal('0')
+                or (admission.payment_type == 'full_payment' and curr_amt != amount_to_pay)
+                or (admission.payment_type == 'token' and (curr_amt >= total_module_fee or curr_amt != amount_to_pay))
+                or (curr_amt > total_module_fee and total_module_fee > Decimal('0'))
+            )
         if needs_amount_update:
             admission.payment_amount = amount_to_pay
             admission.save(update_fields=['payment_amount', 'updated_at'])
@@ -1184,11 +1181,17 @@ class AdmissionUpdateView(APIView):
                 fs = admission.fee_structure
                 if admission.payment_type == 'token':
                     new_amount = _Dec(str(fs.token_amount or 0))
-                    if new_amount <= 0:
-                        new_amount = _get_module_fee(fs, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
+                elif admission.payment_type == 'full_payment':
+                    new_amount = _Dec(str(fs.total_amount or 0))
                 else:
                     new_amount = _get_module_fee(fs, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
-                if new_amount > _Dec('0') and (current_amount <= _Dec('0') or fee_or_type_updated):
+                if (
+                    new_amount > _Dec('0') and (current_amount <= _Dec('0') or fee_or_type_updated)
+                ) or (
+                    fee_or_type_updated
+                    and admission.payment_type in ('token', 'full_payment')
+                    and current_amount != new_amount
+                ):
                     admission.payment_amount = new_amount
                     admission.save(update_fields=['payment_amount', 'updated_at'])
             if fee_or_type_updated and admission.status in ('form_pending', 'payment_pending'):
@@ -1712,7 +1715,11 @@ class AdmissionPaymentSubmitView(APIView):
         admission.payment_note         = serializer.validated_data.get('payment_note', '')
         admission.payment_submitted_at = timezone.now()
         submitted_amount = serializer.validated_data.get('payment_amount')
-        if submitted_amount is None or Decimal(str(submitted_amount)) <= 0:
+        if admission.fee_structure and admission.payment_type == 'token':
+            submitted_amount = admission.fee_structure.token_amount
+        elif admission.fee_structure and admission.payment_type == 'full_payment':
+            submitted_amount = admission.fee_structure.total_amount
+        elif submitted_amount is None or Decimal(str(submitted_amount)) <= 0:
             if admission.payment_type == 'token' and getattr(admission, 'fee_structure', None):
                 token_val = admission.fee_structure.token_amount or 0
                 if token_val > 0:
@@ -1733,7 +1740,7 @@ class AdmissionPaymentSubmitView(APIView):
                     submitted_amount = admission.total_fees
             else:
                 submitted_amount = admission.total_fees
-        admission.payment_amount = submitted_amount or None
+        admission.payment_amount = submitted_amount
         admission.status               = 'approval_pending'
         admission.save(update_fields=[
             'payment_screenshot', 'transaction_id', 'payment_note',

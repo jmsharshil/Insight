@@ -505,9 +505,8 @@ def get_module_fee(fee_structure, group_module, icsi_fees_payment=None):
 
 def sync_admission_payment(admission, request=None, force=False, new_payment=False):
     """
-    Ensures that when payment details (screenshot, transaction_id, payment_amount, or offline payment choice)
-    are submitted for an admission, a corresponding fees.Payment record is created or updated in 'approval_pending'
-    status, and the admission status is synchronized.
+    Creates or updates an approval-pending Payment only after proof, transaction details,
+    or an offline payment choice is submitted; a generated online link alone is not a payment.
     """
     from decimal import Decimal
     from django.utils import timezone
@@ -525,22 +524,20 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
 
     # Determine amount
     pay_amount = admission.payment_amount
-    if admission.payment_type == 'token' and getattr(admission, 'fee_structure', None):
-        t_amt = Decimal(str(admission.fee_structure.token_amount or 0))
-        if t_amt > 0:
-            if not pay_amount or Decimal(str(pay_amount)) <= 0 or Decimal(str(pay_amount)) >= Decimal(str(admission.total_fees or 0)):
-                pay_amount = t_amt
+    fee_structure = getattr(admission, 'fee_structure', None)
+    if fee_structure and admission.payment_type == 'token':
+        pay_amount = Decimal(str(fee_structure.token_amount or 0))
+    elif fee_structure and admission.payment_type == 'full_payment':
+        pay_amount = Decimal(str(fee_structure.total_amount or 0))
     elif not pay_amount or Decimal(str(pay_amount)) <= 0:
-        if getattr(admission, 'fee_structure', None):
-            fs = admission.fee_structure
-            if admission.payment_type == 'full_payment':
-                pay_amount = get_module_fee(fs, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
-            else:
-                pay_amount = Decimal(str(admission.total_fees or 0))
+        if fee_structure:
+            pay_amount = Decimal(str(admission.total_fees or 0))
         else:
             pay_amount = Decimal(str(admission.total_fees or 0))
 
-    if not pay_amount or Decimal(str(pay_amount)) <= 0:
+    if (not fee_structure or admission.payment_type not in ('token', 'full_payment')) and (
+        not pay_amount or Decimal(str(pay_amount)) <= 0
+    ):
         default_course_fees = {
             'cseet': Decimal('1000'),
             'cs_executive': Decimal('2000'),
@@ -550,7 +547,11 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
 
     # Keep the admission amount in sync even when the proof form omits it.
     # This prevents payment history and fee-payment records from recording 0.
-    if pay_amount and Decimal(str(pay_amount)) > 0 and (
+    configured_payment_amount = fee_structure and admission.payment_type in ('token', 'full_payment')
+    if configured_payment_amount and Decimal(str(admission.payment_amount or 0)) != Decimal(str(pay_amount)):
+        admission.payment_amount = pay_amount
+        admission.save(update_fields=['payment_amount', 'updated_at'])
+    elif pay_amount and Decimal(str(pay_amount)) > 0 and (
         not admission.payment_amount or Decimal(str(admission.payment_amount)) <= 0
     ):
         admission.payment_amount = pay_amount
@@ -558,10 +559,7 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
 
     # Has payment details?
     has_payment_data = bool(
-        admission.payment_screenshot or
-        admission.transaction_id or
-        (admission.payment_amount and Decimal(str(admission.payment_amount)) > 0) or
-        pc in ('cash', 'cheque')
+        admission.payment_screenshot or admission.transaction_id or pc in ('cash', 'cheque')
     )
 
     if not has_payment_data and not force:
