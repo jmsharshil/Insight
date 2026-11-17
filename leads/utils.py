@@ -204,11 +204,12 @@ class LeadService:
         )
 
         # ── Send admission-form link to student ───────────────────────────────
+        adm_code = getattr(admission, 'admission_code', None) or getattr(admission, 'admission_number', None) or f"IIPS-{admission.id:06d}"
         admission_link = (
             f"{getattr(settings, 'FRONTEND_BASE_URL', 'http://127.0.0.1:5173')}"
-            f"/insight/student/admission-form?id={lead.id}"
+            f"/insight/student/admission-form?id={adm_code}"
         )
-        button_url_path = f"insight/student/admission-form?id={lead.id}"
+        button_url_path = f"insight/student/admission-form?id={adm_code}"
         org_name = (
             getattr(admission.branch.organization, 'name', 'Insight Institute of Professional Studies')
             if getattr(admission, 'branch', None) and getattr(admission.branch, 'organization', None)
@@ -218,7 +219,7 @@ class LeadService:
         text_content = (
             f"Hello {student_name},\n\n"
             f"Thank you for filling the inquiry form with {org_name}. "
-            f"We have received your details and are ready to proceed with your admission.\n\n"
+            f"We have received your details and are ready to proceed with your admission (Admission Code: {adm_code}).\n\n"
             f"Please tap the link below to complete your admission form and upload the required documents:\n\n"
             f"{admission_link}\n\n"
             f"If you have any questions, feel free to reach out.\n\n"
@@ -236,12 +237,13 @@ class LeadService:
                     template_context={
                         'student_name': student_name,
                         'admission_link': admission_link,
+                        'admission_code': adm_code,
                         'primary_color': '#ed7c31',
                         'org_name': org_name,
                     },
                     organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                 )
-                logger.info(f"Admission form email sent to {admission.email} for lead {lead.id}")
+                logger.info(f"Admission form email sent to {admission.email} for admission {adm_code}")
             except Exception as exc:
                 logger.error(f"Failed to send admission form email to {admission.email}: {exc}")
 
@@ -258,7 +260,6 @@ class LeadService:
                             "parameters": [
                                 {"type": "text", "text": student_name},
                                 {"type": "text", "text": org_name},
-                                {"type": "text", "text": str(lead.id)},
                             ],
                         },
                         {
@@ -272,7 +273,7 @@ class LeadService:
                     ],
                     fallback_body=text_content,
                 )
-                logger.info(f"Admission form WhatsApp sent to {admission.phone_student} for lead {lead.id}")
+                logger.info(f"Admission form WhatsApp sent to {admission.phone_student} for admission {adm_code}")
             except Exception as exc:
                 logger.error(f"Failed to send admission form WhatsApp to {admission.phone_student}: {exc}")
 

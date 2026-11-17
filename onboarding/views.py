@@ -958,8 +958,11 @@ class AdmissionDetailView(APIView):
                     Q(branch__organization=request.user.organization) | Q(branch__isnull=True)
                 )
 
-            # Match either by admission's own ID or by the associated lead's ID
-            return queryset.filter(Q(id=identifier) | Q(lead__id=identifier)).first()
+            # Match by admission_code first, then by numeric ID or lead ID
+            lookup = Q(admission_code=str(identifier).upper())
+            if str(identifier).isdigit():
+                lookup |= Q(id=int(identifier)) | Q(lead__id=int(identifier))
+            return queryset.filter(lookup).first()
         except Exception:
             return None
 

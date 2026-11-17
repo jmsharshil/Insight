@@ -235,7 +235,7 @@ class SalesAttendanceApprovalSerializer(serializers.ModelSerializer):
 
 
 class SalesDailyActivitySerializer(serializers.ModelSerializer):
-    photos = SalesActivityPhotoSerializer(many=True, read_only=True)
+    photos = serializers.SerializerMethodField()
     user_name = serializers.CharField(source='user.name', read_only=True)
     odometer_reading = OdometerReadingSerializer(read_only=True)
     timings = SalesDailyActivityTimingSerializer(many=True, required=False)
@@ -268,6 +268,20 @@ class SalesDailyActivitySerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'user', 'user_name', 'photos', 'odometer_reading', 'event_photo_slots', 'violations', 'attendance', 'attendance_approvals', 'is_checked_in', 'check_in_method', 'check_in_required', 'created_at', 'updated_at']
+
+    def get_photos(self, obj):
+        photos_qs = obj.photos.all().order_by('-captured_at', '-created_at').distinct()
+        serializer = SalesActivityPhotoSerializer(photos_qs, many=True, context=self.context)
+        seen = set()
+        unique_photos = []
+        for item in serializer.data:
+            key = item.get('id') or item.get('photo')
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            unique_photos.append(item)
+        return unique_photos
 
     def get_attendance_approvals(self, obj):
         approvals = obj.attendance_approvals.all()
@@ -607,15 +621,27 @@ class SalesDailyPlanSerializer(serializers.ModelSerializer):
 
     def get_photos(self, obj):
         try:
-            general_activity = SalesDailyActivity.objects.get(
+            activities = SalesDailyActivity.objects.filter(
                 user=obj.user,
                 activity_date=obj.plan_date,
                 name="Daily Field Operations"
             )
-            # Filter for general check-in/out selfies
-            photos = general_activity.photos.filter(photo_type__in=['start_selfie', 'end_selfie'])
-            return SalesActivityPhotoSerializer(photos, many=True, context=self.context).data
-        except SalesDailyActivity.DoesNotExist:
+            photos = SalesActivityPhoto.objects.filter(
+                activity__in=activities,
+                photo_type__in=['start_selfie', 'end_selfie']
+            ).order_by('-captured_at', '-created_at').distinct()
+            serializer = SalesActivityPhotoSerializer(photos, many=True, context=self.context)
+            seen = set()
+            unique_photos = []
+            for item in serializer.data:
+                key = item.get('id') or item.get('photo')
+                if key and key in seen:
+                    continue
+                if key:
+                    seen.add(key)
+                unique_photos.append(item)
+            return unique_photos
+        except Exception:
             return []
 
     def to_internal_value(self, data):

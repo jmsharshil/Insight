@@ -115,8 +115,8 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
     # 1. Student Name
     student_name = " ".join(f"{admission.first_name} {admission.surname}".split())[:60] or "Student"
 
-    # 2. Admission ID
-    admission_id_str = str(admission.id)
+    # 2. Admission Code
+    admission_code_str = getattr(admission, 'admission_code', None) or (f"IIPS-{admission.id:06d}" if admission.id else str(admission.id))
 
     # 3. Course Type
     course_type = " ".join(str(
@@ -207,7 +207,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
             "type": "body",
             "parameters": [
                 {"type": "text", "text": student_name},       # {{1}}
-                {"type": "text", "text": admission_id_str},    # {{2}}
+                {"type": "text", "text": admission_code_str}, # {{2}}
                 {"type": "text", "text": course_type},        # {{3}}
                 {"type": "text", "text": module},             # {{4}}
                 {"type": "text", "text": attempt},            # {{5}}
@@ -222,13 +222,13 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
             "type": "button",
             "sub_type": "quick_reply",
             "index": "0",
-            "parameters": [{"type": "payload", "payload": f"adm_pay_approve:{admission.id}"}]
+            "parameters": [{"type": "payload", "payload": f"adm_pay_approve:{admission_code_str}"}]
         },
         {
             "type": "button",
             "sub_type": "quick_reply",
             "index": "1",
-            "parameters": [{"type": "payload", "payload": f"adm_pay_reject:{admission.id}"}]
+            "parameters": [{"type": "payload", "payload": f"adm_pay_reject:{admission_code_str}"}]
         }
     ]
 
@@ -237,7 +237,7 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         f"FEE PAYMENT VERIFICATION\n\n"
         f"Student Details\n"
         f"• Student Name: {student_name}\n"
-        f"• Admission ID: {admission_id_str}\n"
+        f"• Admission Code: {admission_code_str}\n"
         f"• Course Type: {course_type}\n"
         f"• Module: {module}\n"
         f"• Attempt: {attempt}\n\n"
@@ -249,8 +249,8 @@ def build_payment_approve_reject_components(admission) -> Tuple[List[Dict[str, A
         f"• Payment Submitted At: {submitted_at}\n\n"
         f"Proof Screenshot: {proof_display}\n\n"
         f"Reply with:\n"
-        f"- APPROVE {admission_id_str} to approve\n"
-        f"- REJECT {admission_id_str} to reject\n\n"
+        f"- APPROVE {admission_code_str} to approve\n"
+        f"- REJECT {admission_code_str} to reject\n\n"
         f"Regards,\n"
         f"Insight ERP"
     )
@@ -339,17 +339,18 @@ def send_payment_verification_whatsapp(admission, level: int = 1, approver_user=
             )
 
 
-def parse_admission_payment_payload(payload_str: str, text_str: str = "") -> Tuple[Optional[str], Optional[int]]:
+def parse_admission_payment_payload(payload_str: str, text_str: str = "") -> Tuple[Optional[str], Optional[str]]:
     """
-    Parses action ('approve' or 'reject') and admission_id from incoming WhatsApp message.
+    Parses action ('approve' or 'reject') and admission identifier (code or id) from incoming WhatsApp message.
     Supports quick_reply button payloads:
-      - adm_pay_approve:<id>
-      - adm_pay_reject:<id>
-      - payment_approve:<id>
-      - pay_approve:<id>
+      - adm_pay_approve:<id_or_code>
+      - adm_pay_reject:<id_or_code>
+      - payment_approve:<id_or_code>
+      - pay_approve:<id_or_code>
     Also supports text replies:
+      - "APPROVE IIPS-000001" / "REJECT IIPS-000001"
       - "APPROVE 123" / "REJECT 123"
-      - "APPROVE ADMISSION 123"
+      - "APPROVE ADMISSION IIPS-000001"
     """
     s = str(payload_str or "").strip()
     t = str(text_str or "").strip()
@@ -387,21 +388,17 @@ def parse_admission_payment_payload(payload_str: str, text_str: str = "") -> Tup
     # Check plain text commands
     if not action and t:
         upper_t = t.upper()
-        match_approve = re.search(r'\bAPPROVE\b.*?\b(\d+)\b', upper_t)
-        match_reject = re.search(r'\bREJECT\b.*?\b(\d+)\b', upper_t)
+        match_approve = re.search(r'\bAPPROVE\b\s*(?:ADMISSION\s*)?([A-Z0-9_-]+)', upper_t)
+        match_reject = re.search(r'\bREJECT\b\s*(?:ADMISSION\s*)?([A-Z0-9_-]+)', upper_t)
         if match_approve:
             action = "approve"
-            adm_id_str = match_approve.group(1)
+            adm_id_str = match_approve.group(1).strip()
         elif match_reject:
             action = "reject"
-            adm_id_str = match_reject.group(1)
+            adm_id_str = match_reject.group(1).strip()
 
     if adm_id_str:
-        try:
-            adm_id = int(str(adm_id_str).strip())
-            return action, adm_id
-        except (ValueError, TypeError):
-            return None, None
+        return action, str(adm_id_str).strip()
 
     return None, None
 
@@ -411,8 +408,8 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
     Webhook handler for WhatsApp button and text interactions with 'payment_approve_reject'.
     Restricts actions to Accountant (Level 1) and Super Admin (Level 2).
     """
-    action, admission_id = parse_admission_payment_payload(payload_str, text_str)
-    if not action or not admission_id:
+    action, admission_identifier = parse_admission_payment_payload(payload_str, text_str)
+    if not action or not admission_identifier:
         return False
 
     from auth_user.models import User
@@ -459,13 +456,24 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
         )
         return True
 
-    # 2. Fetch admission
-    try:
-        admission = Admission.objects.get(id=admission_id)
-    except Admission.DoesNotExist:
-        logger.warning("[WA ADMISSION] Admission id=%s not found.", admission_id)
-        send_whatsapp_text(to=sender_wa_id, body=f"Admission #{admission_id} not found.")
+    # 2. Fetch admission by ID or admission_code
+    admission = None
+    target_str = str(admission_identifier).strip()
+    if target_str.isdigit():
+        admission = Admission.objects.filter(id=int(target_str)).first()
+    if not admission:
+        admission = Admission.objects.filter(admission_code__iexact=target_str).first()
+    if not admission and target_str.startswith('IIPS-'):
+        num_part = target_str.replace('IIPS-', '').lstrip('0')
+        if num_part.isdigit():
+            admission = Admission.objects.filter(id=int(num_part)).first()
+
+    if not admission:
+        logger.warning("[WA ADMISSION] Admission identifier=%s not found.", admission_identifier)
+        send_whatsapp_text(to=sender_wa_id, body=f"Admission {admission_identifier} not found.")
         return True
+
+    adm_code = getattr(admission, 'admission_code', None) or (f"IIPS-{admission.id:06d}" if admission.id else str(admission.id))
 
     approver_name = getattr(approver, 'name', None) or approver.username
     is_superuser = getattr(approver, 'is_superuser', False) or user_has_payment_role(approver, {'super_admin'})
@@ -482,7 +490,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
         if admission.status == 'enrolled':
             send_whatsapp_text(
                 to=sender_wa_id,
-                body=f"Admission #{admission.id} ({admission.first_name}) is already enrolled and cannot be rejected."
+                body=f"Admission {adm_code} ({admission.first_name}) is already enrolled and cannot be rejected."
             )
             return True
 
@@ -517,14 +525,20 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 record_id=admission.id,
                 is_final=True,
             )
+            if approver:
+                mark_approval_notification_as_read(
+                    approval_type='admission',
+                    record_id=admission.id,
+                    user=approver,
+                )
         except Exception as notif_e:
             logger.error("[WA ADMISSION] Failed to mark notification as read: %s", notif_e)
 
         send_whatsapp_text(
             to=sender_wa_id,
-            body=f"❌ Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) has been REJECTED by {approver_name}."
+            body=f"❌ Payment for admission {adm_code} ({admission.first_name} {admission.surname}) has been REJECTED by {approver_name}."
         )
-        logger.info("[WA ADMISSION] Admission %s rejected via WhatsApp by %s", admission.id, approver.id)
+        logger.info("[WA ADMISSION] Admission %s (%s) rejected via WhatsApp by %s", admission.id, adm_code, approver.id)
         return True
 
     # 4. Handle APPROVE action
@@ -532,14 +546,14 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
         if admission.status == 'enrolled':
             send_whatsapp_text(
                 to=sender_wa_id,
-                body=f"Admission #{admission.id} ({admission.first_name} {admission.surname}) is already enrolled."
+                body=f"Admission {adm_code} ({admission.first_name} {admission.surname}) is already enrolled."
             )
             return True
 
         if admission.status == 'rejected':
             send_whatsapp_text(
                 to=sender_wa_id,
-                body=f"Admission #{admission.id} is marked as rejected. Please reset its status in ERP before approving."
+                body=f"Admission {adm_code} is marked as rejected. Please reset its status in ERP before approving."
             )
             return True
 
@@ -597,13 +611,19 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     user=approver,
                     step=1,
                 )
+                if approver:
+                    mark_approval_notification_as_read(
+                        approval_type='admission',
+                        record_id=admission.id,
+                        user=approver,
+                    )
             except Exception as notif_e:
                 logger.error("[WA ADMISSION] Failed to mark notification as read: %s", notif_e)
 
             send_whatsapp_text(
                 to=sender_wa_id,
                 body=(
-                    f"✅ Level 1 payment approval completed for admission #{admission.id} "
+                    f"✅ Level 1 payment approval completed for admission {adm_code} "
                     f"({admission.first_name} {admission.surname}).\n\n"
                     f"Status is now 'Approved'. Notification dispatched to Super Admin for Level 2 (final) approval."
                 )
@@ -620,11 +640,11 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 notify_users_by_role(
                     roles=['super_admin'],
                     title='Admission Payment Ready for Final Approval',
-                    body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified at Level 1 and requires Super Admin final approval.",
+                    body=f"Payment for admission {adm_code} ({admission.first_name} {admission.surname}) was verified at Level 1 and requires Super Admin final approval.",
                     organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
                     branch=admission.branch if getattr(admission, 'branch', None) else None,
-                    email_subject=f'Final Approval Required: Admission #{admission.id}',
-                    metadata={'admission_id': str(admission.id), 'step': 'level_2_approval'},
+                    email_subject=f'Final Approval Required: Admission {adm_code}',
+                    metadata={'admission_id': str(admission.id), 'admission_code': adm_code, 'step': 'level_2_approval'},
                     notification_type='admission',
                 )
             except Exception as exc:
@@ -637,7 +657,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 send_whatsapp_text(
                     to=sender_wa_id,
                     body=(
-                        f"Admission #{admission.id} has already completed Level 1 approval. "
+                        f"Admission {adm_code} has already completed Level 1 approval. "
                         f"Level 2 (final) approval must be performed by a Super Admin."
                     )
                 )
@@ -682,6 +702,12 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     record_id=admission.id,
                     is_final=True,
                 )
+                if approver:
+                    mark_approval_notification_as_read(
+                        approval_type='admission',
+                        record_id=admission.id,
+                        user=approver,
+                    )
             except Exception as notif_e:
                 logger.error("[WA ADMISSION] Failed to mark notification as read: %s", notif_e)
 
@@ -735,13 +761,13 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             send_whatsapp_text(
                 to=sender_wa_id,
                 body=(
-                    f"🎉 Level 2 final approval completed! Admission #{admission.id} "
+                    f"🎉 Level 2 final approval completed! Admission {adm_code} "
                     f"({admission.first_name} {admission.surname}) is now enrolled.\n\n"
                     f"Admission No: {adm_no}\n"
                     f"Student profile created & login credentials dispatched."
                 )
             )
-            logger.info("[WA ADMISSION] Admission %s enrolled via WhatsApp by Super Admin %s", admission.id, approver.id)
+            logger.info("[WA ADMISSION] Admission %s (%s) enrolled via WhatsApp by Super Admin %s", admission.id, adm_code, approver.id)
             return True
 
     return False

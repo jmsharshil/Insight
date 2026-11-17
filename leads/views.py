@@ -874,9 +874,18 @@ class SalesActivityPhotoView(APIView):
                 except ValueError:
                     return Response({'detail': 'Invalid date format. Use YYYY-MM-DD or "today".'}, status=status.HTTP_400_BAD_REQUEST)
 
-        queryset = queryset.order_by('-captured_at', '-created_at')
+        queryset = queryset.order_by('-captured_at', '-created_at').distinct()
         serializer = SalesActivityPhotoSerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data)
+        seen_ids = set()
+        distinct_photos = []
+        for item in serializer.data:
+            key = item.get('id') or item.get('photo')
+            if key and key in seen_ids:
+                continue
+            if key:
+                seen_ids.add(key)
+            distinct_photos.append(item)
+        return Response(distinct_photos)
 
     def post(self, request, activity_id=None):
         if activity_id:
@@ -2094,6 +2103,8 @@ class LeadStatusUpdateView(APIView):
 
         # ── Handle conversion: auto-create Admission record ──────────────────
         admission_created = False
+        admission = None
+        assigned_counsellor = None
         if new_stage == 'converted' and old_stage != 'converted':
             try:
                 from .utils import LeadService as _LS
@@ -2101,7 +2112,10 @@ class LeadStatusUpdateView(APIView):
                     lead,
                     changed_by=request.user if request.user.is_authenticated else None,
                 )
-                admission_created = _adm is not None
+                if _adm is not None:
+                    admission = _adm
+                    assigned_counsellor = getattr(_adm, 'assigned_counsellor', None)
+                    admission_created = True
             except Exception as e:
                 logger.error(f"Error creating admission for lead {lead.id}: {str(e)}")
                 return Response(
@@ -2164,7 +2178,7 @@ class LeadStatusUpdateView(APIView):
             "note": lead.note,
         }
 
-        if admission_created:
+        if admission_created and admission:
             message += " Admission record created and assigned for counsellor review."
             counsellor_info = None
             if assigned_counsellor:
@@ -2175,6 +2189,7 @@ class LeadStatusUpdateView(APIView):
                 }
             response_data["admission"] = {
                 "admission_id": admission.id,
+                "admission_code": getattr(admission, 'admission_code', None),
                 "status": admission.status,
                 "assigned_counsellor": counsellor_info,
             }

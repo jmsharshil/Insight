@@ -437,32 +437,71 @@ def mark_approval_notification_as_read(
             qs = qs.exclude(data__type__in=['reimbursement_approved', 'reimbursement_rejected'])
 
         elif approval_type == 'admission':
-            adm_q = (
-                Q(data__admission_id=str_id) |
-                Q(body__icontains=f"admission #{str_id}") |
-                Q(title__icontains=f"Admission #{str_id}") |
-                Q(body__icontains=f"Admission #{str_id}") |
-                Q(data__route__icontains=f"/admissions/{str_id}")
-            )
-            if str_id.isdigit():
-                adm_q |= Q(data__admission_id=int(str_id))
+            possible_ids = set()
+            if str_id:
+                possible_ids.add(str_id)
+                if str_id.isdigit():
+                    possible_ids.add(int(str_id))
+
+            try:
+                from onboarding.models import Admission as _Adm
+                _adm_obj = None
+                if str_id.isdigit():
+                    _adm_obj = _Adm.objects.filter(id=int(str_id)).first()
+                else:
+                    _adm_obj = _Adm.objects.filter(admission_code__iexact=str_id).first()
+                    if not _adm_obj and str_id.startswith('IIPS-'):
+                        _num = str_id.replace('IIPS-', '').lstrip('0')
+                        if _num.isdigit():
+                            _adm_obj = _Adm.objects.filter(id=int(_num)).first()
+
+                if _adm_obj:
+                    possible_ids.add(str(_adm_obj.id))
+                    possible_ids.add(_adm_obj.id)
+                    if _adm_obj.admission_code:
+                        possible_ids.add(_adm_obj.admission_code)
+            except Exception as _adm_err:
+                logger.debug("Could not resolve extra admission codes for notification read: %s", _adm_err)
+
+            adm_q = Q()
+            for pid in possible_ids:
+                adm_q |= (
+                    Q(data__admission_id=pid) |
+                    Q(data__admission_id=str(pid)) |
+                    Q(data__admission_code=str(pid)) |
+                    Q(body__icontains=str(pid)) |
+                    Q(title__icontains=str(pid)) |
+                    Q(data__route__icontains=f"/admissions/{pid}")
+                )
             qs = qs.filter(adm_q)
 
             if not is_final:
                 if step in (1, '1', 'level_1', 'level_1_approval'):
-                    qs = qs.filter(
+                    step_filter = (
                         Q(data__step='level_1_approval') |
                         Q(title__icontains='Level 1') |
                         Q(title__icontains='Admission Payment Proof Submitted') |
-                        Q(body__icontains='Level 1')
+                        Q(body__icontains='Level 1') |
+                        Q(body__icontains='Payment details submitted')
                     )
+                    if user:
+                        uid = getattr(user, 'id', user)
+                        # Match level 1 notifications, especially prioritizing/including the acting user
+                        qs = qs.filter(step_filter | Q(user_id=uid))
+                    else:
+                        qs = qs.filter(step_filter)
                 elif step in (2, '2', 'level_2', 'level_2_approval'):
-                    qs = qs.filter(
+                    step_filter = (
                         Q(data__step='level_2_approval') |
                         Q(title__icontains='Final Approval') |
                         Q(body__icontains='Final Approval') |
                         Q(body__icontains='Level 2')
                     )
+                    if user:
+                        uid = getattr(user, 'id', user)
+                        qs = qs.filter(step_filter | Q(user_id=uid))
+                    else:
+                        qs = qs.filter(step_filter)
                 elif user:
                     uid = getattr(user, 'id', user)
                     qs = qs.filter(user_id=uid)
