@@ -293,13 +293,13 @@ POST /api/v1/fees/razorpay/webhook/
 
 | Event | Handler | Effect |
 |---|---|---|
-| `payment_link.paid` | `process_payment_link_paid_event` | Creates `Payment` record (SF flow) or updates `Admission` status (ADM flow). Sends receipt via email + WhatsApp |
-| `payment_link.partially_paid` | `process_payment_link_paid_event` | Same as above |
+| `payment_link.paid` | `process_payment_link_paid_event` | Records the captured amount and payment history. For ADM links, enrolls the admission and ensures the student profile exists. Sends receipt via email + WhatsApp |
+| `payment_link.partially_paid` | `process_payment_link_paid_event` | Records the captured transaction and cumulative amount. ADM admissions remain unenrolled until the link is fully paid |
 | `refund.processed` | `process_refund_processed_event` | Creates/updates local `Refund` record. Updates `StudentFee` status |
 | `payment_link.cancelled` | `process_payment_link_cancelled_event` | Clears payment link from `Admission` |
 | `payment_link.expired` | `process_payment_link_cancelled_event` | Same as above |
 
-**Response** Always returns `200` to prevent Razorpay retries.
+**Response** Returns `200` after successful processing or for unsupported events. Returns `500` when processing fails so Razorpay can retry; retries for ADM payments are idempotent.
 
 ```json
 { "success": true }
@@ -405,7 +405,7 @@ Located in `fees/razorpay_service.py`. All functions return `{ "success": bool, 
 | `process_payment_link_paid_event` | `(payload)` | Handles `payment_link.paid` / `partially_paid` (SF + ADM flows) |
 | `process_refund_processed_event` | `(payload)` | Handles `refund.processed` events |
 | `process_payment_link_cancelled_event` | `(payload)` | Handles `payment_link.cancelled` / `expired` events |
-| `send_admission_payment_notification` | `(admission, amount_paid, rp_payment_id)` | Sends PDF receipt email + WhatsApp for ADM flow |
+| `send_admission_payment_notification` | `(admission, amount_paid, rp_payment_id, is_partial=False)` | Sends PDF receipt email + WhatsApp for ADM flow |
 | `is_razorpay_enabled` | `()` | Returns `True` if `RAZORPAY_KEY_ID` is configured |
 
 ---

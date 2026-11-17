@@ -336,7 +336,11 @@ class Admission(models.Model):
         """Total fees defined for this admission based on fee structure and module."""
         if self.fee_structure:
             from onboarding.views import _get_module_fee
-            return _get_module_fee(self.fee_structure, self.group_module)
+            return _get_module_fee(
+                self.fee_structure,
+                self.group_module,
+                icsi_fees_payment=self.icsi_fees_payment,
+            )
         return Decimal('0')
 
     @property
@@ -348,7 +352,11 @@ class Admission(models.Model):
             return Decimal('0')
 
         from onboarding.views import _get_module_fee
-        total_fee = _get_module_fee(self.fee_structure, self.group_module)
+        total_fee = _get_module_fee(
+            self.fee_structure,
+            self.group_module,
+            icsi_fees_payment=self.icsi_fees_payment,
+        )
 
         try:
             from fees.models import Payment

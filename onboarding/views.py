@@ -3,6 +3,7 @@ from django.shortcuts import render
 from django.utils import timezone
 
 # Create your views here.
+import json
 import logging
 from core.pagination import paginate_queryset
 
@@ -18,7 +19,10 @@ from django.db.models import Q
 
 from .models import Admission
 from .serializers import (AdmissionSerializer,AdmissionStatusUpdateSerializer,AdmissionListSerializer,AdmissionDetailSerializer,AdmissionUpdateSerializer,AdmissionDocumentUploadSerializer,)
-from .utils import AdmissionService
+from .utils import (
+    AdmissionService,
+    get_module_fee,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +96,7 @@ def _get_bank_selection_amount(admission):
         from fees.models import FeeStructure
         fee_struct = FeeStructure.objects.filter(id=selected_fee_structure_id).first()
         if fee_struct:
-            fee_amount = fee_struct.total_amount
+            fee_amount = _get_module_fee(fee_struct, getattr(admission, 'group_module', None), icsi_fees_payment=getattr(admission, 'icsi_fees_payment', None))
 
     try:
         from fees.models import StudentFee, InstallmentItem
@@ -258,32 +262,13 @@ def _assign_fee_structure(admission):
         admission.save(update_fields=['fee_structure'])
 
 
-def _get_module_fee(fee_structure, group_module):
+def _get_module_fee(fee_structure, group_module, icsi_fees_payment=None):
     """
     Resolves the fee component from the fee structure matching the student's group_module selection.
     Falls back to institute_fees_all_modules or total_amount if specific module fee is not set.
+    Adjusts payable amount based on icsi_fees_payment ('pay_yourself' vs 'pay_through_institute').
     """
-    from decimal import Decimal
-    if not fee_structure:
-        return Decimal('0')
-
-    gm = (group_module or '').strip().lower()
-    if gm == 'module_1' and fee_structure.institute_fees_module_1:
-        return Decimal(str(fee_structure.institute_fees_module_1))
-    elif gm == 'module_2' and fee_structure.institute_fees_module_2:
-        return Decimal(str(fee_structure.institute_fees_module_2))
-    elif gm == 'module_3' and fee_structure.institute_fees_module_3:
-        return Decimal(str(fee_structure.institute_fees_module_3))
-    elif gm == 'module_4' and fee_structure.institute_fees_module_4:
-        return Decimal(str(fee_structure.institute_fees_module_4))
-    elif gm == 'module_5' and fee_structure.institute_fees_module_5:
-        return Decimal(str(fee_structure.institute_fees_module_5))
-    elif gm in ('all', 'both', 'full') and fee_structure.institute_fees_all_modules:
-        return Decimal(str(fee_structure.institute_fees_all_modules))
-
-    if fee_structure.institute_fees_all_modules:
-        return Decimal(str(fee_structure.institute_fees_all_modules))
-    return Decimal(str(fee_structure.total_amount or 0))
+    return get_module_fee(fee_structure, group_module, icsi_fees_payment=icsi_fees_payment)
 
 
 def _setup_payment_bank_and_notify(admission):
@@ -307,7 +292,7 @@ def _setup_payment_bank_and_notify(admission):
     #   5. No fee_structure but payment_amount > 0 → use payment_amount
     #   6. Fallback to hard-coded defaults by course (never 1 Rs)
     fs = getattr(admission, 'fee_structure', None)
-    total_module_fee = _get_module_fee(fs, admission.group_module) if fs else Decimal('0')
+    total_module_fee = _get_module_fee(fs, admission.group_module, icsi_fees_payment=getattr(admission, 'icsi_fees_payment', None)) if fs else Decimal('0')
     token_val = Decimal(str(fs.token_amount or 0)) if fs else Decimal('0')
     curr_pmt_amt = Decimal(str(admission.payment_amount or 0))
 
@@ -332,7 +317,7 @@ def _setup_payment_bank_and_notify(admission):
                 amount_to_pay = Decimal('0')
         else:
             # payment_type not set
-            if curr_pmt_amt > 0:
+            if curr_pmt_amt > 0 and (total_module_fee <= 0 or curr_pmt_amt <= total_module_fee):
                 amount_to_pay = curr_pmt_amt
             else:
                 amount_to_pay = total_module_fee
@@ -415,11 +400,14 @@ def _setup_payment_bank_and_notify(admission):
 
     # Persist the resolved payable amount.
     if amount_to_pay > 0:
-        if (
-            not admission.payment_amount
-            or Decimal(str(admission.payment_amount)) <= 0
-            or (admission.payment_type == 'token' and Decimal(str(admission.payment_amount)) != amount_to_pay)
-        ):
+        curr_amt = Decimal(str(admission.payment_amount or 0))
+        needs_amount_update = (
+            curr_amt <= Decimal('0')
+            or (admission.payment_type == 'full_payment' and curr_amt != amount_to_pay)
+            or (admission.payment_type == 'token' and (curr_amt >= total_module_fee or curr_amt != amount_to_pay))
+            or (curr_amt > total_module_fee and total_module_fee > Decimal('0'))
+        )
+        if needs_amount_update:
             admission.payment_amount = amount_to_pay
             admission.save(update_fields=['payment_amount', 'updated_at'])
 
@@ -1037,7 +1025,21 @@ class AdmissionDetailView(APIView):
         serializer.save()
         _assign_fee_structure(admission)
 
-        if is_student_form_submit and admission.status == 'form_pending':
+        payment_fields = {
+            'icsi_fees_payment',
+            'payment_type',
+            'payment_choice',
+            'payment_amount',
+            'group_module',
+            'fee_structure',
+            'batch_attempt',
+            'course',
+        }
+        payment_updated = any(f in request.data for f in payment_fields)
+
+        if (is_student_form_submit and admission.status == 'form_pending') or (
+            payment_updated and admission.status in ('form_pending', 'payment_pending')
+        ):
             _setup_payment_bank_and_notify(admission)
 
         try:
@@ -1174,6 +1176,7 @@ class AdmissionUpdateView(APIView):
                 'fee_structure' in request.data
                 or 'payment_type' in request.data
                 or 'group_module' in request.data
+                or 'icsi_fees_payment' in request.data
             )
             admission.refresh_from_db()
             current_amount = _Dec(str(admission.payment_amount or 0))
@@ -1182,12 +1185,14 @@ class AdmissionUpdateView(APIView):
                 if admission.payment_type == 'token':
                     new_amount = _Dec(str(fs.token_amount or 0))
                     if new_amount <= 0:
-                        new_amount = _get_module_fee(fs, admission.group_module)
+                        new_amount = _get_module_fee(fs, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
                 else:
-                    new_amount = _get_module_fee(fs, admission.group_module)
+                    new_amount = _get_module_fee(fs, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
                 if new_amount > _Dec('0') and (current_amount <= _Dec('0') or fee_or_type_updated):
                     admission.payment_amount = new_amount
                     admission.save(update_fields=['payment_amount', 'updated_at'])
+            if fee_or_type_updated and admission.status in ('form_pending', 'payment_pending'):
+                _setup_payment_bank_and_notify(admission)
         except Exception as e:
             logger.error(f"Error recalculating payment_amount in AdmissionUpdateView.patch: {e}")
 
@@ -1723,7 +1728,7 @@ class AdmissionPaymentSubmitView(APIView):
             elif getattr(admission, 'fee_structure', None):
                 from .utils import get_module_fee
                 if admission.payment_type == 'full_payment':
-                    submitted_amount = get_module_fee(admission.fee_structure, admission.group_module)
+                    submitted_amount = get_module_fee(admission.fee_structure, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
                 else:
                     submitted_amount = admission.total_fees
             else:
@@ -1963,6 +1968,11 @@ class AdmissionPaymentSetupView(APIView):
             admission.payment_type = raw_type
             update_fields.append('payment_type')
 
+        raw_icsi = data.get('icsi_fees_payment')
+        if raw_icsi and admission.icsi_fees_payment != raw_icsi:
+            admission.icsi_fees_payment = raw_icsi
+            update_fields.append('icsi_fees_payment')
+
         raw_amount = data.get('payment_amount') or data.get('amount') or data.get('amount_to_pay')
         if raw_amount is not None:
             from decimal import Decimal
@@ -2029,164 +2039,46 @@ class AdmissionPaymentSetupView(APIView):
 
 # ── POST /api/admissions/razorpay-webhook/ ─────────────────────────────────────
 
-import hmac
-import hashlib
-import json
-
 class RazorpayWebhookView(APIView):
-    
     def get_permissions(self):
         return [AllowAny()]
 
     def post(self, request):
-        webhook_secret = getattr(settings, 'RAZORPAY_WEBHOOK_SECRET', None)
-        if webhook_secret:
-            signature = request.headers.get('X-Razorpay-Signature', '')
-            payload_body = request.body.decode('utf-8')
-            expected_signature = hmac.new(
-                webhook_secret.encode('utf-8'),
-                payload_body.encode('utf-8'),
-                hashlib.sha256
-            ).hexdigest()
-            if not hmac.compare_digest(expected_signature, signature):
-                return Response({'success': False, 'message': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
-        
         try:
             payload = json.loads(request.body)
-            event = payload.get('event')
-            
-            if event == 'payment_link.paid':
-                payment_link = payload.get('payload', {}).get('payment_link', {}).get('entity', {})
-                reference_id = payment_link.get('reference_id', '')
-                if reference_id.startswith('ADM_'):
-                    admission_id = reference_id.split('_')[1]
-                    admission = Admission.objects.filter(id=admission_id).first()
-                    if admission and admission.status != 'enrolled':
-                        from django.utils import timezone
-                        amount_paid = payment_link.get('amount_paid', 0) / 100
-                        payment_details = payload.get('payload', {}).get('payment', {}).get('entity', {})
-                        transaction_id = payment_details.get('id', '') or payment_link.get('id', '')
-                        
-                        admission.transaction_id = transaction_id
-                        admission.razorpay_payment_id = transaction_id
-                        admission.payment_note = f"Paid via Razorpay: {payment_link.get('id')}"
-                        admission.payment_submitted_at = timezone.now()
-                        admission.payment_amount = amount_paid
-                        admission.save(update_fields=[
-                            'transaction_id', 'razorpay_payment_id', 'payment_note',
-                            'payment_submitted_at', 'payment_amount', 'updated_at'
-                        ])
-                        
-                        # Auto-enroll student directly — Razorpay payment is directly deposited into bank, no approval needed
-                        from .utils import AdmissionService
-                        enroll_note = f"Payment auto-verified directly via Razorpay (no approval needed). Transaction ID: {transaction_id}"
-                        AdmissionService.update_status(
-                            admission=admission,
-                            new_status='enrolled',
-                            note=enroll_note,
-                            user=None,
-                        )
+            from fees.razorpay_service import (
+                process_payment_link_paid_event,
+                process_payment_link_cancelled_event,
+                process_refund_processed_event,
+                verify_webhook_signature,
+            )
 
-                        # Create Student profile
-                        from auth_user.models import User
-                        student_user = User.objects.filter(
-                            email__iexact=admission.email, role='student'
-                        ).first()
+            signature = request.headers.get('X-Razorpay-Signature', '')
+            if not verify_webhook_signature(request.body, signature):
+                return Response(
+                    {'success': False, 'message': 'Invalid signature.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-                        student = None
-                        if student_user:
-                            try:
-                                from students.utils import StudentService
-                                student = StudentService.create_from_admission(
-                                    admission=admission,
-                                    user=student_user,
-                                    acting_user=None,
-                                )
-                            except Exception as exc:
-                                logger.error(f"Failed to auto-create student profile for admission {admission.id}: {exc}")
+            event = payload.get('event', '')
+            if event in ('payment_link.paid', 'payment_link.partially_paid'):
+                result = process_payment_link_paid_event(payload)
+            elif event == 'refund.processed':
+                result = process_refund_processed_event(payload)
+            elif event in ('payment_link.cancelled', 'payment_link.expired'):
+                result = process_payment_link_cancelled_event(payload)
+            else:
+                return Response({'success': True})
 
-                        # Create or update verified Payment record linked to admission and student
-                        from fees.models import Payment
-                        from fees.services import send_payment_receipt
-
-                        payment = Payment.objects.filter(admission=admission).first()
-                        if not payment:
-                            payment = Payment.objects.create(
-                                admission=admission,
-                                student=student,
-                                amount=amount_paid,
-                                payment_mode='online',
-                                transaction_ref=transaction_id,
-                                status='verified',
-                                verified_at=timezone.now(),
-                                payment_date=timezone.now().date(),
-                                note=f"Auto-verified via Razorpay: {payment_link.get('id')}",
-                            )
-                        else:
-                            payment.amount = amount_paid
-                            if student:
-                                payment.student = student
-                            payment.payment_mode = 'online'
-                            payment.transaction_ref = transaction_id
-                            payment.status = 'verified'
-                            payment.verified_at = timezone.now()
-                            payment.payment_date = timezone.now().date()
-                            payment.note = f"Auto-verified via Razorpay: {payment_link.get('id')}"
-                            payment.save()
-
-                        # Dispatch official payment receipt
-                        try:
-                            send_payment_receipt(payment)
-                        except Exception as exc:
-                            logger.error(f"Failed to dispatch payment receipt for Razorpay payment {payment.id}: {exc}")
-
-                        # Update the existing payment_link_created entry to verified.
-                        # Only add a new payment_approved entry if no prior link entry exists.
-                        admission.update_payment_history_entry(
-                            match_event='payment_link_created',
-                            updates={
-                                'status': 'verified',
-                                'transaction_id': transaction_id,
-                                'razorpay_payment_id': transaction_id,
-                                'amount': float(amount_paid),
-                                'verified_by': 'Razorpay (Direct to Bank)',
-                                'verified_at': timezone.now().isoformat(),
-                                'approver_role': 'system_razorpay',
-                                'level': 'auto',
-                                'note': enroll_note,
-                            },
-                            fallback_event='payment_approved',
-                            fallback_data={
-                                'payment_choice': 'online',
-                                'amount': float(amount_paid),
-                                'transaction_id': transaction_id,
-                                'razorpay_payment_id': transaction_id,
-                                'status': 'verified',
-                                'level': 'auto',
-                                'approver_role': 'system_razorpay',
-                                'verified_by': 'Razorpay (Direct to Bank)',
-                                'verified_at': timezone.now().isoformat(),
-                                'date': timezone.now().date().isoformat(),
-                                'note': enroll_note,
-                            },
-                        )
-
-                        # Informational notification only (no manual approval required)
-                        try:
-                            from core.utils import notify_users_by_role
-                            notify_users_by_role(
-                                roles=['accountant', 'super_admin'],
-                                title='Admission Payment Received (Razorpay)',
-                                body=f"Online payment of ₹{amount_paid} received directly to bank for admission #{admission.id} ({admission.first_name} {admission.surname}). Student enrolled.",
-                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                                branch=admission.branch if getattr(admission, 'branch', None) else None,
-                            )
-                        except Exception as exc:
-                            logger.error(f"Failed to dispatch notification for admission {admission.id}: {exc}")
-
-                        logger.info(f"Admission {admission.id} auto-verified and enrolled successfully via Razorpay webhook.")
-            
+            if not result.get('success'):
+                logger.error(f"Razorpay webhook processing failed for {event}: {result.get('error')}")
+                return Response(
+                    {'success': False, 'message': result.get('error', 'Webhook processing failed.')},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
             return Response({'success': True})
-        except Exception as e:
-            logger.error(f"Razorpay webhook processing error: {e}")
+        except json.JSONDecodeError:
+            return Response({'success': False, 'message': 'Invalid JSON.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.error(f"Razorpay webhook processing error: {exc}")
             return Response({'success': False}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

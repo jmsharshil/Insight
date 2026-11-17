@@ -12,10 +12,12 @@ import hmac
 import hashlib
 import json
 import logging
+from decimal import Decimal
 
 import requests as http_requests
 from requests.auth import HTTPBasicAuth
 from django.conf import settings
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -284,11 +286,16 @@ def verify_webhook_signature(body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
-def send_admission_payment_notification(admission, amount_paid: float, rp_payment_id: str):
+def send_admission_payment_notification(
+    admission,
+    amount_paid: float,
+    rp_payment_id: str,
+    *,
+    is_partial: bool = False,
+):
     """
     Send payment confirmation email + WhatsApp to the student (and parent if available)
-    when a Razorpay payment_link.paid event is received for an Admission (ADM_ flow).
-    This is called before the student is fully enrolled — no Payment model object exists yet.
+    when a Razorpay payment event is received for an Admission (ADM_ flow).
     Generates an auto-PDF receipt using _reportlab_receipt_pdf and attaches it to both
     the email and the WhatsApp document message.
     """
@@ -309,6 +316,16 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
             f"{token_note}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ) if token_note else ""
+        payment_status = (
+            "Partial Payment Received — Remaining Payment Pending"
+            if is_partial
+            else "Payment Received — Enrolled"
+        )
+        enrollment_message = (
+            "Please complete the remaining payment to finish your enrollment."
+            if is_partial
+            else "Your enrollment is complete. Login credentials will be sent separately."
+        )
 
         subject = f"Payment Receipt – ₹{amount_paid:,.0f} | Insight Institute"
         text_body = (
@@ -318,10 +335,9 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
             f"Transaction ID : {rp_payment_id or 'N/A'}\n"
             f"Amount         : ₹{amount_paid:,.2f}\n"
             f"Date           : {receipt_date}\n"
-            f"Status         : Payment Received — Pending Enrollment Approval\n\n"
+            f"Status         : {payment_status}\n\n"
             f"Your official receipt is attached to this email. "
-            f"Our team will complete your enrollment shortly. "
-            f"You will receive your login credentials once approved."
+            f"{enrollment_message}"
             f"{token_notice_block}\n\n"
             f"Thank you,\nInsight Institute of Professional Studies"
         )
@@ -414,8 +430,7 @@ def send_admission_payment_notification(admission, amount_paid: float, rp_paymen
                     f"Receipt No    : {receipt_number}\n"
                     f"Transaction ID: {rp_payment_id or 'N/A'}\n"
                     f"Date          : {receipt_date}\n\n"
-                    f"Your enrollment is pending approval. "
-                    f"You will receive login credentials once approved."
+                    f"{enrollment_message}"
                     f"{wa_token_part}\n\n"
                     f"— Insight Institute of Professional Studies"
                 )
@@ -510,7 +525,8 @@ def process_payment_link_paid_event(payload: dict) -> dict:
         link_entity   = payload.get('payload', {}).get('payment_link', {}).get('entity', {})
         pay_entity    = payload.get('payload', {}).get('payment', {}).get('entity', {})
         reference_id  = link_entity.get('reference_id', '')
-        amount_paid   = link_entity.get('amount_paid', 0) / 100
+        amount_paid_paise = link_entity.get('amount_paid') or pay_entity.get('amount') or 0
+        amount_paid   = Decimal(str(amount_paid_paise)) / Decimal('100')
         rp_payment_id = pay_entity.get('id', '') or link_entity.get('id', '')
 
         # ── StudentFee flow ───────────────────────────────────────────────
@@ -573,128 +589,225 @@ def process_payment_link_paid_event(payload: dict) -> dict:
 
         # ── Admission flow ────────────────────────────────────────────────
         elif reference_id.startswith('ADM_'):
-            adm_id = reference_id.split('_')[1]
+            parts = reference_id.split('_', 2)
+            if len(parts) < 2 or not parts[1]:
+                return {"success": False, "error": f"Invalid admission reference_id: {reference_id}"}
+            adm_id = parts[1]
 
-            from onboarding.models import Admission, AdmissionStatusHistory
-
-            admission = Admission.objects.filter(id=adm_id).first()
-            if not admission:
-                return {"success": False, "error": f"Admission {adm_id} not found."}
-            if admission.status == 'enrolled':
-                return {"success": True, "processed": "ADM", "note": "Already enrolled."}
-
-            token_note = getattr(admission, 'token_payment_terms_note', None)
-            payment_note = f"Paid via Razorpay: {link_entity.get('id')}"
-            history_note = f"Payment auto-verified directly via Razorpay (no approval needed). Txn: {rp_payment_id}"
-            if token_note:
-                payment_note += f". {token_note}"
-                history_note += f". {token_note}"
-                if not admission.note:
-                    admission.note = token_note
-                else:
-                    admission.note = f"{admission.note}\n{token_note}"
-
-            admission.transaction_id       = rp_payment_id
-            admission.payment_note         = payment_note
-            admission.payment_submitted_at = timezone.now()
-            admission.payment_amount       = amount_paid
-            admission.razorpay_payment_id  = rp_payment_id
-            admission.save(update_fields=[
-                'transaction_id', 'payment_note', 'payment_submitted_at',
-                'payment_amount', 'razorpay_payment_id', 'updated_at', 'note',
-            ])
-
-            # Auto-enroll student directly — Razorpay payment is directly deposited into bank, no approval needed
-            from onboarding.utils import AdmissionService
-            AdmissionService.update_status(
-                admission=admission,
-                new_status='enrolled',
-                note=history_note,
-                user=None,
+            payment_amount_paise = pay_entity.get('amount')
+            transaction_amount = (
+                Decimal(str(payment_amount_paise)) / Decimal('100')
+                if payment_amount_paise is not None
+                else amount_paid
             )
+            if transaction_amount <= 0 or not pay_entity.get('id'):
+                return {
+                    "success": False,
+                    "error": "Razorpay admission event is missing a valid payment amount or payment ID.",
+                }
 
-            # Auto-create Student profile
+            from onboarding.models import Admission
+            from onboarding.utils import AdmissionService
             from auth_user.models import User as AuthUser
-            student_user = AuthUser.objects.filter(
-                email__iexact=admission.email, role='student'
-            ).first()
-
-            student = None
-            if student_user:
-                try:
-                    from students.utils import StudentService
-                    student = StudentService.create_from_admission(
-                        admission=admission,
-                        user=student_user,
-                        acting_user=None,
-                    )
-                except Exception as exc:
-                    logger.error(f"[Razorpay] StudentService.create_from_admission error for {adm_id}: {exc}")
-
-            # Create or update verified Payment record linked to admission and student
-            from .models import Payment
+            from students.models import Student
+            from students.utils import StudentService
+            from .models import Payment, StudentFee
             from .services import send_payment_receipt
+            from django.db.models import Sum
 
-            payment = Payment.objects.filter(admission=admission).first()
-            if not payment:
-                payment = Payment.objects.create(
+            event = payload.get('event')
+            is_partial = event == 'payment_link.partially_paid'
+            now = timezone.now()
+
+            with transaction.atomic():
+                admission = Admission.objects.select_for_update().filter(id=adm_id).first()
+                if not admission:
+                    return {"success": False, "error": f"Admission {adm_id} not found."}
+
+                existing_payment = Payment.objects.filter(
                     admission=admission,
-                    student=student,
-                    amount=amount_paid,
-                    payment_mode='online',
                     transaction_ref=rp_payment_id,
+                ).first()
+                is_new_transaction = existing_payment is None
+                previous_total = Payment.objects.filter(
+                    admission=admission,
                     status='verified',
-                    verified_at=timezone.now(),
-                    payment_date=timezone.now().date(),
-                    note=f"Auto-verified via Razorpay: {rp_payment_id}",
+                ).exclude(transaction_ref=rp_payment_id).aggregate(
+                    total=Sum('amount'),
+                )['total'] or Decimal('0')
+                cumulative_paid = max(previous_total + transaction_amount, amount_paid)
+
+                token_note = getattr(admission, 'token_payment_terms_note', None)
+                payment_note = f"Paid via Razorpay: {link_entity.get('id')}"
+                history_note = (
+                    f"Payment auto-verified directly via Razorpay (no approval needed). "
+                    f"Txn: {rp_payment_id}"
                 )
-            else:
-                payment.amount = amount_paid
-                if student:
-                    payment.student = student
-                payment.payment_mode = 'online'
-                payment.transaction_ref = rp_payment_id
-                payment.status = 'verified'
-                payment.verified_at = timezone.now()
-                payment.payment_date = timezone.now().date()
-                payment.note = f"Auto-verified via Razorpay: {rp_payment_id}"
-                payment.save()
+                if token_note:
+                    payment_note += f". {token_note}"
+                    history_note += f". {token_note}"
 
-            # Record in payment_history
-            admission.add_payment_history_entry('payment_approved', {
-                'payment_choice': 'online',
-                'amount': float(amount_paid),
-                'transaction_id': rp_payment_id,
-                'razorpay_payment_id': rp_payment_id,
-                'status': 'verified',
-                'level': 'auto',
-                'approver_role': 'system_razorpay',
-                'verified_by': 'Razorpay (Direct to Bank)',
-                'verified_at': timezone.now().isoformat(),
-                'date': timezone.now().date().isoformat(),
-                'note': history_note,
-            })
+                admission.transaction_id = rp_payment_id
+                admission.payment_note = payment_note
+                admission.payment_submitted_at = admission.payment_submitted_at or now
+                admission.payment_amount = cumulative_paid
+                admission.razorpay_payment_id = rp_payment_id
+                admission.save(update_fields=[
+                    'transaction_id', 'payment_note', 'payment_submitted_at', 'payment_amount',
+                    'razorpay_payment_id', 'updated_at',
+                ])
 
-            # Send official PDF payment receipt
-            try:
-                send_payment_receipt(payment)
-            except Exception as e:
-                logger.error(f"[Razorpay] Receipt dispatch failed: {e}")
+                student = Student.objects.filter(admission=admission).first()
+                payment = existing_payment
+                if not is_partial:
+                    if admission.status != 'enrolled':
+                        AdmissionService.update_status(
+                            admission=admission,
+                            new_status='enrolled',
+                            note=history_note,
+                            user=None,
+                        )
 
-            # Auto-send payment confirmation
-            try:
-                send_admission_payment_notification(admission, amount_paid, rp_payment_id)
-            except Exception as notify_err:
-                logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
+                    student_user = student.user if student else AuthUser.objects.filter(
+                        email__iexact=admission.email,
+                        role='student',
+                    ).first()
+                    if not student_user:
+                        AdmissionService._create_user_accounts(admission)
+                        student_user = AuthUser.objects.filter(
+                            email__iexact=admission.email,
+                            role='student',
+                        ).first()
+                    if not student_user:
+                        raise RuntimeError(
+                            f"Student login account could not be created for admission {adm_id}."
+                        )
 
-            # Route Transfer if configured
-            try:
-                if admission.bank_account and admission.bank_account.razorpay_account_id:
-                    transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
-            except Exception as e:
-                logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {e}")
+                    if not student:
+                        student = StudentService.create_from_admission(
+                            admission=admission,
+                            user=student_user,
+                            acting_user=None,
+                        )
 
-            logger.info(f"[Razorpay] Admission {adm_id} auto-verified and enrolled successfully.")
+                    if payment is None:
+                        payment = Payment.objects.filter(
+                            admission=admission,
+                            transaction_ref=rp_payment_id,
+                        ).first()
+
+                payment_created_here = payment is None
+                if payment_created_here:
+                    payment = Payment.objects.create(
+                        admission=admission,
+                        student=student,
+                        amount=transaction_amount,
+                        payment_mode='online',
+                        transaction_ref=rp_payment_id,
+                        status='verified',
+                        verified_at=now,
+                        payment_date=now.date(),
+                        note=f"Auto-verified via Razorpay: {rp_payment_id}",
+                    )
+                else:
+                    payment.student = student or payment.student
+                    payment.amount = transaction_amount
+                    payment.payment_mode = 'online'
+                    payment.status = 'verified'
+                    payment.verified_at = payment.verified_at or now
+                    payment.payment_date = now.date()
+                    payment.note = f"Auto-verified via Razorpay: {rp_payment_id}"
+                    payment.save()
+
+                if student and not payment.student_fee_id:
+                    student_fee = StudentFee.objects.filter(student=student).order_by('-created_at').first()
+                    if student_fee:
+                        payment.student_fee = student_fee
+                        payment.save(update_fields=['student_fee', 'updated_at'])
+
+                total_paid = Payment.objects.filter(
+                    admission=admission,
+                    status='verified',
+                ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+                admission.payment_amount = total_paid
+                admission.save(update_fields=['payment_amount', 'updated_at'])
+
+                history = list(admission.payment_history or [])
+                for entry in reversed(history):
+                    if (
+                        entry.get('event') == 'payment_link_created'
+                        and entry.get('razorpay_payment_link_id') == link_entity.get('id')
+                    ):
+                        entry.update({
+                            'status': 'partially_paid' if is_partial else 'paid',
+                            'amount_paid': float(total_paid),
+                            'last_payment_amount': float(transaction_amount),
+                        })
+                        break
+
+                payment_event = 'payment_received' if is_partial else 'payment_approved'
+                payment_history_entry = {
+                    'event': payment_event,
+                    'timestamp': now.isoformat(),
+                    'payment_choice': 'online',
+                    'amount': float(transaction_amount),
+                    'amount_paid': float(total_paid),
+                    'transaction_id': rp_payment_id,
+                    'razorpay_payment_id': rp_payment_id,
+                    'status': 'partially_paid' if is_partial else 'verified',
+                    'level': 'auto',
+                    'approver_role': 'system_razorpay',
+                    'verified_by': 'Razorpay (Direct to Bank)',
+                    'verified_at': now.isoformat(),
+                    'date': now.date().isoformat(),
+                    'note': history_note,
+                }
+                matching_entry = next(
+                    (
+                        entry for entry in reversed(history)
+                        if entry.get('transaction_id') == rp_payment_id
+                        or entry.get('razorpay_payment_id') == rp_payment_id
+                    ),
+                    None,
+                )
+                if matching_entry:
+                    matching_entry.update(payment_history_entry)
+                else:
+                    history.append(payment_history_entry)
+                admission.payment_history = history
+                admission.save(update_fields=['payment_history', 'updated_at'])
+
+            if is_new_transaction:
+                if payment_created_here:
+                    try:
+                        send_payment_receipt(payment)
+                    except Exception as exc:
+                        logger.error(f"[Razorpay] Receipt dispatch failed for {rp_payment_id}: {exc}")
+
+                try:
+                    send_admission_payment_notification(
+                        admission,
+                        float(transaction_amount),
+                        rp_payment_id,
+                        is_partial=is_partial,
+                    )
+                except Exception as notify_err:
+                    logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
+
+                try:
+                    if admission.bank_account and admission.bank_account.razorpay_account_id:
+                        transfer_payment_to_linked_account(
+                            rp_payment_id,
+                            transaction_amount,
+                            admission.bank_account.razorpay_account_id,
+                        )
+                except Exception as exc:
+                    logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {exc}")
+
+            logger.info(
+                f"[Razorpay] Admission {adm_id} payment {rp_payment_id} "
+                f"processed ({'partial' if is_partial else 'paid'})."
+            )
             return {"success": True, "processed": "ADM", "payment_id": str(payment.id)}
 
         return {"success": True, "processed": "unknown", "reference_id": reference_id}

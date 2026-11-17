@@ -84,11 +84,13 @@ The setup message includes:
 ## 6. Post-Payment Confirmation & Receipt
 When the student pays the token amount via Razorpay:
 1. **Webhook Event (`payment_link.paid`):**
-   - Marks the admission as `approval_pending`.
-   - Records the transaction ID and stores the remaining fee notice in `admission.payment_note`, `admission.note`, and the status history.
+   - Records the captured amount and transaction ID in the admission, verified `Payment`, and payment history.
+   - Enrolls the admission and creates the student profile; webhook retries can recover profile creation if it was incomplete.
 2. **Payment Receipt Email & WhatsApp:**
    - Automatically sends an official PDF receipt.
    - Highlights the 15-day remaining fee notice:
      > *"⚠️ Important Notice Regarding Remaining Fees: In 15 days you have to pay remaining fees (₹XX,XXX) otherwise it will be considered as Finance."*
 3. **API & Admin Visibility:**
    - Both `remaining_fees` and `token_payment_terms_note` are exposed in `AdmissionListSerializer` and `AdmissionDetailSerializer` for frontend display.
+
+For `payment_link.partially_paid`, each captured transaction is recorded, but enrollment waits until Razorpay reports `payment_link.paid`.

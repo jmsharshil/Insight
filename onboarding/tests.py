@@ -823,6 +823,153 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertIn(received_event['status'], ('paid', 'verified'))
         self.assertEqual(received_event['transaction_id'], 'pay_rzp_99999')
 
+    def test_razorpay_retries_recover_enrolled_admission_and_are_idempotent(self):
+        from fees.razorpay_service import process_payment_link_paid_event
+        from fees.models import Payment
+
+        admission = _make_admission(
+            email='razorpay_recovery@example.com',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            status='enrolled',
+        )
+        payload = {
+            'event': 'payment_link.paid',
+            'payload': {
+                'payment_link': {
+                    'entity': {
+                        'reference_id': f'ADM_{admission.id}_retry',
+                        'amount_paid': 4000000,
+                        'id': 'plink_recovery',
+                    }
+                },
+                'payment': {
+                    'entity': {'id': 'pay_rzp_recovery', 'amount': 4000000}
+                },
+            },
+        }
+
+        with (
+            patch('onboarding.utils.send_student_login_credentials'),
+            patch('onboarding.utils.send_parent_login_credentials'),
+            patch('fees.services.send_payment_receipt'),
+            patch('fees.razorpay_service.send_admission_payment_notification'),
+            patch('fees.razorpay_service.transfer_payment_to_linked_account'),
+        ):
+            first_result = process_payment_link_paid_event(payload)
+            retry_result = process_payment_link_paid_event(payload)
+
+        self.assertTrue(first_result['success'])
+        self.assertTrue(retry_result['success'])
+        admission.refresh_from_db()
+        student = Student.objects.get(admission=admission)
+        payment = Payment.objects.get(admission=admission, transaction_ref='pay_rzp_recovery')
+
+        self.assertEqual(admission.status, 'enrolled')
+        self.assertEqual(payment.student, student)
+        self.assertEqual(payment.amount, Decimal('40000'))
+        self.assertEqual(admission.payment_amount, Decimal('40000'))
+        self.assertEqual(
+            sum(
+                entry.get('transaction_id') == 'pay_rzp_recovery'
+                for entry in admission.payment_history
+            ),
+            1,
+        )
+
+    def test_razorpay_partial_and_final_captures_keep_actual_payment_amounts(self):
+        from fees.razorpay_service import process_payment_link_paid_event
+        from fees.models import Payment
+
+        admission = _make_admission(
+            email='razorpay_partial@example.com',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            status='payment_pending',
+            payment_history=[{
+                'event': 'payment_link_created',
+                'amount': 5000,
+                'razorpay_payment_link_id': 'plink_partial',
+                'status': 'pending',
+            }],
+        )
+
+        def make_payload(event, payment_id, cumulative_amount):
+            return {
+                'event': event,
+                'payload': {
+                    'payment_link': {
+                        'entity': {
+                            'reference_id': f'ADM_{admission.id}_partial',
+                            'amount_paid': cumulative_amount,
+                            'id': 'plink_partial',
+                        }
+                    },
+                    'payment': {
+                        'entity': {'id': payment_id, 'amount': 250000}
+                    },
+                },
+            }
+
+        with (
+            patch('onboarding.utils.send_student_login_credentials'),
+            patch('onboarding.utils.send_parent_login_credentials'),
+            patch('fees.services.send_payment_receipt'),
+            patch('fees.razorpay_service.send_admission_payment_notification'),
+            patch('fees.razorpay_service.transfer_payment_to_linked_account'),
+        ):
+            partial_result = process_payment_link_paid_event(
+                make_payload('payment_link.partially_paid', 'pay_rzp_partial', 250000)
+            )
+            admission.refresh_from_db()
+            self.assertEqual(admission.status, 'payment_pending')
+            self.assertFalse(Student.objects.filter(admission=admission).exists())
+            partial_entry = next(
+                entry for entry in admission.payment_history
+                if entry.get('transaction_id') == 'pay_rzp_partial'
+            )
+            self.assertEqual(partial_entry['amount'], 2500)
+            self.assertEqual(admission.payment_history[0]['status'], 'partially_paid')
+
+            paid_payload = make_payload('payment_link.paid', 'pay_rzp_final', 500000)
+            paid_result = process_payment_link_paid_event(paid_payload)
+            retry_result = process_payment_link_paid_event(paid_payload)
+
+        self.assertTrue(partial_result['success'])
+        self.assertTrue(paid_result['success'])
+        self.assertTrue(retry_result['success'])
+        admission.refresh_from_db()
+        self.assertEqual(admission.status, 'enrolled')
+        self.assertTrue(Student.objects.filter(admission=admission).exists())
+        self.assertEqual(admission.payment_amount, Decimal('5000'))
+        self.assertEqual(admission.payment_history[0]['status'], 'paid')
+        final_entry = next(
+            entry for entry in admission.payment_history
+            if entry.get('transaction_id') == 'pay_rzp_final'
+        )
+        self.assertEqual(final_entry['amount'], 2500)
+        self.assertEqual(final_entry['amount_paid'], 5000)
+        self.assertEqual(
+            list(
+                Payment.objects.filter(admission=admission)
+                .order_by('transaction_ref')
+                .values_list('transaction_ref', 'amount')
+            ),
+            [
+                ('pay_rzp_final', Decimal('2500')),
+                ('pay_rzp_partial', Decimal('2500')),
+            ],
+        )
+        self.assertEqual(
+            sum(
+                entry.get('transaction_id') == 'pay_rzp_final'
+                for entry in admission.payment_history
+            ),
+            1,
+        )
+
     def test_total_fees_and_remaining_fees_calculation(self):
         # 1. Full payment not yet paid
         admission = _make_admission(
@@ -847,6 +994,68 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         )
         self.assertEqual(float(admission_token.total_fees), 40000.0)
         self.assertEqual(float(admission_token.remaining_fees), 35000.0)  # 40000 - 5000 token
+
+    def test_icsi_payment_choice_sets_razorpay_amount_and_fee_totals(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        fee_structure = FeeStructure.objects.create(
+            name='ICSI Choice Test',
+            course=self.course,
+            level=self.level,
+            group_module='all',
+            institute_fees_all_modules=50000,
+            total_amount=50000,
+            icsi_registration_fees=5000,
+            is_active=True,
+        )
+        admission = _make_admission(
+            email='icsi_payment_choice@example.com',
+            fee_structure=fee_structure,
+            group_module='all',
+            payment_type='full_payment',
+            payment_choice='online',
+            icsi_fees_payment='pay_yourself',
+            status='form_pending',
+        )
+
+        with (
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={
+                    'success': True,
+                    'data': {'short_url': 'https://razorpay.test/icsi', 'id': 'plink_icsi'},
+                },
+            ) as mock_create_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        admission.refresh_from_db()
+        self.assertEqual(admission.total_fees, Decimal('45000'))
+        self.assertEqual(admission.payment_amount, Decimal('45000'))
+        self.assertEqual(mock_create_link.call_args.kwargs['amount'], Decimal('45000'))
+
+        student_user = User.objects.create_user(
+            username='icsi_payment_student',
+            email=admission.email,
+            password='test-password',
+            role='student',
+        )
+        from students.utils import StudentService
+        with patch('fees.services.send_payment_receipt'):
+            student = StudentService.create_from_admission(admission, student_user)
+        student_fee = StudentFee.objects.get(student=student)
+        self.assertEqual(student_fee.total_amount, Decimal('45000'))
+
+        institute_paid_admission = _make_admission(
+            email='icsi_through_institute@example.com',
+            fee_structure=fee_structure,
+            group_module='all',
+            icsi_fees_payment='pay_through_institute',
+        )
+        self.assertEqual(institute_paid_admission.total_fees, Decimal('50000'))
 
     def test_payment_history_token_fee_details(self):
         admission = _make_admission(

@@ -407,32 +407,100 @@ def create_razorpay_refund(payment_id, amount, reason=""):
     return None
 
 
-def get_module_fee(fee_structure, group_module):
+def get_icsi_fee(fee_structure):
+    """
+    Returns the total ICSI fee components (registration, exam, cseet/direct registration)
+    defined on the fee structure.
+    """
+    from decimal import Decimal
+    if not fee_structure:
+        return Decimal('0')
+    icsi = Decimal('0')
+    for attr in (
+        'icsi_registration_fees',
+        'icsi_exam_fees',
+        'icsi_registration_fees_via_cseet',
+        'icsi_registration_fees_direct',
+    ):
+        val = getattr(fee_structure, attr, None)
+        if val:
+            icsi += Decimal(str(val))
+    return icsi
+
+
+def is_icsi_pay_by_self(choice):
+    """
+    Returns True if the student's ICSI fee payment choice indicates they pay by self.
+    Matches 'pay_yourself', 'by_self', 'self', 'pay_by_self', 'yourself'.
+    """
+    if not choice:
+        return False
+    c = str(choice).strip().lower().replace('-', '_').replace(' ', '_')
+    return c in ('pay_yourself', 'by_self', 'self', 'pay_by_self', 'yourself')
+
+
+def is_icsi_pay_through_institute(choice):
+    """
+    Returns True if the student's ICSI fee payment choice indicates they pay through the institute.
+    Matches 'pay_through_institute', 'through_institute', 'institute'.
+    """
+    if not choice:
+        return False
+    c = str(choice).strip().lower().replace('-', '_').replace(' ', '_')
+    return c in ('pay_through_institute', 'through_institute', 'institute')
+
+
+def get_module_fee(fee_structure, group_module, icsi_fees_payment=None):
     """
     Resolves the fee component from the fee structure matching the student's group_module selection.
     Falls back to institute_fees_all_modules or total_amount if specific module fee is not set.
+    Adjusts payable amount based on icsi_fees_payment:
+      - If 'pay_yourself' / by self: ICSI fees are removed from the payable amount to IIPS.
+      - If 'pay_through_institute': ICSI fees are included in the payable amount to IIPS.
     """
     from decimal import Decimal
     if not fee_structure:
         return Decimal('0')
 
-    gm = (group_module or '').strip().lower()
-    if gm == 'module_1' and fee_structure.institute_fees_module_1:
-        return Decimal(str(fee_structure.institute_fees_module_1))
-    elif gm == 'module_2' and fee_structure.institute_fees_module_2:
-        return Decimal(str(fee_structure.institute_fees_module_2))
-    elif gm == 'module_3' and fee_structure.institute_fees_module_3:
-        return Decimal(str(fee_structure.institute_fees_module_3))
-    elif gm == 'module_4' and fee_structure.institute_fees_module_4:
-        return Decimal(str(fee_structure.institute_fees_module_4))
-    elif gm == 'module_5' and fee_structure.institute_fees_module_5:
-        return Decimal(str(fee_structure.institute_fees_module_5))
-    elif gm in ('all', 'both', 'full') and fee_structure.institute_fees_all_modules:
-        return Decimal(str(fee_structure.institute_fees_all_modules))
+    icsi_fee = get_icsi_fee(fee_structure)
+    by_self = is_icsi_pay_by_self(icsi_fees_payment)
+    through_inst = is_icsi_pay_through_institute(icsi_fees_payment)
 
-    if fee_structure.institute_fees_all_modules:
-        return Decimal(str(fee_structure.institute_fees_all_modules))
-    return Decimal(str(fee_structure.total_amount or 0))
+    gm = (group_module or '').strip().lower()
+    inst_fee = None
+    if gm == 'module_1' and getattr(fee_structure, 'institute_fees_module_1', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_module_1))
+    elif gm == 'module_2' and getattr(fee_structure, 'institute_fees_module_2', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_module_2))
+    elif gm == 'module_3' and getattr(fee_structure, 'institute_fees_module_3', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_module_3))
+    elif gm == 'module_4' and getattr(fee_structure, 'institute_fees_module_4', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_module_4))
+    elif gm == 'module_5' and getattr(fee_structure, 'institute_fees_module_5', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_module_5))
+    elif gm in ('all', 'both', 'full') and getattr(fee_structure, 'institute_fees_all_modules', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_all_modules))
+    elif getattr(fee_structure, 'institute_fees_all_modules', None):
+        inst_fee = Decimal(str(fee_structure.institute_fees_all_modules))
+
+    total_amount = Decimal(str(getattr(fee_structure, 'total_amount', 0) or 0))
+
+    if inst_fee is not None:
+        base_fee = inst_fee
+        if through_inst:
+            if total_amount > 0 and base_fee >= total_amount:
+                return base_fee
+            return base_fee + icsi_fee
+        elif by_self:
+            if total_amount > 0 and base_fee >= total_amount and icsi_fee > 0:
+                return max(Decimal('0'), base_fee - icsi_fee)
+            return base_fee
+        else:
+            return base_fee
+
+    if by_self and icsi_fee > 0:
+        return max(Decimal('0'), total_amount - icsi_fee)
+    return total_amount
 
 
 def sync_admission_payment(admission, request=None, force=False, new_payment=False):
@@ -466,7 +534,7 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
         if getattr(admission, 'fee_structure', None):
             fs = admission.fee_structure
             if admission.payment_type == 'full_payment':
-                pay_amount = get_module_fee(fs, admission.group_module)
+                pay_amount = get_module_fee(fs, admission.group_module, icsi_fees_payment=admission.icsi_fees_payment)
             else:
                 pay_amount = Decimal(str(admission.total_fees or 0))
         else:

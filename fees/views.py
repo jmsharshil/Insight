@@ -2206,15 +2206,22 @@ class RazorpayWebhookView(APIView):
         logger.info(f"Razorpay webhook received: {event}")
 
         if event in ('payment_link.paid', 'payment_link.partially_paid'):
-            process_payment_link_paid_event(payload)
+            result = process_payment_link_paid_event(payload)
 
         elif event == 'refund.processed':
-            process_refund_processed_event(payload)
+            result = process_refund_processed_event(payload)
             
         elif event in ('payment_link.cancelled', 'payment_link.expired'):
-            process_payment_link_cancelled_event(payload)
+            result = process_payment_link_cancelled_event(payload)
+        else:
+            return Response({'success': True})
 
-        # Always return 200 so Razorpay doesn't retry indefinitely
+        if not result.get('success'):
+            logger.error(f"Razorpay webhook processing failed for {event}: {result.get('error')}")
+            return Response(
+                {'success': False, 'message': result.get('error', 'Webhook processing failed.')},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response({'success': True})
 
 

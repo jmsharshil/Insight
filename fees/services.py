@@ -63,7 +63,7 @@ def create_student_fee(student, acting_user=None):
         student=student,
         fee_structure=fs,
         defaults={
-            'total_amount': fs.total_amount,
+            'total_amount': admission.total_fees if (admission and getattr(admission, 'total_fees', None) and admission.total_fees > Decimal('0')) else fs.total_amount,
             'discount': Decimal('0'),
             'amount_paid': Decimal('0'),
             'status': 'approval_pending',
