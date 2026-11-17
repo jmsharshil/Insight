@@ -271,6 +271,53 @@ def _get_module_fee(fee_structure, group_module, icsi_fees_payment=None):
     return get_module_fee(fee_structure, group_module, icsi_fees_payment=icsi_fees_payment)
 
 
+def _configured_payment_amount_error(admission):
+    from decimal import Decimal
+
+    if admission.payment_type not in ('token', 'full_payment'):
+        return None
+
+    fee_structure = getattr(admission, 'fee_structure', None)
+    if not fee_structure:
+        return 'An active fee structure is required for token or full payment.'
+
+    amount = (
+        fee_structure.token_amount
+        if admission.payment_type == 'token'
+        else fee_structure.total_amount
+    )
+    if not amount or Decimal(str(amount)) <= 0:
+        field = 'token_amount' if admission.payment_type == 'token' else 'total_amount'
+        return f'The selected fee structure must have a positive {field}.'
+    return None
+
+
+def _cancel_admission_payment_link(admission):
+    link_id = admission.razorpay_payment_link_id
+    if not link_id:
+        raise RuntimeError('Cannot replace the existing Razorpay link because its link ID is missing.')
+
+    from fees.razorpay_service import cancel_payment_link
+    result = cancel_payment_link(link_id)
+    if not result.get('success'):
+        raise RuntimeError(
+            f"Could not cancel the old Razorpay link {link_id}: "
+            f"{result.get('error', 'Unknown cancellation error.')}"
+        )
+
+    history = list(admission.payment_history or [])
+    for entry in reversed(history):
+        if entry.get('razorpay_payment_link_id') == link_id:
+            entry['status'] = 'cancelled'
+            break
+    admission.razorpay_payment_link = None
+    admission.razorpay_payment_link_id = None
+    admission.payment_history = history
+    admission.save(update_fields=[
+        'razorpay_payment_link', 'razorpay_payment_link_id', 'payment_history', 'updated_at',
+    ])
+
+
 def _setup_payment_bank_and_notify(admission):
     """Extracted common logic (removes duplication between ListView and DetailView).
     Assigns threshold-aware bank, creates status history, and sends payment email.
@@ -281,6 +328,15 @@ def _setup_payment_bank_and_notify(admission):
     from fees.razorpay_service import create_payment_link
 
     from decimal import Decimal
+    fs = getattr(admission, 'fee_structure', None)
+    amount_error = _configured_payment_amount_error(admission)
+    if amount_error:
+        if admission.razorpay_payment_link or admission.razorpay_payment_link_id:
+            _cancel_admission_payment_link(admission)
+        admission.payment_amount = None
+        admission.save(update_fields=['payment_amount', 'updated_at'])
+        raise ValueError(amount_error)
+
     payment_amount = _get_bank_selection_amount(admission)
 
     # ── Determine amount_to_pay from fee structure ────────────────────────────
@@ -291,7 +347,6 @@ def _setup_payment_bank_and_notify(admission):
     #   4. fee_structure + payment_type unset → if payment_amount set use that, else module/total fee
     #   5. No fee_structure but payment_amount > 0 → use payment_amount
     #   6. Fallback to hard-coded defaults by course (never 1 Rs)
-    fs = getattr(admission, 'fee_structure', None)
     total_module_fee = _get_module_fee(fs, admission.group_module, icsi_fees_payment=getattr(admission, 'icsi_fees_payment', None)) if fs else Decimal('0')
     token_val = Decimal(str(fs.token_amount or 0)) if fs else Decimal('0')
     curr_pmt_amt = Decimal(str(admission.payment_amount or 0))
@@ -357,14 +412,12 @@ def _setup_payment_bank_and_notify(admission):
                 except Exception:
                     pass
                 break
-        if existing_amount is not None and (existing_amount <= Decimal('1') or existing_amount != amount_to_pay):
+        if existing_amount is None or existing_amount <= Decimal('1') or existing_amount != amount_to_pay:
             logger.info(
                 f"Admission {admission.id}: stale Razorpay link detected "
                 f"(was {existing_amount}, now {amount_to_pay}). Regenerating link."
             )
-            admission.razorpay_payment_link = None
-            admission.razorpay_payment_link_id = None
-            admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+            _cancel_admission_payment_link(admission)
 
     assigned_bank = getattr(admission, 'bank_account', None)
     if not assigned_bank:
@@ -1037,6 +1090,15 @@ class AdmissionDetailView(APIView):
         if (is_student_form_submit and admission.status == 'form_pending') or (
             payment_updated and admission.status in ('form_pending', 'payment_pending')
         ):
+            amount_error = _configured_payment_amount_error(admission)
+            if amount_error:
+                if admission.payment_amount is not None:
+                    admission.payment_amount = None
+                    admission.save(update_fields=['payment_amount', 'updated_at'])
+                return Response(
+                    {'success': False, 'message': amount_error},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             _setup_payment_bank_and_notify(admission)
 
         try:
@@ -1195,6 +1257,15 @@ class AdmissionUpdateView(APIView):
                     admission.payment_amount = new_amount
                     admission.save(update_fields=['payment_amount', 'updated_at'])
             if fee_or_type_updated and admission.status in ('form_pending', 'payment_pending'):
+                amount_error = _configured_payment_amount_error(admission)
+                if amount_error:
+                    if admission.payment_amount is not None:
+                        admission.payment_amount = None
+                        admission.save(update_fields=['payment_amount', 'updated_at'])
+                    return Response(
+                        {'success': False, 'message': amount_error},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 _setup_payment_bank_and_notify(admission)
         except Exception as e:
             logger.error(f"Error recalculating payment_amount in AdmissionUpdateView.patch: {e}")
@@ -1701,6 +1772,13 @@ class AdmissionPaymentSubmitView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        amount_error = _configured_payment_amount_error(admission)
+        if amount_error:
+            return Response(
+                {'success': False, 'message': amount_error},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         from .serializers import PaymentSubmitSerializer
         serializer = PaymentSubmitSerializer(data=request.data)
         if not serializer.is_valid():
@@ -1981,7 +2059,8 @@ class AdmissionPaymentSetupView(APIView):
             update_fields.append('icsi_fees_payment')
 
         raw_amount = data.get('payment_amount') or data.get('amount') or data.get('amount_to_pay')
-        if raw_amount is not None:
+        effective_payment_type = raw_type or admission.payment_type
+        if raw_amount is not None and effective_payment_type not in ('token', 'full_payment'):
             from decimal import Decimal
             try:
                 admission.payment_amount = Decimal(str(raw_amount))
@@ -2003,6 +2082,24 @@ class AdmissionPaymentSetupView(APIView):
             _assign_fee_structure(admission)
         except Exception as e:
             logger.error(f'AdmissionPaymentSetupView: fee structure error for {admission_id}: {e}')
+
+        amount_error = _configured_payment_amount_error(admission)
+        if amount_error:
+            try:
+                if admission.razorpay_payment_link or admission.razorpay_payment_link_id:
+                    _cancel_admission_payment_link(admission)
+                admission.payment_amount = None
+                admission.save(update_fields=['payment_amount', 'updated_at'])
+            except Exception as exc:
+                logger.error(f'AdmissionPaymentSetupView: invalid fee payment cleanup failed for {admission_id}: {exc}')
+                return Response(
+                    {'success': False, 'message': str(exc)},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            return Response(
+                {'success': False, 'message': amount_error},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # ── Bank assignment + Razorpay link + WhatsApp ────────────────────────
         try:

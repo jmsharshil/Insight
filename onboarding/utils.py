@@ -525,10 +525,25 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
     # Determine amount
     pay_amount = admission.payment_amount
     fee_structure = getattr(admission, 'fee_structure', None)
-    if fee_structure and admission.payment_type == 'token':
-        pay_amount = Decimal(str(fee_structure.token_amount or 0))
-    elif fee_structure and admission.payment_type == 'full_payment':
-        pay_amount = Decimal(str(fee_structure.total_amount or 0))
+    if admission.payment_type in ('token', 'full_payment'):
+        if not fee_structure:
+            logger.error(
+                f"Cannot sync {admission.payment_type} payment for admission {admission.id}: "
+                "fee structure is missing."
+            )
+            return None
+        configured_amount = (
+            fee_structure.token_amount
+            if admission.payment_type == 'token'
+            else fee_structure.total_amount
+        )
+        pay_amount = Decimal(str(configured_amount or 0))
+        if pay_amount <= 0:
+            logger.error(
+                f"Cannot sync {admission.payment_type} payment for admission {admission.id}: "
+                "the configured fee amount must be positive."
+            )
+            return None
     elif not pay_amount or Decimal(str(pay_amount)) <= 0:
         if fee_structure:
             pay_amount = Decimal(str(admission.total_fees or 0))

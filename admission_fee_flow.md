@@ -50,7 +50,7 @@ When the backend receives the form submission, the system automatically runs the
 - The matching fee structure is saved directly to the `Admission` record.
 
 > [!IMPORTANT]
-> If a student selects a combination of Course + Attempt + Year for which no active fee structure exists, the admission record will still be saved, but no fee structure will be attached, and the Razorpay link will fallback to the default base fees.
+> If a student selects a combination of Course + Attempt + Year for which no active fee structure exists, the admission record may still be saved, but token/full-payment setup will return an error and no guessed-amount Razorpay link will be created.
 
 ## 4. Razorpay Link Generation
 After the fee structure is linked, the system computes the amount the student needs to pay.
@@ -85,7 +85,7 @@ The setup message includes:
 When the student pays the token amount via Razorpay:
 1. **Webhook Event (`payment_link.paid`):**
    - Automatically verifies the captured amount and transaction ID in the admission, `Payment`, and payment history; Razorpay payments do not require manual approval.
-   - Enrolls the admission and creates the student profile; account/profile creation failures do not undo payment verification.
+   - Enrolls the admission and creates the student profile; payment verification is retained if profile creation fails, and the webhook returns an error so Razorpay can retry the student setup.
 2. **Payment Receipt Email & WhatsApp:**
    - Automatically sends an official PDF receipt.
    - Highlights the 15-day remaining fee notice:

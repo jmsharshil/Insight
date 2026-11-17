@@ -355,6 +355,33 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         admission.refresh_from_db()
         self.assertEqual(admission.payment_amount, Decimal('5000'))
 
+    def test_token_setup_rejects_default_amount_without_fee_structure(self):
+        from onboarding.views import AdmissionPaymentSetupView
+        from rest_framework.test import APIRequestFactory
+
+        admission = _make_admission(
+            email='token_without_fee_structure@example.com',
+            payment_type='token',
+            payment_amount=Decimal('1000'),
+            status='form_pending',
+        )
+        request = APIRequestFactory().post(
+            f'/api/admissions/{admission.id}/setup/',
+            {'payment_type': 'token', 'payment_amount': '1000'},
+            format='json',
+        )
+
+        with (
+            patch('onboarding.views._assign_fee_structure'),
+            patch('onboarding.views._setup_payment_bank_and_notify') as setup_payment,
+        ):
+            response = AdmissionPaymentSetupView.as_view()(request, admission_id=admission.id)
+
+        self.assertEqual(response.status_code, 400)
+        setup_payment.assert_not_called()
+        admission.refresh_from_db()
+        self.assertIsNone(admission.payment_amount)
+
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):
     """
@@ -641,6 +668,43 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         self.assertEqual(mock_create_link.call_args.kwargs['amount'], Decimal('45000'))
         admission.refresh_from_db()
         self.assertEqual(admission.payment_amount, Decimal('45000'))
+
+    def test_stale_token_link_is_cancelled_and_replaced_at_token_amount(self):
+        from onboarding.views import _setup_payment_bank_and_notify
+
+        admission = _make_admission(
+            email='stale_token_link@example.com',
+            fee_structure=self.fee_structure,
+            payment_type='token',
+            payment_choice='online',
+            payment_amount=Decimal('1000'),
+            status='form_pending',
+            razorpay_payment_link='https://razorpay.test/old',
+            razorpay_payment_link_id='plink_old_token',
+            payment_history=[{
+                'event': 'payment_link_created',
+                'amount': 1000,
+                'razorpay_payment_link_id': 'plink_old_token',
+                'status': 'pending',
+            }],
+        )
+
+        with (
+            patch('fees.razorpay_service.cancel_payment_link', return_value={'success': True}) as cancel_link,
+            patch('fees.utils.select_bank_accounts_for_payment', return_value=[self.bank]),
+            patch(
+                'fees.razorpay_service.create_payment_link',
+                return_value={'success': True, 'data': {'short_url': 'https://razorpay.test/token', 'id': 'plink_new_token'}},
+            ) as create_link,
+            patch('core.sender.send_email'),
+            patch('chat.notifications.send_whatsapp_with_fallback'),
+        ):
+            _setup_payment_bank_and_notify(admission)
+
+        cancel_link.assert_called_once_with('plink_old_token')
+        self.assertEqual(create_link.call_args.kwargs['amount'], Decimal('5000'))
+        admission.refresh_from_db()
+        self.assertEqual(admission.razorpay_payment_link_id, 'plink_new_token')
 
     def test_online_link_amount_alone_does_not_create_pending_payment(self):
         from fees.models import Payment
@@ -982,9 +1046,11 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
         ):
             result = process_payment_link_paid_event(payload)
 
-        self.assertTrue(result['success'])
+        self.assertFalse(result['success'])
+        self.assertIn('account could not be created', result['error'])
         payment = Payment.objects.get(admission=admission, transaction_ref='pay_rzp_student_failure')
         self.assertEqual(payment.status, 'verified')
+        self.assertFalse(Student.objects.filter(admission=admission).exists())
 
     def test_razorpay_partial_and_final_captures_keep_actual_payment_amounts(self):
         from fees.razorpay_service import process_payment_link_paid_event

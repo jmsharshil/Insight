@@ -618,6 +618,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             event = payload.get('event')
             is_partial = event == 'payment_link.partially_paid'
             now = timezone.now()
+            profile_creation_error = None
 
             with transaction.atomic():
                 admission = Admission.objects.select_for_update().filter(id=adm_id).first()
@@ -691,9 +692,8 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                             role='student',
                         ).first()
                     if not student_user:
-                        logger.error(
-                            f"[Razorpay] No student account available for admission {adm_id}; "
-                            "recording the captured payment without a student link."
+                        profile_creation_error = (
+                            f"Student login account could not be created for admission {adm_id}."
                         )
 
                     if not student:
@@ -708,6 +708,12 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                                 logger.error(
                                     f"[Razorpay] Student profile creation failed for admission {adm_id}: {exc}"
                                 )
+                                profile_creation_error = str(exc)
+                        student = Student.objects.filter(admission=admission).first()
+                    if not student and not profile_creation_error:
+                        profile_creation_error = (
+                            f"Student profile was not created for admission {adm_id}."
+                        )
 
                     if payment is None:
                         payment = Payment.objects.filter(
@@ -796,6 +802,13 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                     history.append(payment_history_entry)
                 admission.payment_history = history
                 admission.save(update_fields=['payment_history', 'updated_at'])
+
+            if profile_creation_error:
+                logger.error(
+                    f"[Razorpay] Admission {adm_id} payment is verified, but student setup failed: "
+                    f"{profile_creation_error}"
+                )
+                return {"success": False, "error": profile_creation_error}
 
             if is_new_transaction:
                 if payment:
