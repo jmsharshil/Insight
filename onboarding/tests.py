@@ -1042,6 +1042,58 @@ class AdmissionPaymentChoiceAndHistoryTests(TestCase):
             1,
         )
 
+    def test_razorpay_paid_event_creates_student_with_optional_admission_fields_missing(self):
+        from fees.razorpay_service import process_payment_link_paid_event
+
+        admission = _make_admission(
+            email='razorpay_optional_fields@example.com',
+            fee_structure=self.fee_structure,
+            payment_type='full_payment',
+            payment_choice='online',
+            status='payment_pending',
+            surname=None,
+            father_name=None,
+            mother_name=None,
+            category=None,
+            phone_father=None,
+            street=None,
+            city=None,
+            state=None,
+            pincode=None,
+        )
+        payload = {
+            'event': 'payment_link.paid',
+            'payload': {
+                'payment_link': {
+                    'entity': {
+                        'reference_id': f'ADM_{admission.id}_optional_fields',
+                        'amount_paid': 4000000,
+                        'id': 'plink_optional_fields',
+                    }
+                },
+                'payment': {
+                    'entity': {'id': 'pay_rzp_optional_fields', 'amount': 4000000}
+                },
+            },
+        }
+
+        with (
+            patch('onboarding.utils.send_student_login_credentials'),
+            patch('onboarding.utils.send_parent_login_credentials'),
+            patch('fees.services.send_payment_receipt'),
+            patch('fees.razorpay_service.send_admission_payment_notification'),
+            patch('fees.razorpay_service.transfer_payment_to_linked_account'),
+        ):
+            result = process_payment_link_paid_event(payload)
+
+        self.assertTrue(result['success'], result.get('error'))
+        student = Student.objects.get(admission=admission)
+        self.assertEqual(student.dob, admission.dob)
+        self.assertEqual(student.surname, '')
+        self.assertEqual(student.father_name, '')
+        self.assertEqual(student.category, '')
+        self.assertEqual(student.phone_father, admission.phone_student)
+
     def test_razorpay_payment_stays_verified_if_student_setup_fails(self):
         from fees.models import Payment
         from fees.razorpay_service import process_payment_link_paid_event

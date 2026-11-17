@@ -41,6 +41,11 @@ class StudentService:
             )
             return existing
 
+        if admission.dob is None:
+            raise ValueError(
+                f"Cannot create student profile for admission {admission.id}: date of birth is required."
+            )
+
         student = Student(
             admission           = admission,
             user                = user,
@@ -48,36 +53,42 @@ class StudentService:
             assigned_counsellor = admission.assigned_counsellor,
 
             # Personal
-            first_name  = admission.first_name,
-            surname     = admission.surname,
-            father_name = admission.father_name,
-            mother_name = admission.mother_name,
+            first_name  = admission.first_name or user.name or '',
+            surname     = admission.surname or '',
+            father_name = admission.father_name or '',
+            mother_name = admission.mother_name or '',
             dob         = admission.dob,
             gender      = admission.gender or '',
-            category    = admission.category,
+            category    = admission.category or '',
 
             # Contact
-            email           = admission.email,
-            email_parent    = admission.email_parent,
-            phone_student   = admission.phone_student,
-            phone_student_2 = admission.phone_student_2,
-            phone_father    = admission.phone_father,
-            phone_father_2  = admission.phone_father_2,
+            email           = admission.email or user.email or '',
+            email_parent    = admission.email_parent or '',
+            phone_student   = admission.phone_student or user.phone or '',
+            phone_student_2 = admission.phone_student_2 or '',
+            phone_father    = (
+                admission.phone_father
+                or admission.phone_father_2
+                or admission.phone_student_2
+                or admission.phone_student
+                or ''
+            ),
+            phone_father_2  = admission.phone_father_2 or '',
 
             # Address
-            street    = admission.street,
-            apartment = admission.apartment,
-            city      = admission.city,
-            state     = admission.state,
-            pincode   = admission.pincode,
-            country   = admission.country,
+            street    = admission.street or '',
+            apartment = admission.apartment or '',
+            city      = admission.city or '',
+            state     = admission.state or '',
+            pincode   = admission.pincode or '',
+            country   = admission.country or 'India',
 
             # Academic
-            course        = admission.course,
-            group_module  = admission.group_module,
-            batch_attempt = admission.batch_attempt,
-            qualification = admission.qualification,
-            location      = admission.location,
+            course        = admission.course or '',
+            group_module  = admission.group_module or '',
+            batch_attempt = admission.batch_attempt or '',
+            qualification = admission.qualification or '',
+            location      = admission.location or '',
 
             status      = 'active',
             enrolled_at = timezone.now(),
