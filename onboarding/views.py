@@ -300,32 +300,51 @@ def _setup_payment_bank_and_notify(admission):
 
     # ── Determine amount_to_pay from fee structure ────────────────────────────
     # Priority order:
-    #   1. fee_structure + payment_type = 'token'  → token_amount
+    #   1. fee_structure + payment_type = 'token'  → token_amount (or payment_amount)
     #   2. fee_structure + payment_type = 'full_payment' → module/total fee
-    #   3. fee_structure + payment_type unset → module/total fee (treat as full)
-    #   4. No fee_structure but payment_amount > 0 → use payment_amount
-    #   5. Fallback to hard-coded defaults by course (never 1 Rs)
+    #   3. fee_structure + payment_type = 'finance' → token / down payment (or 0)
+    #   4. fee_structure + payment_type unset → if payment_amount set use that, else module/total fee
+    #   5. No fee_structure but payment_amount > 0 → use payment_amount
+    #   6. Fallback to hard-coded defaults by course (never 1 Rs)
     fs = getattr(admission, 'fee_structure', None)
+    total_module_fee = _get_module_fee(fs, admission.group_module) if fs else Decimal('0')
+    token_val = Decimal(str(fs.token_amount or 0)) if fs else Decimal('0')
+    curr_pmt_amt = Decimal(str(admission.payment_amount or 0))
+
     if fs:
         if admission.payment_type == 'token':
-            amount_to_pay = Decimal(str(fs.token_amount or 0))
-            # If token_amount is 0, fall back to module fee so we never send 0
-            if amount_to_pay <= 0:
-                amount_to_pay = _get_module_fee(fs, admission.group_module)
+            if curr_pmt_amt > 0 and (total_module_fee <= 0 or curr_pmt_amt < total_module_fee):
+                amount_to_pay = curr_pmt_amt
+            elif token_val > 0:
+                amount_to_pay = token_val
+            elif total_module_fee > Decimal('5000'):
+                amount_to_pay = Decimal('5000')
+            else:
+                amount_to_pay = total_module_fee
         elif admission.payment_type == 'full_payment':
-            amount_to_pay = _get_module_fee(fs, admission.group_module)
+            amount_to_pay = total_module_fee
+        elif admission.payment_type == 'finance':
+            if curr_pmt_amt > 0 and (total_module_fee <= 0 or curr_pmt_amt < total_module_fee):
+                amount_to_pay = curr_pmt_amt
+            elif token_val > 0:
+                amount_to_pay = token_val
+            else:
+                amount_to_pay = Decimal('0')
         else:
-            # payment_type not set — treat as full payment from fee structure
-            amount_to_pay = _get_module_fee(fs, admission.group_module)
-            # If module fee resolves to 0 but payment_amount is set, prefer that
-            if amount_to_pay <= 0 and Decimal(str(payment_amount)) > 0:
-                amount_to_pay = Decimal(str(payment_amount))
+            # payment_type not set
+            if curr_pmt_amt > 0:
+                amount_to_pay = curr_pmt_amt
+            else:
+                amount_to_pay = total_module_fee
     else:
-        amount_to_pay = Decimal(str(payment_amount))
+        if curr_pmt_amt > 0:
+            amount_to_pay = curr_pmt_amt
+        else:
+            amount_to_pay = Decimal(str(payment_amount))
 
     # Fallback to hard-coded defaults if the resulting amount is still zero/negative.
     # Normalize course key so we never fall through to 1 Rs.
-    if amount_to_pay <= 0:
+    if amount_to_pay <= 0 and admission.payment_type != 'finance':
         default_course_fees = {
             'cseet': Decimal('1000'),
             'cs_executive': Decimal('2000'),
@@ -345,11 +364,12 @@ def _setup_payment_bank_and_notify(admission):
             )
             amount_to_pay = Decimal('1000')
 
-    # ── Auto-correct stale 1-Rs Razorpay link ────────────────────────────────
-    # If a Razorpay link was previously generated with 1 Rs (a bug) and the
-    # correct fee is higher, reset the link so it will be regenerated below.
+    # ── Auto-correct stale or mismatched Razorpay link ────────────────────────
+    # If a Razorpay link was previously generated with an amount different from
+    # amount_to_pay (e.g. was 1 Rs, or was full fee and student changed to token),
+    # reset the link so a fresh link with correct amount is created.
     existing_rp_link = admission.razorpay_payment_link or ''
-    if existing_rp_link and amount_to_pay > Decimal('1'):
+    if existing_rp_link and amount_to_pay > 0:
         existing_amount = None
         for entry in (admission.payment_history or []):
             if entry.get('event') == 'payment_link_created':
@@ -358,9 +378,9 @@ def _setup_payment_bank_and_notify(admission):
                 except Exception:
                     pass
                 break
-        if existing_amount is not None and existing_amount <= Decimal('1'):
+        if existing_amount is not None and (existing_amount <= Decimal('1') or existing_amount != amount_to_pay):
             logger.info(
-                f"Admission {admission.id}: stale 1-Rs Razorpay link detected "
+                f"Admission {admission.id}: stale Razorpay link detected "
                 f"(was {existing_amount}, now {amount_to_pay}). Regenerating link."
             )
             admission.razorpay_payment_link = None
@@ -393,12 +413,15 @@ def _setup_payment_bank_and_notify(admission):
 
     print("Amount to pay..........", amount_to_pay)
 
-    # Persist the resolved payable amount.  Admissions created before this fix
-    # could otherwise remain at 0 and later payment submissions/history records
-    # would all inherit that value.
-    if amount_to_pay > 0 and Decimal(str(admission.payment_amount or 0)) <= 0:
-        admission.payment_amount = amount_to_pay
-        admission.save(update_fields=['payment_amount', 'updated_at'])
+    # Persist the resolved payable amount.
+    if amount_to_pay > 0:
+        if (
+            not admission.payment_amount
+            or Decimal(str(admission.payment_amount)) <= 0
+            or (admission.payment_type == 'token' and Decimal(str(admission.payment_amount)) != amount_to_pay)
+        ):
+            admission.payment_amount = amount_to_pay
+            admission.save(update_fields=['payment_amount', 'updated_at'])
 
     # Determine whether payment is online or offline:
     # If user selected 'cash' or 'cheque', do NOT generate Razorpay link.
@@ -458,18 +481,28 @@ def _setup_payment_bank_and_notify(admission):
                     error_detail = response.get('error') or response.get('detail', response)
                     print(f"Failed to create Razorpay link for ADM_{admission.id} (amount={amount_to_pay}): {error_detail}")
 
-            # Record payment link generation event in payment_history if not present
+            # Record payment link generation event in payment_history
             if razorpay_link_url:
-                existing_events = [e.get('event') for e in (admission.payment_history or [])]
-                if 'payment_link_created' not in existing_events:
-                    admission.add_payment_history_entry('payment_link_created', {
-                        'payment_choice': 'online',
-                        'amount': float(amount_to_pay),
-                        'razorpay_payment_link': razorpay_link_url,
-                        'razorpay_payment_link_id': rp_link_id,
-                        'status': 'pending',
-                    })
-                    print(f"Payment history entry 'payment_link_created' added for admission {admission.id}")
+                admission.update_payment_history_entry('payment_link_created', {
+                    'payment_choice': 'online',
+                    'amount': float(amount_to_pay),
+                    'total_fees': float(admission.total_fees or 0),
+                    'token_amount': float(getattr(admission.fee_structure, 'token_amount', 0) or 0),
+                    'remaining_fees': float(admission.remaining_fees or 0),
+                    'razorpay_payment_link': razorpay_link_url,
+                    'razorpay_payment_link_id': rp_link_id,
+                    'status': 'pending',
+                }, fallback_event='payment_link_created', fallback_data={
+                    'payment_choice': 'online',
+                    'amount': float(amount_to_pay),
+                    'total_fees': float(admission.total_fees or 0),
+                    'token_amount': float(getattr(admission.fee_structure, 'token_amount', 0) or 0),
+                    'remaining_fees': float(admission.remaining_fees or 0),
+                    'razorpay_payment_link': razorpay_link_url,
+                    'razorpay_payment_link_id': rp_link_id,
+                    'status': 'pending',
+                })
+                print(f"Payment history entry 'payment_link_created' recorded for admission {admission.id}")
         except Exception as e:
             print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
     else:
@@ -1675,13 +1708,21 @@ class AdmissionPaymentSubmitView(APIView):
         admission.payment_submitted_at = timezone.now()
         submitted_amount = serializer.validated_data.get('payment_amount')
         if submitted_amount is None or Decimal(str(submitted_amount)) <= 0:
-            submitted_amount = admission.payment_amount
-        if submitted_amount is None or Decimal(str(submitted_amount)) <= 0:
-            if getattr(admission, 'fee_structure', None):
+            if admission.payment_type == 'token' and getattr(admission, 'fee_structure', None):
+                token_val = admission.fee_structure.token_amount or 0
+                if token_val > 0:
+                    submitted_amount = token_val
+                elif admission.payment_amount and Decimal(str(admission.payment_amount)) < admission.total_fees:
+                    submitted_amount = admission.payment_amount
+                elif admission.total_fees > Decimal('5000'):
+                    submitted_amount = Decimal('5000')
+                else:
+                    submitted_amount = admission.total_fees
+            elif admission.payment_amount and Decimal(str(admission.payment_amount)) > 0:
+                submitted_amount = admission.payment_amount
+            elif getattr(admission, 'fee_structure', None):
                 from .utils import get_module_fee
-                if admission.payment_type == 'token':
-                    submitted_amount = admission.fee_structure.token_amount or 0
-                elif admission.payment_type == 'full_payment':
+                if admission.payment_type == 'full_payment':
                     submitted_amount = get_module_fee(admission.fee_structure, admission.group_module)
                 else:
                     submitted_amount = admission.total_fees

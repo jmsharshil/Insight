@@ -80,7 +80,9 @@ class ExamListCreateView(APIView):
             try:
                 from students.models import Student
                 from batches.models import BatchStudent
-                sp = Student.objects.select_related('batch').get(user=user)
+                sp = Student.objects.select_related('batch').filter(user=user).order_by('-created_at').first()
+                if not sp:
+                    raise Student.DoesNotExist
                 # Support both direct batch_id and many-to-many via BatchStudent
                 if sp.batch_id:
                     qs = qs.filter(batch_id=sp.batch_id)
@@ -364,7 +366,9 @@ class QuestionView(APIView):
         if role == 'student':
             try:
                 from students.models import Student
-                sp = Student.objects.get(user=request.user)
+                sp = Student.objects.filter(user=request.user).order_by('-created_at').first()
+                if not sp:
+                    raise Student.DoesNotExist
                 # Only allow question fetch if student has an active session for THIS exam
                 active_sessions = ExamSession.objects.filter(exam=exam, student=sp)
                 if not active_sessions.exists():
@@ -743,7 +747,9 @@ class ExamStartView(APIView):
         try:
             from students.models import Student
             from batches.models import BatchStudent
-            student = Student.objects.get(user=request.user)
+            student = Student.objects.filter(user=request.user).order_by('-created_at').first()
+            if not student:
+                raise Student.DoesNotExist
             enrolled_batch_ids = list(BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True))
             if student.batch_id and student.batch_id not in enrolled_batch_ids:
                 enrolled_batch_ids.append(student.batch_id)

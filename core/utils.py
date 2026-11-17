@@ -46,7 +46,7 @@ def get_user_branch_id(user):
 
     try:
         from students.models import Student
-        student = Student.objects.only('branch_id').get(user=user)
+        student = Student.objects.only('branch_id').filter(user=user).first()
         if getattr(student, 'branch_id', None):
             return student.branch_id
     except Exception:
@@ -138,7 +138,7 @@ def get_student_profile(user):
     """
     try:
         from students.models import Student
-        return Student.objects.select_related('branch', 'batch').get(user=user)
+        return Student.objects.select_related('branch', 'batch').filter(user=user).order_by('-created_at').first()
     except Exception:
         return None
 

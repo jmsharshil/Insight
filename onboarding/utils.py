@@ -457,12 +457,15 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
 
     # Determine amount
     pay_amount = admission.payment_amount
-    if not pay_amount or Decimal(str(pay_amount)) <= 0:
+    if admission.payment_type == 'token' and getattr(admission, 'fee_structure', None):
+        t_amt = Decimal(str(admission.fee_structure.token_amount or 0))
+        if t_amt > 0:
+            if not pay_amount or Decimal(str(pay_amount)) <= 0 or Decimal(str(pay_amount)) >= Decimal(str(admission.total_fees or 0)):
+                pay_amount = t_amt
+    elif not pay_amount or Decimal(str(pay_amount)) <= 0:
         if getattr(admission, 'fee_structure', None):
             fs = admission.fee_structure
-            if admission.payment_type == 'token':
-                pay_amount = Decimal(str(fs.token_amount or 0))
-            elif admission.payment_type == 'full_payment':
+            if admission.payment_type == 'full_payment':
                 pay_amount = get_module_fee(fs, admission.group_module)
             else:
                 pay_amount = Decimal(str(admission.total_fees or 0))

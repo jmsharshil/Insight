@@ -1404,11 +1404,20 @@ class MyFeesAPIView(APIView):
         from students.models import Student, ParentLink
         try:
             if role == 'student':
-                student = Student.objects.select_related('admission', 'branch').get(user=user)
+                student_id = request.GET.get('student_id')
+                student_qs = Student.objects.select_related('admission', 'branch').filter(user=user)
+                if student_id:
+                    student = student_qs.filter(id=student_id).first()
+                else:
+                    student = student_qs.order_by('-created_at').first()
+                if not student:
+                    raise Student.DoesNotExist
             else:
                 student_id = request.GET.get('student_id')
                 if student_id:
-                    link = ParentLink.objects.select_related('student__admission', 'student__branch').get(parent=user, student_id=student_id)
+                    link = ParentLink.objects.select_related('student__admission', 'student__branch').filter(parent=user, student_id=student_id).first()
+                    if not link:
+                        raise ParentLink.DoesNotExist
                     student = link.student
                 else:
                     link = ParentLink.objects.select_related('student__admission', 'student__branch').filter(parent=user).first()
@@ -1584,11 +1593,20 @@ class MyFeesAPIView(APIView):
 
         try:
             if role == 'student':
-                student = Student.objects.select_related('admission', 'branch').get(user=user)
+                student_id = request.data.get('student_id') or request.GET.get('student_id')
+                student_qs = Student.objects.select_related('admission', 'branch').filter(user=user)
+                if student_id:
+                    student = student_qs.filter(id=student_id).first()
+                else:
+                    student = student_qs.order_by('-created_at').first()
+                if not student:
+                    raise Student.DoesNotExist
             else:
                 student_id = request.data.get('student_id') or request.GET.get('student_id')
                 if student_id:
-                    link = ParentLink.objects.select_related('student__admission', 'student__branch').get(parent=user, student_id=student_id)
+                    link = ParentLink.objects.select_related('student__admission', 'student__branch').filter(parent=user, student_id=student_id).first()
+                    if not link:
+                        raise ParentLink.DoesNotExist
                     student = link.student
                 else:
                     link = ParentLink.objects.select_related('student__admission', 'student__branch').filter(parent=user).first()

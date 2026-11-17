@@ -676,8 +676,8 @@ def _get_student_dashboard(user, now, today, month_start):
             student = parent_link.student
     else:
         try:
-            student = Student.objects.select_related('user', 'batch').get(user=user)
-        except Student.DoesNotExist:
+            student = Student.objects.select_related('user', 'batch').filter(user=user).order_by('-created_at').first()
+        except Exception:
             student = None
 
     if not student:
@@ -894,8 +894,8 @@ def _get_leave_dashboard_data(user, role, today, month_start):
                 pass
         else:
             try:
-                student = Student.objects.select_related('user').get(user=user)
-            except Student.DoesNotExist:
+                student = Student.objects.select_related('user').filter(user=user).order_by('-created_at').first()
+            except Exception:
                 pass
 
         if student:

@@ -870,7 +870,9 @@ class StudentRecheckRequestView(APIView):
 
         try:
             from students.models import Student
-            student = Student.objects.get(user=request.user)
+            student = Student.objects.filter(user=request.user).order_by('-created_at').first()
+            if not student:
+                raise Student.DoesNotExist
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -898,7 +900,9 @@ class StudentRecheckRequestView(APIView):
 
         try:
             from students.models import Student
-            student = Student.objects.get(user=request.user)
+            student = Student.objects.filter(user=request.user).order_by('-created_at').first()
+            if not student:
+                raise Student.DoesNotExist
         except Exception:
             return Response({'success': False, 'message': 'Student profile not found.'}, status=status.HTTP_404_NOT_FOUND)
 

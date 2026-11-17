@@ -501,10 +501,16 @@ class Admission(models.Model):
         # If payment link was generated but missing from history, synthesize it
         has_link_entry = any(item.get('event') == 'payment_link_created' for item in history)
         if not has_link_entry and self.razorpay_payment_link:
+            expected_pay_amount = self.payment_amount
+            if not expected_pay_amount or expected_pay_amount <= 0:
+                if self.payment_type == 'token' and self.fee_structure and getattr(self.fee_structure, 'token_amount', None):
+                    expected_pay_amount = self.fee_structure.token_amount
+                else:
+                    expected_pay_amount = self.total_fees or 0
             history.insert(0, {
                 'event': 'payment_link_created',
                 'payment_choice': self.payment_choice or 'online',
-                'amount': float(self.payment_amount if self.payment_amount and self.payment_amount > 0 else self.total_fees or 0),
+                'amount': float(expected_pay_amount),
                 'razorpay_payment_link': self.razorpay_payment_link,
                 'razorpay_payment_link_id': self.razorpay_payment_link_id,
                 'status': 'paid' if self.is_razorpay_paid else 'pending',
@@ -514,10 +520,16 @@ class Admission(models.Model):
 
         # If offline choice was made without link, synthesize offline_payment_selected if history is empty
         if not history and self.payment_choice in ('cash', 'cheque', 'check'):
+            expected_pay_amount = self.payment_amount
+            if not expected_pay_amount or expected_pay_amount <= 0:
+                if self.payment_type == 'token' and self.fee_structure and getattr(self.fee_structure, 'token_amount', None):
+                    expected_pay_amount = self.fee_structure.token_amount
+                else:
+                    expected_pay_amount = self.total_fees or 0
             history.append({
                 'event': 'offline_payment_selected',
                 'payment_choice': self.payment_choice,
-                'amount_to_pay': float(self.total_fees or 0),
+                'amount_to_pay': float(expected_pay_amount),
                 'status': 'payment_pending',
                 'created_at': self.submitted_at.isoformat() if self.submitted_at else None,
                 'date': self.submitted_at.date().isoformat() if self.submitted_at else None,
@@ -562,10 +574,16 @@ class Admission(models.Model):
         # If payment was submitted/received but missing from history, synthesize it
         has_payment_entry = any(item.get('event') in ('payment_received', 'payment_submitted', 'payment_verified', 'payment_approved', 'payment_approval_pending') for item in history)
         if not has_payment_entry and (self.razorpay_payment_id or self.payment_submitted_at or self.transaction_id or self.payment_screenshot):
+            expected_pay_amount = self.payment_amount
+            if not expected_pay_amount or expected_pay_amount <= 0:
+                if self.payment_type == 'token' and self.fee_structure and getattr(self.fee_structure, 'token_amount', None):
+                    expected_pay_amount = self.fee_structure.token_amount
+                else:
+                    expected_pay_amount = self.total_fees or 0
             history.append({
                 'event': 'payment_received' if self.razorpay_payment_id else 'payment_submitted',
                 'payment_choice': self.payment_choice or ('online' if self.razorpay_payment_id else 'offline'),
-                'amount': float(self.payment_amount if self.payment_amount and self.payment_amount > 0 else self.total_fees or 0),
+                'amount': float(expected_pay_amount),
                 'transaction_id': self.transaction_id or self.razorpay_payment_id,
                 'razorpay_payment_id': self.razorpay_payment_id,
                 'payment_screenshot': proof_url,
@@ -593,17 +611,16 @@ class Admission(models.Model):
             item.setdefault('fee_terms_note', self.token_payment_terms_note)
 
             expected_amount = Decimal(str(self.payment_amount or 0))
-            if expected_amount <= 0:
-                if p_type == 'token' and self.fee_structure and getattr(self.fee_structure, 'token_amount', None):
-                    expected_amount = Decimal(str(self.fee_structure.token_amount or 0))
-                    if expected_amount <= 0:
-                        expected_amount = Decimal(str(self.total_fees or 0))
+            if expected_amount <= 0 or (p_type == 'token' and total_fee > 0 and expected_amount >= Decimal(str(total_fee)) and token_amt > 0):
+                if p_type == 'token' and token_amt > 0:
+                    expected_amount = Decimal(str(token_amt))
                 else:
-                    expected_amount = Decimal(str(self.total_fees or 0))
+                    expected_amount = Decimal(str(total_fee))
             if expected_amount > 0:
                 for amount_key in ('amount', 'amount_to_pay'):
                     try:
-                        if amount_key in item and Decimal(str(item.get(amount_key) or 0)) <= 0:
+                        curr_val = Decimal(str(item.get(amount_key) or 0))
+                        if curr_val <= 0 or (p_type == 'token' and total_fee > 0 and curr_val >= Decimal(str(total_fee)) and token_amt > 0):
                             item[amount_key] = float(expected_amount)
                     except (TypeError, ValueError):
                         item[amount_key] = float(expected_amount)

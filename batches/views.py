@@ -1210,7 +1210,7 @@ class TimetableExportExcelView(TimetableListView):
             from batches.models import BatchStudent
             try:
                 from students.models import Student
-                student = Student.objects.get(user=request.user)
+                student = Student.objects.filter(user=request.user).order_by('-created_at').first()
                 batch_ids = BatchStudent.objects.filter(student=student).values_list('batch_id', flat=True)
                 queryset = queryset.filter(batch_id__in=batch_ids)
             except Exception:
