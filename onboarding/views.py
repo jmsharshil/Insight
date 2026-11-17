@@ -2058,6 +2058,29 @@ class AdmissionPaymentSetupView(APIView):
             admission.icsi_fees_payment = raw_icsi
             update_fields.append('icsi_fees_payment')
 
+        raw_fee_structure = data.get('fee_structure', data.get('fee_structure_id'))
+        if isinstance(raw_fee_structure, dict):
+            raw_fee_structure = raw_fee_structure.get('id')
+        if raw_fee_structure not in (None, ''):
+            from fees.models import FeeStructure
+            from django.core.exceptions import ValidationError
+            try:
+                fee_structure = FeeStructure.objects.get(
+                    pk=raw_fee_structure,
+                    is_active=True,
+                )
+            except (FeeStructure.DoesNotExist, ValidationError, ValueError, TypeError):
+                return Response(
+                    {
+                        'success': False,
+                        'message': 'The supplied fee structure does not exist or is inactive.',
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if admission.fee_structure_id != fee_structure.id:
+                admission.fee_structure = fee_structure
+                update_fields.append('fee_structure')
+
         raw_amount = data.get('payment_amount') or data.get('amount') or data.get('amount_to_pay')
         effective_payment_type = raw_type or admission.payment_type
         if raw_amount is not None and effective_payment_type not in ('token', 'full_payment'):

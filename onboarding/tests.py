@@ -382,6 +382,40 @@ class AdmissionFeeStructureSelectionTest(TestCase):
         admission.refresh_from_db()
         self.assertIsNone(admission.payment_amount)
 
+    def test_payment_setup_uses_fee_structure_passed_in_request(self):
+        from onboarding.views import AdmissionPaymentSetupView
+        from rest_framework.test import APIRequestFactory
+
+        admission = _make_admission(
+            email='setup_passed_fee_structure@example.com',
+            course='cs_executive',
+            group_module='all',
+            batch_attempt=self.fee_structure.attempt,
+            attempt_year=self.fee_structure.year,
+            payment_type='token',
+            payment_choice='cash',
+            status='form_pending',
+        )
+        request = APIRequestFactory().post(
+            f'/api/admissions/{admission.id}/setup/',
+            {
+                'payment_type': 'token',
+                'payment_choice': 'cash',
+                'fee_structure': str(self.fee_structure.id),
+            },
+            format='json',
+        )
+
+        with (
+            patch('onboarding.views._setup_payment_bank_and_notify'),
+            patch('onboarding.utils.sync_admission_payment'),
+        ):
+            response = AdmissionPaymentSetupView.as_view()(request, admission_id=admission.id)
+
+        self.assertEqual(response.status_code, 200)
+        admission.refresh_from_db()
+        self.assertEqual(admission.fee_structure_id, self.fee_structure.id)
+
 
 class AdmissionToStudentFeeIntegrationTest(TestCase):
     """
