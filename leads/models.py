@@ -59,6 +59,13 @@ QUALIFICATION_TYPE_CHOICES = [
     ('post_graduate', 'Post Graduate'),
 ]
 
+MEDIUM_TYPE_CHOICES = [
+    ('english', 'English Medium'),
+    ('gujarati', 'Gujarati Medium'),
+    ('hindi', 'Hindi Medium'),
+    ('other', 'Other'),
+]
+
 BOARD_TYPE_CHOICES = [
     ('gseb', 'Gujarat Board (GSEB)'),
     ('cbse', 'CBSE Board'),
@@ -148,6 +155,7 @@ class Lead(models.Model):
 
     # ── Section 3: 10th Education (Inquiry only) ──────────────────────────────
     tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)
+    tenth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True)
     tenth_school     = models.CharField(max_length=200, blank=True)
     tenth_coaching   = models.CharField(max_length=200, blank=True)
     tenth_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
@@ -155,6 +163,7 @@ class Lead(models.Model):
 
     # ── Section 4: 12th Education (Inquiry only) ──────────────────────────────
     twelfth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)
+    twelfth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True)
     twelfth_school     = models.CharField(max_length=200, blank=True)
     twelfth_coaching   = models.CharField(max_length=200, blank=True)
     twelfth_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)

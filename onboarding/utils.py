@@ -496,6 +496,8 @@ def get_module_fee(fee_structure, group_module, icsi_fees_payment=None):
                 return max(Decimal('0'), base_fee - icsi_fee)
             return base_fee
         else:
+            if total_amount > 0 and (gm in ('all', 'both', 'full') or not gm):
+                return total_amount
             return base_fee
 
     if by_self and icsi_fee > 0:

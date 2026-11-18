@@ -714,6 +714,11 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
             # Synchronize Payment status to verified and link student
             from fees.models import Payment
             from fees.services import send_payment_receipt
+            from fees.utils import update_student_fee_status
+            student_fee = None
+            if 'student' in locals() and student and hasattr(student, 'student_fees'):
+                student_fee = student.student_fees.first()
+
             payment = Payment.objects.filter(admission=admission).first()
             if payment:
                 payment.status = 'verified'
@@ -722,14 +727,12 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                         payment.student = student
                     except Exception:
                         pass
+                if student_fee and not payment.student_fee:
+                    payment.student_fee = student_fee
                 payment.verified_by = approver
                 payment.verified_at = timezone.now()
                 payment.note = final_note
-                payment.save(update_fields=['status', 'student', 'verified_by', 'verified_at', 'note', 'updated_at'])
-                try:
-                    send_payment_receipt(payment)
-                except Exception as exc:
-                    logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
+                payment.save(update_fields=['status', 'student', 'student_fee', 'verified_by', 'verified_at', 'note', 'updated_at'])
             else:
                 mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
                 student_obj = None
@@ -742,6 +745,7 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                 payment = Payment.objects.create(
                     admission=admission,
                     student=student_obj,
+                    student_fee=student_fee,
                     amount=admission.payment_amount or admission.total_fees or 0,
                     payment_mode=mapped_mode,
                     transaction_ref=admission.transaction_id or '',
@@ -753,10 +757,17 @@ def handle_admission_payment_whatsapp_approval(sender_wa_id: str, payload_str: s
                     payment_date=timezone.now().date(),
                     note=final_note,
                 )
+
+            if payment.student_fee_id:
                 try:
-                    send_payment_receipt(payment)
-                except Exception as exc:
-                    logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
+                    update_student_fee_status(payment.student_fee_id)
+                except Exception as fee_err:
+                    logger.error("[WA ADMISSION] Failed to update fee status: %s", fee_err)
+
+            try:
+                send_payment_receipt(payment)
+            except Exception as exc:
+                logger.error("[WA ADMISSION] Failed to send receipt: %s", exc)
 
             send_whatsapp_text(
                 to=sender_wa_id,

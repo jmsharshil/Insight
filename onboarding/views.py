@@ -800,6 +800,18 @@ class AdmissionListView(APIView):
                     state=data.get('state', ''),
                     country=data.get('country', 'India'),
                     consent=bool(data.get('consent', False)),
+                    tenth_medium=data.get('tenth_medium', ''),
+                    tenth_board=data.get('tenth_board', ''),
+                    tenth_school=data.get('tenth_school', ''),
+                    tenth_coaching=data.get('tenth_coaching', ''),
+                    tenth_percentage=data.get('tenth_percentage') or None,
+                    tenth_percentile=data.get('tenth_percentile') or None,
+                    twelfth_medium=data.get('twelfth_medium', ''),
+                    twelfth_board=data.get('twelfth_board', ''),
+                    twelfth_school=data.get('twelfth_school', ''),
+                    twelfth_coaching=data.get('twelfth_coaching', ''),
+                    twelfth_percentage=data.get('twelfth_percentage') or None,
+                    twelfth_percentile=data.get('twelfth_percentile') or None,
                     current_stage='converted',
                     converted_at=tz.localdate(),
                     branch=branch_obj,
@@ -857,6 +869,18 @@ class AdmissionListView(APIView):
                     state=lead.state,
                     country=lead.country,
                     consent=lead.consent,
+                    tenth_medium=lead.tenth_medium,
+                    tenth_board=lead.tenth_board,
+                    tenth_school=lead.tenth_school,
+                    tenth_coaching=lead.tenth_coaching,
+                    tenth_percentage=lead.tenth_percentage,
+                    tenth_percentile=lead.tenth_percentile,
+                    twelfth_medium=lead.twelfth_medium,
+                    twelfth_board=lead.twelfth_board,
+                    twelfth_school=lead.twelfth_school,
+                    twelfth_coaching=lead.twelfth_coaching,
+                    twelfth_percentage=lead.twelfth_percentage,
+                    twelfth_percentile=lead.twelfth_percentile,
                 )
                 admission.save()
 
@@ -1434,6 +1458,44 @@ class AdmissionApproveView(APIView):
                 except Exception as exc:
                     logger.error(f"Failed to dispatch Level 2 WhatsApp notification for admission {admission.id}: {exc}")
 
+                # Notify student & parent that Level 1 payment approval (cash/cheque) is verified
+                try:
+                    from core.sender import send_email
+                    from chat.notifications import send_whatsapp_with_fallback
+                    adm_name = f"{admission.first_name} {admission.surname}".strip()
+                    pay_amt = admission.payment_amount or admission.total_fees or 0
+                    choice_display = admission.get_payment_choice_display() or str(admission.payment_choice).title()
+                    subject_l1 = f"Payment Received & Verified (Level 1) - Admission #{admission.admission_code or admission.id}"
+                    msg_l1 = (
+                        f"Dear {adm_name},\n\n"
+                        f"We have received and verified your {choice_display} payment of \u20b9{pay_amt:,.2f}.\n"
+                        f"Your admission is now queued for final Super Admin enrollment approval.\n\n"
+                        f"Thank you,\nInsight Institute of Professional Studies"
+                    )
+                    std_emails = [e for e in [admission.email, admission.email_parent] if e]
+                    for rec_email in std_emails:
+                        try:
+                            send_email(
+                                to=rec_email,
+                                subject=subject_l1,
+                                text=msg_l1,
+                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                            )
+                        except Exception as m_err:
+                            logger.error(f"Level 1 email to {rec_email} failed: {m_err}")
+
+                    wa_l1_phones = [p for p in [admission.phone_student, admission.phone_father] if p]
+                    for wa_p in wa_l1_phones:
+                        try:
+                            send_whatsapp_with_fallback(
+                                to=wa_p,
+                                fallback_body=msg_l1,
+                            )
+                        except Exception as w_err:
+                            logger.error(f"Level 1 WhatsApp to {wa_p} failed: {w_err}")
+                except Exception as notif_err:
+                    logger.error(f"Failed to send Level 1 student notification for admission {admission.id}: {notif_err}")
+
                 try:
                     from chat.notifications import mark_approval_notification_as_read
                     mark_approval_notification_as_read(
@@ -1648,6 +1710,11 @@ class AdmissionApproveView(APIView):
             # Synchronize linked Payment record to verified and link student
             from fees.models import Payment
             from fees.services import send_payment_receipt
+            from fees.utils import update_student_fee_status
+            student_fee = None
+            if hasattr(student, 'student_fees'):
+                student_fee = student.student_fees.first()
+
             payment = Payment.objects.filter(admission=admission).first()
             if payment:
                 payment.status = 'verified'
@@ -1655,19 +1722,18 @@ class AdmissionApproveView(APIView):
                     payment.student = student
                 except Exception:
                     pass
+                if student_fee and not payment.student_fee:
+                    payment.student_fee = student_fee
                 payment.verified_by = acting_user
                 payment.verified_at = timezone.now()
                 payment.note = final_note
-                payment.save(update_fields=['status', 'student', 'verified_by', 'verified_at', 'note', 'updated_at'])
-                try:
-                    send_payment_receipt(payment)
-                except Exception as exc:
-                    logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
+                payment.save(update_fields=['status', 'student', 'student_fee', 'verified_by', 'verified_at', 'note', 'updated_at'])
             else:
                 mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
                 payment = Payment.objects.create(
                     admission=admission,
                     student=student,
+                    student_fee=student_fee,
                     amount=admission.payment_amount or admission.total_fees or 0,
                     payment_mode=mapped_mode,
                     transaction_ref=admission.transaction_id or '',
@@ -1679,10 +1745,17 @@ class AdmissionApproveView(APIView):
                     payment_date=timezone.now().date(),
                     note=final_note,
                 )
+
+            if payment.student_fee_id:
                 try:
-                    send_payment_receipt(payment)
-                except Exception as exc:
-                    logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
+                    update_student_fee_status(payment.student_fee_id)
+                except Exception as fee_err:
+                    logger.error(f"Failed to update student fee status: {fee_err}")
+
+            try:
+                send_payment_receipt(payment)
+            except Exception as exc:
+                logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
 
             try:
                 from chat.notifications import mark_approval_notification_as_read

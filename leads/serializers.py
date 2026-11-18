@@ -4,7 +4,7 @@ from decimal import Decimal
 from rest_framework import serializers
 from .models import (Lead, LeadAssignmentLog, LeadTransferRequest, SalesDailyPlan, SalesDailyActivity, SalesActivityPhoto, OdometerReading, SalesPlanReminder, SalesDailyActivityTiming, SalesAttendanceApproval, FORM_TYPE_CHOICES, COURSE_TYPE_CHOICES, GROUP_MODULE_CHOICES,
                      ATTEMPT_TYPE_CHOICES, STAGE_CHOICES, QUALIFICATION_TYPE_CHOICES,
-                     BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES,)
+                     BOARD_TYPE_CHOICES, REFERENCE_TYPE_CHOICES, MEDIUM_TYPE_CHOICES,)
 from auth_user.models import User
 from dateutil import parser
 from django.utils import timezone
@@ -836,13 +836,15 @@ class InquirySerializer(ContactSerializer):
     inquiry_date = serializers.DateField()
     reference_name = serializers.CharField(max_length=100,required=False,allow_blank=True)
 
-    tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES)
+    tenth_medium     = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    tenth_board      = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
     tenth_school     = serializers.CharField(max_length=200)
     tenth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
     tenth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
     tenth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2)
 
-    twelfth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False)
+    twelfth_medium     = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    twelfth_board      = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
     twelfth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True)
     twelfth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
     twelfth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
@@ -883,6 +885,7 @@ class InquirySerializer(ContactSerializer):
                         f"Valid options: {valid['batch_attempt']}"
                     )
                 })
+
 
         if qualification == 'appearing_12':
             return data
@@ -990,7 +993,9 @@ class LeadListSerializer(serializers.ModelSerializer):
     qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
     reference_display = serializers.CharField(source="get_reference_display", read_only=True)
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    tenth_board_display = serializers.CharField(source="get_tenth_board_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    twelfth_board_display = serializers.CharField(source="get_twelfth_board_display", read_only=True)
     stage_display = serializers.CharField(source="get_stage_display", read_only=True)
     # ── Assignment display ───────────────────────────────────────────────
     assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)
@@ -1014,7 +1019,7 @@ class LeadListSerializer(serializers.ModelSerializer):
             'id', 'branch', 'branch_name', 'form_type', 'form_type_display', 'first_name', 'surname', 'email',
             'phone_student', 'course', 'current_stage', 'current_stage_display', 'location', 'note', 'created_at',
             'contacted_at', 'interested_at', 'followup_set_at', 'converted_at', 'lost_at', 'followup_date', 'visit_date', 'is_visited', 'visit_set_at',
-            'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'stage_display',
+            'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'tenth_board_display', 'twelfth_medium_display', 'twelfth_board_display', 'stage_display',
             'assigned_to_id', 'assigned_to_name', 'can_edit',
         ]
 
@@ -1120,7 +1125,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
     reference_display = serializers.CharField(source="get_reference_display", read_only=True)
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    tenth_board_display = serializers.CharField(source="get_tenth_board_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    twelfth_board_display = serializers.CharField(source="get_twelfth_board_display", read_only=True)
     stage_display = serializers.CharField(source="get_stage_display", read_only=True)
     # ── Assignment display ───────────────────────────────────────────────
     assigned_to_id   = serializers.UUIDField(source='assigned_to.id',   read_only=True, allow_null=True)

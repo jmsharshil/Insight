@@ -727,9 +727,15 @@ class PaymentVerifyView(APIView):
                                     acting_user=request.user,
                                 )
                                 payment.student = student
-                                payment.save(update_fields=['student'])
+                                if not payment.student_fee and hasattr(student, 'student_fees'):
+                                    payment.student_fee = student.student_fees.first()
+                                payment.save(update_fields=['student', 'student_fee'])
                             except Exception as exc:
                                 logger.error(f"Failed to auto-create student from admission in PaymentVerifyView: {exc}")
+
+                if not payment.student_fee and payment.student and hasattr(payment.student, 'student_fees'):
+                    payment.student_fee = payment.student.student_fees.first()
+                    payment.save(update_fields=['student_fee'])
 
                     admission.update_current_payment_history_entry('payment_approved', {
                         'payment_choice': payment.payment_mode,

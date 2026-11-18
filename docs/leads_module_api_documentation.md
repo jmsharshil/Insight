@@ -102,6 +102,60 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
 
 ## Complete API Reference
 
+### Create Lead (Contact / Inquiry Web Form)
+**`POST /api/v1/leads/`** — Public or authenticated lead capture endpoint.
+
+- For `form_type: "contact"`: Minimal contact inquiry for quick follow-up.
+- For `form_type: "inquiry"`: Comprehensive prospective student inquiry with education history (10th, 12th, graduation).
+
+#### Inquiry Form (`form_type: "inquiry"`) Request Example:
+```json
+{
+  "form_type": "inquiry",
+  "first_name": "Priya",
+  "surname": "Shah",
+  "father_name": "Ramesh Shah",
+  "email": "priya@example.com",
+  "phone_student": "9876543210",
+  "phone_father": "9876543211",
+  "course": "cseet",
+  "group_module": "full",
+  "batch_attempt": "june",
+  "street": "123 MG Road",
+  "city": "Ahmedabad",
+  "state": "Gujarat",
+  "qualification": "appearing_12",
+  "reference": "google",
+  "reference_name": "Friend Referral",
+  "consent": true,
+  "inquiry_date": "2026-06-01",
+
+  "tenth_medium": "gujarati",
+  "tenth_board": "gseb",
+  "tenth_school": "ABC High School",
+  "tenth_coaching": "XYZ Classes",
+  "tenth_percentage": 85.50,
+  "tenth_percentile": 92.00,
+
+  "twelfth_medium": "english",
+  "twelfth_board": "cbse",
+  "twelfth_school": "National Higher Secondary",
+  "twelfth_coaching": "Premier Coaching",
+  "twelfth_percentage": 88.00,
+  "twelfth_percentile": 95.00,
+
+  "grad_university": "",
+  "grad_college": "",
+  "grad_last_sem": ""
+}
+```
+
+#### Qualification-Based Validation Rules:
+- If `qualification != 'appearing_12'`, 12th education details are required: `twelfth_medium`, `twelfth_school`, `twelfth_percentage`, `twelfth_percentile`.
+- If `qualification` is in `['pass_12', 'cseet_pass', 'post_graduate']`, graduation details are required: `grad_university`, `grad_college`, `grad_last_sem`.
+
+---
+
 ### List Leads
 **`GET /api/v1/leads/`** — Paginated. Role-scoped (counsellor sees assigned only).
 
@@ -137,13 +191,11 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
 - `assignment_history` contains every assignment/reassignment entry, ordered newest first.
 - Each history entry includes full `assigned_from`, `assigned_to`, and `changed_by` user details: `id`, `name`, `email`, `phone`, `role`, and `additional_roles`.
 - Each entry also includes `note` and `changed_at`. An unassigned side is returned as `null`.
-- **PATCH** `/api/v1/leads/<lead_id>/` — Update notes, details, or basic fields.
 
 **PATCH Example:**
 ```json
 {
   "note": "Student visited campus, very interested in CS Executive program.",
-  "course": "cs_executive"
 }
 ```
 

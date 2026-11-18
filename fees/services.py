@@ -321,6 +321,10 @@ def send_payment_receipt(payment):
 
         # --- Build recipient list first so we can always send at least a text email ---
         recipients = set()
+        adm = getattr(payment, 'admission', None)
+        if not adm and getattr(payment, 'student', None) and hasattr(payment.student, 'admission'):
+            adm = payment.student.admission
+
         if payment.student:
             parent_email = getattr(payment.student, 'email_parent', None)
             if parent_email:
@@ -329,14 +333,23 @@ def send_payment_receipt(payment):
             student_email = getattr(payment.student, 'email', None)
             if student_email:
                 recipients.add(student_email)
+
+            try:
+                if (getattr(payment.student, 'user', None)
+                        and getattr(payment.student.user, 'email', None)):
+                    recipients.add(payment.student.user.email)
+            except Exception:
+                pass
             
-            if not recipients:
-                recipients = set(get_recipient_emails(payment.student))
-        elif getattr(payment, 'admission', None):
-            if getattr(payment.admission, 'email', None):
-                recipients.add(payment.admission.email)
-            if getattr(payment.admission, 'email_parent', None):
-                recipients.add(payment.admission.email_parent)
+            for em in get_recipient_emails(payment.student):
+                if em:
+                    recipients.add(em)
+
+        if adm:
+            if getattr(adm, 'email', None):
+                recipients.add(adm.email)
+            if getattr(adm, 'email_parent', None):
+                recipients.add(adm.email_parent)
 
         recipients = list(recipients)
         if not recipients:
@@ -420,7 +433,53 @@ def send_payment_receipt(payment):
                 f"PDF generation failed for payment {payment.id}: {pdf_err}",
                 exc_info=True
             )
-            # Continue — email will still be sent without PDF attachment
+
+        # Fallback to direct ReportLab if generate_payment_receipt_pdf returned empty or None
+        if not pdf_attachment:
+            try:
+                logger.info(f"Direct ReportLab fallback triggered for payment {payment.id}")
+                from .pdf_services import _reportlab_receipt_pdf
+                from core.number_utils import num2words
+                rl_batch = 'N/A'
+                try:
+                    if (
+                        getattr(payment, 'student_fee', None)
+                        and getattr(payment.student_fee, 'fee_structure', None)
+                        and getattr(payment.student_fee.fee_structure, 'batch', None)
+                    ):
+                        rl_batch = payment.student_fee.fee_structure.batch.name
+                    elif adm and getattr(adm, 'course', None):
+                        rl_batch = str(adm.course)
+                except Exception:
+                    pass
+
+                rl_context = {
+                    'receipt_no': payment.receipt_number or f"REC-{payment.id}",
+                    'receipt_date': template_context.get('payment_date') or timezone.now().strftime('%d %b, %Y'),
+                    'student_name': student_name,
+                    'amount': f"Rs. {payment.amount:,.2f}",
+                    'amount_words': num2words(payment.amount),
+                    'batch_name': rl_batch,
+                    'payment_type': getattr(adm, 'payment_type', 'installment') if adm else 'installment',
+                    'payment_mode': payment.payment_mode or 'N/A',
+                    'transaction_ref': payment.transaction_ref or 'N/A',
+                    'transaction_date': template_context.get('payment_date', ''),
+                }
+                rl_buffer = _reportlab_receipt_pdf(rl_context)
+                if rl_buffer and rl_buffer.getvalue():
+                    filename = f"Receipt_{payment.receipt_number or payment.id}.pdf"
+                    pdf_bytes = rl_buffer.getvalue()
+                    try:
+                        payment.payment_document.save(
+                            filename, ContentFile(pdf_bytes), save=True
+                        )
+                        logger.info(f"ReportLab PDF saved to payment_document for payment {payment.id}")
+                    except Exception as save_err:
+                        logger.error(f"Failed to save ReportLab PDF to payment_document: {save_err}")
+                    pdf_attachment = (filename, pdf_bytes, 'application/pdf')
+                    payment._receipt_generated = True
+            except Exception as rl_err:
+                logger.error(f"Direct ReportLab fallback failed for payment {payment.id}: {rl_err}", exc_info=True)
 
         # --- Send email to all recipients ---
         attachments = [pdf_attachment] if pdf_attachment else []
@@ -460,6 +519,12 @@ def send_payment_receipt(payment):
                     wa_phones.add(payment.student.user.phone)
             except Exception:
                 pass
+
+            if adm:
+                for attr in ('phone_student', 'phone_father', 'phone_student_2', 'phone_father_2'):
+                    val = getattr(adm, attr, None)
+                    if val:
+                        wa_phones.add(val)
 
             wa_phones = list(filter(None, wa_phones))
             if not wa_phones:

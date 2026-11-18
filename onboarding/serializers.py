@@ -9,7 +9,7 @@ from .models import (
 )
 from fees.models import FeeStructure
 
-from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
+from leads.models import (COURSE_TYPE_CHOICES,GROUP_MODULE_CHOICES,ATTEMPT_TYPE_CHOICES,QUALIFICATION_TYPE_CHOICES,BOARD_TYPE_CHOICES,MEDIUM_TYPE_CHOICES,CATEGORY_TYPE_CHOICES,REFERENCE_TYPE_CHOICES,)
 from leads.serializers import VALID_COMBINATIONS
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -138,14 +138,15 @@ class AdmissionSerializer(serializers.Serializer):
     reference_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
     # ── 10th Education ────────────────────────────────────────────────────────
-    tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_null=True)
+    tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    tenth_board      = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
     tenth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     tenth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
     tenth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     tenth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
 
     # ── 12th Education (always required for admission) ────────────────────────
-    twelfth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_null=True)
+    twelfth_board      = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
     twelfth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     twelfth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
     twelfth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
@@ -341,12 +342,15 @@ class AdmissionListSerializer(serializers.ModelSerializer):
     qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
     reference_display = serializers.CharField(source="get_reference_display", read_only=True)
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    tenth_board_display = serializers.CharField(source="get_tenth_board_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    twelfth_board_display = serializers.CharField(source="get_twelfth_board_display", read_only=True)
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
     payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
     payment_choice_display = serializers.CharField(source="get_payment_choice_display", read_only=True)
     icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
     total_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    paid_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     remaining_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     is_paid = serializers.BooleanField(read_only=True)
     is_razorpay_paid = serializers.BooleanField(read_only=True)
@@ -365,8 +369,8 @@ class AdmissionListSerializer(serializers.ModelSerializer):
             'gender', 'gender_display',
             'course', 'batch_attempt', 'attempt_year', 'fee_structure', 'payment_type', 'payment_choice', 'payment_choice_display', 'icsi_fees_payment', 'status', 'status_display', 'location',
             'assigned_counsellor', 'note', 'submitted_at',
-            'total_fees', 'remaining_fees', 'is_paid', 'is_razorpay_paid', 'razorpay_payment_status', 'payment_history', 'token_payment_terms_note',
-            'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'twelfth_medium_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display'
+            'total_fees', 'paid_amount', 'remaining_fees', 'is_paid', 'is_razorpay_paid', 'razorpay_payment_status', 'payment_history', 'token_payment_terms_note',
+            'category_display', 'course_display', 'group_module_display', 'batch_attempt_display', 'qualification_display', 'reference_display', 'tenth_medium_display', 'tenth_board_display', 'twelfth_medium_display', 'twelfth_board_display', 'fee_structure_display', 'payment_type_display', 'icsi_fees_payment_display'
         ]
 
 
@@ -384,13 +388,16 @@ class AdmissionDetailSerializer(serializers.ModelSerializer):
     qualification_display = serializers.CharField(source="get_qualification_display", read_only=True)
     reference_display = serializers.CharField(source="get_reference_display", read_only=True)
     tenth_medium_display = serializers.CharField(source="get_tenth_medium_display", read_only=True)
+    tenth_board_display = serializers.CharField(source="get_tenth_board_display", read_only=True)
     twelfth_medium_display = serializers.CharField(source="get_twelfth_medium_display", read_only=True)
+    twelfth_board_display = serializers.CharField(source="get_twelfth_board_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     fee_structure_display = serializers.CharField(source="get_fee_structure_display", read_only=True)
     payment_type_display = serializers.CharField(source="get_payment_type_display", read_only=True)
     payment_choice_display = serializers.CharField(source="get_payment_choice_display", read_only=True)
     icsi_fees_payment_display = serializers.CharField(source="get_icsi_fees_payment_display", read_only=True)
     total_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    paid_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     remaining_fees = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     is_paid = serializers.BooleanField(read_only=True)
     is_razorpay_paid = serializers.BooleanField(read_only=True)

@@ -179,7 +179,18 @@ POST `/approve/`:
 > In all new admission submissions and updates, `phone_student`, `phone_father`, and `mother_phone` / `phone_mother` (stored in `phone_father_2`) must all be **different from each other**. Both `mother_phone` and `phone_mother` are accepted and returned by all admission endpoints. If any two numbers match, the API rejects the request with HTTP 400 Bad Request:
 > - `"Student phone number, father's phone number, and mother's phone number must all be different."`
 
-**Example Request Body (form completion):**
+#### Education Choices (Medium & Board):
+- **`tenth_medium` / `twelfth_medium`** choices (strictly Medium):
+  - `'english'` — English Medium
+  - `'gujarati'` — Gujarati Medium
+  - `'hindi'` — Hindi Medium
+  - `'other'` — Other
+- **`tenth_board` / `twelfth_board`** choices (strictly Board):
+  - `'gseb'` — Gujarat Board (GSEB)
+  - `'cbse'` — CBSE Board
+  - `'icse'` — ICSE Board
+
+**Example Request Body (form submission & completion):**
 ```json
 {
   "first_name": "Priya",
@@ -197,14 +208,35 @@ POST `/approve/`:
   "city": "Ahmedabad",
   "state": "Gujarat",
   "pincode": "380001",
+  "country": "India",
   "course": "cseet",
   "group_module": "full",
   "batch_attempt": "june",
   "qualification": "pass_12",
   "fee_structure": "fs-uuid-001",
+  "payment_type": "token",
+  "payment_choice": "cash",
   "reference": "google",
-  "tenth_percentage": 89.5,
-  ...
+  "reference_name": "Friend Referral",
+  "consent": true,
+
+  "tenth_medium": "gujarati",
+  "tenth_board": "gseb",
+  "tenth_school": "ABC High School",
+  "tenth_coaching": "XYZ Classes",
+  "tenth_percentage": 85.50,
+  "tenth_percentile": 92.00,
+
+  "twelfth_medium": "english",
+  "twelfth_board": "cbse",
+  "twelfth_school": "National Higher Secondary",
+  "twelfth_coaching": "Premier Coaching",
+  "twelfth_percentage": 88.00,
+  "twelfth_percentile": 95.00,
+
+  "grad_university": "",
+  "grad_college": "",
+  "grad_last_sem": ""
 }
 ```
 
@@ -216,7 +248,19 @@ POST `/approve/`:
   "data": {
     "admission_id": "IIPS-000001",
     "status": "payment_pending",
+    "status_display": "Payment Pending",
     "name": "Priya Shah",
+    "payment_type": "token",
+    "payment_choice": "cash",
+    "payment_choice_display": "Cash",
+    "total_fees": "35000.00",
+    "paid_amount": "0.00",
+    "remaining_fees": "35000.00",
+    "is_paid": false,
+    "tenth_medium_display": "Gujarati Medium",
+    "tenth_board_display": "Gujarat Board (GSEB)",
+    "twelfth_medium_display": "English Medium",
+    "twelfth_board_display": "CBSE Board",
     "assigned_counsellor": {"id": "coun-uuid", "name": "Counsellor Name", "email": "..."}
   }
 }
@@ -242,7 +286,23 @@ POST `/approve/`:
 }
 ```
 
-- **POST** `/api/v1/admissions/<admission_code>/approve/` — Main enrollment endpoint (handles `payment_submitted` → `enrolled` flow, user/student/fee creation).
+- **POST** `/api/v1/admissions/<admission_code>/approve/` — Payment verification & enrollment approval endpoint.
+
+Supports the 2-level payment approval workflow:
+
+1. **Level 1 Approval (Accountant Verification for Cash/Cheque):**
+   - Triggered when an accountant verifies the physical cash or cheque payment.
+   - Status updates to `level1_approved`.
+   - **Notifications:** Dispatches immediate confirmation email and WhatsApp message to both student and parent:
+     > *"We have received and verified your Cash/Cheque payment of ₹X. Your admission is now queued for final Super Admin enrollment approval."*
+
+2. **Level 2 Approval (Super Admin Final Enrollment):**
+   - Triggered by Super Admin to finalize admission and create the enrolled student.
+   - Status updates to `enrolled`.
+   - **User Accounts & Credentials:** Automatically creates or updates the student's `User` account, generating a secure temporary password (guaranteed even if an account already existed).
+   - **Login Notification:** Credentials (username & temporary password) are dispatched via email and WhatsApp to the student and parent.
+   - **StudentFee Synchronization:** Links `Payment.student_fee` to the student's fee record and invokes `update_student_fee_status()`, ensuring `amount_paid` and `amount_due` are accurately reflected on the student dashboard.
+   - **Official Payment Receipt with PDF:** Generates and dispatches the payment receipt email with an attached PDF document (using WeasyPrint / Playwright or direct in-memory ReportLab fallback).
 
 **Request:**
 ```json

@@ -127,9 +127,11 @@ def _reportlab_receipt_pdf(context):
     elements.append(Spacer(1, 5 * mm))
 
     # Details rows
+    raw_amount = context.get('amount', '')
+    safe_amount = str(raw_amount).replace('\u20b9', 'Rs. ')
     details = [
         ('Received From M/s.', context.get('student_name', 'N/A')),
-        ('Amount', context.get('amount', '')),
+        ('Amount', safe_amount),
         ('Amount in Words', context.get('amount_words', '')),
         ('Batch', context.get('batch_name', 'N/A')),
     ]
@@ -319,7 +321,7 @@ def generate_payment_receipt_pdf(payment):
             import requests
             import base64
             from PIL import Image
-            resp = requests.get(raw_sig_url, timeout=5)
+            resp = requests.get(raw_sig_url, timeout=1.5)
             if resp.status_code == 200:
                 img = Image.open(BytesIO(resp.content)).convert("RGBA")
                 datas = img.getdata()

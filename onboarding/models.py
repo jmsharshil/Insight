@@ -10,6 +10,7 @@ from leads.models import (
     ATTEMPT_TYPE_CHOICES,
     QUALIFICATION_TYPE_CHOICES,
     BOARD_TYPE_CHOICES,
+    MEDIUM_TYPE_CHOICES,
     CATEGORY_TYPE_CHOICES,
     REFERENCE_TYPE_CHOICES,
 )
@@ -165,6 +166,7 @@ class Admission(models.Model):
 
     # ── 10th Education ────────────────────────────────────────────────────────
     tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
+    tenth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True, null=True)
     tenth_school     = models.CharField(max_length=200, blank=True, null=True)
     tenth_coaching   = models.CharField(max_length=200, blank=True)
     tenth_percentage = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
@@ -172,6 +174,7 @@ class Admission(models.Model):
 
     # ── 12th Education ────────────────────────────────────────────────────────
     twelfth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
+    twelfth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True, null=True)
     twelfth_school     = models.CharField(max_length=200, blank=True, null=True)
     twelfth_coaching   = models.CharField(max_length=200, blank=True)
     twelfth_percentage = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
@@ -297,7 +300,8 @@ class Admission(models.Model):
                 return True
             if Payment.objects.filter(admission=self).exists():
                 return False
-        except Exception:
+        except Exception as e:
+            # print("PAID_AMOUNT EXC:", type(e), e)
             pass
         if bool(self.razorpay_payment_id):
             return True
@@ -334,56 +338,74 @@ class Admission(models.Model):
         return 'not_created'
 
     @property
+    def paid_amount(self):
+        """Calculates total verified paid amount for this admission."""
+        try:
+            from fees.models import Payment
+            from django.db.models import Sum, Q
+            q_filter = Q(admission=self, status='verified')
+            try:
+                sp = getattr(self, 'student_profile', None)
+                if sp:
+                    q_filter |= Q(student=sp, status='verified')
+            except Exception:
+                pass
+            total_verified = Payment.objects.filter(q_filter).aggregate(total=Sum('amount'))['total']
+            if total_verified is not None and Decimal(str(total_verified)) > Decimal('0'):
+                return Decimal(str(total_verified))
+        except Exception as e:
+            # print("PAID_AMOUNT EXC:", type(e), e)
+            pass
+
+        if self.is_razorpay_paid:
+            return Decimal(str(self.payment_amount or self.total_fees or 0))
+
+        if self.is_paid:
+            return Decimal(str(self.payment_amount or self.total_fees or 0))
+
+        return Decimal('0')
+
+    @property
     def total_fees(self):
         """Total fees defined for this admission based on fee structure and module."""
-        if self.fee_structure:
+        fs = self.fee_structure
+        if not fs:
+            try:
+                from onboarding.views import _assign_fee_structure
+                _assign_fee_structure(self)
+                fs = self.fee_structure
+            except Exception:
+                pass
+
+        if fs:
             from onboarding.views import _get_module_fee
-            return _get_module_fee(
-                self.fee_structure,
+            fee = _get_module_fee(
+                fs,
                 self.group_module,
                 icsi_fees_payment=self.icsi_fees_payment,
             )
+            if fee > Decimal('0'):
+                return fee
+            if getattr(fs, 'total_amount', None) and Decimal(str(fs.total_amount)) > Decimal('0'):
+                return Decimal(str(fs.total_amount))
+
+        if hasattr(self, 'student_profile') and self.student_profile:
+            try:
+                sf = self.student_profile.student_fees.first()
+                if sf and Decimal(str(sf.total_amount)) > Decimal('0'):
+                    return Decimal(str(sf.total_amount))
+            except Exception:
+                pass
+
         return Decimal('0')
 
     @property
     def remaining_fees(self):
         """
-        Calculates remaining fee from total fees.
+        Calculates remaining fee strictly from total fees minus verified paid amount:
+        max(0, total_fees - paid_amount).
         """
-        if not self.fee_structure:
-            return Decimal('0')
-
-        from onboarding.views import _get_module_fee
-        total_fee = _get_module_fee(
-            self.fee_structure,
-            self.group_module,
-            icsi_fees_payment=self.icsi_fees_payment,
-        )
-
-        try:
-            from fees.models import Payment
-            from django.db.models import Sum, Q
-            q_filter = Q(admission=self, status='verified')
-            if hasattr(self, 'student_profile') and self.student_profile:
-                q_filter |= Q(student=self.student_profile, status='verified')
-            total_verified = Payment.objects.filter(q_filter).aggregate(total=Sum('amount'))['total']
-            if total_verified is not None:
-                return max(Decimal('0'), total_fee - Decimal(str(total_verified)))
-        except Exception:
-            pass
-
-        if self.payment_type == 'token':
-            token_paid = Decimal(str(self.payment_amount or self.fee_structure.token_amount or 0))
-            return max(Decimal('0'), total_fee - token_paid)
-
-        if self.is_paid:
-            paid = Decimal(str(self.payment_amount or total_fee))
-            return max(Decimal('0'), total_fee - paid)
-        elif self.payment_amount:
-            paid = Decimal(str(self.payment_amount))
-            return max(Decimal('0'), total_fee - paid)
-        else:
-            return total_fee
+        return max(Decimal('0'), self.total_fees - self.paid_amount)
 
     @property
     def token_payment_terms_note(self):
@@ -606,6 +628,7 @@ class Admission(models.Model):
 
         token_amt = float(getattr(self.fee_structure, 'token_amount', 0) or 0) if self.fee_structure else 0.0
         total_fee = float(self.total_fees or 0)
+        paid_amt = float(self.paid_amount or 0)
         rem_fee = float(self.remaining_fees or 0)
         p_type = self.payment_type or 'full_payment'
         p_type_display = self.get_payment_type_display() if hasattr(self, 'get_payment_type_display') else p_type.replace('_', ' ').title()
@@ -614,9 +637,10 @@ class Admission(models.Model):
         for item in history:
             item.setdefault('payment_type', p_type)
             item.setdefault('payment_type_display', p_type_display)
-            item.setdefault('total_fees', total_fee)
-            item.setdefault('token_amount', token_amt)
-            item.setdefault('remaining_fees', rem_fee)
+            item['total_fees'] = total_fee
+            item['token_amount'] = token_amt
+            item['paid_amount'] = paid_amt
+            item['remaining_fees'] = rem_fee
             item.setdefault('terms_note', self.token_payment_terms_note)
             item.setdefault('fee_terms_note', self.token_payment_terms_note)
 
