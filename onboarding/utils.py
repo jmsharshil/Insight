@@ -294,6 +294,8 @@ class AdmissionService:
             user = User.objects.filter(email__iexact=email, role=role).first()
 
         if user:
+            password = generate_temporary_password()
+            user.set_password(password)
             if not user.username:
                 user.username = username or AdmissionService._build_unique_username(email)
             user.phone          = phone
@@ -307,7 +309,7 @@ class AdmissionService:
             user.save()
             if linked_student:
                 user.linked_students.add(linked_student)
-            return user, None
+            return user, password
         else:
             password = generate_temporary_password()
             user = User.objects.create_user(

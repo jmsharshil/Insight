@@ -138,15 +138,16 @@ class AdmissionSerializer(serializers.Serializer):
     reference_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
     # ── 10th Education ────────────────────────────────────────────────────────
-    tenth_medium     = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
-    tenth_board      = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    tenth_medium     = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    tenth_board      = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
     tenth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     tenth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
     tenth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     tenth_percentile = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
 
     # ── 12th Education (always required for admission) ────────────────────────
-    twelfth_board      = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    twelfth_medium     = serializers.ChoiceField(choices=MEDIUM_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
+    twelfth_board      = serializers.ChoiceField(choices=BOARD_TYPE_CHOICES, required=False, allow_blank=True, allow_null=True)
     twelfth_school     = serializers.CharField(max_length=200, required=False, allow_blank=True, allow_null=True)
     twelfth_coaching   = serializers.CharField(max_length=200, required=False, allow_blank=True)
     twelfth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)

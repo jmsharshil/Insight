@@ -165,16 +165,16 @@ class Admission(models.Model):
     reference_name = models.CharField(max_length=100,blank=True)
 
     # ── 10th Education ────────────────────────────────────────────────────────
-    tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
-    tenth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True, null=True)
+    tenth_medium     = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True, null=True)
+    tenth_board      = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
     tenth_school     = models.CharField(max_length=200, blank=True, null=True)
     tenth_coaching   = models.CharField(max_length=200, blank=True)
     tenth_percentage = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
     tenth_percentile = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
 
     # ── 12th Education ────────────────────────────────────────────────────────
-    twelfth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
-    twelfth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True, null=True)
+    twelfth_medium     = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True, null=True)
+    twelfth_board      = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True, null=True)
     twelfth_school     = models.CharField(max_length=200, blank=True, null=True)
     twelfth_coaching   = models.CharField(max_length=200, blank=True)
     twelfth_percentage = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)

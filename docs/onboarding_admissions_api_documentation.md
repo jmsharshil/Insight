@@ -180,15 +180,15 @@ POST `/approve/`:
 > - `"Student phone number, father's phone number, and mother's phone number must all be different."`
 
 #### Education Choices (Medium & Board):
-- **`tenth_medium` / `twelfth_medium`** choices (strictly Medium):
+- **`tenth_medium` / `twelfth_medium`** choices (Board choices):
+  - `'gseb'` — Gujarat Board (GSEB)
+  - `'cbse'` — CBSE Board
+  - `'icse'` — ICSE Board
+- **`tenth_board` / `twelfth_board`** choices (Medium choices):
   - `'english'` — English Medium
   - `'gujarati'` — Gujarati Medium
   - `'hindi'` — Hindi Medium
   - `'other'` — Other
-- **`tenth_board` / `twelfth_board`** choices (strictly Board):
-  - `'gseb'` — Gujarat Board (GSEB)
-  - `'cbse'` — CBSE Board
-  - `'icse'` — ICSE Board
 
 **Example Request Body (form submission & completion):**
 ```json
@@ -220,15 +220,15 @@ POST `/approve/`:
   "reference_name": "Friend Referral",
   "consent": true,
 
-  "tenth_medium": "gujarati",
-  "tenth_board": "gseb",
+  "tenth_medium": "gseb",
+  "tenth_board": "gujarati",
   "tenth_school": "ABC High School",
   "tenth_coaching": "XYZ Classes",
   "tenth_percentage": 85.50,
   "tenth_percentile": 92.00,
 
-  "twelfth_medium": "english",
-  "twelfth_board": "cbse",
+  "twelfth_medium": "cbse",
+  "twelfth_board": "english",
   "twelfth_school": "National Higher Secondary",
   "twelfth_coaching": "Premier Coaching",
   "twelfth_percentage": 88.00,
@@ -257,10 +257,10 @@ POST `/approve/`:
     "paid_amount": "0.00",
     "remaining_fees": "35000.00",
     "is_paid": false,
-    "tenth_medium_display": "Gujarati Medium",
-    "tenth_board_display": "Gujarat Board (GSEB)",
-    "twelfth_medium_display": "English Medium",
-    "twelfth_board_display": "CBSE Board",
+    "tenth_medium_display": "Gujarat Board (GSEB)",
+    "tenth_board_display": "Gujarati Medium",
+    "twelfth_medium_display": "CBSE Board",
+    "twelfth_board_display": "English Medium",
     "assigned_counsellor": {"id": "coun-uuid", "name": "Counsellor Name", "email": "..."}
   }
 }

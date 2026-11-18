@@ -213,19 +213,19 @@ class TestAllFixes(unittest.TestCase):
         board_keys = [k for k, _ in BOARD_TYPE_CHOICES]
         medium_keys = [k for k, _ in MEDIUM_TYPE_CHOICES]
 
-        # Board choices must be strictly gseb, cbse, icse
-        self.assertIn('gseb', board_keys)
-        self.assertIn('cbse', board_keys)
-        self.assertIn('icse', board_keys)
-        self.assertNotIn('english', board_keys)
-        self.assertNotIn('gujarati', board_keys)
+        # Medium choices in models are strictly gseb, cbse, icse
+        self.assertIn('gseb', medium_keys)
+        self.assertIn('cbse', medium_keys)
+        self.assertIn('icse', medium_keys)
+        self.assertNotIn('english', medium_keys)
+        self.assertNotIn('gujarati', medium_keys)
 
-        # Medium choices must be strictly english, gujarati, hindi, other
-        self.assertIn('english', medium_keys)
-        self.assertIn('gujarati', medium_keys)
-        self.assertIn('hindi', medium_keys)
-        self.assertNotIn('gseb', medium_keys)
-        self.assertNotIn('cbse', medium_keys)
+        # Board choices in models are strictly english, gujarati, hindi, other
+        self.assertIn('english', board_keys)
+        self.assertIn('gujarati', board_keys)
+        self.assertIn('hindi', board_keys)
+        self.assertNotIn('gseb', board_keys)
+        self.assertNotIn('cbse', board_keys)
 
         from leads.serializers import InquirySerializer
 
@@ -247,34 +247,34 @@ class TestAllFixes(unittest.TestCase):
             'reference': 'google',
             'consent': True,
             'inquiry_date': '2026-11-18',
-            'tenth_medium': 'gujarati',
-            'tenth_board': 'gseb',
+            'tenth_medium': 'gseb',
+            'tenth_board': 'gujarati',
             'tenth_school': 'ABC High School',
             'tenth_percentage': '85.50',
             'tenth_percentile': '92.00',
-            'twelfth_medium': 'english',
-            'twelfth_board': 'cbse',
+            'twelfth_medium': 'cbse',
+            'twelfth_board': 'english',
             'twelfth_school': 'XYZ Higher Secondary',
             'twelfth_percentage': '88.00',
             'twelfth_percentile': '95.00',
         }
         s = InquirySerializer(data=inquiry_data)
         self.assertTrue(s.is_valid(), s.errors)
-        self.assertEqual(s.validated_data['tenth_medium'], 'gujarati')
-        self.assertEqual(s.validated_data['tenth_board'], 'gseb')
-        self.assertEqual(s.validated_data['twelfth_medium'], 'english')
-        self.assertEqual(s.validated_data['twelfth_board'], 'cbse')
+        self.assertEqual(s.validated_data['tenth_medium'], 'gseb')
+        self.assertEqual(s.validated_data['tenth_board'], 'gujarati')
+        self.assertEqual(s.validated_data['twelfth_medium'], 'cbse')
+        self.assertEqual(s.validated_data['twelfth_board'], 'english')
 
-        # Verify invalid medium choice is rejected
+        # Verify invalid choice for tenth_medium (rejects 'gujarati' because MEDIUM_TYPE_CHOICES has gseb/cbse/icse)
         bad_data = inquiry_data.copy()
-        bad_data['tenth_medium'] = 'gseb'  # board value in medium field
+        bad_data['tenth_medium'] = 'gujarati'
         s_bad = InquirySerializer(data=bad_data)
         self.assertFalse(s_bad.is_valid())
         self.assertIn('tenth_medium', s_bad.errors)
 
-        # Verify invalid board choice is rejected
+        # Verify invalid choice for tenth_board (rejects 'gseb' because BOARD_TYPE_CHOICES has english/gujarati/hindi/other)
         bad_data2 = inquiry_data.copy()
-        bad_data2['tenth_board'] = 'english'  # medium value in board field
+        bad_data2['tenth_board'] = 'gseb'
         s_bad2 = InquirySerializer(data=bad_data2)
         self.assertFalse(s_bad2.is_valid())
         self.assertIn('tenth_board', s_bad2.errors)

@@ -108,6 +108,17 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
 - For `form_type: "contact"`: Minimal contact inquiry for quick follow-up.
 - For `form_type: "inquiry"`: Comprehensive prospective student inquiry with education history (10th, 12th, graduation).
 
+#### Education Choices:
+- **`tenth_medium` / `twelfth_medium`** choices (Board choices):
+  - `'gseb'` — Gujarat Board (GSEB)
+  - `'cbse'` — CBSE Board
+  - `'icse'` — ICSE Board
+- **`tenth_board` / `twelfth_board`** choices (Medium choices):
+  - `'english'` — English Medium
+  - `'gujarati'` — Gujarati Medium
+  - `'hindi'` — Hindi Medium
+  - `'other'` — Other
+
 #### Inquiry Form (`form_type: "inquiry"`) Request Example:
 ```json
 {
@@ -130,15 +141,15 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
   "consent": true,
   "inquiry_date": "2026-06-01",
 
-  "tenth_medium": "gujarati",
-  "tenth_board": "gseb",
+  "tenth_medium": "gseb",
+  "tenth_board": "gujarati",
   "tenth_school": "ABC High School",
   "tenth_coaching": "XYZ Classes",
   "tenth_percentage": 85.50,
   "tenth_percentile": 92.00,
 
-  "twelfth_medium": "english",
-  "twelfth_board": "cbse",
+  "twelfth_medium": "cbse",
+  "twelfth_board": "english",
   "twelfth_school": "National Higher Secondary",
   "twelfth_coaching": "Premier Coaching",
   "twelfth_percentage": 88.00,

@@ -154,16 +154,16 @@ class Lead(models.Model):
     reference_name = models.CharField(max_length=100,blank=True)
 
     # ── Section 3: 10th Education (Inquiry only) ──────────────────────────────
-    tenth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)
-    tenth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True)
+    tenth_medium     = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True)
+    tenth_board      = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)
     tenth_school     = models.CharField(max_length=200, blank=True)
     tenth_coaching   = models.CharField(max_length=200, blank=True)
     tenth_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     tenth_percentile = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     # ── Section 4: 12th Education (Inquiry only) ──────────────────────────────
-    twelfth_medium     = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)
-    twelfth_board      = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True)
+    twelfth_medium     = models.CharField(max_length=10, choices=MEDIUM_TYPE_CHOICES, blank=True)
+    twelfth_board      = models.CharField(max_length=10, choices=BOARD_TYPE_CHOICES, blank=True)
     twelfth_school     = models.CharField(max_length=200, blank=True)
     twelfth_coaching   = models.CharField(max_length=200, blank=True)
     twelfth_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
