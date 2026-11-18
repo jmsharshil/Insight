@@ -1998,7 +1998,7 @@ class LeadListView(APIView):
             notify_users_by_role(
                 roles=['super_admin', 'branch_manager', 'front_desk', 'admin_executive'],
                 title='New Lead Received',
-                body=f"A new lead ({lead.first_name} {lead.surname or ''}) has submitted a {FORM_TYPE_DISPLAY.get(lead.form_type, lead.form_type)} form.",
+                body=f"A new lead ({lead.first_name} {lead.surname or ''}) has submitted a {FORM_TYPE_DISPLAY.get(lead.form_type, lead.form_type)}.",
                 organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
                 branch=lead.branch if getattr(lead, 'branch', None) else None,
             )
