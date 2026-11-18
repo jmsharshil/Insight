@@ -141,9 +141,12 @@ class AdmissionService:
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to create user accounts for admission {admission.id}: {e}"
+                    f"Failed to create user accounts for admission {admission.id}: {e}",
+                    exc_info=True,
                 )
-                # Don't re-raise — status is already saved
+                # Don't re-raise — status is already saved, but credential
+                # dispatch may have been skipped.  Check logs for
+                # "credential email/WhatsApp FAILED" entries.
 
         return admission
 
@@ -178,8 +181,16 @@ class AdmissionService:
             if student_password:
                 send_student_login_credentials(student_user, student_password)
                 logger.info(f"Student credentials sent for admission {admission.id}")
+            else:
+                logger.warning(
+                    f"Student password was None/empty for admission {admission.id} — "
+                    f"credential email NOT sent. User may already exist."
+                )
         except Exception as e:
-            logger.error(f"Student email sending failed for admission {admission.id}: {e}")
+            logger.error(
+                f"Student credential email/WhatsApp FAILED for admission {admission.id}: {e}",
+                exc_info=True,
+            )
 
         # ── Parent User Account Creation ──────────────────────────────────────
         raw_father = admission.father_name.strip() if admission.father_name else ''
@@ -263,7 +274,10 @@ class AdmissionService:
                     )
                     logger.info(f"Parent account already existed, added student link for admission {admission.id}.")
             except Exception as e:
-                logger.error(f"Parent email sending failed for admission {admission.id}: {e}")
+                logger.error(
+                    f"Parent credential email/WhatsApp FAILED for admission {admission.id}: {e}",
+                    exc_info=True,
+                )
         else:
             logger.warning(f"Skipping parent account creation for admission {admission.id} (missing email and phone).")
 

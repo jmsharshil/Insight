@@ -742,6 +742,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                         note=f"Auto-verified via Razorpay: {rp_payment_id}",
                     )
                 else:
+                    payment.admission = payment.admission or admission
                     payment.student = student or payment.student
                     payment.amount = transaction_amount
                     payment.payment_mode = 'online'
@@ -810,29 +811,31 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 admission.payment_history = history
                 admission.save(update_fields=['payment_history', 'updated_at'])
 
-            if profile_creation_error:
-                logger.error(
-                    f"[Razorpay] Admission {adm_id} payment is verified, but student setup failed: "
-                    f"{profile_creation_error}"
-                )
-                return {"success": False, "error": profile_creation_error}
-
+            # ── Always dispatch receipt + notification even if student setup failed ──
+            # Payment is verified regardless of profile creation status; the student
+            # and parent must still receive their receipt email & WhatsApp.
             if is_new_transaction:
+                receipt_sent = False
                 if payment:
                     try:
                         send_payment_receipt(payment)
+                        receipt_sent = True
                     except Exception as exc:
                         logger.error(f"[Razorpay] Receipt dispatch failed for {rp_payment_id}: {exc}")
 
-                try:
-                    send_admission_payment_notification(
-                        admission,
-                        float(transaction_amount),
-                        rp_payment_id,
-                        is_partial=is_partial,
-                    )
-                except Exception as notify_err:
-                    logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
+                # Only send admission-level notification as FALLBACK if
+                # send_payment_receipt failed or payment record was missing,
+                # OR for partial payments (which don't create a student yet).
+                if not receipt_sent or is_partial:
+                    try:
+                        send_admission_payment_notification(
+                            admission,
+                            float(transaction_amount),
+                            rp_payment_id,
+                            is_partial=is_partial,
+                        )
+                    except Exception as notify_err:
+                        logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
 
                 try:
                     if admission.bank_account and admission.bank_account.razorpay_account_id:
@@ -843,6 +846,18 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                         )
                 except Exception as exc:
                     logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {exc}")
+
+            if profile_creation_error:
+                logger.error(
+                    f"[Razorpay] Admission {adm_id} payment is verified, but student setup failed: "
+                    f"{profile_creation_error}"
+                )
+                return {
+                    "success": False,
+                    "error": profile_creation_error,
+                    "receipt_sent": is_new_transaction,
+                    "payment_id": str(payment.id) if payment else None,
+                }
 
             logger.info(
                 f"[Razorpay] Admission {adm_id} payment {rp_payment_id} "

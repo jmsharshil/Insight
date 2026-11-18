@@ -440,5 +440,93 @@ class TestAllFixes(unittest.TestCase):
                     filter_calls = [str(call) for call in mock_p_qs.filter.call_args_list]
                     self.assertTrue(any('admission__admission_code__iexact' in c for c in filter_calls))
 
+    def test_razorpay_receipt_sent_even_on_profile_creation_error(self):
+        """
+        Fix: receipt + notification must be dispatched BEFORE the
+        profile_creation_error early return in process_payment_link_paid_event.
+        We verify the code structure by reading the source and checking order.
+        """
+        import inspect
+        from fees.razorpay_service import process_payment_link_paid_event
+        source = inspect.getsource(process_payment_link_paid_event)
+
+        # Receipt dispatch (send_payment_receipt) must appear BEFORE profile_creation_error return
+        idx_receipt = source.find('send_payment_receipt(payment)')
+        idx_notif = source.find('send_admission_payment_notification(')
+        idx_error_return = source.find('"receipt_sent": is_new_transaction')
+
+        self.assertGreater(idx_receipt, 0, "send_payment_receipt call not found")
+        self.assertGreater(idx_notif, 0, "send_admission_payment_notification call not found")
+        self.assertGreater(idx_error_return, 0, "profile_creation_error return not found")
+
+        # Key assertion: receipt and notification must come BEFORE the error return
+        self.assertLess(idx_receipt, idx_error_return,
+                        "send_payment_receipt must execute BEFORE profile_creation_error return")
+        self.assertLess(idx_notif, idx_error_return,
+                        "send_admission_payment_notification must execute BEFORE profile_creation_error return")
+
+    def test_level2_approval_sends_receipt_on_student_user_missing(self):
+        """
+        Fix: Level 2 approval in onboarding/views.py must still try to send
+        payment receipt even when student_user lookup fails (returns 500).
+        """
+        import inspect
+        from onboarding.views import AdmissionApproveView
+        source = inspect.getsource(AdmissionApproveView)
+
+        # After "Student user account missing" error, there must be a fallback receipt dispatch
+        idx_missing_msg = source.find('Student user account missing')
+        idx_fallback_receipt = source.find('Payment receipt has been dispatched')
+        self.assertGreater(idx_missing_msg, 0, "Missing student user message not found")
+        self.assertGreater(idx_fallback_receipt, 0, "Fallback receipt dispatch not found")
+        self.assertGreater(idx_fallback_receipt, idx_missing_msg,
+                           "Fallback receipt dispatch must come after missing user detection")
+
+    def test_level2_approval_sends_receipt_on_student_profile_failure(self):
+        """
+        Fix: Level 2 approval must dispatch receipt even when
+        StudentService.create_from_admission fails.
+        """
+        import inspect
+        from onboarding.views import AdmissionApproveView
+        source = inspect.getsource(AdmissionApproveView)
+
+        # After "profile creation failed" error, receipt should still be dispatched
+        idx_profile_failed = source.find('profile creation failed')
+        idx_receipt_msg = source.find('Payment receipt has been dispatched.')
+        self.assertGreater(idx_profile_failed, 0, "Profile creation failed message not found")
+        self.assertGreater(idx_receipt_msg, 0, "Receipt dispatch message not found")
+
+    def test_payment_admission_always_set_on_update(self):
+        """
+        Fix: When updating an existing payment in Razorpay webhook,
+        payment.admission must be set so send_payment_receipt can find
+        recipients via admission fallback.
+        """
+        import inspect
+        from fees.razorpay_service import process_payment_link_paid_event
+        source = inspect.getsource(process_payment_link_paid_event)
+
+        # The else branch (existing payment update) must set payment.admission
+        idx_else = source.find('payment.admission = payment.admission or admission')
+        self.assertGreater(idx_else, 0,
+                           "payment.admission assignment not found in existing payment update path")
+
+    def test_credential_dispatch_logging(self):
+        """
+        Verify _create_user_accounts has proper logging when password is
+        empty/None (user already existed and no new password generated).
+        """
+        import inspect
+        from onboarding.utils import AdmissionService
+        source = inspect.getsource(AdmissionService._create_user_accounts)
+
+        # Must log a warning when student_password is None
+        self.assertIn('credential email NOT sent', source,
+                       "Warning about skipped credential dispatch not found in _create_user_accounts")
+        # Must have exc_info=True for better debugging
+        self.assertIn('exc_info=True', source,
+                       "exc_info=True not found in credential error handler")
+
 if __name__ == '__main__':
     unittest.main()

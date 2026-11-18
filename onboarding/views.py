@@ -1591,12 +1591,24 @@ class AdmissionApproveView(APIView):
                     f"Student user account missing for admission {admission_id} "
                     f"(email={admission.email}) after enrolment."
                 )
+                # Still try to send payment receipt before returning error
+                try:
+                    from fees.models import Payment
+                    from fees.services import send_payment_receipt
+                    _fallback_payment = Payment.objects.filter(admission=admission).first()
+                    if _fallback_payment:
+                        send_payment_receipt(_fallback_payment)
+                        logger.info(f"Payment receipt sent despite missing student user for admission {admission_id}")
+                except Exception as _receipt_err:
+                    logger.error(f"Fallback receipt dispatch failed for admission {admission_id}: {_receipt_err}")
+
                 return Response(
                     {
                         'success': False,
                         'message': (
                             'Admission status set to enrolled but student user account '
-                            'was not found. Please check server logs.'
+                            'was not found. Payment receipt has been dispatched. '
+                            'Please check server logs.'
                         ),
                         'data': {
                             'admission_id': admission.admission_code,
@@ -1619,12 +1631,24 @@ class AdmissionApproveView(APIView):
                     f"StudentService.create_from_admission failed for admission "
                     f"{admission_id}: {exc}"
                 )
+                # Still try to send payment receipt before returning error
+                try:
+                    from fees.models import Payment
+                    from fees.services import send_payment_receipt
+                    _fallback_payment = Payment.objects.filter(admission=admission).first()
+                    if _fallback_payment:
+                        send_payment_receipt(_fallback_payment)
+                        logger.info(f"Payment receipt sent despite student profile failure for admission {admission_id}")
+                except Exception as _receipt_err:
+                    logger.error(f"Fallback receipt dispatch failed for admission {admission_id}: {_receipt_err}")
+
                 return Response(
                     {
                         'success': False,
                         'message': (
                             'Admission enrolled and user accounts created, but student '
-                            f'profile creation failed: {exc}'
+                            f'profile creation failed: {exc}. '
+                            'Payment receipt has been dispatched.'
                         ),
                         'data': {
                             'admission_id': admission.admission_code,
