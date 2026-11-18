@@ -1990,15 +1990,18 @@ class LeadListView(APIView):
 
         tag = "duplicate" if duplicate_lead else "new"
 
-        # Send notification to admins
-        from core.utils import notify_users_by_role
-        notify_users_by_role(
-            roles=['super_admin', 'branch_manager', 'front_desk', 'admin_executive'],
-            title='New Lead Received',
-            body=f"A new lead ({lead.first_name} {lead.surname or ''}) has submitted a {FORM_TYPE_DISPLAY.get(lead.form_type, lead.form_type)} form.",
-            organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
-            branch=lead.branch if getattr(lead, 'branch', None) else None,
-        )
+        # For non-inquiry forms, send standard "New Lead Received" notification.
+        # Inquiry forms are converted leads and have already dispatched dedicated
+        # converted-lead system and WhatsApp notifications in auto_create_admission_for_lead.
+        if lead.form_type != 'inquiry':
+            from core.utils import notify_users_by_role
+            notify_users_by_role(
+                roles=['super_admin', 'branch_manager', 'front_desk', 'admin_executive'],
+                title='New Lead Received',
+                body=f"A new lead ({lead.first_name} {lead.surname or ''}) has submitted a {FORM_TYPE_DISPLAY.get(lead.form_type, lead.form_type)} form.",
+                organization=lead.branch.organization if getattr(lead, 'branch', None) else None,
+                branch=lead.branch if getattr(lead, 'branch', None) else None,
+            )
 
         return Response(
             {

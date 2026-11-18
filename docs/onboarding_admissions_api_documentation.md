@@ -169,10 +169,18 @@ POST `/approve/`:
 
 ### List & Detail
 - Admission records have a public immutable `admission_code` in the format `IIPS-000001`.
-- API responses expose that code as `id`. The numeric database ID remains internal and is accepted by existing URLs for backward compatibility.
-- **GET** `/api/v1/admissions/` — Paginated list. Filters: `status`, `course`, `branch`, `attempt_year`; search on name/email/phone. Uses `AdmissionListSerializer`.
-- **GET** `/api/v1/admissions/<admission_code>/` — Full detail using a code such as `IIPS-000001`. Includes history. `AdmissionDetailSerializer`.
-- **PATCH/PUT/POST** `/api/v1/admissions/<admission_code>/` — Update form (partial OK). Numeric IDs continue to work for existing integrations. Triggers bank assignment/email on first complete submit if `form_pending`. Uses `AdmissionUpdateSerializer`.
+- **Universal Identifier Support**: ALL admission-related endpoints and queries accept both `admission_code` (e.g. `IIPS-000001`, `iips-000001`) and numeric database IDs (e.g. `123`).
+- API responses expose `admission_code` as `id`.
+- **GET** `/api/v1/admissions/` — Paginated list. Filters: `status`, `course`, `branch`, `attempt_year`, `admission_id`/`admission_code`/`id`; search on name/email/phone. Uses `AdmissionListSerializer`.
+- **GET** `/api/v1/admissions/<admission_code>/` — Full detail using a code such as `IIPS-000001` or numeric ID. Includes history. `AdmissionDetailSerializer`.
+- **PATCH/PUT/POST** `/api/v1/admissions/<admission_code>/` — Update form (partial OK). Accepts either `admission_code` or numeric ID. Triggers bank assignment/email on first complete submit if `form_pending`. Uses `AdmissionUpdateSerializer`.
+- **PATCH** `/api/v1/admissions/<admission_code>/status/` — Update admission status using code or numeric ID.
+- **POST** `/api/v1/admissions/<admission_code>/approve/` — Approve payment (Level 1 / Level 2) using code or numeric ID.
+- **POST** `/api/v1/admissions/<admission_code>/reject/` — Reject admission using code or numeric ID.
+- **POST** `/api/v1/admissions/<admission_code>/documents/` — Upload documents using code or numeric ID.
+- **POST** `/api/v1/admissions/<admission_code>/payment/` — Submit payment proof using code or numeric ID.
+- **POST** `/api/v1/admissions/<admission_code>/setup/` — Run payment bank setup and link dispatch using code or numeric ID.
+- **GET** `/api/fees/payments/?admission_id=<admission_code>` — Filter payments by `admission_code` or numeric ID.
 
 > [!IMPORTANT]
 > **Phone Number Uniqueness Requirement**:
@@ -180,15 +188,15 @@ POST `/approve/`:
 > - `"Student phone number, father's phone number, and mother's phone number must all be different."`
 
 #### Education Choices (Medium & Board):
-- **`tenth_medium` / `twelfth_medium`** choices (Board choices):
-  - `'gseb'` — Gujarat Board (GSEB)
-  - `'cbse'` — CBSE Board
-  - `'icse'` — ICSE Board
-- **`tenth_board` / `twelfth_board`** choices (Medium choices):
+- **`tenth_medium` / `twelfth_medium`** choices (Language Medium):
   - `'english'` — English Medium
   - `'gujarati'` — Gujarati Medium
   - `'hindi'` — Hindi Medium
   - `'other'` — Other
+- **`tenth_board` / `twelfth_board`** choices (Examination Board):
+  - `'gseb'` — Gujarat Board (GSEB)
+  - `'cbse'` — CBSE Board
+  - `'icse'` — ICSE Board
 
 **Example Request Body (form submission & completion):**
 ```json
@@ -220,15 +228,15 @@ POST `/approve/`:
   "reference_name": "Friend Referral",
   "consent": true,
 
-  "tenth_medium": "gseb",
-  "tenth_board": "gujarati",
+  "tenth_medium": "gujarati",
+  "tenth_board": "gseb",
   "tenth_school": "ABC High School",
   "tenth_coaching": "XYZ Classes",
   "tenth_percentage": 85.50,
   "tenth_percentile": 92.00,
 
-  "twelfth_medium": "cbse",
-  "twelfth_board": "english",
+  "twelfth_medium": "english",
+  "twelfth_board": "cbse",
   "twelfth_school": "National Higher Secondary",
   "twelfth_coaching": "Premier Coaching",
   "twelfth_percentage": 88.00,

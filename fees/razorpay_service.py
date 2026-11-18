@@ -621,7 +621,14 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             profile_creation_error = None
 
             with transaction.atomic():
-                admission = Admission.objects.select_for_update().filter(id=adm_id).first()
+                adm_lookup = Q(admission_code__iexact=str(adm_id).strip())
+                if str(adm_id).strip().isdigit():
+                    adm_lookup |= Q(id=int(str(adm_id).strip()))
+                elif str(adm_id).strip().upper().startswith('IIPS-'):
+                    num_part = str(adm_id).strip().split('-')[-1].lstrip('0')
+                    if num_part.isdigit():
+                        adm_lookup |= Q(id=int(num_part))
+                admission = Admission.objects.select_for_update().filter(adm_lookup).first()
                 if not admission:
                     return {"success": False, "error": f"Admission {adm_id} not found."}
 
@@ -929,7 +936,14 @@ def process_payment_link_cancelled_event(payload: dict) -> dict:
             adm_id = reference_id.split('_')[1]
             from onboarding.models import Admission
 
-            admission = Admission.objects.filter(id=adm_id).first()
+            adm_lookup = Q(admission_code__iexact=str(adm_id).strip())
+            if str(adm_id).strip().isdigit():
+                adm_lookup |= Q(id=int(str(adm_id).strip()))
+            elif str(adm_id).strip().upper().startswith('IIPS-'):
+                num_part = str(adm_id).strip().split('-')[-1].lstrip('0')
+                if num_part.isdigit():
+                    adm_lookup |= Q(id=int(num_part))
+            admission = Admission.objects.filter(adm_lookup).first()
             if admission and admission.razorpay_payment_link_id == link_id:
                 admission.razorpay_payment_link = None
                 admission.razorpay_payment_link_id = None

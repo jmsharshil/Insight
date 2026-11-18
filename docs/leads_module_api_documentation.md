@@ -87,11 +87,18 @@ Automatic round-robin via signal on Lead save (`auto_assign_lead`). Uses `form_t
 ### Step 3: Pipeline Management
 Counsellor/Telecaller updates stage progressively with notes. Immutable `LeadStage` + assignment logs for full audit trail.
 
-### Step 4: Conversion
-`converted` stage no longer auto-creates Admission (signal commented). Use dedicated **Admission onboarding pipeline** (see `onboarding_admissions_api_documentation.md` and new `admissions/models.py` with `AdmissionStatusHistory`, bank round-robin, Razorpay integration, full student data fields).
+### Step 4: Conversion & Inquiry Auto-Conversion
+- Submitting an inquiry form (`form_type: "inquiry"`) immediately marks the lead stage as `converted` and automatically creates an `Admission` record in `form_pending` status.
+- **Automated Converted Lead Notifications**:
+  - **System Notifications**: Dispatched to staff roles (`super_admin`, `branch_manager`, `front_desk`, `admin_executive`, `counsellor`) and targeted directly to `assigned_counsellor`. Contains `admission_code`, `admission_id`, and `lead_id`.
+  - **WhatsApp Notifications (via `admission_process` template)**: Dispatched to:
+    - **Student** (`phone_student`): Admission process link and inquiry confirmation.
+    - **Parent** (`phone_father`): Inquiry confirmation with admission code and link.
+    - **Assigned Counsellor**: Lead assignment alert with student name, course, phone, and admission code.
+    - **Branch Managers & Super Admins**: New converted lead notification for follow-up.
 
 ### Step 5: Onward Flow
-Manual creation of `Admission` (status workflow: `form_pending` → `payment_pending` → `approved` etc.). Links to `fees.utils.select_bank_accounts_for_payment()`, installment rules via `CourseLevel.course_type`, enrollment to Student/StudentFee.
+Manual or auto creation of `Admission` (status workflow: `form_pending` → `payment_pending` → `approved` etc.). Links to `fees.utils.select_bank_accounts_for_payment()`, installment rules via `CourseLevel.course_type`, enrollment to Student/StudentFee.
 
 **Example:** Converted CSEET lead with fee_structure creates StudentFee with default 1-installment (approved) or multi (pending_approval if >2).
 
@@ -106,18 +113,18 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
 **`POST /api/v1/leads/`** — Public or authenticated lead capture endpoint.
 
 - For `form_type: "contact"`: Minimal contact inquiry for quick follow-up.
-- For `form_type: "inquiry"`: Comprehensive prospective student inquiry with education history (10th, 12th, graduation).
+- For `form_type: "inquiry"`: Comprehensive prospective student inquiry with education history (10th, 12th, graduation). Auto-converts to an admission record and triggers system + WhatsApp notifications via `admission_process` template.
 
 #### Education Choices:
-- **`tenth_medium` / `twelfth_medium`** choices (Board choices):
-  - `'gseb'` — Gujarat Board (GSEB)
-  - `'cbse'` — CBSE Board
-  - `'icse'` — ICSE Board
-- **`tenth_board` / `twelfth_board`** choices (Medium choices):
+- **`tenth_medium` / `twelfth_medium`** choices (Language Medium):
   - `'english'` — English Medium
   - `'gujarati'` — Gujarati Medium
   - `'hindi'` — Hindi Medium
   - `'other'` — Other
+- **`tenth_board` / `twelfth_board`** choices (Examination Board):
+  - `'gseb'` — Gujarat Board (GSEB)
+  - `'cbse'` — CBSE Board
+  - `'icse'` — ICSE Board
 
 #### Inquiry Form (`form_type: "inquiry"`) Request Example:
 ```json
@@ -141,15 +148,15 @@ Leads list with filters for conversion rate tracking. Lost leads with reasons.
   "consent": true,
   "inquiry_date": "2026-06-01",
 
-  "tenth_medium": "gseb",
-  "tenth_board": "gujarati",
+  "tenth_medium": "gujarati",
+  "tenth_board": "gseb",
   "tenth_school": "ABC High School",
   "tenth_coaching": "XYZ Classes",
   "tenth_percentage": 85.50,
   "tenth_percentile": 92.00,
 
-  "twelfth_medium": "cbse",
-  "twelfth_board": "english",
+  "twelfth_medium": "english",
+  "twelfth_board": "cbse",
   "twelfth_school": "National Higher Secondary",
   "twelfth_coaching": "Premier Coaching",
   "twelfth_percentage": 88.00,

@@ -457,7 +457,15 @@ class PaymentListView(APIView):
         if student_id:
             queryset = queryset.filter(student_id=student_id)
         if admission_id:
-            queryset = queryset.filter(admission_id=admission_id)
+            clean_adm = str(admission_id).strip()
+            lookup = Q(admission__admission_code__iexact=clean_adm)
+            if clean_adm.isdigit():
+                lookup |= Q(admission_id=int(clean_adm))
+            elif clean_adm.upper().startswith('IIPS-'):
+                num_part = clean_adm.split('-')[-1].lstrip('0')
+                if num_part.isdigit():
+                    lookup |= Q(admission_id=int(num_part))
+            queryset = queryset.filter(lookup)
         if payment_status:
             queryset = queryset.filter(status=payment_status)
         if payment_mode:

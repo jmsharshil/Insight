@@ -147,13 +147,24 @@ def _get_admission(request, admission_id):
         queryset = Admission.objects.select_related(
             'branch', 'assigned_counsellor', 'lead',
         )
-        if getattr(request.user, 'organization', None):
-            queryset = queryset.filter(branch__organization=request.user.organization)
-        lookup = Q(admission_code=str(admission_id).upper())
-        if str(admission_id).isdigit():
-            lookup |= Q(id=int(admission_id))
+        user = getattr(request, 'user', None) if request else None
+        if user and user.is_authenticated and not (getattr(user, 'is_superuser', False) or getattr(user, 'role', None) == 'super_admin'):
+            user_org = getattr(user, 'organization', None)
+            if user_org:
+                queryset = queryset.filter(
+                    Q(branch__organization=user_org) | Q(branch__isnull=True)
+                )
+
+        clean_id = str(admission_id).strip()
+        lookup = Q(admission_code__iexact=clean_id)
+        if clean_id.isdigit():
+            lookup |= Q(id=int(clean_id)) | Q(lead__id=int(clean_id))
+        elif clean_id.upper().startswith('IIPS-'):
+            num_part = clean_id.split('-')[-1].lstrip('0')
+            if num_part.isdigit():
+                lookup |= Q(id=int(num_part)) | Q(lead__id=int(num_part))
         return queryset.filter(lookup).first()
-    except Admission.DoesNotExist:
+    except Exception:
         return None
  
  
@@ -906,11 +917,7 @@ class AdmissionListView(APIView):
         # ── Normal path: id was provided — look up the existing admission ────────
         if admission_id:
             try:
-                from django.db.models import Q
-                lookup = Q(admission_code=str(admission_id).upper())
-                if str(admission_id).isdigit():
-                    lookup |= Q(id=int(admission_id)) | Q(lead__id=int(admission_id))
-                admission = Admission.objects.filter(lookup).first()
+                admission = _get_admission(request, admission_id)
                 if not admission:
                     return Response({'success': False, 'message': 'Admission not found for this ID.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1021,6 +1028,18 @@ class AdmissionListView(APIView):
         course     = request.GET.get('course')
         branch  = request.GET.get("branch")
         batch_attempt = request.GET.get("batch_attempt")
+        adm_identifier = request.GET.get('admission_id') or request.GET.get('id') or request.GET.get('admission_code')
+
+        if adm_identifier:
+            clean_query = str(adm_identifier).strip()
+            lookup = Q(admission_code__iexact=clean_query)
+            if clean_query.isdigit():
+                lookup |= Q(id=int(clean_query)) | Q(lead__id=int(clean_query))
+            elif clean_query.upper().startswith('IIPS-'):
+                num_part = clean_query.split('-')[-1].lstrip('0')
+                if num_part.isdigit():
+                    lookup |= Q(id=int(num_part)) | Q(lead__id=int(num_part))
+            queryset = queryset.filter(lookup)
 
         if adm_status:
             queryset = queryset.filter(status=adm_status)
@@ -1045,21 +1064,7 @@ class AdmissionDetailView(APIView):
     permission_classes = [AllowAny]
 
     def _get_admission(self, request, identifier):
-        try:
-            from django.db.models import Q
-            queryset = Admission.objects.all()
-            if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(
-                    Q(branch__organization=request.user.organization) | Q(branch__isnull=True)
-                )
-
-            # Match by admission_code first, then by numeric ID or lead ID
-            lookup = Q(admission_code=str(identifier).upper())
-            if str(identifier).isdigit():
-                lookup |= Q(id=int(identifier)) | Q(lead__id=int(identifier))
-            return queryset.filter(lookup).first()
-        except Exception:
-            return None
+        return _get_admission(request, identifier)
 
     def get(self, request, admission_id):
         admission = self._get_admission(request, admission_id)
@@ -1164,19 +1169,9 @@ class AdmissionDetailView(APIView):
 class AdmissionStatusUpdateView(APIView):
 
     def patch(self, request, admission_id):
-        try:
-            queryset = Admission.objects.all()
-            if getattr(request.user, 'organization', None):
-                queryset = queryset.filter(branch__organization=request.user.organization)
-            lookup = Q(admission_code=str(admission_id).upper())
-            if str(admission_id).isdigit():
-                lookup |= Q(id=int(admission_id))
-            admission = queryset.filter(lookup).first()
-        except Admission.DoesNotExist:
-            return Response(
-                {'success': False, 'message': 'Admission not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        admission = _get_admission(request, admission_id)
+        if not admission:
+            return _not_found()
 
         serializer = AdmissionStatusUpdateSerializer(data=request.data)
         if not serializer.is_valid():
@@ -1819,17 +1814,9 @@ class AdmissionPaymentSubmitView(APIView):
         return [AllowAny()]
 
     def post(self, request, admission_id):
-        from django.db.models import Q
         from decimal import Decimal
 
-        try:
-            lookup = Q(admission_code=str(admission_id).upper())
-            if str(admission_id).isdigit():
-                lookup |= Q(id=int(admission_id)) | Q(lead__id=int(admission_id))
-            admission = Admission.objects.filter(lookup).first()
-        except Exception:
-            admission = None
-
+        admission = _get_admission(request, admission_id)
         if not admission:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},
@@ -2091,17 +2078,8 @@ class AdmissionPaymentSetupView(APIView):
         return [AllowAny()]
 
     def post(self, request, admission_id):
-        from django.db.models import Q
-
         # ── Lookup ────────────────────────────────────────────────────────────
-        try:
-            lookup = Q(admission_code=str(admission_id).upper())
-            if str(admission_id).isdigit():
-                lookup |= Q(id=int(admission_id)) | Q(lead__id=int(admission_id))
-            admission = Admission.objects.filter(lookup).first()
-        except Exception:
-            admission = None
-
+        admission = _get_admission(request, admission_id)
         if not admission:
             return Response(
                 {'success': False, 'message': 'Admission not found.'},

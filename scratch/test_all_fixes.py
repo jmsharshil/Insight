@@ -213,19 +213,19 @@ class TestAllFixes(unittest.TestCase):
         board_keys = [k for k, _ in BOARD_TYPE_CHOICES]
         medium_keys = [k for k, _ in MEDIUM_TYPE_CHOICES]
 
-        # Medium choices in models are strictly gseb, cbse, icse
-        self.assertIn('gseb', medium_keys)
-        self.assertIn('cbse', medium_keys)
-        self.assertIn('icse', medium_keys)
-        self.assertNotIn('english', medium_keys)
-        self.assertNotIn('gujarati', medium_keys)
+        # Medium choices in models are strictly english, gujarati, hindi, other
+        self.assertIn('english', medium_keys)
+        self.assertIn('gujarati', medium_keys)
+        self.assertIn('hindi', medium_keys)
+        self.assertNotIn('gseb', medium_keys)
+        self.assertNotIn('cbse', medium_keys)
 
-        # Board choices in models are strictly english, gujarati, hindi, other
-        self.assertIn('english', board_keys)
-        self.assertIn('gujarati', board_keys)
-        self.assertIn('hindi', board_keys)
-        self.assertNotIn('gseb', board_keys)
-        self.assertNotIn('cbse', board_keys)
+        # Board choices in models are strictly gseb, cbse, icse
+        self.assertIn('gseb', board_keys)
+        self.assertIn('cbse', board_keys)
+        self.assertIn('icse', board_keys)
+        self.assertNotIn('english', board_keys)
+        self.assertNotIn('gujarati', board_keys)
 
         from leads.serializers import InquirySerializer
 
@@ -247,34 +247,34 @@ class TestAllFixes(unittest.TestCase):
             'reference': 'google',
             'consent': True,
             'inquiry_date': '2026-11-18',
-            'tenth_medium': 'gseb',
-            'tenth_board': 'gujarati',
+            'tenth_medium': 'gujarati',
+            'tenth_board': 'gseb',
             'tenth_school': 'ABC High School',
             'tenth_percentage': '85.50',
             'tenth_percentile': '92.00',
-            'twelfth_medium': 'cbse',
-            'twelfth_board': 'english',
+            'twelfth_medium': 'english',
+            'twelfth_board': 'cbse',
             'twelfth_school': 'XYZ Higher Secondary',
             'twelfth_percentage': '88.00',
             'twelfth_percentile': '95.00',
         }
         s = InquirySerializer(data=inquiry_data)
         self.assertTrue(s.is_valid(), s.errors)
-        self.assertEqual(s.validated_data['tenth_medium'], 'gseb')
-        self.assertEqual(s.validated_data['tenth_board'], 'gujarati')
-        self.assertEqual(s.validated_data['twelfth_medium'], 'cbse')
-        self.assertEqual(s.validated_data['twelfth_board'], 'english')
+        self.assertEqual(s.validated_data['tenth_medium'], 'gujarati')
+        self.assertEqual(s.validated_data['tenth_board'], 'gseb')
+        self.assertEqual(s.validated_data['twelfth_medium'], 'english')
+        self.assertEqual(s.validated_data['twelfth_board'], 'cbse')
 
-        # Verify invalid choice for tenth_medium (rejects 'gujarati' because MEDIUM_TYPE_CHOICES has gseb/cbse/icse)
+        # Verify invalid choice for tenth_medium (rejects 'gseb' because MEDIUM_TYPE_CHOICES has english/gujarati/hindi/other)
         bad_data = inquiry_data.copy()
-        bad_data['tenth_medium'] = 'gujarati'
+        bad_data['tenth_medium'] = 'gseb'
         s_bad = InquirySerializer(data=bad_data)
         self.assertFalse(s_bad.is_valid())
         self.assertIn('tenth_medium', s_bad.errors)
 
-        # Verify invalid choice for tenth_board (rejects 'gseb' because BOARD_TYPE_CHOICES has english/gujarati/hindi/other)
+        # Verify invalid choice for tenth_board (rejects 'gujarati' because BOARD_TYPE_CHOICES has gseb/cbse/icse)
         bad_data2 = inquiry_data.copy()
-        bad_data2['tenth_board'] = 'gseb'
+        bad_data2['tenth_board'] = 'gujarati'
         s_bad2 = InquirySerializer(data=bad_data2)
         self.assertFalse(s_bad2.is_valid())
         self.assertIn('tenth_board', s_bad2.errors)
@@ -301,6 +301,144 @@ class TestAllFixes(unittest.TestCase):
                 self.assertEqual(user, existing_user)
                 self.assertEqual(password, 'TempPass123!')
                 existing_user.set_password.assert_called_once_with('TempPass123!')
+
+    def test_inquiry_converted_lead_notifications(self):
+        """Test system and WhatsApp notifications sent on inquiry form converted lead creation."""
+        from leads.utils import LeadService
+        from leads.models import Lead
+        from onboarding.models import Admission
+
+        lead = Lead(
+            id=777,
+            form_type='inquiry',
+            current_stage='converted',
+            first_name='Priya',
+            surname='Sharma',
+            email='priya@example.com',
+            phone_student='919876543210',
+            phone_father='919876543211',
+            course='cseet',
+        )
+        from branch.models import Branch
+        from auth_user.models import Organization, User
+        org = Organization(id=1, name='Insight Institute')
+        b = Branch(id=1, name='Main', organization=org)
+        lead.branch = b
+
+        counsellor = User(id=88, name='Rahul Counsellor', phone='919876543299', role='counsellor')
+        lead.assigned_to = counsellor
+
+        branch_mgr = User(id=99, name='Branch Manager', phone='919876543288', role='branch_manager')
+
+        with patch('onboarding.models.Admission.objects.filter') as mock_adm_filter:
+            # Idempotency check: not exists
+            mock_adm_filter.return_value.exists.return_value = False
+            with patch('onboarding.models.Admission.save'), \
+                 patch('onboarding.models.AdmissionStatusHistory.objects.create'):
+                with patch('core.sender.send_email') as mock_email, \
+                     patch('core.utils.notify_users_by_role') as mock_notify_role, \
+                     patch('chat.notifications.send_system_notification') as mock_sys_notif, \
+                     patch('chat.notifications.send_whatsapp_with_fallback') as mock_wa_fallback, \
+                     patch('auth_user.models.User.objects.filter') as mock_user_filter:
+
+                    qs_mock = MagicMock()
+                    qs_mock.exclude.return_value = qs_mock
+                    qs_mock.filter.return_value = [branch_mgr]
+                    mock_user_filter.return_value = qs_mock
+
+                    adm = LeadService.auto_create_admission_for_lead(lead)
+                    self.assertIsNotNone(adm)
+                    adm_code = getattr(adm, 'admission_code', None) or f"IIPS-{adm.id:06d}"
+
+                    # 1. System notification to administrative roles
+                    self.assertTrue(mock_notify_role.called)
+                    role_args = mock_notify_role.call_args[1]
+                    self.assertIn('super_admin', role_args['roles'])
+                    self.assertIn('counsellor', role_args['roles'])
+                    self.assertIn('Priya Sharma', role_args['title'])
+                    self.assertEqual(role_args['metadata']['admission_id'], str(lead.id))
+                    self.assertEqual(role_args['metadata']['type'], 'lead_converted')
+
+                    # 2. Targeted system notification for assigned counsellor
+                    self.assertTrue(mock_sys_notif.called)
+                    c_args = mock_sys_notif.call_args[1]
+                    self.assertEqual(c_args['user_id'], '88')
+                    self.assertIn('Priya Sharma', c_args['title'])
+
+                    # 3. WhatsApp notifications using admission_process template
+                    self.assertTrue(mock_wa_fallback.called)
+                    wa_calls = [call[1]['to'] for call in mock_wa_fallback.call_args_list]
+                    self.assertIn('919876543210', wa_calls) # Student
+                    self.assertIn('919876543211', wa_calls) # Father
+                    self.assertIn('919876543299', wa_calls) # Counsellor
+                    self.assertIn('919876543288', wa_calls) # Branch Manager
+
+                    # Verify template_name is admission_process for all calls
+                    for call in mock_wa_fallback.call_args_list:
+                        self.assertEqual(call[1]['template_name'], 'admission_process')
+
+    def test_admission_code_lookups_across_all_apis(self):
+        """Test _get_admission and endpoints accept BOTH admission_code and numeric id."""
+        from onboarding.views import _get_admission, AdmissionStatusUpdateView
+        from onboarding.models import Admission
+
+        mock_admission = MagicMock(spec=Admission)
+        mock_admission.id = 55
+        mock_admission.pk = 55
+        mock_admission.admission_code = 'IIPS-000055'
+
+        mock_request = MagicMock()
+        mock_request.user = MagicMock()
+        mock_request.user.is_authenticated = True
+        mock_request.user.is_superuser = True
+
+        with patch('onboarding.models.Admission.objects.select_related') as mock_sr:
+            mock_qs = MagicMock()
+            mock_sr.return_value = mock_qs
+            mock_qs.filter.return_value.first.return_value = mock_admission
+
+            # 1. Lookup by string admission_code
+            adm1 = _get_admission(mock_request, 'IIPS-000055')
+            self.assertEqual(adm1, mock_admission)
+            q1 = mock_qs.filter.call_args[0][0]
+            # Verify Q expression includes admission_code__iexact and IIPS- numeric extraction
+            self.assertTrue('admission_code__iexact' in str(q1) or 'id' in str(q1))
+
+            # 2. Lookup by lowercase string admission_code
+            adm2 = _get_admission(mock_request, 'iips-000055')
+            self.assertEqual(adm2, mock_admission)
+
+            # 3. Lookup by numeric id
+            adm3 = _get_admission(mock_request, '55')
+            self.assertEqual(adm3, mock_admission)
+
+            # 4. Lookup by int
+            adm4 = _get_admission(mock_request, 55)
+            self.assertEqual(adm4, mock_admission)
+
+        # Test fees payment filter with admission_code
+        from fees.views import PaymentListView
+        from fees.models import Payment
+        fees_req = MagicMock()
+        fees_req.user = MagicMock()
+        fees_req.user.is_authenticated = True
+        fees_req.user.is_superuser = True
+        fees_req.GET = {'admission_id': 'IIPS-000055'}
+
+        with patch('fees.models.Payment.objects.select_related') as mock_p_sr:
+            mock_p_qs = MagicMock()
+            mock_p_sr.return_value = mock_p_qs
+            mock_p_qs.prefetch_related.return_value.all.return_value = mock_p_qs
+            mock_p_qs.filter.return_value = mock_p_qs
+            with patch('fees.views.apply_filters', side_effect=lambda v, r, qs: qs):
+                with patch('fees.views.paginate_queryset') as mock_pag:
+                    mock_pag.return_value = MagicMock()
+                    view = PaymentListView()
+                    view.request = fees_req
+                    view.get(fees_req)
+                    # Verify that filter was called with admission_code lookup
+                    filter_calls = [str(call) for call in mock_p_qs.filter.call_args_list]
+                    self.assertTrue(any('admission__admission_code__iexact' in c for c in filter_calls))
 
 if __name__ == '__main__':
     unittest.main()
