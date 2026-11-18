@@ -486,35 +486,34 @@ class TestAllFixes(unittest.TestCase):
 
     def test_level2_approval_sends_receipt_on_student_user_missing(self):
         """
-        Fix: Level 2 approval in onboarding/views.py must still try to send
-        payment receipt even when student_user lookup fails (returns 500).
+        Fix: Level 2 approval delegates to complete_admission_enrollment which
+        ensures payment receipt dispatch even when student_user lookup or creation is handled.
         """
         import inspect
         from onboarding.views import AdmissionApproveView
-        source = inspect.getsource(AdmissionApproveView)
+        from onboarding.utils import complete_admission_enrollment
+        source_view = inspect.getsource(AdmissionApproveView)
+        source_util = inspect.getsource(complete_admission_enrollment)
 
-        # After "Student user account missing" error, there must be a fallback receipt dispatch
-        idx_missing_msg = source.find('Student user account missing')
-        idx_fallback_receipt = source.find('Payment receipt has been dispatched')
-        self.assertGreater(idx_missing_msg, 0, "Missing student user message not found")
-        self.assertGreater(idx_fallback_receipt, 0, "Fallback receipt dispatch not found")
-        self.assertGreater(idx_fallback_receipt, idx_missing_msg,
-                           "Fallback receipt dispatch must come after missing user detection")
+        self.assertIn('complete_admission_enrollment', source_view)
+        self.assertIn('send_payment_receipt', source_util)
+        self.assertIn('Payment receipt dispatched', source_util)
 
     def test_level2_approval_sends_receipt_on_student_profile_failure(self):
         """
-        Fix: Level 2 approval must dispatch receipt even when
+        Fix: Level 2 approval / complete_admission_enrollment must dispatch receipt even when
         StudentService.create_from_admission fails.
         """
         import inspect
-        from onboarding.views import AdmissionApproveView
-        source = inspect.getsource(AdmissionApproveView)
+        from onboarding.utils import complete_admission_enrollment
+        source = inspect.getsource(complete_admission_enrollment)
 
-        # After "profile creation failed" error, receipt should still be dispatched
-        idx_profile_failed = source.find('profile creation failed')
-        idx_receipt_msg = source.find('Payment receipt has been dispatched.')
-        self.assertGreater(idx_profile_failed, 0, "Profile creation failed message not found")
-        self.assertGreater(idx_receipt_msg, 0, "Receipt dispatch message not found")
+        idx_profile = source.find('StudentService.create_from_admission')
+        idx_receipt = source.find('send_payment_receipt')
+        self.assertGreater(idx_profile, 0, "create_from_admission call not found")
+        self.assertGreater(idx_receipt, 0, "send_payment_receipt call not found")
+        self.assertGreater(idx_receipt, idx_profile,
+                           "Receipt dispatch must execute after profile creation attempt")
 
     def test_payment_admission_always_set_on_update(self):
         """
@@ -546,6 +545,157 @@ class TestAllFixes(unittest.TestCase):
         # Must have exc_info=True for better debugging
         self.assertIn('exc_info=True', source,
                        "exc_info=True not found in credential error handler")
+
+    def test_inquiry_auto_create_admission_idempotency(self):
+        """Calling auto_create_admission_for_lead when admission exists returns None and sends no notifications."""
+        from leads.utils import LeadService
+        from leads.models import Lead
+
+        lead = Lead(id=999, form_type='inquiry', first_name='Rohan', surname='Patel')
+
+        with patch('onboarding.models.Admission.objects.filter') as mock_filter:
+            mock_filter.return_value.exists.return_value = True
+            with patch('core.sender.send_email') as mock_email, \
+                 patch('core.utils.notify_users_by_role') as mock_notify_role, \
+                 patch('chat.notifications.send_whatsapp_with_fallback') as mock_wa:
+                adm = LeadService.auto_create_admission_for_lead(lead)
+                self.assertIsNone(adm, "Must return None when admission already exists")
+                self.assertFalse(mock_email.called, "Should not send email when already exists")
+                self.assertFalse(mock_notify_role.called, "Should not send system notification when already exists")
+                self.assertFalse(mock_wa.called, "Should not send WhatsApp when already exists")
+
+    def test_exclude_user_ids_in_notify_users_by_role(self):
+        """notify_users_by_role properly excludes user IDs when exclude_user_ids is passed."""
+        from core.utils import notify_users_by_role
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        with patch.object(User.objects, 'filter') as mock_filter:
+            mock_qs = MagicMock()
+            mock_filter.return_value = mock_qs
+            mock_qs.exclude.return_value = mock_qs
+            mock_qs.__iter__.return_value = []
+
+            notify_users_by_role(
+                roles=['counsellor', 'super_admin'],
+                title='Test Title',
+                body='Test Body',
+                exclude_user_ids=[88, 99],
+            )
+            mock_qs.exclude.assert_called_once_with(id__in=[88, 99])
+
+    def test_double_receipt_prevention_in_razorpay(self):
+        """Verify Razorpay webhook guards send_admission_payment_notification to prevent duplicate receipt emails."""
+        import inspect
+        from fees.razorpay_service import process_payment_link_paid_event
+        source = inspect.getsource(process_payment_link_paid_event)
+
+        self.assertIn('receipt_sent = False', source)
+        self.assertIn('receipt_sent = True', source)
+        self.assertIn('if not receipt_sent or is_partial:', source)
+
+    def test_admission_status_update_view_uses_universal_get_admission(self):
+        """Verify AdmissionStatusUpdateView uses centralized _get_admission for admission_code lookups."""
+        import inspect
+        from onboarding.views import AdmissionStatusUpdateView
+        source = inspect.getsource(AdmissionStatusUpdateView.patch)
+
+        self.assertIn('_get_admission(request, admission_id)', source)
+        self.assertIn('_not_found()', source)
+
+    def test_razorpay_service_admission_code_lookup_logic(self):
+        """Verify process_payment_link_paid_event includes admission_code__iexact and IIPS- parsing."""
+        import inspect
+        from fees.razorpay_service import process_payment_link_paid_event
+        source = inspect.getsource(process_payment_link_paid_event)
+
+        self.assertIn('adm_lookup = Q(admission_code__iexact=str(adm_id).strip())', source)
+        self.assertIn("startswith('IIPS-')", source)
+
+    def test_admission_status_update_view_enrolled_calls_complete_enrollment(self):
+        """Verify AdmissionStatusUpdateView calls complete_admission_enrollment when status is 'enrolled'."""
+        import inspect
+        from onboarding.views import AdmissionStatusUpdateView
+        source = inspect.getsource(AdmissionStatusUpdateView.patch)
+
+        self.assertIn("new_status == 'enrolled'", source)
+        self.assertIn('complete_admission_enrollment', source)
+        self.assertIn('payment_verified', source)
+
+    def test_email_sender_gmail_sender_fallback(self):
+        """Verify send_email uses EMAIL_HOST_USER when sending via Gmail to avoid 553 sender rejection."""
+        import inspect
+        from core import sender
+        source = inspect.getsource(sender.send_email)
+
+        self.assertIn("'gmail.com' in email_host", source)
+        self.assertIn('from_email = email_user', source)
+
+    def test_admission_service_update_status_when_already_enrolled(self):
+        """Verify AdmissionService.update_status checks student_user_exists to backfill credentials even if old_status was enrolled."""
+        import inspect
+        from onboarding.utils import AdmissionService
+        source = inspect.getsource(AdmissionService.update_status)
+
+        self.assertIn('student_user_exists', source)
+        self.assertIn("new_status == 'enrolled' and (old_status != 'enrolled' or not student_user_exists)", source)
+
+    def test_complete_admission_enrollment_full_pipeline(self):
+        """Verify complete_admission_enrollment creates accounts, student profile, verified payment, and sends receipt."""
+        from onboarding.models import Admission
+        from onboarding.utils import complete_admission_enrollment
+        from auth_user.models import User
+        from students.models import Student
+        from fees.models import Payment
+
+        adm = MagicMock(spec=Admission)
+        adm.id = 777
+        adm.status = 'approved'
+        adm.email = 'student777@example.com'
+        adm.phone_student = '9876543210'
+        adm.phone_father = '9876543211'
+        adm.first_name = 'Test'
+        adm.surname = 'Student'
+        adm.admission_code = 'IIPS-000777'
+        adm.payment_choice = 'cash'
+        adm.payment_amount = 10000
+        adm.total_fees = 10000
+        adm.transaction_id = 'TXN777'
+        adm.payment_screenshot = None
+        adm.branch = None
+
+        mock_user = MagicMock(spec=User)
+        mock_user.name = 'Test Student'
+        mock_user.email = 'student777@example.com'
+
+        mock_student = MagicMock(spec=Student)
+        mock_student.id = 888
+        mock_student.admission_number = 'STU-000777'
+
+        mock_payment = MagicMock(spec=Payment)
+        mock_payment.id = 999
+        mock_payment.status = 'verified'
+        mock_payment.student_fee_id = None
+
+        with patch('auth_user.models.User.objects.filter') as mock_u_filter, \
+             patch('onboarding.models.AdmissionStatusHistory.objects.create') as mock_hist, \
+             patch('onboarding.utils.AdmissionService._create_user_accounts') as mock_create_acc, \
+             patch('students.utils.StudentService.create_from_admission', return_value=mock_student) as mock_create_student, \
+             patch('fees.models.Payment.objects.filter') as mock_p_filter, \
+             patch('fees.services.send_payment_receipt') as mock_receipt, \
+             patch('chat.notifications.mark_approval_notification_as_read') as mock_mark_read:
+
+            mock_u_filter.return_value.first.return_value = mock_user
+            mock_p_filter.return_value.first.return_value = mock_payment
+
+            student, payment = complete_admission_enrollment(adm, note='Test approval')
+
+            self.assertEqual(adm.status, 'enrolled')
+            mock_create_acc.assert_called_once_with(adm)
+            mock_create_student.assert_called_once_with(admission=adm, user=mock_user, acting_user=None)
+            self.assertEqual(payment.status, 'verified')
+            mock_receipt.assert_called_once_with(payment)
+            mock_mark_read.assert_called_once_with(approval_type='admission', record_id=777, is_final=True)
 
 if __name__ == '__main__':
     unittest.main()

@@ -56,8 +56,18 @@ def send_email(to, subject, cc=None, text="", template=None, attachments=None, t
     """
     if cc is None:
         cc = []
-    if from_email is None:
-        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'support@insightinstitute.co')
+    
+    email_host = (getattr(settings, 'EMAIL_HOST', '') or '').lower()
+    email_user = getattr(settings, 'EMAIL_HOST_USER', '') or ''
+    default_from = getattr(settings, 'DEFAULT_FROM_EMAIL', '') or ''
+
+    # When using Gmail SMTP, Google strictly requires the sender address to match
+    # the authenticated Gmail account or a verified alias, otherwise throwing 553.
+    if 'gmail.com' in email_host and email_user:
+        if from_email is None or from_email == 'support@insightinstitute.co':
+            from_email = email_user
+    elif from_email is None:
+        from_email = default_from or email_user or 'support@insightinstitute.co'
     
     # Ensure to/cc are always lists and deduplicate while preserving order
     if isinstance(to, str):

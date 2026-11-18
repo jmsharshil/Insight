@@ -1204,6 +1204,30 @@ class AdmissionStatusUpdateView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if new_status == 'enrolled':
+            from .utils import complete_admission_enrollment
+            student, payment = complete_admission_enrollment(
+                admission=admission,
+                acting_user=request.user if request.user.is_authenticated else None,
+                note=note,
+            )
+            student_adm_no = getattr(student, 'admission_number', admission.admission_code) if student else admission.admission_code
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Admission status updated to enrolled. Credentials and payment receipt dispatched.',
+                    'data': {
+                        'admission_id': admission.admission_code,
+                        'status': admission.status,
+                        'note': admission.note,
+                        'student_id': str(student.id) if student else None,
+                        'admission_number': student_adm_no,
+                        'payment_verified': True if payment and payment.status == 'verified' else False,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
         AdmissionService.update_status(
             admission=admission,
             new_status=new_status,
@@ -1320,11 +1344,18 @@ class AdmissionApproveView(APIView):
         if not admission:
             return _not_found()
 
-        if admission.status == 'enrolled':
-            return Response(
-                {'success': False, 'message': 'Admission is already enrolled.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        force_override = bool(request.data.get('override') or request.data.get('force'))
+
+        if admission.status == 'enrolled' and not force_override:
+            from students.models import Student
+            from fees.models import Payment
+            has_student = Student.objects.filter(admission=admission).exists()
+            has_verified_payment = Payment.objects.filter(admission=admission, status='verified').exists()
+            if has_student and has_verified_payment:
+                return Response(
+                    {'success': False, 'message': 'Admission is already enrolled.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         if admission.status == 'rejected':
             return Response(
@@ -1545,7 +1576,7 @@ class AdmissionApproveView(APIView):
         #   Admission is in 'approved' status (Level 1 completed),
         #   or super_admin with force_override.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if admission.status == 'approved' or force_override:
+        if admission.status in ('approved', 'enrolled') or force_override:
             if not user_has_payment_role(acting_user, {'super_admin'}):
                 return Response(
                     {
@@ -1567,246 +1598,46 @@ class AdmissionApproveView(APIView):
 
             final_note = note or 'Level 2 final approval completed by Super Admin.'
 
+            from .utils import complete_admission_enrollment
             try:
-                AdmissionService.update_status(
+                student, payment = complete_admission_enrollment(
                     admission=admission,
-                    new_status='enrolled',
+                    acting_user=acting_user,
                     note=final_note,
-                    user=acting_user,
                 )
             except Exception as exc:
-                logger.error(f"AdmissionService.update_status failed for {admission_id}: {exc}")
+                logger.error(f"complete_admission_enrollment failed for admission {admission_id}: {exc}", exc_info=True)
                 return Response(
                     {'success': False, 'message': f'Enrolment failed: {exc}'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
-            from auth_user.models import User
-            student_user = User.objects.filter(
-                email__iexact=admission.email, role='student'
-            ).first()
-
-            if not student_user:
-                logger.error(
-                    f"Student user account missing for admission {admission_id} "
-                    f"(email={admission.email}) after enrolment."
-                )
-                # Still try to send payment receipt before returning error
-                try:
-                    from fees.models import Payment
-                    from fees.services import send_payment_receipt
-                    _fallback_payment = Payment.objects.filter(admission=admission).first()
-                    if _fallback_payment:
-                        send_payment_receipt(_fallback_payment)
-                        logger.info(f"Payment receipt sent despite missing student user for admission {admission_id}")
-                except Exception as _receipt_err:
-                    logger.error(f"Fallback receipt dispatch failed for admission {admission_id}: {_receipt_err}")
-
-                return Response(
-                    {
-                        'success': False,
-                        'message': (
-                            'Admission status set to enrolled but student user account '
-                            'was not found. Payment receipt has been dispatched. '
-                            'Please check server logs.'
-                        ),
-                        'data': {
-                            'admission_id': admission.admission_code,
-                            'admission_status': admission.status,
-                            'status_display': admission.get_status_display(),
-                        },
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-            try:
-                from students.utils import StudentService
-                student = StudentService.create_from_admission(
-                    admission=admission,
-                    user=student_user,
-                    acting_user=acting_user,
-                )
-            except Exception as exc:
-                logger.error(
-                    f"StudentService.create_from_admission failed for admission "
-                    f"{admission_id}: {exc}"
-                )
-                # Still try to send payment receipt before returning error
-                try:
-                    from fees.models import Payment
-                    from fees.services import send_payment_receipt
-                    _fallback_payment = Payment.objects.filter(admission=admission).first()
-                    if _fallback_payment:
-                        send_payment_receipt(_fallback_payment)
-                        logger.info(f"Payment receipt sent despite student profile failure for admission {admission_id}")
-                except Exception as _receipt_err:
-                    logger.error(f"Fallback receipt dispatch failed for admission {admission_id}: {_receipt_err}")
-
-                return Response(
-                    {
-                        'success': False,
-                        'message': (
-                            'Admission enrolled and user accounts created, but student '
-                            f'profile creation failed: {exc}. '
-                            'Payment receipt has been dispatched.'
-                        ),
-                        'data': {
-                            'admission_id': admission.admission_code,
-                            'admission_status': admission.status,
-                            'status_display': admission.get_status_display(),
-                        },
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-             
-            # # ── Auto-create StudentFee + Payment from admission ────────────
-            # try:
-            #     from fees.models import StudentFee, Payment, FeeStructure
-            #     from django.utils import timezone
-            #     from decimal import Decimal
-
-            #     fee_structure = admission.fee_structure
-            #     payment_amount = admission.payment_amount or Decimal('0')
-
-            #     if fee_structure:
-            #         # Create StudentFee record
-            #         student_fee = StudentFee.objects.create(
-            #             student=student,
-            #             fee_structure=fee_structure,
-            #             total_amount=fee_structure.total_amount,
-            #             discount=Decimal('0'),
-            #             amount_paid=Decimal('0'),
-            #             status='approval_pending',
-            #         )
-
-            #         # Create Payment record if a payment amount was submitted
-            #         if payment_amount > Decimal('0'):
-            #             Payment.objects.create(
-            #                 student=student,
-            #                 student_fee=student_fee,
-            #                 amount=payment_amount,
-            #                 payment_mode='online',
-            #                 transaction_ref=admission.transaction_id or '',
-            #                 payment_proof=admission.payment_screenshot or None,
-            #                 status='verified',
-            #                 recorded_by=acting_user,
-            #                 verified_by=acting_user,
-            #                 verified_at=timezone.now(),
-            #                 payment_date=timezone.now().date(),
-            #                 note=f'Auto-created from admission {admission.id}. '
-            #                      f'Transaction ID: {admission.transaction_id or "N/A"}',
-            #             )
-            #             # Payment.save() triggers update_student_fee_status automatically
-
-            #         logger.info(
-            #             f"StudentFee + Payment auto-created for student "
-            #             f"{student.admission_number} from admission {admission.id}"
-            #         )
-            #     else:
-            #         logger.warning(
-            #             f"No fee_structure on admission {admission.id}, "
-            #             f"skipping auto StudentFee creation."
-            #         )
-            # except Exception as exc:
-            #     logger.error(
-            #         f"Auto StudentFee/Payment creation failed for admission "
-            #         f"{admission_id}: {exc}"
-            #     )
-            #     # Non-fatal: student is already created, fee can be added manually 
-            admission.update_current_payment_history_entry('payment_approved', {
-                'payment_choice': admission.payment_choice,
-                'amount': float(admission.payment_amount or admission.total_fees or 0),
-                'transaction_id': admission.transaction_id,
-                'status': 'verified',
-                'level': 2,
-                'approver_role': 'super_admin',
-                'verified_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Super Admin'),
-                'verified_at': timezone.now().isoformat(),
-                'date': timezone.now().date().isoformat(),
-                'note': final_note,
-            })
-
-            # Synchronize linked Payment record to verified and link student
-            from fees.models import Payment
-            from fees.services import send_payment_receipt
-            from fees.utils import update_student_fee_status
-            student_fee = None
-            if hasattr(student, 'student_fees'):
-                student_fee = student.student_fees.first()
-
-            payment = Payment.objects.filter(admission=admission).first()
-            if payment:
-                payment.status = 'verified'
-                try:
-                    payment.student = student
-                except Exception:
-                    pass
-                if student_fee and not payment.student_fee:
-                    payment.student_fee = student_fee
-                payment.verified_by = acting_user
-                payment.verified_at = timezone.now()
-                payment.note = final_note
-                payment.save(update_fields=['status', 'student', 'student_fee', 'verified_by', 'verified_at', 'note', 'updated_at'])
-            else:
-                mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
-                payment = Payment.objects.create(
-                    admission=admission,
-                    student=student,
-                    student_fee=student_fee,
-                    amount=admission.payment_amount or admission.total_fees or 0,
-                    payment_mode=mapped_mode,
-                    transaction_ref=admission.transaction_id or '',
-                    payment_proof=admission.payment_screenshot,
-                    status='verified',
-                    recorded_by=acting_user,
-                    verified_by=acting_user,
-                    verified_at=timezone.now(),
-                    payment_date=timezone.now().date(),
-                    note=final_note,
-                )
-
-            if payment.student_fee_id:
-                try:
-                    update_student_fee_status(payment.student_fee_id)
-                except Exception as fee_err:
-                    logger.error(f"Failed to update student fee status: {fee_err}")
-
-            try:
-                send_payment_receipt(payment)
-            except Exception as exc:
-                logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
-
-            try:
-                from chat.notifications import mark_approval_notification_as_read
-                mark_approval_notification_as_read(
-                    approval_type='admission',
-                    record_id=admission.id,
-                    is_final=True,
-                )
-            except Exception as notif_e:
-                logger.error(f"Failed to mark level 2 notification as read: {notif_e}")
-
+            actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Super Admin')
+            student_adm_no = getattr(student, 'admission_number', admission.admission_code) if student else admission.admission_code
             return Response(
                 {
                     'success': True,
                     'message': (
                         f"Level 2 final approval completed by Super Admin. "
                         f"Payment verified, admission approved and student enrolled. "
-                        f"Admission number: {student.admission_number}. "
-                        f"Login credentials dispatched to student and parent."
+                        f"Admission number: {student_adm_no}. "
+                        f"Login credentials and payment receipt dispatched to student and parent."
                     ),
                     'data': {
                         'admission_id'    : admission.admission_code,
                         'admission_status': admission.status,
                         'status_display'  : admission.get_status_display(),
-                        'student_id'      : str(student.id),
-                        'admission_number': student.admission_number,
-                        'student_status' : student.status,
-                        'approval_level': 2,
+                        'student_id'      : str(student.id) if student else None,
+                        'admission_number': student_adm_no,
+                        'student_status'  : getattr(student, 'status', 'active') if student else None,
+                        'approval_level'  : 2,
+                        'approved_by'     : actor_name,
+                        'payment_verified': True if payment and payment.status == 'verified' else False,
                     },
                 },
                 status=status.HTTP_200_OK,
             )
+
 
         # ── Status not eligible for approval ──────────────────────────────────
         if admission.status == 'payment_pending':

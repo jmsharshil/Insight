@@ -132,8 +132,13 @@ class AdmissionService:
             note=note,
         )
 
-        # Trigger credential creation only on transition to 'enrolled'
-        if new_status == 'enrolled' and old_status != 'enrolled':
+        # Trigger credential creation only on transition to 'enrolled', or if student user account doesn't exist yet
+        from auth_user.models import User as AuthUser
+        student_user_exists = (
+            AuthUser.objects.filter(email__iexact=admission.email, role='student').exists()
+            if admission.email else False
+        )
+        if new_status == 'enrolled' and (old_status != 'enrolled' or not student_user_exists):
             try:
                 AdmissionService._create_user_accounts(admission)
                 logger.info(
@@ -150,6 +155,176 @@ class AdmissionService:
 
         return admission
 
+    # ── Complete Admission Enrollment (Level 2 / Full Pipeline) ───────────────
+
+    @staticmethod
+    def complete_enrollment(admission: Admission, acting_user=None, note=''):
+        """
+        Unified Level 2 enrollment handler:
+        1. Sets status to 'enrolled' & updates status history
+        2. Ensures student and parent user accounts exist & dispatches login credentials
+        3. Creates Student master profile linked to admission and student user
+        4. Updates payment history entry to 'payment_approved' / 'verified'
+        5. Synchronizes or creates Payment record, marks status='verified', student=student
+        6. Updates student fee status if student_fee is linked
+        7. Sends payment receipt email & WhatsApp with PDF
+        8. Marks approval notifications as read
+        """
+        from django.utils import timezone
+        from auth_user.models import User as AuthUser
+        from .models import AdmissionStatusHistory
+
+        # 1. Update status to 'enrolled'
+        if admission.status != 'enrolled':
+            admission.status = 'enrolled'
+            if note:
+                admission.note = note
+            admission.save(update_fields=['status', 'note', 'updated_at'])
+            AdmissionStatusHistory.objects.create(
+                admission=admission,
+                status='enrolled',
+                changed_by=acting_user,
+                note=note or 'Admission enrolled.',
+            )
+
+        # 2. Ensure Student & Parent User Accounts & Credentials
+        student_user = AuthUser.objects.filter(
+            email__iexact=admission.email, role='student'
+        ).first() if admission.email else None
+
+        try:
+            AdmissionService._create_user_accounts(admission)
+            student_user = AuthUser.objects.filter(
+                email__iexact=admission.email, role='student'
+            ).first()
+        except Exception as exc:
+            logger.error(f"Error creating user accounts for admission {admission.id}: {exc}", exc_info=True)
+
+        if not student_user and admission.email:
+            try:
+                from auth_user.utils import generate_username
+                student_username, _ = generate_username(
+                    role='student',
+                    branch=admission.branch,
+                    course=admission.course,
+                    batch_attempt=admission.batch_attempt,
+                    attempt_year=admission.attempt_year,
+                )
+                student_user, _ = AdmissionService._create_or_update_user(
+                    email=admission.email,
+                    phone=admission.phone_student or admission.phone_father or '0000000000',
+                    name=f"{admission.first_name} {admission.surname}".strip(),
+                    role='student',
+                    branch=admission.branch,
+                    username=student_username,
+                )
+            except Exception as e_create:
+                logger.error(f"Fallback student user creation failed for admission {admission.id}: {e_create}")
+
+        # 3. Create or retrieve Student master profile
+        student = None
+        if student_user:
+            try:
+                from students.utils import StudentService
+                student = StudentService.create_from_admission(
+                    admission=admission,
+                    user=student_user,
+                    acting_user=acting_user,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"StudentService.create_from_admission failed for admission {admission.id}: {exc}",
+                    exc_info=True,
+                )
+                from students.models import Student
+                student = Student.objects.filter(admission=admission).first()
+        else:
+            from students.models import Student
+            student = Student.objects.filter(admission=admission).first()
+
+        # 4. Update payment history entry
+        actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Super Admin')
+        role_label = getattr(acting_user, 'role', 'super_admin') if acting_user else 'super_admin'
+        admission.update_current_payment_history_entry('payment_approved', {
+            'payment_choice': admission.payment_choice,
+            'amount': float(admission.payment_amount or admission.total_fees or 0),
+            'transaction_id': admission.transaction_id,
+            'status': 'verified',
+            'level': 2,
+            'approver_role': role_label,
+            'verified_by': actor_name,
+            'verified_at': timezone.now().isoformat(),
+            'date': timezone.now().date().isoformat(),
+            'note': note or 'Final enrollment approval completed.',
+        })
+
+        # 5. Synchronize or create Payment record
+        from fees.models import Payment
+        from fees.services import send_payment_receipt
+        from fees.utils import update_student_fee_status
+
+        student_fee = None
+        if student and hasattr(student, 'student_fees'):
+            student_fee = student.student_fees.first()
+
+        payment = Payment.objects.filter(admission=admission).first()
+        if payment:
+            payment.status = 'verified'
+            if student and not payment.student:
+                payment.student = student
+            if student_fee and not payment.student_fee:
+                payment.student_fee = student_fee
+            payment.verified_by = acting_user
+            payment.verified_at = timezone.now()
+            if note:
+                payment.note = note
+            payment.save(update_fields=['status', 'student', 'student_fee', 'verified_by', 'verified_at', 'note', 'updated_at'])
+        else:
+            mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+            payment = Payment.objects.create(
+                admission=admission,
+                student=student,
+                student_fee=student_fee,
+                amount=admission.payment_amount or admission.total_fees or 0,
+                payment_mode=mapped_mode,
+                transaction_ref=admission.transaction_id or '',
+                payment_proof=admission.payment_screenshot,
+                status='verified',
+                recorded_by=acting_user,
+                verified_by=acting_user,
+                verified_at=timezone.now(),
+                payment_date=timezone.now().date(),
+                note=note or 'Auto-created upon enrollment approval.',
+            )
+
+        # 6. Update student fee status if fee record exists
+        if payment and payment.student_fee_id:
+            try:
+                update_student_fee_status(payment.student_fee_id)
+            except Exception as fee_err:
+                logger.error(f"Failed to update student fee status: {fee_err}")
+
+        # 7. Send payment receipt (Email + WhatsApp)
+        if payment:
+            try:
+                send_payment_receipt(payment)
+                logger.info(f"Payment receipt dispatched for admission {admission.id}")
+            except Exception as exc:
+                logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")
+
+        # 8. Mark approval notifications as read
+        try:
+            from chat.notifications import mark_approval_notification_as_read
+            mark_approval_notification_as_read(
+                approval_type='admission',
+                record_id=admission.id,
+                is_final=True,
+            )
+        except Exception as notif_e:
+            logger.error(f"Failed to mark level 2 notification as read: {notif_e}")
+
+        return student, payment
+
     # ── Create Student + Parent Accounts (called only on enrollment) ─────────
 
     @staticmethod
@@ -165,9 +340,18 @@ class AdmissionService:
             attempt_year=admission.attempt_year
         )
 
+        raw_phone = (
+            admission.phone_student
+            or admission.phone_student_2
+            or admission.phone_father
+            or admission.phone_father_2
+            or ''
+        )
+        student_phone = re.sub(r'\D', '', raw_phone) or '0000000000'
+
         student_user, student_password = AdmissionService._create_or_update_user(
             email=admission.email,
-            phone=re.sub(r'\D', '', admission.phone_student or ''),
+            phone=student_phone,
             name=student_name,
             role='student',
             linked_student=None,
@@ -295,10 +479,12 @@ class AdmissionService:
 
     @staticmethod
     def _create_or_update_user(*, email, phone, name, role, linked_student=None, organization=None, branch=None, username=None):
-        if not email:
-            raise ValueError("Email is required to create login credentials.")
+        if not email and not username:
+            raise ValueError("Email or username is required to create login credentials.")
         if not phone:
-            raise ValueError("Phone is required to create login credentials.")
+            phone = '0000000000'
+        if not email:
+            email = f"{username or 'student'}@insightinstitute.local"
 
         # Look up by username first, or by (email, role) so parent and student don't collide if sharing an email
         user = None
@@ -714,3 +900,6 @@ def sync_admission_payment(admission, request=None, force=False, new_payment=Fal
             logger.error(f"Failed to dispatch Level 1 system notification for admission {admission.id}: {exc}")
 
     return payment
+
+
+complete_admission_enrollment = AdmissionService.complete_enrollment
