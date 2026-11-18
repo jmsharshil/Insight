@@ -697,5 +697,15 @@ class TestAllFixes(unittest.TestCase):
             mock_receipt.assert_called_once_with(payment)
             mock_mark_read.assert_called_once_with(approval_type='admission', record_id=777, is_final=True)
 
+    def test_super_admin_skips_level1_accountant_approval(self):
+        """Verify Super Admin approval skips Level 1 accountant approval directly to enrollment."""
+        import inspect
+        from onboarding.views import AdmissionApproveView
+        source = inspect.getsource(AdmissionApproveView.post)
+
+        self.assertIn("SUPER ADMIN APPROVAL: Skip Level 1 from Accountant", source)
+        self.assertIn("is_super_admin and (is_pending_level1 or admission.status in ('approved', 'enrolled') or force_override)", source)
+        self.assertNotIn("Level 1 approval by an Accountant is required before Super Admin final approval.", source)
+
 if __name__ == '__main__':
     unittest.main()

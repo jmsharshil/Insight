@@ -1402,201 +1402,16 @@ class AdmissionApproveView(APIView):
             )
         )
 
-        level1_roles = ('accountant',)
-
-        if is_pending_level1:
-            # If not force_override, perform Level 1 approval:
-            # Allowed for all level1_roles as well as super_admin / is_superuser
-            if not force_override:
-                if user_has_payment_role(acting_user, {'super_admin'}):
-                    return Response(
-                        {
-                            'success': False,
-                            'message': 'Level 1 approval by an Accountant is required before Super Admin final approval.',
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                role_label = getattr(acting_user, 'get_role_display', lambda: role)() if acting_user else 'Staff'
-                actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Staff')
-                level1_note = note or f'Level 1 payment approval completed by {role_label}.'
-                AdmissionService.update_status(
-                    admission=admission,
-                    new_status='approved',
-                    note=level1_note,
-                    user=acting_user,
-                )
-
-                admission.update_current_payment_history_entry('payment_verified', {
-                    'payment_choice': admission.payment_choice,
-                    'amount': float(admission.payment_amount or admission.total_fees or 0),
-                    'transaction_id': admission.transaction_id,
-                    'status': 'level_1_approved',
-                    'level': 1,
-                    'approver_role': role,
-                    'verified_by': actor_name,
-                    'verified_at': timezone.now().isoformat(),
-                    'date': timezone.now().date().isoformat(),
-                    'note': level1_note,
-                })
-
-                # Synchronize linked Payment record to level_1_approved
-                from fees.models import Payment
-                payment = Payment.objects.filter(admission=admission).first()
-                if payment:
-                    payment.status = 'level_1_approved'
-                    payment.verified_by = acting_user
-                    payment.note = level1_note
-                    payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
-                else:
-                    mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
-                    Payment.objects.create(
-                        admission=admission,
-                        amount=admission.payment_amount or admission.total_fees or 0,
-                        payment_mode=mapped_mode,
-                        transaction_ref=admission.transaction_id or '',
-                        payment_proof=admission.payment_screenshot,
-                        status='level_1_approved',
-                        verified_by=acting_user,
-                        payment_date=timezone.now().date(),
-                        note=level1_note,
-                    )
-
-                # Notify super_admins that Level 1 is complete and Level 2 approval is required
-                try:
-                    from core.utils import notify_users_by_role
-                    notify_users_by_role(
-                        roles=['super_admin'],
-                        title='Admission Payment Ready for Final Approval',
-                        body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified by {role_label} and requires Super Admin final approval.",
-                        organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                        branch=admission.branch if getattr(admission, 'branch', None) else None,
-                        email_subject=f'Final Approval Required: Admission #{admission.id}',
-                        metadata={'admission_id': str(admission.id), 'step': 'level_2_approval'},
-                        notification_type='admission',
-                    )
-                except Exception as exc:
-                    logger.error(f"Failed to notify super_admin of level 1 approval for admission {admission.id}: {exc}")
-
-                # Dispatch WhatsApp template (payment_approve_reject) to Super Admins for Level 2 final approval
-                try:
-                    from .notifications import send_payment_verification_whatsapp
-                    send_payment_verification_whatsapp(admission, level=2)
-                except Exception as exc:
-                    logger.error(f"Failed to dispatch Level 2 WhatsApp notification for admission {admission.id}: {exc}")
-
-                # Notify student & parent that Level 1 payment approval (cash/cheque) is verified
-                try:
-                    from core.sender import send_email
-                    from chat.notifications import send_whatsapp_with_fallback
-                    adm_name = f"{admission.first_name} {admission.surname}".strip()
-                    pay_amt = admission.payment_amount or admission.total_fees or 0
-                    choice_display = admission.get_payment_choice_display() or str(admission.payment_choice).title()
-                    subject_l1 = f"Payment Received & Verified (Level 1) - Admission #{admission.admission_code or admission.id}"
-                    msg_l1 = (
-                        f"Dear {adm_name},\n\n"
-                        f"We have received and verified your {choice_display} payment of \u20b9{pay_amt:,.2f}.\n"
-                        f"Your admission is now queued for final Super Admin enrollment approval.\n\n"
-                        f"Thank you,\nInsight Institute of Professional Studies"
-                    )
-                    std_emails = [e for e in [admission.email, admission.email_parent] if e]
-                    for rec_email in std_emails:
-                        try:
-                            send_email(
-                                to=rec_email,
-                                subject=subject_l1,
-                                text=msg_l1,
-                                organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
-                            )
-                        except Exception as m_err:
-                            logger.error(f"Level 1 email to {rec_email} failed: {m_err}")
-
-                    wa_l1_phones = [p for p in [admission.phone_student, admission.phone_father] if p]
-                    for wa_p in wa_l1_phones:
-                        try:
-                            send_whatsapp_with_fallback(
-                                to=wa_p,
-                                fallback_body=msg_l1,
-                            )
-                        except Exception as w_err:
-                            logger.error(f"Level 1 WhatsApp to {wa_p} failed: {w_err}")
-                except Exception as notif_err:
-                    logger.error(f"Failed to send Level 1 student notification for admission {admission.id}: {notif_err}")
-
-                try:
-                    from chat.notifications import mark_approval_notification_as_read
-                    mark_approval_notification_as_read(
-                        approval_type='admission',
-                        record_id=admission.id,
-                        user=acting_user,
-                        step=1,
-                    )
-                except Exception as notif_e:
-                    logger.error(f"Failed to mark level 1 notification as read: {notif_e}")
-
-                return Response(
-                    {
-                        'success': True,
-                        'message': f'Level 1 payment approval completed by {role_label}. Pending Level 2 (final) approval by Super Admin.',
-                        'data': {
-                            'admission_id': admission.admission_code,
-                            'admission_status': admission.status,
-                            'status_display': admission.get_status_display(),
-                            'approval_level': 1,
-                            'approved_by': actor_name,
-                            'next_step': 'super_admin_approval',
-                        },
-                    },
-                    status=status.HTTP_200_OK,
-                )
-
-            # If super_admin with override on pending level 1:
-            level1_note = note or 'Level 1 payment approval completed by Super Admin (override).'
-            admission.update_current_payment_history_entry('payment_verified', {
-                'payment_choice': admission.payment_choice,
-                'amount': float(admission.payment_amount or admission.total_fees or 0),
-                'transaction_id': admission.transaction_id,
-                'status': 'level_1_approved',
-                'level': 1,
-                'approver_role': 'super_admin',
-                'verified_by': getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Super Admin'),
-                'verified_at': timezone.now().isoformat(),
-                'date': timezone.now().date().isoformat(),
-                'note': level1_note,
-            })
-            from fees.models import Payment
-            payment = Payment.objects.filter(admission=admission).first()
-            if payment:
-                payment.status = 'level_1_approved'
-                payment.verified_by = acting_user
-                payment.note = level1_note
-                payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
+        is_super_admin = user_has_payment_role(acting_user, {'super_admin'})
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # LEVEL 2: Super Admin Final Approval
-        #   Admission is in 'approved' status (Level 1 completed),
-        #   or super_admin with force_override.
+        # SUPER ADMIN APPROVAL: Skip Level 1 from Accountant
+        #   If Super Admin approves at any eligible stage (is_pending_level1,
+        #   'approved', or 'enrolled' retry), skip Level 1 and directly complete
+        #   enrollment, verify payment, and dispatch credentials + receipt.
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        if admission.status in ('approved', 'enrolled') or force_override:
-            if not user_has_payment_role(acting_user, {'super_admin'}):
-                return Response(
-                    {
-                        'success': False,
-                        'message': (
-                            'Level 1 approval is already completed. '
-                            'Level 2 (final) approval must be performed by a Super Admin.'
-                        ),
-                        'data': {
-                            'admission_id': admission.admission_code,
-                            'admission_status': admission.status,
-                            'status_display': admission.get_status_display(),
-                            'required_role': 'super_admin',
-                            'approval_level': 2,
-                        },
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-            final_note = note or 'Level 2 final approval completed by Super Admin.'
+        if is_super_admin and (is_pending_level1 or admission.status in ('approved', 'enrolled') or force_override):
+            final_note = note or 'Final approval completed by Super Admin (Level 1 skipped).'
 
             from .utils import complete_admission_enrollment
             try:
@@ -1618,7 +1433,7 @@ class AdmissionApproveView(APIView):
                 {
                     'success': True,
                     'message': (
-                        f"Level 2 final approval completed by Super Admin. "
+                        f"Final approval completed by Super Admin (Level 1 skipped). "
                         f"Payment verified, admission approved and student enrolled. "
                         f"Admission number: {student_adm_no}. "
                         f"Login credentials and payment receipt dispatched to student and parent."
@@ -1636,6 +1451,164 @@ class AdmissionApproveView(APIView):
                     },
                 },
                 status=status.HTTP_200_OK,
+            )
+
+        level1_roles = ('accountant',)
+
+        if is_pending_level1:
+            role_label = getattr(acting_user, 'get_role_display', lambda: role)() if acting_user else 'Accountant'
+            actor_name = getattr(acting_user, 'name', None) or getattr(acting_user, 'username', 'Accountant')
+            level1_note = note or f'Level 1 payment approval completed by {role_label}.'
+            AdmissionService.update_status(
+                admission=admission,
+                new_status='approved',
+                note=level1_note,
+                user=acting_user,
+            )
+
+            admission.update_current_payment_history_entry('payment_verified', {
+                'payment_choice': admission.payment_choice,
+                'amount': float(admission.payment_amount or admission.total_fees or 0),
+                'transaction_id': admission.transaction_id,
+                'status': 'level_1_approved',
+                'level': 1,
+                'approver_role': role,
+                'verified_by': actor_name,
+                'verified_at': timezone.now().isoformat(),
+                'date': timezone.now().date().isoformat(),
+                'note': level1_note,
+            })
+
+            # Synchronize linked Payment record to level_1_approved
+            from fees.models import Payment
+            payment = Payment.objects.filter(admission=admission).first()
+            if payment:
+                payment.status = 'level_1_approved'
+                payment.verified_by = acting_user
+                payment.note = level1_note
+                payment.save(update_fields=['status', 'verified_by', 'note', 'updated_at'])
+            else:
+                mapped_mode = 'cheque' if str(admission.payment_choice).lower() in ('cheque', 'check') else ('cash' if str(admission.payment_choice).lower() == 'cash' else 'online')
+                Payment.objects.create(
+                    admission=admission,
+                    amount=admission.payment_amount or admission.total_fees or 0,
+                    payment_mode=mapped_mode,
+                    transaction_ref=admission.transaction_id or '',
+                    payment_proof=admission.payment_screenshot,
+                    status='level_1_approved',
+                    verified_by=acting_user,
+                    payment_date=timezone.now().date(),
+                    note=level1_note,
+                )
+
+            # Notify super_admins that Level 1 is complete and Level 2 approval is required
+            try:
+                from core.utils import notify_users_by_role
+                notify_users_by_role(
+                    roles=['super_admin'],
+                    title='Admission Payment Ready for Final Approval',
+                    body=f"Payment for admission #{admission.id} ({admission.first_name} {admission.surname}) was verified by {role_label} and requires Super Admin final approval.",
+                    organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                    branch=admission.branch if getattr(admission, 'branch', None) else None,
+                    email_subject=f'Final Approval Required: Admission #{admission.id}',
+                    metadata={'admission_id': str(admission.id), 'step': 'level_2_approval'},
+                    notification_type='admission',
+                )
+            except Exception as exc:
+                logger.error(f"Failed to notify super_admin of level 1 approval for admission {admission.id}: {exc}")
+
+            # Dispatch WhatsApp template (payment_approve_reject) to Super Admins for Level 2 final approval
+            try:
+                from .notifications import send_payment_verification_whatsapp
+                send_payment_verification_whatsapp(admission, level=2)
+            except Exception as exc:
+                logger.error(f"Failed to dispatch Level 2 WhatsApp notification for admission {admission.id}: {exc}")
+
+            # Notify student & parent that Level 1 payment approval (cash/cheque) is verified
+            try:
+                from core.sender import send_email
+                from chat.notifications import send_whatsapp_with_fallback
+                adm_name = f"{admission.first_name} {admission.surname}".strip()
+                pay_amt = admission.payment_amount or admission.total_fees or 0
+                choice_display = admission.get_payment_choice_display() or str(admission.payment_choice).title()
+                subject_l1 = f"Payment Received & Verified (Level 1) - Admission #{admission.admission_code or admission.id}"
+                msg_l1 = (
+                    f"Dear {adm_name},\n\n"
+                    f"We have received and verified your {choice_display} payment of \u20b9{pay_amt:,.2f}.\n"
+                    f"Your admission is now queued for final Super Admin enrollment approval.\n\n"
+                    f"Thank you,\nInsight Institute of Professional Studies"
+                )
+                std_emails = [e for e in [admission.email, admission.email_parent] if e]
+                for rec_email in std_emails:
+                    try:
+                        send_email(
+                            to=rec_email,
+                            subject=subject_l1,
+                            text=msg_l1,
+                            organization=admission.branch.organization if getattr(admission, 'branch', None) else None,
+                        )
+                    except Exception as m_err:
+                        logger.error(f"Level 1 email to {rec_email} failed: {m_err}")
+
+                wa_l1_phones = [p for p in [admission.phone_student, admission.phone_father] if p]
+                for wa_p in wa_l1_phones:
+                    try:
+                        send_whatsapp_with_fallback(
+                            to=wa_p,
+                            fallback_body=msg_l1,
+                        )
+                    except Exception as w_err:
+                        logger.error(f"Level 1 WhatsApp to {wa_p} failed: {w_err}")
+            except Exception as notif_err:
+                logger.error(f"Failed to send Level 1 student notification for admission {admission.id}: {notif_err}")
+
+            try:
+                from chat.notifications import mark_approval_notification_as_read
+                mark_approval_notification_as_read(
+                    approval_type='admission',
+                    record_id=admission.id,
+                    user=acting_user,
+                    step=1,
+                )
+            except Exception as notif_e:
+                logger.error(f"Failed to mark level 1 notification as read: {notif_e}")
+
+            return Response(
+                {
+                    'success': True,
+                    'message': f'Level 1 payment approval completed by {role_label}. Pending Level 2 (final) approval by Super Admin.',
+                    'data': {
+                        'admission_id': admission.admission_code,
+                        'admission_status': admission.status,
+                        'status_display': admission.get_status_display(),
+                        'approval_level': 1,
+                        'approved_by': actor_name,
+                        'next_step': 'super_admin_approval',
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # ACCOUNTANT GUARD: Accountant cannot perform Level 2 approval
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if admission.status in ('approved', 'enrolled'):
+            return Response(
+                {
+                    'success': False,
+                    'message': (
+                        'Level 1 approval is already completed. '
+                        'Level 2 (final) approval must be performed by a Super Admin.'
+                    ),
+                    'data': {
+                        'admission_id': admission.admission_code,
+                        'admission_status': admission.status,
+                        'status_display': admission.get_status_display(),
+                        'required_role': 'super_admin',
+                        'approval_level': 2,
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
             )
 
 
