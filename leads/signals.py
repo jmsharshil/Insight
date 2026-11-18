@@ -86,8 +86,13 @@ def auto_assign_lead(sender, instance, **kwargs):
 def notify_new_lead_assignment(sender, instance, created, **kwargs):
     """
     Notify the assignee when a new lead is created and assigned to them (e.g. via auto-assignment or public form).
+    For inquiry forms, auto_create_admission_for_lead sends the dedicated
+    'Converted Lead Assigned' notification with the admission link, so we skip here.
     """
     if created and instance.assigned_to:
+        if getattr(instance, 'form_type', None) == 'inquiry':
+            return
+
         from chat.notifications import send_system_notification
         title = "New Lead Assigned"
         body = f"You have been assigned a new lead: {instance.first_name} {instance.surname}".strip()

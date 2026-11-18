@@ -365,9 +365,14 @@ class TestAllFixes(unittest.TestCase):
                     self.assertEqual(c_args['user_id'], '88')
                     self.assertIn('Priya Sharma', c_args['title'])
 
+                    # Verify exact call counts (no duplicate dispatch)
+                    self.assertEqual(mock_notify_role.call_count, 1)
+                    self.assertEqual(mock_sys_notif.call_count, 1)
+
                     # 3. WhatsApp notifications using admission_process template
                     self.assertTrue(mock_wa_fallback.called)
                     wa_calls = [call[1]['to'] for call in mock_wa_fallback.call_args_list]
+                    self.assertEqual(len(wa_calls), 4) # Exactly 4: Student, Parent, Counsellor, Branch Manager
                     self.assertIn('919876543210', wa_calls) # Student
                     self.assertIn('919876543211', wa_calls) # Father
                     self.assertIn('919876543299', wa_calls) # Counsellor
@@ -376,6 +381,20 @@ class TestAllFixes(unittest.TestCase):
                     # Verify template_name is admission_process for all calls
                     for call in mock_wa_fallback.call_args_list:
                         self.assertEqual(call[1]['template_name'], 'admission_process')
+
+    def test_inquiry_lead_skips_generic_lead_assigned_signal(self):
+        """Test that inquiry form leads do not trigger generic 'New Lead Assigned' signal."""
+        from leads.signals import notify_new_lead_assignment
+        from leads.models import Lead
+        from auth_user.models import User
+
+        counsellor = User(id=50, name='Test Counsellor', phone='919999999999', role='counsellor')
+        lead = Lead(id=888, form_type='inquiry', first_name='Test', surname='Student')
+        lead.assigned_to = counsellor
+
+        with patch('chat.notifications.send_system_notification') as mock_sys_notif:
+            notify_new_lead_assignment(sender='leads.Lead', instance=lead, created=True)
+            self.assertFalse(mock_sys_notif.called, "Generic assignment signal should skip inquiry form leads")
 
     def test_admission_code_lookups_across_all_apis(self):
         """Test _get_admission and endpoints accept BOTH admission_code and numeric id."""

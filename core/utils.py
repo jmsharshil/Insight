@@ -248,6 +248,7 @@ def notify_users_by_role(
     email_context=None,
     email_subject=None,
     notification_type=None,
+    exclude_user_ids=None,
 ):
     """
     Find users with the given roles (optionally scoped by organization or branch)
@@ -258,6 +259,9 @@ def notify_users_by_role(
 
     User = get_user_model()
     qs = User.objects.filter(get_role_filter_q(roles), is_active=True)
+
+    if exclude_user_ids:
+        qs = qs.exclude(id__in=exclude_user_ids)
 
     if branch:
         from django.db.models import Q
