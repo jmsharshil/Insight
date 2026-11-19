@@ -8,8 +8,10 @@ from django.utils import timezone
 from django.db.models import Count, Sum, Q, F, Avg, Case, When, Value, FloatField, Min
 from django.core.cache import cache
 
+from core.utils import get_lead_filter_q, get_user_branch_filter
 from auth_user.models import User, NotificationHistory
 from students.models import Student, ParentLink
+
 from attendance.models import AttendanceRecord
 from fees.models import StudentFee, Payment, Refund
 from exams.models import Exam
@@ -58,20 +60,10 @@ def _result_percentage_comparison(queryset):
 
 
 def _branch_filter(user, model=None):
-    """Optimized branch/organization filter based on role."""
-    q = Q()
-    role = getattr(user, 'role', None)
-    if hasattr(user, 'organization') and user.organization:
-        q &= Q(organization=user.organization) if hasattr(model, 'organization') else Q(branch__organization=user.organization)
-    if role == 'super_admin':
-        return q
-    bid = getattr(user, 'branch_id', None)
-    if bid:
-        if model and hasattr(model, 'branch'):
-            q &= Q(branch_id=bid)
-        elif 'branch' in str(model):
-            q &= Q(branch_id=bid)
-    return q
+    """Delegates to centralized get_user_branch_filter (core.utils) for
+    consistent scoping with reports, leads list views, RoleChecker + additional_roles.
+    """
+    return get_user_branch_filter(user, model)
 
 
 def _fee_student_scope(user, student_path='student'):
@@ -143,7 +135,7 @@ def get_role_dashboard(user):
         data = _get_faculty_dashboard(user, now, today, month_start)
     elif role in ('student', 'parents'):
         data = _get_student_dashboard(user, now, today, month_start)
-    elif role in ('sales_senior_executive', 'sales_executive', 'counsellor', 'tele_caller', 'front_desk'):
+    elif role in ('sales_senior_executive', 'sales_executive', 'counsellor', 'tele_caller', 'front_desk', 'receptionist'):
         data = _get_sales_dashboard(user, now, today, month_start)
     else:
         data = _get_default_dashboard(user, now, today)
@@ -225,11 +217,11 @@ def _get_management_dashboard(user, now, today, month_start, thirty_days_ago):
         )
     )
 
-    # Leads pipeline
-    lead_bq = bq
-    if user.role == 'super_admin' and getattr(user, 'organization', None):
-        lead_bq = Q(branch__organization=user.organization) | Q(branch__isnull=True)
-    lead_qs = Lead.objects.filter(lead_bq)
+    # Leads pipeline - use centralized get_lead_filter_q for consistency with
+    # reports, sales dashboard, LeadListView (full access roles see org-wide
+    # incl. unassigned; no cross-org leakage)
+    lead_q = get_lead_filter_q(user)
+    lead_qs = Lead.objects.filter(lead_q).select_related('assigned_to', 'branch')
     lead_pipeline = list(
         lead_qs.values('current_stage')
         .annotate(count=Count('id'))
@@ -792,18 +784,16 @@ def _get_student_dashboard(user, now, today, month_start):
 
 
 def _get_sales_dashboard(user, now, today, month_start):
-    """Sales, counsellor, telecaller focused on leads and conversions."""
-    bq = _branch_filter(user)
+    """Sales, counsellor, telecaller, front_desk focused on leads and conversions.
+    Uses centralized get_lead_filter_q (front_desk treated as FULL_LEAD_ACCESS_ROLES
+    — sees all org leads + unassigned, no assigned_to filter; juniors restricted).
+    Real aggregates only (no demo data). Leave summary added for *all* roles.
+    """
+    lead_q = get_lead_filter_q(user)
+    branch_q = _branch_filter(user)  # safe branch/org Q for attendance trend etc.
+    lead_qs = Lead.objects.filter(lead_q).select_related('assigned_to', 'branch')
 
-    lead_qs = Lead.objects.filter(bq)
-
-    # Junior sales roles only see leads assigned to them.
-    # Senior roles (sales_senior_executive, front_desk) see all branch leads.
-    individual_roles = ('sales_executive', 'tele_caller', 'counsellor')
-    if user.role in individual_roles:
-        lead_qs = lead_qs.filter(assigned_to=user)
-
-    # Attendance rate for staff/sales roles
+    # Attendance rate for staff/sales roles (real from EmployeeAttendanceRecord)
     my_att_rate = 100.0
     scan_agg = {}
     from attendance.models import EmployeeAttendanceRecord
@@ -813,7 +803,7 @@ def _get_sales_dashboard(user, now, today, month_start):
         total=Count('id'),
         present=Count('id', filter=Q(status__in=['present', 'late', 'half_day'])),
     )
-    if scan_agg['total']:
+    if scan_agg.get('total'):
         my_att_rate = round(((scan_agg['present'] or 0) / (scan_agg['total'] or 1)) * 100, 2)
 
     lead_agg = lead_qs.aggregate(
@@ -845,7 +835,7 @@ def _get_sales_dashboard(user, now, today, month_start):
         },
         'pipeline': pipeline,
         'recent_leads': recent_leads,
-        'conversion_trend': _get_simple_trend(30, bq),
+        'conversion_trend': _get_simple_trend(30, branch_q),
         'top_sources': list(lead_qs.values('reference').annotate(count=Count('id')).order_by('-count')[:5]),
     }
 
