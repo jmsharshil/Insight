@@ -370,9 +370,9 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
             logger.warning(
                 f"No email recipients found for payment {payment.id} "
                 f"(student: {getattr(payment.student, 'id', 'N/A')}, admission: {getattr(payment.admission, 'id', 'N/A')}). "
-                "Ensure student.email, student.user.email, or admission.email is set."
+                "Ensure student.email, student.user.email, or admission.email is set. "
+                "Skipping email only; WhatsApp will still be attempted."
             )
-            return
 
         student_name = ''
         if payment.student:
