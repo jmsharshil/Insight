@@ -274,6 +274,8 @@ def payment_approval_reminders_task(*args, **kwargs):
     # Group by branch
     branch_map = {}
     for payment in pending_payments:
+        if not payment.student:
+            continue
         branch_id = payment.student.branch_id if payment.student.branch else None
         if branch_id not in branch_map:
             branch_map[branch_id] = {
