@@ -616,6 +616,18 @@ class BatchListView(APIView):
         if getattr(request.user, 'organization', None):
             queryset = queryset.filter(organization=request.user.organization)
 
+        # Role-based filtering — students/parents see only assigned batches
+        # (matches _get_student pattern from students/views.py and timetable/export views)
+        role = getattr(request.user, 'role', None)
+        if role == 'student':
+            queryset = queryset.filter(
+                batch_students__student__user=request.user
+            ).distinct()
+        elif role in ('parents', 'parent'):
+            queryset = queryset.filter(
+                batch_students__student__parent_links__parent=request.user
+            ).distinct()
+
         course_id = request.GET.get('course_id')
         is_active = request.GET.get('is_active')
         branch_id = request.GET.get('branch_id') or request.GET.get('branch')
