@@ -961,6 +961,13 @@ class AdmissionListView(APIView):
                 admission.lead.save(update_fields=['branch'])
             resolve_combo_executive_course(admission)
 
+            if any([data.get('payment_choice'), data.get('payment_screenshot'), data.get('transaction_id')]):
+                try:
+                    from .utils import sync_admission_payment
+                    sync_admission_payment(admission, request=request)
+                except Exception as sync_e:
+                    logger.error(f"AdmissionListView sync_admission_payment error: {sync_e}")
+
         except Exception as e:
             logger.error(f"Admission update error: {e}")
             return Response(

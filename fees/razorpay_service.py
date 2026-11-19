@@ -447,6 +447,8 @@ def send_admission_payment_notification(
                         logger.info(f"[Razorpay] ADM receipt PDF uploaded to: {pdf_public_url}")
                     except Exception as upload_err:
                         logger.error(f"[Razorpay] ADM PDF upload for WhatsApp failed: {upload_err}")
+                if pdf_public_url:
+                    wa_caption += f"\n\n📄 Download receipt: {pdf_public_url}"
 
                 for phone in phones:
                     try:
@@ -818,7 +820,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 receipt_sent = False
                 if payment:
                     try:
-                        send_payment_receipt(payment)
+                        send_payment_receipt(payment, force_regenerate=True)
                         receipt_sent = True
                     except Exception as exc:
                         logger.error(f"[Razorpay] Receipt dispatch failed for {rp_payment_id}: {exc}")
