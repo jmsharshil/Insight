@@ -61,13 +61,16 @@ def send_email(to, subject, cc=None, text="", template=None, attachments=None, t
     email_user = getattr(settings, 'EMAIL_HOST_USER', '') or ''
     default_from = getattr(settings, 'DEFAULT_FROM_EMAIL', '') or ''
 
-    # When using Gmail SMTP, Google strictly requires the sender address to match
-    # the authenticated Gmail account or a verified alias, otherwise throwing 553.
+    # Providers like Gmail and Hostinger strictly require the sender address to match
+    # the authenticated account or a verified alias, otherwise throwing 553 Sender address rejected.
     if 'gmail.com' in email_host and email_user:
         if from_email is None or from_email == 'support@insightinstitute.co':
             from_email = email_user
+    elif email_user:
+        if from_email is None or from_email == 'support@insightinstitute.co':
+            from_email = default_from or email_user
     elif from_email is None:
-        from_email = default_from or email_user or 'support@insightinstitute.co'
+        from_email = default_from or 'support@insightinstitute.co'
     
     # Ensure to/cc are always lists and deduplicate while preserving order
     if isinstance(to, str):

@@ -562,7 +562,7 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
                         f"Receipt No    : {payment.receipt_number or 'N/A'}\n"
                         f"Transaction ID: {payment.transaction_ref or 'N/A'}\n"
                         f"Payment Mode  : {getattr(payment, 'payment_mode', 'N/A').title()}\n\n"
-                        f"Official receipt is attached. "
+                        f"{('Download receipt: ' + pdf_url) if pdf_url else 'Official receipt is attached.'} "
                         f"Keep it safe for your records.\n"
                         f"— Insight Institute of Professional Studies"
                     )

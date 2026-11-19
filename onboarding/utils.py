@@ -165,6 +165,14 @@ class AdmissionService:
                         payment_date=timezone.now().date(),
                         note='Auto-created on enrollment via WhatsApp/Status update.',
                     )
+                else:
+                    if payment.status != 'verified':
+                        payment.status = 'verified'
+                        if not payment.verified_at:
+                            payment.verified_at = timezone.now()
+                        if not payment.verified_by and user:
+                            payment.verified_by = user
+                        payment.save(update_fields=['status', 'verified_at', 'verified_by', 'updated_at'])
 
                 if payment:
                     send_payment_receipt(payment)
