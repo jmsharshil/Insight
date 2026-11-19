@@ -132,8 +132,14 @@ class AdmissionService:
             note=note,
         )
 
-        # Trigger credential creation only on transition to 'enrolled', or if student user account doesn't exist yet
+        # Trigger credential creation + payment receipt (especially for online payments)
+        # when status becomes 'enrolled'. This ensures receipts and credentials
+        # are sent even if WhatsApp Level-2 approval uses update_status().
         from auth_user.models import User as AuthUser
+        from django.utils import timezone
+        from fees.models import Payment
+        from fees.services import send_payment_receipt
+
         student_user_exists = (
             AuthUser.objects.filter(email__iexact=admission.email, role='student').exists()
             if admission.email else False
@@ -141,17 +147,38 @@ class AdmissionService:
         if new_status == 'enrolled' and (old_status != 'enrolled' or not student_user_exists):
             try:
                 AdmissionService._create_user_accounts(admission)
+
+                # Ensure Payment record exists and send receipt (fixes online payment receipt issue)
+                payment = Payment.objects.filter(admission=admission).first()
+                if not payment:
+                    mapped_mode = 'online' if str(getattr(admission, 'payment_choice', '')).lower() in ('online', 'razorpay', 'upi', 'link') else 'cheque'
+                    payment = Payment.objects.create(
+                        admission=admission,
+                        amount=admission.payment_amount or admission.total_fees or 0,
+                        payment_mode=mapped_mode,
+                        transaction_ref=admission.transaction_id or '',
+                        payment_proof=getattr(admission, 'payment_screenshot', None),
+                        status='verified',
+                        recorded_by=user,
+                        verified_by=user,
+                        verified_at=timezone.now(),
+                        payment_date=timezone.now().date(),
+                        note='Auto-created on enrollment via WhatsApp/Status update.',
+                    )
+
+                if payment:
+                    send_payment_receipt(payment)
+                    logger.info(f"Payment receipt dispatched for admission {admission.id}")
+
                 logger.info(
                     f"Student enrolled — credentials created for admission {admission.id}"
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to create user accounts for admission {admission.id}: {e}",
+                    f"Failed to create user accounts or send receipt for admission {admission.id}: {e}",
                     exc_info=True,
                 )
-                # Don't re-raise — status is already saved, but credential
-                # dispatch may have been skipped.  Check logs for
-                # "credential email/WhatsApp FAILED" entries.
+                # Don't re-raise — status is already saved.
 
         return admission
 
