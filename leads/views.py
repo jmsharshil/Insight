@@ -71,6 +71,7 @@ def _can_modify_lead(user, lead):
     if user_role in RESTRICTED_ROLES:
         return bool(lead and lead.assigned_to_id == user.id)
     return False
+
 SALES_ROLES = {
     'sales_senior_executive', 'sales_executive', 'counsellor',
     'tele_caller', 'senior_tele_caller', 'telecaller',
@@ -1874,8 +1875,8 @@ def get_lead_queryset(request):
 
     user = request.user
     if user.is_authenticated:
-        role = getattr(user, 'role', None)
-        if role != 'super_admin' and getattr(user, 'branch_id', None):
+        role = getattr(user, 'role', None)            
+        if role != 'super_admin' and getattr(user, 'branch_id', None) and role != 'front_desk':
             # Keep branch-scoped lead lists aligned with role dashboards.
             queryset = queryset.filter(
                 Q(branch__isnull=True) | Q(branch_id=user.branch_id)
