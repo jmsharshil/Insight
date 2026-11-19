@@ -1399,17 +1399,26 @@ class SubjectWiseResultView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty', 'student', 'parents']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = PublishedResult.objects.select_related(
-            'exam__subject', 'exam__batch', 'exam__branch'
+            'exam__subject', 'exam__batch', 'exam__branch', 'student__user'
         ).filter(
             exam__subject__isnull=False,
             exam__is_deleted=False,
         )
         if role == 'faculty':
             qs = qs.filter(exam__faculty__user=request.user)
+        elif role == 'student':
+            qs = qs.filter(student__user=request.user)
+        elif role == 'parents':
+            # Use ParentLink as source of truth (consistent with ResultView, ResultAnalyticsView, attendance)
+            from students.models import ParentLink
+            linked_student_ids = ParentLink.objects.filter(
+                parent=request.user
+            ).values_list('student_id', flat=True)
+            qs = qs.filter(student_id__in=linked_student_ids)
 
         qs, err = apply_exam_filters_to_results(qs, request)
         if err:
@@ -1523,17 +1532,26 @@ class BatchWiseResultView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty', 'student', 'parents']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
         qs = PublishedResult.objects.select_related(
-            'exam__batch', 'exam__subject', 'exam__branch'
+            'exam__batch', 'exam__subject', 'exam__branch', 'student__user'
         ).filter(
             exam__batch__isnull=False,
             exam__is_deleted=False,
         )
         if role == 'faculty':
             qs = qs.filter(exam__faculty__user=request.user)
+        elif role == 'student':
+            qs = qs.filter(student__user=request.user)
+        elif role == 'parents':
+            # Use ParentLink as source of truth (consistent with ResultView, ResultAnalyticsView, attendance)
+            from students.models import ParentLink
+            linked_student_ids = ParentLink.objects.filter(
+                parent=request.user
+            ).values_list('student_id', flat=True)
+            qs = qs.filter(student_id__in=linked_student_ids)
 
         qs, err = apply_exam_filters_to_results(qs, request)
         if err:
@@ -1585,14 +1603,23 @@ class ResultAnalyticsView(APIView):
 
     def get(self, request):
         role = _user_role(request.user)
-        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty']:
+        if role not in ['super_admin', 'admin_senior_executive', 'branch_manager', 'faculty', 'student', 'parents']:
             return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty', 'exam__branch').filter(
+        base_qs = PublishedResult.objects.select_related('exam__subject', 'exam__batch', 'exam__faculty', 'exam__branch', 'student__user').filter(
             exam__is_deleted=False
         )
         if role == 'faculty':
             base_qs = base_qs.filter(exam__faculty__user=request.user)
+        elif role == 'student':
+            base_qs = base_qs.filter(student__user=request.user)
+        elif role == 'parents':
+            # Use ParentLink as source of truth (consistent with dashboard, attendance, fees, ResultView)
+            from students.models import ParentLink
+            linked_student_ids = ParentLink.objects.filter(
+                parent=request.user
+            ).values_list('student_id', flat=True)
+            base_qs = base_qs.filter(student_id__in=linked_student_ids)
         base_qs, err = apply_exam_filters_to_results(base_qs, request)
         if err:
             return Response({'success': False, 'message': err}, status=status.HTTP_400_BAD_REQUEST)
