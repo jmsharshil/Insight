@@ -413,13 +413,6 @@ class PaperView(APIView):
         except Exception:
             pass
 
-        comparison_qs = PublishedResult.objects.filter(
-            exam_id=exam_id,
-            exam__is_deleted=False,
-        )
-        if role == 'parents':
-            comparison_qs = comparison_qs.filter(student_id__in=linked_student_ids)
-
         return Response({
             'success': True, 'count': qs.count(),
             'exam_attendance_percentage': exam_att_pct,
@@ -826,7 +819,7 @@ class ResultView(APIView):
             'success': True, 'count': qs.count(),
             'exam_attendance_percentage': exam_att_pct,
             'percentage_comparison': _percentage_comparison_summary(
-                comparison_qs
+                qs
             ),
             'data': PublishedResultSerializer(qs, many=True).data,
         })
