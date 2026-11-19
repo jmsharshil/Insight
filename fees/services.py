@@ -302,7 +302,7 @@ def payment_approval_reminders_task(*args, **kwargs):
             email_subject=f"Action Required: {count} Payments Pending Approval"
         )
 
-def send_payment_receipt(payment):
+def send_payment_receipt(payment, force_regenerate=False, resend_notifications=True):
     """
     Shared utility to generate PDF receipt (with WeasyPrint or Playwright fallback),
     persist it to payment.payment_document, and email *using a Django template*
@@ -311,10 +311,22 @@ def send_payment_receipt(payment):
     to student/parent via core.sender.send_email (with tuple attachment).
     Uses _receipt_generated guard to prevent recursion on payment_document.save().
     Falls back to sending an email without PDF attachment if PDF generation fails.
+
+    force_regenerate=True will clear any existing payment_document and force PDF regeneration.
+    resend_notifications=False will skip email/WhatsApp (useful for bulk regeneration).
     """
-    if getattr(payment, '_receipt_generated', False):
+    if not force_regenerate and getattr(payment, '_receipt_generated', False):
         logger.debug(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')}")
         return
+
+    if force_regenerate and payment.payment_document:
+        try:
+            payment.payment_document.delete(save=False)
+            payment.payment_document = None
+            payment.save(update_fields=['payment_document'])
+            logger.info(f"Cleared existing receipt document for regeneration on payment {payment.id}")
+        except Exception as del_err:
+            logger.warning(f"Failed to clear existing receipt document: {del_err}")
 
     try:
         from core.sender import send_email
@@ -483,120 +495,122 @@ def send_payment_receipt(payment):
             except Exception as rl_err:
                 logger.error(f"Direct ReportLab fallback failed for payment {payment.id}: {rl_err}", exc_info=True)
 
-        # --- Send email to all recipients ---
-        attachments = [pdf_attachment] if pdf_attachment else []
-        for recipient in recipients:
-            try:
-                send_email(
-                    to=recipient,
-                    subject=subject,
-                    text=text_body,
-                    template="emails/payment_receipt.html",
-                    template_context=template_context,
-                    attachments=attachments,
-                )
-                logger.info(
-                    f"Receipt email sent to {recipient} for payment "
-                    f"{payment.receipt_number or payment.id}"
-                    + (" (with PDF)" if pdf_attachment else " (NO PDF — generation failed)")
-                )
-            except Exception as mail_err:
-                logger.error(
-                    f"Email to {recipient} failed for payment {payment.id}: {mail_err}",
-                    exc_info=True
-                )
-
-        # --- Send WhatsApp to student + parent phones (with PDF document) ---
-        try:
-            from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
-
-            wa_phones = set()
-            if getattr(payment.student, 'phone_student', None):
-                wa_phones.add(payment.student.phone_student)
-            if getattr(payment.student, 'phone_father', None):
-                wa_phones.add(payment.student.phone_father)
-            try:
-                if (getattr(payment.student, 'user', None)
-                        and getattr(payment.student.user, 'phone', None)):
-                    wa_phones.add(payment.student.user.phone)
-            except Exception:
-                pass
-
-            if adm:
-                for attr in ('phone_student', 'phone_father', 'phone_student_2', 'phone_father_2'):
-                    val = getattr(adm, attr, None)
-                    if val:
-                        wa_phones.add(val)
-
-            wa_phones = list(filter(None, wa_phones))
-            if not wa_phones:
-                logger.info(f"No WhatsApp phones found for payment {payment.id} — skipping WA.")
-            else:
-                # Try to get a publicly accessible PDF URL from the saved payment_document
-                pdf_url = None
+        # --- Send email/WhatsApp only if requested (default True for normal flow) ---
+        if resend_notifications:
+            # --- Send email to all recipients ---
+            attachments = [pdf_attachment] if pdf_attachment else []
+            for recipient in recipients:
                 try:
-                    doc = payment.payment_document
-                    if doc and doc.name:
-                        pdf_url = doc.url  # Azure Blob / S3 / local URL
+                    send_email(
+                        to=recipient,
+                        subject=subject,
+                        text=text_body,
+                        template="emails/payment_receipt.html",
+                        template_context=template_context,
+                        attachments=attachments,
+                    )
+                    logger.info(
+                        f"Receipt email sent to {recipient} for payment "
+                        f"{payment.receipt_number or payment.id}"
+                        + (" (with PDF)" if pdf_attachment else " (NO PDF — generation failed)")
+                    )
+                except Exception as mail_err:
+                    logger.error(
+                        f"Email to {recipient} failed for payment {payment.id}: {mail_err}",
+                        exc_info=True
+                    )
+
+            # --- Send WhatsApp to student + parent phones (with PDF document) ---
+            try:
+                from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
+
+                wa_phones = set()
+                if getattr(payment.student, 'phone_student', None):
+                    wa_phones.add(payment.student.phone_student)
+                if getattr(payment.student, 'phone_father', None):
+                    wa_phones.add(payment.student.phone_father)
+                try:
+                    if (getattr(payment.student, 'user', None)
+                            and getattr(payment.student.user, 'phone', None)):
+                        wa_phones.add(payment.student.user.phone)
                 except Exception:
                     pass
 
-                wa_caption = (
-                    f"✅ *Payment Receipt — Insight Institute*\n"
-                    f"Dear {student_name},\n\n"
-                    f"Your payment of ₹{payment.amount:,.2f} has been verified.\n"
-                    f"Receipt No    : {payment.receipt_number or 'N/A'}\n"
-                    f"Transaction ID: {payment.transaction_ref or 'N/A'}\n"
-                    f"Payment Mode  : {getattr(payment, 'payment_mode', 'N/A').title()}\n\n"
-                    f"Official receipt is attached. "
-                    f"Keep it safe for your records.\n"
-                    f"— Insight Institute of Professional Studies"
-                )
+                if adm:
+                    for attr in ('phone_student', 'phone_father', 'phone_student_2', 'phone_father_2'):
+                        val = getattr(adm, attr, None)
+                        if val:
+                            wa_phones.add(val)
 
-                for phone in wa_phones:
+                wa_phones = list(filter(None, wa_phones))
+                if not wa_phones:
+                    logger.info(f"No WhatsApp phones found for payment {payment.id} — skipping WA.")
+                else:
+                    # Try to get a publicly accessible PDF URL from the saved payment_document
+                    pdf_url = None
                     try:
-                        components = [{
-                            "type": "body", 
-                            "parameters": [
-                                {"type": "text", "text": student_name},
-                                {"type": "text", "text": f"{payment.amount:,.2f}"},
-                                {"type": "text", "text": payment.receipt_number or "N/A"},
-                                {"type": "text", "text": getattr(payment, 'payment_mode', 'N/A').title()},
-                                {"type": "text", "text": payment.transaction_ref or "N/A"},
-                            ]
-                        }]
-                        if pdf_url:
-                            components.insert(0, {
-                                "type": "header",
-                                "parameters": [{
-                                    "type": "document",
-                                    "document": {
-                                        "link": pdf_url,
-                                        "filename": f"Receipt_{payment.receipt_number or payment.id}.pdf"
-                                    }
-                                }]
-                            })
+                        doc = payment.payment_document
+                        if doc and doc.name:
+                            pdf_url = doc.url  # Azure Blob / S3 / local URL
+                    except Exception:
+                        pass
 
-                        send_whatsapp_with_fallback(
-                            to=phone,
-                            template_name="payment_reciept_",
-                            language_code="en",
-                            components=components,
-                            fallback_body=wa_caption,
-                        )
-                        logger.info(
-                            f"WhatsApp receipt (template/text) sent to {phone} "
-                            f"for payment {payment.id}"
-                        )
-                    except Exception as wa_phone_err:
-                        logger.error(
-                            f"WhatsApp to {phone} failed for payment {payment.id}: {wa_phone_err}"
-                        )
-        except Exception as wa_err:
-            logger.error(
-                f"WhatsApp receipt notification failed for payment "
-                f"{getattr(payment, 'id', 'N/A')}: {wa_err}"
-            )
+                    wa_caption = (
+                        f"✅ *Payment Receipt — Insight Institute*\n"
+                        f"Dear {student_name},\n\n"
+                        f"Your payment of ₹{payment.amount:,.2f} has been verified.\n"
+                        f"Receipt No    : {payment.receipt_number or 'N/A'}\n"
+                        f"Transaction ID: {payment.transaction_ref or 'N/A'}\n"
+                        f"Payment Mode  : {getattr(payment, 'payment_mode', 'N/A').title()}\n\n"
+                        f"Official receipt is attached. "
+                        f"Keep it safe for your records.\n"
+                        f"— Insight Institute of Professional Studies"
+                    )
+
+                    for phone in wa_phones:
+                        try:
+                            components = [{
+                                "type": "body", 
+                                "parameters": [
+                                    {"type": "text", "text": student_name},
+                                    {"type": "text", "text": f"{payment.amount:,.2f}"},
+                                    {"type": "text", "text": payment.receipt_number or "N/A"},
+                                    {"type": "text", "text": getattr(payment, 'payment_mode', 'N/A').title()},
+                                    {"type": "text", "text": payment.transaction_ref or "N/A"},
+                                ]
+                            }]
+                            if pdf_url:
+                                components.insert(0, {
+                                    "type": "header",
+                                    "parameters": [{
+                                        "type": "document",
+                                        "document": {
+                                            "link": pdf_url,
+                                            "filename": f"Receipt_{payment.receipt_number or payment.id}.pdf"
+                                        }
+                                    }]
+                                })
+
+                            send_whatsapp_with_fallback(
+                                to=phone,
+                                template_name="payment_reciept_",
+                                language_code="en",
+                                components=components,
+                                fallback_body=wa_caption,
+                            )
+                            logger.info(
+                                f"WhatsApp receipt (template/text) sent to {phone} "
+                                f"for payment {payment.id}"
+                            )
+                        except Exception as wa_phone_err:
+                            logger.error(
+                                f"WhatsApp to {phone} failed for payment {payment.id}: {wa_phone_err}"
+                            )
+            except Exception as wa_err:
+                logger.error(
+                    f"WhatsApp receipt notification failed for payment "
+                    f"{getattr(payment, 'id', 'N/A')}: {wa_err}"
+                )
 
     except Exception as e:
         logger.error(

@@ -3,7 +3,7 @@ from .views import (
     FeeStructureListView, FeeStructureDetailView,
     StudentFeeListView, StudentFeeDetailView, StudentFeeByStudentView,
     InstallmentPlanListView, InstallmentPlanCreateView, InstallmentPlanApproveView,
-    PaymentListView, PaymentDetailView, PaymentVerifyView,
+    PaymentListView, PaymentDetailView, PaymentVerifyView, PaymentReceiptRegenerateView,
     RefundListView, RefundCreateView, RefundUpdateView,
     BankAccountListView, BankAccountDetailView,
     FeeReportView,
@@ -40,6 +40,7 @@ urlpatterns = [
     path('payments/', PaymentListView.as_view(), name='payment-list'),
     path('payments/<uuid:pk>/', PaymentDetailView.as_view(), name='payment-detail'),
     path('payments/<uuid:pk>/verify/', PaymentVerifyView.as_view(), name='payment-verify'),
+    path('payments/<uuid:pk>/regenerate-receipt/', PaymentReceiptRegenerateView.as_view(), name='payment-regenerate-receipt'),
 
     # ── Refunds ────────────────────────────────────────────────────────────
     path('refunds/', RefundListView.as_view(), name='refund-list'),

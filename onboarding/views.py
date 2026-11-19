@@ -1388,6 +1388,18 @@ class AdmissionApproveView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # Payment entry is created via sync_admission_payment when proof is uploaded to Admission.
+        # Approval for non-online payment types (cash/cheque) can ONLY be done if payment proof
+        # (screenshot) has been uploaded. Online/Razorpay paths bypass this via webhook verification.
+        if str(admission.payment_choice or '').lower() in ('cash', 'cheque', 'check') and not admission.payment_screenshot:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Approval of admission for non-online payment types can only be done if payment proof is uploaded.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         note = request.data.get('note', '').strip()
         force_override = bool(request.data.get('override') or request.data.get('force'))
 

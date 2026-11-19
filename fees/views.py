@@ -922,6 +922,65 @@ class PaymentVerifyView(APIView):
         )
 
 
+class PaymentReceiptRegenerateView(APIView):
+    """
+    POST /api/v1/fees/payments/<uuid:pk>/regenerate-receipt/
+    Force-regenerates the PDF receipt (clearing any existing document if force_regenerate=True),
+    persists it to payment.payment_document, sends email (Django template) + WhatsApp document.
+    This addresses cases where receipt was not generated on L2 approval, webhook, or offline paths.
+    """
+    def post(self, request, pk):
+        try:
+            queryset = Payment.objects.select_related(
+                'student', 'student_fee', 'admission'
+            ).all()
+            if getattr(request.user, 'organization', None):
+                queryset = queryset.filter(
+                    Q(student__branch__organization=request.user.organization) |
+                    Q(admission__branch__organization=request.user.organization)
+                )
+            payment = queryset.get(pk=pk)
+        except Payment.DoesNotExist:
+            return Response({'success': False, 'message': 'Payment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Permission check (reuse same logic as verify)
+        from onboarding.notifications import user_has_payment_role
+        if not user_has_payment_role(request.user, ('accountant', 'super_admin')):
+            return Response(
+                {'success': False, 'message': 'Permission denied. Only Accountant or Super Admin can regenerate receipts.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            send_payment_receipt(
+                payment,
+                force_regenerate=True,
+                resend_notifications=True
+            )
+            receipt_url = None
+            if payment.payment_document:
+                try:
+                    receipt_url = request.build_absolute_uri(payment.payment_document.url)
+                except Exception:
+                    receipt_url = str(payment.payment_document.url) if hasattr(payment.payment_document, 'url') else None
+
+            return Response({
+                'success': True,
+                'message': f'Receipt regenerated and notifications re-sent for payment {payment.receipt_number or payment.id}.',
+                'data': {
+                    'payment_id': str(payment.id),
+                    'receipt_number': payment.receipt_number,
+                    'receipt_document_url': receipt_url,
+                }
+            })
+        except Exception as e:
+            logger.error(f"Receipt regeneration failed for payment {pk}: {e}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': f'Failed to regenerate receipt: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Refund Views
 # ═══════════════════════════════════════════════════════════════════════════════
