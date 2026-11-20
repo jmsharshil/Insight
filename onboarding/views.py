@@ -517,19 +517,20 @@ def _setup_payment_bank_and_notify(admission):
     existing_rp_link = admission.razorpay_payment_link or ''
     if existing_rp_link:
         existing_amount = None
-        for entry in (admission.payment_history or []):
-            if entry.get('event') == 'payment_link_created':
+        for entry in reversed(admission.payment_history or []):
+            if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == existing_rp_link:
                 try:
                     existing_amount = Decimal(str(entry.get('amount', 0)))
                 except Exception:
                     pass
                 break
-        if existing_amount is None or existing_amount <= Decimal('1') or existing_amount != amount_to_pay:
+        if existing_amount is not None and (existing_amount <= Decimal('1') or existing_amount != amount_to_pay):
             logger.info(
                 f"Admission {admission.id}: stale Razorpay link detected "
                 f"(was {existing_amount}, now {amount_to_pay}). Regenerating link."
             )
             _cancel_admission_payment_link(admission)
+            admission._allow_resend_link = True
 
     assigned_bank = getattr(admission, 'bank_account', None)
     if not assigned_bank:
@@ -708,16 +709,17 @@ def _setup_payment_bank_and_notify(admission):
         try:
             from chat.notifications import send_whatsapp_with_fallback
             if razorpay_link_url:
-                # Deduplicate: do not resend razorpay_link if this exact link was already sent to student via WhatsApp
+                # Deduplicate: do not resend razorpay_link if link was already notified to student via WhatsApp
+                allow_resend = getattr(admission, '_allow_resend_link', False) is True
                 link_already_sent = (
-                    getattr(admission, '_razorpay_link_sent', False) is True
-                    or any(
-                        (
-                            (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
-                            or entry.get('event') == 'payment_link_notified'
+                    not allow_resend
+                    and (
+                        getattr(admission, '_razorpay_link_sent', False) is True
+                        or any(
+                            entry.get('event') == 'payment_link_notified'
+                            or (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
+                            for entry in (admission.payment_history or [])
                         )
-                        and entry.get('razorpay_payment_link') == razorpay_link_url
-                        for entry in (admission.payment_history or [])
                     )
                 )
                 if link_already_sent:
@@ -2145,6 +2147,7 @@ class AdmissionPaymentSetupView(APIView):
         if data.get('force_new') or data.get('regenerate_link') or data.get('force_new_link'):
             admission.razorpay_payment_link = None
             admission.razorpay_payment_link_id = None
+            admission._allow_resend_link = True
             update_fields.extend(['razorpay_payment_link', 'razorpay_payment_link_id'])
 
         if update_fields:
