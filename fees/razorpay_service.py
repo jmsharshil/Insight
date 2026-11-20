@@ -698,12 +698,17 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 admission.payment_submitted_at = admission.payment_submitted_at or now
                 admission.payment_amount = cumulative_paid
                 admission.razorpay_payment_id = rp_payment_id
-                if not is_partial:
-                    admission.razorpay_link = None
-                admission.save(update_fields=[
+                save_fields = [
                     'transaction_id', 'payment_note', 'payment_submitted_at', 'payment_amount',
-                    'razorpay_payment_id', 'updated_at', 'razorpay_link'
-                ])
+                    'razorpay_payment_id', 'updated_at',
+                ]
+                if not is_partial:
+                    # NOTE: the real model field is `razorpay_payment_link` (there is no
+                    # `razorpay_link`). Using a non-existent name in update_fields raised
+                    # ValueError, rolled back the transaction and left no Payment row.
+                    admission.razorpay_payment_link = None
+                    save_fields.append('razorpay_payment_link')
+                admission.save(update_fields=save_fields)
 
                 student = Student.objects.filter(admission=admission).first()
                 payment = existing_payment
