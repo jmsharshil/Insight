@@ -76,6 +76,107 @@ def resolve_combo_executive_course(admission):
         batch = batch_qs.filter(branch=admission.branch).first() or batch_qs.filter(branch__isnull=True).first()
     else:
         batch = batch_qs.first()
+
+    if not batch:
+        # Create CS Executive batch for combo offer (fixes "cmbo offer the batch for cs executive is not created")
+        from batches.services import get_batch_dates, get_exam_attempt_year
+        from batches.models import Batch, Course, BatchSequenceCounter
+        from django.utils import timezone
+        import logging
+        logger = logging.getLogger(__name__)
+
+        course_type = 'cs_executive'
+        batch_attempt = future_attempt
+        attempt_year = future_year or get_exam_attempt_year(
+            course=course_type,
+            batch_attempt=batch_attempt,
+            group_module=admission.group_module or 'both',
+            form_date=timezone.now().date(),
+        )
+        group_module = admission.group_module or 'both'
+        branch = admission.branch
+        today = timezone.now().date()
+
+        # Resolve CS Executive course
+        course_obj = (
+            Course.objects.filter(levels__course_type=course_type, is_active=True).first()
+            or Course.objects.filter(name__icontains='executive', is_active=True).first()
+            or Course.objects.filter(is_active=True).first()
+        )
+        if not course_obj:
+            logger.warning(f"No active Course found for CS Executive combo future batch on admission {admission.id}")
+            admission.combo_future_batch = None
+            admission.save(update_fields=['combo_future_batch'])
+            return admission
+
+        # Sequence counter (branch-aware, matches auto_assign_batch)
+        counter_kwargs = {
+            'course_type': course_type,
+            'batch_attempt': batch_attempt,
+            'attempt_year': attempt_year,
+        }
+        if branch:
+            counter_kwargs['branch'] = branch
+        counter, _ = BatchSequenceCounter.objects.select_for_update().get_or_create(
+            **counter_kwargs,
+            defaults={'last_sequence': 100},
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+        sequence = counter.last_sequence
+
+        year_suffix = str(attempt_year)[-2:]
+
+        # Branch prefix (B1_ style)
+        branch_prefix = ''
+        if branch and getattr(branch, 'name', None):
+            try:
+                parts = branch.name.split('-')
+                if len(parts) >= 2:
+                    bseq = parts[-1]
+                    branch_prefix = f"{bseq.lstrip('0') or '0'}"
+                else:
+                    branch_prefix = branch.name[:3].upper()
+            except Exception:
+                branch_prefix = 'BXX'
+
+        if branch_prefix:
+            batch_name = f"{branch_prefix}_CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
+        else:
+            batch_name = f"CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
+
+        batch_start, batch_end = get_batch_dates(
+            course=course_type,
+            batch_attempt=batch_attempt,
+            group_module=group_module,
+            attempt_year=attempt_year,
+        )
+        if batch_start < today:
+            batch_start = today
+
+        organization = getattr(branch, 'organization', None) if branch else None
+
+        batch = Batch.objects.create(
+            course=course_obj,
+            name=batch_name,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            group_module=group_module,
+            auto_sequence=sequence,
+            is_auto_created=True,
+            is_active=True,
+            start_date=batch_start,
+            end_date=batch_end,
+            organization=organization,
+            branch=branch,
+            # Link to combo fee structure if available
+            fee_structure=admission.fee_structure if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'is_combo', False) else None,
+        )
+        logger.info(
+            f"Created future CS Executive combo batch {batch.name} (branch={getattr(branch, 'name', 'None')}) "
+            f"for admission {admission.id}"
+        )
+
     admission.combo_future_batch = batch
     admission.save(update_fields=['combo_future_batch'])
     return admission
