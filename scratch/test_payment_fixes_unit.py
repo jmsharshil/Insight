@@ -7,9 +7,16 @@ Unit tests for:
 
 Run with: python scratch/test_payment_fixes_unit.py
 """
+import os
+import sys
 import unittest
 from decimal import Decimal
 from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'insight.settings')
+import django
+django.setup()
 
 
 def _get_module_fee(fee_structure, group_module):
@@ -199,6 +206,33 @@ class TestPaymentLogic(unittest.TestCase):
         student = qs.filter(user="test").order_by('-created_at').first()
         self.assertIsNotNone(student)
         self.assertEqual(student.id, "std_2")
+
+    def test_button_index_string_normalization_in_sender(self):
+        """WhatsAppSender.send_template converts button component index to str."""
+        from core.sender import WhatsAppSender
+        sender = WhatsAppSender.__new__(WhatsAppSender)
+        sender._base_payload = MagicMock(return_value={})
+        sender._post = MagicMock(side_effect=lambda payload: payload)
+
+        components = [
+            {"type": "body", "parameters": [{"type": "text", "text": "10,000"}]},
+            {"type": "button", "sub_type": "url", "index": 0, "parameters": [{"type": "text", "text": "NPj2jKkN"}]},
+        ]
+        res = sender.send_template(to="919876543210", template_name="razorpay_link", components=components)
+        sent_components = res["template"]["components"]
+        button_comp = [c for c in sent_components if c["type"] == "button"][0]
+        self.assertEqual(button_comp["index"], "0")
+        self.assertIsInstance(button_comp["index"], str)
+
+    def test_razorpay_link_deduplication_atomic_lock_in_views(self):
+        """_setup_payment_bank_and_notify uses select_for_update and checks link_already_sent."""
+        import inspect
+        from onboarding.views import _setup_payment_bank_and_notify
+        src = inspect.getsource(_setup_payment_bank_and_notify)
+        self.assertIn("select_for_update", src)
+        self.assertIn("link_already_sent", src)
+        self.assertIn("payment_link_notified", src)
+        self.assertIn('"0"', src)
 
 
 if __name__ == '__main__':

@@ -536,6 +536,24 @@ TaskScheduler.register("whatsapp_send", _run_whatsapp_send)
 # ---------------- convenience wrappers for call sites ----------------
 
 def queue_whatsapp_text(*, to: str, body: str, delay_seconds: int = 0, max_retries: int = 3):
+    # Deduplication guard: avoid queueing identical text message to same recipient within 120s
+    try:
+        from datetime import timedelta
+        from django.utils import timezone
+        from scheduler.models import ScheduledTask
+        recent = ScheduledTask.objects.filter(
+            task_type="whatsapp_send",
+            status__in=["pending", "running", "completed"],
+            scheduled_at__gte=timezone.now() - timedelta(seconds=120),
+            task_kwargs__to=to,
+            task_kwargs__body=body,
+        ).first()
+        if recent:
+            logger.info("[WHATSAPP] Skipping duplicate text message to %s within 120s (task=%s)", to, recent.id)
+            return recent
+    except Exception as e:
+        logger.debug("[WHATSAPP] Dedupe text check error: %s", e)
+
     return TaskScheduler.schedule(
         task_type="whatsapp_send",
         task_kwargs={"method": "send_text", "to": to, "body": body},
@@ -555,6 +573,28 @@ def queue_whatsapp_template(*, to: str, template_name: str, language_code: str =
     API error (e.g. 131008 missing param, 132001 not approved), the scheduler
     will automatically queue a plain-text message with that content instead.
     """
+    # Deduplication guard: avoid queueing duplicate template/fallback to same recipient within 120s
+    if not language_retry_attempted:
+        try:
+            from datetime import timedelta
+            from django.utils import timezone
+            from scheduler.models import ScheduledTask
+            qs = ScheduledTask.objects.filter(
+                task_type="whatsapp_send",
+                status__in=["pending", "running", "completed"],
+                scheduled_at__gte=timezone.now() - timedelta(seconds=120),
+                task_kwargs__to=to,
+                task_kwargs__template_name=template_name,
+            )
+            if fallback_body:
+                qs = qs.filter(task_kwargs__fallback_body=fallback_body)
+            recent = qs.first()
+            if recent:
+                logger.info("[WHATSAPP] Skipping duplicate template '%s' to %s within 120s (task=%s)", template_name, to, recent.id)
+                return recent
+        except Exception as e:
+            logger.debug("[WHATSAPP] Dedupe template check error: %s", e)
+
     task_kwargs = {
         "method": "send_template",
         "to": to,
