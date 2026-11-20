@@ -252,44 +252,52 @@ Best Regards,
 {org_title} Team
 """
 
-    send_email(
-        to=parent_user.email,
-        subject=subject,
-        text=text_content,
-        template='emails/parent_credentials.html',
-        template_context={
-            'parent_name': parent_user.name,
-            'student_name': student_user.name,
-            'student_email': student_user.email,
-            'student_password': student_password,
-            'parent_email': parent_user.email,
-            'password': password,
-            'org_name': org_title,
-            'play_store_url': play_store_url,
-            'app_store_url': app_store_url,
-        },
-        organization=parent_user.organization,
-    )
-
-    try:
-        send_whatsapp_with_fallback(
-            to=parent_user.phone,
-            template_name="login_",
-            language_code="en",
-            components=[
-                {
-                    "type": "body",
-                    "parameters": [
-                        {"type": "text", "text": parent_user.name},
-                        {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'}
-                    ],
-                }
-            ],
-            fallback_body=text_content,
-            user_id=str(parent_user.id),
+    # Only dispatch email to parent if parent has a distinct email from student
+    student_email_clean = (student_user.email or '').strip().lower()
+    parent_email_clean = (parent_user.email or '').strip().lower()
+    if parent_email_clean and parent_email_clean != student_email_clean:
+        send_email(
+            to=parent_user.email,
+            subject=subject,
+            text=text_content,
+            template='emails/parent_credentials.html',
+            template_context={
+                'parent_name': parent_user.name,
+                'student_name': student_user.name,
+                'student_email': student_user.email,
+                'student_password': student_password,
+                'parent_email': parent_user.email,
+                'password': password,
+                'org_name': org_title,
+                'play_store_url': play_store_url,
+                'app_store_url': app_store_url,
+            },
+            organization=parent_user.organization,
         )
-    except Exception as e:
-        print(e)
+
+    # Only dispatch WhatsApp to parent if parent has a distinct phone number from student
+    student_phone_clean = re.sub(r'\D', '', student_user.phone or '')
+    parent_phone_clean = re.sub(r'\D', '', parent_user.phone or '')
+    if parent_phone_clean and parent_phone_clean != student_phone_clean:
+        try:
+            send_whatsapp_with_fallback(
+                to=parent_user.phone,
+                template_name="login_",
+                language_code="en",
+                components=[
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": parent_user.name},
+                            {"type": "text", "text": parent_user.organization.name if parent_user.organization else 'Insight ERP'}
+                        ],
+                    }
+                ],
+                fallback_body=text_content,
+                user_id=str(parent_user.id),
+            )
+        except Exception as e:
+            print(e)
 
 def send_login_otp(user, otp):
     subject = "Your Login Verification Code"
