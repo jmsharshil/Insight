@@ -382,12 +382,20 @@ def send_admission_payment_notification(
             logger.error(f"[Razorpay] ADM receipt PDF generation failed: {pdf_err}", exc_info=True)
 
         # ── Build recipient email list ──────────────────────────────────────────────
-        recipients = set()
+        raw_recipients = set()
         if getattr(admission, 'email', None):
-            recipients.add(admission.email)
+            raw_recipients.add(admission.email)
         if getattr(admission, 'email_parent', None):
-            recipients.add(admission.email_parent)
-        recipients = list(filter(None, recipients))
+            raw_recipients.add(admission.email_parent)
+
+        recipients = []
+        seen_emails = set()
+        for em in raw_recipients:
+            if em and isinstance(em, str):
+                cleaned_em = em.strip().lower()
+                if cleaned_em and '@' in cleaned_em and cleaned_em not in seen_emails:
+                    seen_emails.add(cleaned_em)
+                    recipients.append(cleaned_em)
 
         attachments = [pdf_attachment] if pdf_attachment else []
         for recipient in recipients:
@@ -411,13 +419,21 @@ def send_admission_payment_notification(
         # ── WhatsApp notification with PDF document ─────────────────────────────────
         try:
             from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
+            from core.sender import WhatsAppSender
+
+            raw_phones = []
+            if getattr(admission, 'phone_student', None):
+                raw_phones.append(admission.phone_student)
+            if getattr(admission, 'phone_father', None):
+                raw_phones.append(admission.phone_father)
 
             phones = []
-            if getattr(admission, 'phone_student', None):
-                phones.append(admission.phone_student)
-            if getattr(admission, 'phone_father', None):
-                phones.append(admission.phone_father)
-            phones = list(set(filter(None, phones)))
+            seen_phones = set()
+            for p in raw_phones:
+                cleaned_p = WhatsAppSender.clean_phone(p)
+                if cleaned_p and len(cleaned_p) >= 10 and cleaned_p not in seen_phones:
+                    seen_phones.add(cleaned_p)
+                    phones.append(cleaned_p)
 
             if not phones:
                 logger.info(f"[Razorpay] No WhatsApp phones for ADM {admission.id} — skipping WA.")
@@ -830,7 +846,21 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             # and parent must still receive their receipt email & WhatsApp.
             if is_new_transaction:
                 receipt_sent = False
-                if payment and not (getattr(payment, '_receipt_notified', None) is True):
+                has_existing_receipt = bool(
+                    payment
+                    and (
+                        getattr(payment, '_receipt_notified', None) is True
+                        or (
+                            getattr(payment, 'payment_document', None)
+                            and isinstance(getattr(payment.payment_document, 'name', None), str)
+                            and payment.payment_document.name.strip()
+                        )
+                    )
+                )
+                if has_existing_receipt:
+                    receipt_sent = True
+                    logger.info(f"[Razorpay] Receipt already dispatched for payment {getattr(payment, 'id', 'N/A')} — skipping duplicate.")
+                elif payment and not (getattr(payment, '_receipt_notified', None) is True):
                     try:
                         send_payment_receipt(payment)
                         receipt_sent = True
@@ -867,8 +897,8 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                     f"{profile_creation_error}"
                 )
                 return {
-                    "success": False,
-                    "error": profile_creation_error,
+                    "success": True,
+                    "warning": profile_creation_error,
                     "receipt_sent": is_new_transaction,
                     "payment_id": str(payment.id) if payment else None,
                 }

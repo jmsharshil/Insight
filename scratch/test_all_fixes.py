@@ -707,5 +707,71 @@ class TestAllFixes(unittest.TestCase):
         self.assertIn("is_super_admin and (is_pending_level1 or admission.status in ('approved', 'enrolled') or force_override)", source)
         self.assertNotIn("Level 1 approval by an Accountant is required before Super Admin final approval.", source)
 
+    def test_phone_normalization_deduplication_guarantees_single_recipient(self):
+        """
+        Verify that 7 raw phone candidates formatted with spaces, +91, 0, or raw 10-digits
+        all resolve to a single unique canonical E.164 phone number, preventing 7 duplicate WhatsApp messages.
+        """
+        from core.sender import WhatsAppSender
+
+        raw_candidates = [
+            "8401611072",
+            "+91 8401611072",
+            "+918401611072",
+            "08401611072",
+            "84016 11072",
+            "+91-8401611072",
+            "918401611072",
+        ]
+
+        cleaned_phones = []
+        seen = set()
+        for p in raw_candidates:
+            c = WhatsAppSender.clean_phone(p)
+            if c and len(c) >= 10 and c not in seen:
+                seen.add(c)
+                cleaned_phones.append(c)
+
+        self.assertEqual(len(cleaned_phones), 1)
+        self.assertEqual(cleaned_phones[0], "918401611072")
+
+    def test_persisted_receipt_skips_duplicate_receipt_dispatch(self):
+        """
+        Verify that send_payment_receipt aborts early if payment_document already exists
+        and force_regenerate is False.
+        """
+        from fees.services import send_payment_receipt
+
+        payment = MagicMock()
+        payment.id = 12345
+        payment._receipt_notified = False
+        payment._receipt_generated = False
+        payment.payment_document = MagicMock()
+        payment.payment_document.name = "payments/documents/Receipt_RCT-12345.pdf"
+
+        with patch('fees.pdf_services.generate_payment_receipt_pdf') as mock_gen, \
+             patch('core.sender.send_email') as mock_email, \
+             patch('chat.notifications.send_whatsapp_with_fallback') as mock_wa:
+            send_payment_receipt(payment, force_regenerate=False)
+
+            self.assertFalse(mock_gen.called)
+            self.assertFalse(mock_email.called)
+            self.assertFalse(mock_wa.called)
+            self.assertTrue(payment._receipt_notified)
+
+    def test_razorpay_link_deduplication_in_admission_source(self):
+        """
+        Verify that onboarding/views.py _setup_payment_bank_and_notify checks link_already_sent
+        and logs skipping duplicate.
+        """
+        import inspect
+        from onboarding.views import _setup_payment_bank_and_notify
+        source = inspect.getsource(_setup_payment_bank_and_notify)
+
+        self.assertIn("link_already_sent", source)
+        self.assertIn("payment_link_notified", source)
+        self.assertIn("already dispatched to WhatsApp for admission", source)
+
+
 if __name__ == '__main__':
     unittest.main()

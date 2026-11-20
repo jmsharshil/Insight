@@ -607,56 +607,97 @@ def _setup_payment_bank_and_notify(admission):
         try:
             from chat.notifications import send_whatsapp_with_fallback
             if razorpay_link_url:
-                # Extract dynamic suffix for button (template base URL: https://rzp.io/{{1}})
-                rzp_suffix = str(razorpay_link_url).strip()
-                for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
-                    if rzp_suffix.startswith(prefix):
-                        rzp_suffix = rzp_suffix[len(prefix):]
-                        break
+                # Deduplicate: do not resend razorpay_link if this exact link was already sent to student via WhatsApp
+                link_already_sent = (
+                    getattr(admission, '_razorpay_link_sent', False) is True
+                    or any(
+                        (
+                            (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
+                            or entry.get('event') == 'payment_link_notified'
+                        )
+                        and entry.get('razorpay_payment_link') == razorpay_link_url
+                        for entry in (admission.payment_history or [])
+                    )
+                )
+                if link_already_sent:
+                    logger.info(
+                        f"Razorpay link {razorpay_link_url} already dispatched to WhatsApp for admission {admission.id} — skipping duplicate."
+                    )
+                else:
+                    # Extract dynamic suffix for button (template base URL: https://rzp.io/{{1}})
+                    rzp_suffix = str(razorpay_link_url).strip()
+                    for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
+                        if rzp_suffix.startswith(prefix):
+                            rzp_suffix = rzp_suffix[len(prefix):]
+                            break
 
-                send_whatsapp_with_fallback(
-                    to=admission.phone_student,
-                    template_name="razorpay_link",
-                    language_code="en",
-                    components=[
-                        {
-                            "type": "body",
-                            "parameters": [
-                                {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
-                            ]
-                        },
-                        {
-                            "type": "button",
-                            "sub_type": "url",
-                            "index": 0,
-                            "parameters": [
-                                {"type": "text", "text": rzp_suffix}
-                            ]
-                        }
-                    ],
-                    fallback_body=(
-                        f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_to_pay):,.0f}. "
-                        f"You can pay through clicking below: {razorpay_link_url}"
-                    ),
-                )
-                logger.info(f"WhatsApp razorpay_link dispatched to {admission.phone_student} for admission {admission.id}")
+                    send_whatsapp_with_fallback(
+                        to=admission.phone_student,
+                        template_name="razorpay_link",
+                        language_code="en",
+                        components=[
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
+                                ]
+                            },
+                            {
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": 0,
+                                "parameters": [
+                                    {"type": "text", "text": rzp_suffix}
+                                ]
+                            }
+                        ],
+                        fallback_body=(
+                            f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_to_pay):,.0f}. "
+                            f"You can pay through clicking below: {razorpay_link_url}"
+                        ),
+                    )
+                    logger.info(f"WhatsApp razorpay_link dispatched to {admission.phone_student} for admission {admission.id}")
+
+                    # Mark this link as notified via WhatsApp in payment_history and in-memory
+                    admission._razorpay_link_sent = True
+                    history = list(admission.payment_history or [])
+                    for entry in history:
+                        if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == razorpay_link_url:
+                            entry['whatsapp_sent'] = True
+                    history.append({
+                        'event': 'payment_link_notified',
+                        'razorpay_payment_link': razorpay_link_url,
+                        'phone': admission.phone_student,
+                        'date': timezone.now().date().isoformat(),
+                        'timestamp': timezone.now().isoformat(),
+                    })
+                    admission.payment_history = history
+                    admission.save(update_fields=['payment_history', 'updated_at'])
             else:
-                send_whatsapp_with_fallback(
-                    to=admission.phone_student,
-                    template_name="payment_setup_",
-                    language_code="en",
-                    components=[
-                        {
-                            "type": "body", 
-                            "parameters": [
-                                {"type": "text", "text": admission.first_name},
-                                {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
-                            ]
-                        }
-                    ],
-                    fallback_body=f"Hello {admission.first_name}, please complete your fee payment of INR {float(amount_to_pay):,.0f}.",
+                setup_already_sent = any(
+                    entry.get('event') == 'payment_setup_notified'
+                    for entry in (admission.payment_history or [])
                 )
-                logger.info(f"WhatsApp payment_setup_ dispatched to {admission.phone_student} for admission {admission.id}")
+                if not setup_already_sent:
+                    send_whatsapp_with_fallback(
+                        to=admission.phone_student,
+                        template_name="payment_setup_",
+                        language_code="en",
+                        components=[
+                            {
+                                "type": "body", 
+                                "parameters": [
+                                    {"type": "text", "text": admission.first_name},
+                                    {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
+                                ]
+                            }
+                        ],
+                        fallback_body=f"Hello {admission.first_name}, please complete your fee payment of INR {float(amount_to_pay):,.0f}.",
+                    )
+                    logger.info(f"WhatsApp payment_setup_ dispatched to {admission.phone_student} for admission {admission.id}")
+                    admission.update_payment_history_entry('payment_setup_notified', {
+                        'date': timezone.now().date().isoformat(),
+                    })
         except Exception as e:
             logger.error(f"Failed to send WhatsApp payment notification for admission {admission.id}: {e}")
 
