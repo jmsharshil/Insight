@@ -657,7 +657,6 @@ def _setup_payment_bank_and_notify(admission):
             print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
     else:
         if not is_online_choice:
-            from django.utils import timezone
             proof_url = None
             if admission.payment_screenshot:
                 try:
@@ -708,18 +707,39 @@ def _setup_payment_bank_and_notify(admission):
         try:
             from chat.notifications import send_whatsapp_with_fallback
             if razorpay_link_url:
-                # Deduplicate: do not resend razorpay_link if this exact link was already sent to student via WhatsApp
-                link_already_sent = (
-                    getattr(admission, '_razorpay_link_sent', False) is True
-                    or any(
-                        (
-                            (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
-                            or entry.get('event') == 'payment_link_notified'
+                # Deduplicate: do not resend razorpay_link if this exact link was already sent to student via WhatsApp.
+                # The check + "claim" is done atomically under a row lock on fresh DB data, so two
+                # concurrent requests (e.g. payment-setup + admission update fired together by the
+                # frontend) can never both send the same link.
+                from django.db import transaction
+                link_already_sent = getattr(admission, '_razorpay_link_sent', False) is True
+                if not link_already_sent:
+                    with transaction.atomic():
+                        locked = type(admission).objects.select_for_update().get(pk=admission.pk)
+                        history = list(locked.payment_history or [])
+                        link_already_sent = any(
+                            (
+                                (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
+                                or entry.get('event') == 'payment_link_notified'
+                            )
+                            and entry.get('razorpay_payment_link') == razorpay_link_url
+                            for entry in history
                         )
-                        and entry.get('razorpay_payment_link') == razorpay_link_url
-                        for entry in (admission.payment_history or [])
-                    )
-                )
+                        if not link_already_sent:
+                            for entry in history:
+                                if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == razorpay_link_url:
+                                    entry['whatsapp_sent'] = True
+                            history.append({
+                                'event': 'payment_link_notified',
+                                'razorpay_payment_link': razorpay_link_url,
+                                'phone': admission.phone_student,
+                                'date': timezone.now().date().isoformat(),
+                                'timestamp': timezone.now().isoformat(),
+                            })
+                            locked.payment_history = history
+                            locked.save(update_fields=['payment_history', 'updated_at'])
+                            admission.payment_history = history
+                            admission._razorpay_link_sent = True
                 if link_already_sent:
                     logger.info(
                         f"Razorpay link {razorpay_link_url} already dispatched to WhatsApp for admission {admission.id} — skipping duplicate."
@@ -758,22 +778,6 @@ def _setup_payment_bank_and_notify(admission):
                         ),
                     )
                     logger.info(f"WhatsApp razorpay_link dispatched to {admission.phone_student} for admission {admission.id}")
-
-                    # Mark this link as notified via WhatsApp in payment_history and in-memory
-                    admission._razorpay_link_sent = True
-                    history = list(admission.payment_history or [])
-                    for entry in history:
-                        if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == razorpay_link_url:
-                            entry['whatsapp_sent'] = True
-                    history.append({
-                        'event': 'payment_link_notified',
-                        'razorpay_payment_link': razorpay_link_url,
-                        'phone': admission.phone_student,
-                        'date': timezone.now().date().isoformat(),
-                        'timestamp': timezone.now().isoformat(),
-                    })
-                    admission.payment_history = history
-                    admission.save(update_fields=['payment_history', 'updated_at'])
             else:
                 setup_already_sent = any(
                     entry.get('event') == 'payment_setup_notified'
