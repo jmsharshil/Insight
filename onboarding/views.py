@@ -1,4 +1,4 @@
-﻿from onboarding.models import AdmissionStatusHistory
+from onboarding.models import AdmissionStatusHistory
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -80,9 +80,10 @@ def resolve_combo_executive_course(admission):
     if not batch:
         # Create CS Executive batch for combo offer (fixes "cmbo offer the batch for cs executive is not created")
         from batches.services import get_batch_dates, get_exam_attempt_year
-        from batches.models import Course, BatchSequenceCounter
+        from batches.models import Batch, Course, BatchSequenceCounter
         from django.utils import timezone
-        from django.db import transaction
+        import logging
+        logger = logging.getLogger(__name__)
 
         course_type = 'cs_executive'
         batch_attempt = future_attempt
@@ -96,13 +97,10 @@ def resolve_combo_executive_course(admission):
         branch = admission.branch
         today = timezone.now().date()
 
-        # Resolve CS Executive course - improved lookup to match auto_assign_batch style
+        # Resolve CS Executive course
         course_obj = (
             Course.objects.filter(levels__course_type=course_type, is_active=True).first()
-            or Course.objects.filter(levels__course_type='executive', is_active=True).first()
             or Course.objects.filter(name__icontains='executive', is_active=True).first()
-            or Course.objects.filter(name__icontains='cs executive', is_active=True).first()
-            or Course.objects.filter(code__icontains='exec', is_active=True).first()
             or Course.objects.filter(is_active=True).first()
         )
         if not course_obj:
@@ -111,75 +109,73 @@ def resolve_combo_executive_course(admission):
             admission.save(update_fields=['combo_future_batch'])
             return admission
 
-        # Sequence counter + batch creation must be atomic for select_for_update()
-        with transaction.atomic():
-            # Sequence counter (branch-aware, matches auto_assign_batch)
-            counter_kwargs = {
-                'course_type': course_type,
-                'batch_attempt': batch_attempt,
-                'attempt_year': attempt_year,
-            }
-            if branch:
-                counter_kwargs['branch'] = branch
-            counter, _ = BatchSequenceCounter.objects.select_for_update().get_or_create(
-                **counter_kwargs,
-                defaults={'last_sequence': 100},
-            )
-            counter.last_sequence += 1
-            counter.save(update_fields=['last_sequence'])
-            sequence = counter.last_sequence
+        # Sequence counter (branch-aware, matches auto_assign_batch)
+        counter_kwargs = {
+            'course_type': course_type,
+            'batch_attempt': batch_attempt,
+            'attempt_year': attempt_year,
+        }
+        if branch:
+            counter_kwargs['branch'] = branch
+        counter, _ = BatchSequenceCounter.objects.select_for_update().get_or_create(
+            **counter_kwargs,
+            defaults={'last_sequence': 100},
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+        sequence = counter.last_sequence
 
-            year_suffix = str(attempt_year)[-2:]
+        year_suffix = str(attempt_year)[-2:]
 
-            # Branch prefix (B1_ style)
-            branch_prefix = ''
-            if branch and getattr(branch, 'name', None):
-                try:
-                    parts = branch.name.split('-')
-                    if len(parts) >= 2:
-                        bseq = parts[-1]
-                        branch_prefix = f"{bseq.lstrip('0') or '0'}"
-                    else:
-                        branch_prefix = branch.name[:3].upper()
-                except Exception:
-                    branch_prefix = 'BXX'
+        # Branch prefix (B1_ style)
+        branch_prefix = ''
+        if branch and getattr(branch, 'name', None):
+            try:
+                parts = branch.name.split('-')
+                if len(parts) >= 2:
+                    bseq = parts[-1]
+                    branch_prefix = f"{bseq.lstrip('0') or '0'}"
+                else:
+                    branch_prefix = branch.name[:3].upper()
+            except Exception:
+                branch_prefix = 'BXX'
 
-            if branch_prefix:
-                batch_name = f"{branch_prefix}_CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
-            else:
-                batch_name = f"CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
+        if branch_prefix:
+            batch_name = f"{branch_prefix}_CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
+        else:
+            batch_name = f"CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
 
-            batch_start, batch_end = get_batch_dates(
-                course=course_type,
-                batch_attempt=batch_attempt,
-                group_module=group_module,
-                attempt_year=attempt_year,
-            )
-            if batch_start < today:
-                batch_start = today
+        batch_start, batch_end = get_batch_dates(
+            course=course_type,
+            batch_attempt=batch_attempt,
+            group_module=group_module,
+            attempt_year=attempt_year,
+        )
+        if batch_start < today:
+            batch_start = today
 
-            organization = getattr(branch, 'organization', None) if branch else None
+        organization = getattr(branch, 'organization', None) if branch else None
 
-            batch = Batch.objects.create(
-                course=course_obj,
-                name=batch_name,
-                batch_attempt=batch_attempt,
-                attempt_year=attempt_year,
-                group_module=group_module,
-                auto_sequence=sequence,
-                is_auto_created=True,
-                is_active=True,
-                start_date=batch_start,
-                end_date=batch_end,
-                organization=organization,
-                branch=branch,
-                # Link to combo fee structure if available
-                fee_structure=admission.fee_structure if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'is_combo', False) else None,
-            )
-            logger.info(
-                f"Created future CS Executive combo batch {batch.name} (branch={getattr(branch, 'name', 'None')}) "
-                f"for admission {admission.id}"
-            )
+        batch = Batch.objects.create(
+            course=course_obj,
+            name=batch_name,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            group_module=group_module,
+            auto_sequence=sequence,
+            is_auto_created=True,
+            is_active=True,
+            start_date=batch_start,
+            end_date=batch_end,
+            organization=organization,
+            branch=branch,
+            # Link to combo fee structure if available
+            fee_structure=admission.fee_structure if getattr(admission, 'fee_structure', None) and getattr(admission.fee_structure, 'is_combo', False) else None,
+        )
+        logger.info(
+            f"Created future CS Executive combo batch {batch.name} (branch={getattr(branch, 'name', 'None')}) "
+            f"for admission {admission.id}"
+        )
 
     admission.combo_future_batch = batch
     admission.save(update_fields=['combo_future_batch'])
@@ -521,20 +517,19 @@ def _setup_payment_bank_and_notify(admission):
     existing_rp_link = admission.razorpay_payment_link or ''
     if existing_rp_link:
         existing_amount = None
-        for entry in reversed(admission.payment_history or []):
-            if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == existing_rp_link:
+        for entry in (admission.payment_history or []):
+            if entry.get('event') == 'payment_link_created':
                 try:
                     existing_amount = Decimal(str(entry.get('amount', 0)))
                 except Exception:
                     pass
                 break
-        if existing_amount is not None and (existing_amount <= Decimal('1') or existing_amount != amount_to_pay):
+        if existing_amount is None or existing_amount <= Decimal('1') or existing_amount != amount_to_pay:
             logger.info(
                 f"Admission {admission.id}: stale Razorpay link detected "
                 f"(was {existing_amount}, now {amount_to_pay}). Regenerating link."
             )
             _cancel_admission_payment_link(admission)
-            admission._allow_resend_link = True
 
     assigned_bank = getattr(admission, 'bank_account', None)
     if not assigned_bank:
@@ -713,98 +708,72 @@ def _setup_payment_bank_and_notify(admission):
         try:
             from chat.notifications import send_whatsapp_with_fallback
             if razorpay_link_url:
-                from django.db import transaction
-                should_send_link = False
-                claimed_history_before = None
-                # Step 1: inside a short transaction, lock the row, check and CLAIM the send
-                # (persist payment_link_notified). The actual send happens AFTER commit so the
-                # scheduler worker thread can see the queued task row.
-                with transaction.atomic():
-                    locked_adm = Admission.objects.select_for_update().filter(id=admission.id).first()
-                    fresh_history = list(locked_adm.payment_history or []) if locked_adm else list(admission.payment_history or [])
-                    claimed_history_before = list(fresh_history)
-
-                    allow_resend = getattr(admission, '_allow_resend_link', False) is True
-                    link_already_sent = (
-                        not allow_resend
-                        and (
-                            getattr(admission, '_razorpay_link_sent', False) is True
-                            or any(
-                                (
-                                    entry.get('event') == 'payment_link_notified'
-                                    or (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
-                                )
-                                and entry.get('razorpay_payment_link') == razorpay_link_url
-                                for entry in fresh_history
-                            )
+                # Deduplicate: do not resend razorpay_link if this exact link was already sent to student via WhatsApp
+                link_already_sent = (
+                    getattr(admission, '_razorpay_link_sent', False) is True
+                    or any(
+                        (
+                            (entry.get('event') == 'payment_link_created' and entry.get('whatsapp_sent') is True)
+                            or entry.get('event') == 'payment_link_notified'
                         )
+                        and entry.get('razorpay_payment_link') == razorpay_link_url
+                        for entry in (admission.payment_history or [])
                     )
-                    if link_already_sent:
-                        logger.info(
-                            f"Razorpay link {razorpay_link_url} already dispatched to WhatsApp for admission {admission.id} — skipping duplicate."
-                        )
-                    else:
-                        should_send_link = True
-                        admission._razorpay_link_sent = True
-                        history = list(fresh_history)
-                        for entry in history:
-                            if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == razorpay_link_url:
-                                entry['whatsapp_sent'] = True
-                        history.append({
-                            'event': 'payment_link_notified',
-                            'razorpay_payment_link': razorpay_link_url,
-                            'phone': admission.phone_student,
-                            'date': timezone.now().date().isoformat(),
-                            'timestamp': timezone.now().isoformat(),
-                        })
-                        admission.payment_history = history
-                        if locked_adm:
-                            locked_adm.payment_history = history
-                            locked_adm.save(update_fields=['payment_history', 'updated_at'])
-                        else:
-                            admission.save(update_fields=['payment_history', 'updated_at'])
-
-                # Step 2: transaction committed -> now queue the WhatsApp message.
-                if should_send_link:
+                )
+                if link_already_sent:
+                    logger.info(
+                        f"Razorpay link {razorpay_link_url} already dispatched to WhatsApp for admission {admission.id} — skipping duplicate."
+                    )
+                else:
                     # Extract dynamic suffix for button (template base URL: https://rzp.io/{{1}})
                     rzp_suffix = str(razorpay_link_url).strip()
                     for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
                         if rzp_suffix.startswith(prefix):
                             rzp_suffix = rzp_suffix[len(prefix):]
                             break
-                    try:
-                        send_whatsapp_with_fallback(
-                            to=admission.phone_student,
-                            template_name="razorpay_link",
-                            language_code="en",
-                            components=[
-                                {
-                                    "type": "body",
-                                    "parameters": [
-                                        {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
-                                    ]
-                                },
-                                {
-                                    "type": "button",
-                                    "sub_type": "url",
-                                    "index": "0",
-                                    "parameters": [
-                                        {"type": "text", "text": rzp_suffix}
-                                    ]
-                                }
-                            ],
-                            fallback_body=(
-                                f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_to_pay):,.0f}. "
-                                f"You can pay through clicking below: {razorpay_link_url}"
-                            ),
-                        )
-                        logger.info(f"WhatsApp razorpay_link dispatched to {admission.phone_student} for admission {admission.id}")
-                    except Exception:
-                        # Release the claim so a later request can retry
-                        admission._razorpay_link_sent = False
-                        admission.payment_history = claimed_history_before
-                        admission.save(update_fields=['payment_history', 'updated_at'])
-                        raise
+
+                    send_whatsapp_with_fallback(
+                        to=admission.phone_student,
+                        template_name="razorpay_link",
+                        language_code="en",
+                        components=[
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": f"{float(amount_to_pay):,.0f}"},
+                                ]
+                            },
+                            {
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": 0,
+                                "parameters": [
+                                    {"type": "text", "text": rzp_suffix}
+                                ]
+                            }
+                        ],
+                        fallback_body=(
+                            f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_to_pay):,.0f}. "
+                            f"You can pay through clicking below: {razorpay_link_url}"
+                        ),
+                    )
+                    logger.info(f"WhatsApp razorpay_link dispatched to {admission.phone_student} for admission {admission.id}")
+
+                    # Mark this link as notified via WhatsApp in payment_history and in-memory
+                    admission._razorpay_link_sent = True
+                    history = list(admission.payment_history or [])
+                    for entry in history:
+                        if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == razorpay_link_url:
+                            entry['whatsapp_sent'] = True
+                    history.append({
+                        'event': 'payment_link_notified',
+                        'razorpay_payment_link': razorpay_link_url,
+                        'phone': admission.phone_student,
+                        'date': timezone.now().date().isoformat(),
+                        'timestamp': timezone.now().isoformat(),
+                    })
+                    admission.payment_history = history
+                    admission.save(update_fields=['payment_history', 'updated_at'])
             else:
                 setup_already_sent = any(
                     entry.get('event') == 'payment_setup_notified'
@@ -2176,7 +2145,6 @@ class AdmissionPaymentSetupView(APIView):
         if data.get('force_new') or data.get('regenerate_link') or data.get('force_new_link'):
             admission.razorpay_payment_link = None
             admission.razorpay_payment_link_id = None
-            admission._allow_resend_link = True
             update_fields.extend(['razorpay_payment_link', 'razorpay_payment_link_id'])
 
         if update_fields:

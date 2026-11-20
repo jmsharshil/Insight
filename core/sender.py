@@ -306,16 +306,7 @@ class WhatsAppSender:
         payload = self._base_payload(to, "template", reply_to)
         template: Dict[str, Any] = {"name": template_name, "language": {"code": language_code}}
         if components:
-            # Normalize button component index to string as required by Meta Cloud API
-            normalized = []
-            for comp in components:
-                if isinstance(comp, dict) and comp.get("type") == "button" and "index" in comp:
-                    comp_copy = dict(comp)
-                    comp_copy["index"] = str(comp_copy["index"])
-                    normalized.append(comp_copy)
-                else:
-                    normalized.append(comp)
-            template["components"] = normalized
+            template["components"] = components
         payload["template"] = template
         return self._post(payload)
 
