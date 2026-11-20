@@ -369,3 +369,206 @@ def auto_assign_batch(student):
     )
 
     return batch_student
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CSEET + CS Executive COMBO offer — second (future) batch
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#   CSEET June  Y -> CS Executive June Y+1
+#   CSEET Oct   Y -> CS Executive Dec  Y+1
+#   CSEET Feb   Y -> CS Executive Dec  Y
+#
+# e.g. June 2027 -> June 2028 | Oct 2027 -> Dec 2028 | Feb 2028 -> Dec 2028
+# The first (CSEET) batch is handled by auto_assign_batch() and is NOT touched
+# here.  The second batch is found (with free capacity) or created, and the
+# student is enrolled into it via BatchStudent.
+
+def _combo_source_year(admission):
+    """Exam year of the CSEET (first) batch of a combo admission."""
+    from django.utils import timezone
+    if admission.attempt_year:
+        return admission.attempt_year
+    submitted = getattr(admission, 'submitted_at', None)
+    form_date = submitted.date() if submitted else timezone.now().date()
+    return get_exam_attempt_year(
+        course=admission.course or 'cseet',
+        batch_attempt=admission.batch_attempt,
+        group_module=admission.group_module or '',
+        form_date=form_date,
+    )
+
+
+def get_combo_future_attempt(admission):
+    """Return (batch_attempt, attempt_year) of the CS Executive combo batch, or None."""
+    if not admission.combo_offer or admission.course != 'cseet' or not admission.batch_attempt:
+        return None
+    source_attempt = admission.batch_attempt.strip().lower()
+    source_year = _combo_source_year(admission)
+    if source_attempt == 'june':
+        return 'june', source_year + 1
+    if source_attempt == 'oct':
+        return 'dec', source_year + 1
+    if source_attempt == 'feb':
+        return 'dec', source_year
+    if source_attempt == 'dec':
+        return 'dec', source_year + 1
+    return None
+
+
+def _branch_prefix(branch):
+    if not branch or not getattr(branch, 'name', None):
+        return ''
+    try:
+        parts = branch.name.split('-')
+        if len(parts) >= 2:
+            return f"{parts[-1].lstrip('0') or '0'}"
+        return branch.name[:3].upper()
+    except Exception:
+        return 'BXX'
+
+
+def resolve_combo_future_batch(admission):
+    """
+    Find a CS Executive batch (with free capacity) for the combo's second
+    batch, or create a new one.  Returns the Batch (or None when the
+    admission is not a combo / no course is configured).
+    Does NOT enrol anybody.
+    """
+    from django.db.models import Count, Q
+    from django.utils import timezone
+    from batches.models import Batch, BatchSequenceCounter, Course
+    from leads.models import COURSE_TYPE_CHOICES
+
+    target = get_combo_future_attempt(admission)
+    if not target:
+        return None
+    batch_attempt, attempt_year = target
+
+    course_type = 'cs_executive'
+    group_module = 'both'          # combo CS Executive = full (both modules)
+    branch = admission.branch
+    today = timezone.now().date()
+
+    course_obj = (
+        Course.objects.filter(levels__course_type=course_type, is_active=True).first()
+        or Course.objects.filter(name__icontains='executive', is_active=True).first()
+        or Course.objects.filter(is_active=True).first()
+    )
+    if course_obj is None:
+        logger.warning(f"No active Course found for combo CS Executive batch (admission {admission.id})")
+        return None
+
+    def _norm(text):
+        return (text or '').upper().replace(' ', '').replace('_', '')
+
+    wanted = {_norm(course_type), _norm(dict(COURSE_TYPE_CHOICES).get(course_type))}
+
+    common = Batch.objects.filter(
+        batch_attempt=batch_attempt,
+        attempt_year=attempt_year,
+        group_module=group_module,
+        is_active=True,
+        end_date__gte=today,
+    )
+    common = common.filter(branch=branch) if branch else common.filter(branch__isnull=True)
+
+    fs_ids = [
+        b.id for b in common.filter(fee_structure__isnull=False, fee_structure__level__isnull=False)
+        .select_related('fee_structure__level')
+        if _norm(b.fee_structure.level.name) in wanted
+    ]
+    legacy_ids = common.filter(course=course_obj, fee_structure__isnull=True).values('id')
+
+    candidates = (
+        Batch.objects.filter(Q(id__in=fs_ids) | Q(id__in=legacy_ids))
+        .distinct()
+        .annotate(enrolled_count=Count('batch_students'))
+        .order_by('created_at')
+    )
+
+    # Prefer the batch already linked to this admission if it still has room.
+    current = admission.combo_future_batch if admission.combo_future_batch_id else None
+    if current is not None:
+        enrolled = current.batch_students.count()
+        if current.is_active and (enrolled < current.max_students) \
+                and current.batch_attempt == batch_attempt and current.attempt_year == attempt_year:
+            return current
+
+    for candidate in candidates:
+        if candidate.enrolled_count < candidate.max_students:
+            return candidate
+
+    # ── No batch / all full → create a new one ───────────────────────────────
+    with transaction.atomic():
+        counter, _ = BatchSequenceCounter.objects.select_for_update().get_or_create(
+            course_type=course_type,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            branch=branch if branch else None,
+            defaults={'last_sequence': 100},
+        )
+        counter.last_sequence += 1
+        counter.save(update_fields=['last_sequence'])
+        sequence = counter.last_sequence
+
+        year_suffix = str(attempt_year)[-2:]
+        prefix = _branch_prefix(branch)
+        base = f"CS_EXECUTIVE_{batch_attempt.upper()}_{year_suffix}_{group_module.upper()}_{sequence}"
+        batch_name = f"{prefix}_{base}" if prefix else base
+
+        batch_start, batch_end = get_batch_dates(
+            course=course_type,
+            batch_attempt=batch_attempt,
+            group_module=group_module,
+            attempt_year=attempt_year,
+        )
+        if batch_start < today:
+            batch_start = today
+
+        batch = Batch.objects.create(
+            course=course_obj,
+            name=batch_name,
+            batch_attempt=batch_attempt,
+            attempt_year=attempt_year,
+            group_module=group_module,
+            auto_sequence=sequence,
+            is_auto_created=True,
+            is_active=True,
+            start_date=batch_start,
+            end_date=batch_end,
+            organization=getattr(branch, 'organization', None) if branch else None,
+            branch=branch,
+        )
+    logger.info(
+        f"Created combo CS Executive batch {batch.name} "
+        f"({batch_attempt}-{attempt_year}) for admission {admission.id}"
+    )
+    return batch
+
+
+def assign_combo_future_batch(student):
+    """
+    Enrol a combo student into the second (CS Executive) batch, creating the
+    batch when none is available or all are full.  Leaves Student.batch (the
+    first batch) untouched.  Returns the BatchStudent or None.
+    """
+    from batches.models import BatchStudent
+
+    admission = getattr(student, 'admission', None)
+    if admission is None or not admission.combo_offer or admission.course != 'cseet':
+        return None
+
+    batch = resolve_combo_future_batch(admission)
+    if batch is None:
+        return None
+
+    batch_student, created = BatchStudent.objects.get_or_create(batch=batch, student=student)
+    if admission.combo_future_batch_id != batch.id:
+        admission.combo_future_batch = batch
+        admission.save(update_fields=['combo_future_batch'])
+    logger.info(
+        f"Combo student {getattr(student, 'admission_number', student.id)} "
+        f"{'enrolled in' if created else 'already in'} CS Executive batch {batch.name}"
+    )
+    return batch_student

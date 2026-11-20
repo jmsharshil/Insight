@@ -168,6 +168,16 @@ class StudentService:
                 "batch can be assigned manually."
             )
 
+        # Combo offer: second batch (CS Executive) — created if missing/full
+        try:
+            from batches.services import assign_combo_future_batch
+            assign_combo_future_batch(student)
+        except Exception as exc:
+            logger.error(
+                f"Combo future batch assignment failed for student {student.admission_number} "
+                f"(admission {admission.id}): {exc}"
+            )
+
         # Notify staff and admins about new admission completed / student created
         try:
             from onboarding.notifications import send_new_admission_completed_notification
