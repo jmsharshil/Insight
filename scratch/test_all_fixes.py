@@ -76,7 +76,7 @@ class TestAllFixes(unittest.TestCase):
         adm.pk = 101
         adm._state.adding = False
         adm.admission_code = 'IIPS-000101'
-        adm.payment_type = 'token'
+        adm.payment_type = 'full_payment'
         adm.payment_amount = Decimal('5000')
         adm.group_module = 'all'
         adm.icsi_fees_payment = None

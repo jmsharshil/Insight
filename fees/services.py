@@ -377,9 +377,10 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
         student_name = ''
         if payment.student:
             student_name = (
-                getattr(payment.student, 'first_name', '')
+                getattr(payment.student, 'full_name', '')
+                or f"{getattr(payment.student, 'first_name', '')} {getattr(payment.student, 'surname', '')}".strip()
                 or getattr(payment.student, 'name', '')
-                or getattr(payment.student, 'full_name', '')
+                or getattr(payment.student, 'first_name', '')
             )
         elif getattr(payment, 'admission', None):
             student_name = f"{payment.admission.first_name} {payment.admission.surname}".strip()

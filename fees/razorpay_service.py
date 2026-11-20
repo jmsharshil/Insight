@@ -832,7 +832,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 receipt_sent = False
                 if payment and not (getattr(payment, '_receipt_notified', None) is True):
                     try:
-                        send_payment_receipt(payment, force_regenerate=True)
+                        send_payment_receipt(payment)
                         receipt_sent = True
                     except Exception as exc:
                         logger.error(f"[Razorpay] Receipt dispatch failed for {rp_payment_id}: {exc}")

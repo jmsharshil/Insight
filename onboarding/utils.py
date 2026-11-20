@@ -174,8 +174,11 @@ class AdmissionService:
                             payment.verified_by = user
                         payment.save(update_fields=['status', 'verified_at', 'verified_by', 'updated_at'])
 
-                if payment:
-                    send_payment_receipt(payment, force_regenerate=True)
+                # Only dispatch receipt if payment is already linked to a student and not yet generated.
+                # Full enrollment pipelines (complete_admission_enrollment, PaymentVerifyView, Razorpay)
+                # dispatch the official receipt after creating and linking the Student profile.
+                if payment and getattr(payment, 'student_id', None) and not payment.payment_document:
+                    send_payment_receipt(payment)
                     logger.info(f"Payment receipt dispatched for admission {admission.id}")
 
                 logger.info(
