@@ -385,14 +385,14 @@ class Admission(models.Model):
         if fs:
             from onboarding.views import _get_module_fee
             # Priority: full_payment → total_amount; token → token_amount (direct from FS)
-            if self.payment_type == 'full_payment':
+            if self.payment_type in ['full_payment','token']:
                 total = getattr(fs, 'total_amount', 0)
                 if total and Decimal(str(total)) > Decimal('0'):
                     return Decimal(str(total))
-            elif self.payment_type == 'token':
-                token_amt = getattr(fs, 'token_amount', 0)
-                if token_amt and Decimal(str(token_amt)) > Decimal('0'):
-                    return Decimal(str(token_amt))
+            # elif self.payment_type == 'token':
+            #     token_amt = getattr(fs, 'token_amount', 0)
+            #     if token_amt and Decimal(str(token_amt)) > Decimal('0'):
+            #         return Decimal(str(token_amt))
             # For finance or unset: use module fee (handles ICSI pay_yourself / pay_through_institute,
             # group_module specific institute fees)
             fee = _get_module_fee(

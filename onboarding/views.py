@@ -2060,7 +2060,7 @@ class AdmissionPaymentSetupView(APIView):
                     'payment_choice':          admission.payment_choice,
                     'payment_choice_display':  admission.get_payment_choice_display(),
                     'total_fees':              admission.total_fees,
-                    'remaining_fees':          admission.remaining_fees,
+                    'remaining_fees':          admission.total_fees - admission.payment_amount,
                     'is_paid':                 admission.is_paid,
                     'is_razorpay_paid':        admission.is_razorpay_paid,
                     'razorpay_payment_status': admission.razorpay_payment_status,
