@@ -225,6 +225,56 @@ def get_role_filter_q(roles, prefix=''):
     return q
 
 
+# Role groups for consistent scoping (used by leads report, dashboard, list views)
+RESTRICTED_ROLES = frozenset({'sales_executive', 'tele_caller', 'counsellor'})
+FULL_LEAD_ACCESS_ROLES = frozenset({
+    'super_admin', 'branch_manager', 'front_desk', 'receptionist',
+    'sales_senior_executive', 'admin_senior_executive', 'admin_executive'
+})
+
+
+def get_lead_filter_q(user):
+    """
+    Centralized Q-object for Lead scoping. Ensures get_lead_report(), 
+    _get_sales_dashboard() / _get_management_dashboard() and LeadListView 
+    produce identical counts (including unassigned for full-access roles).
+
+    New permission: front_desk now sees *all* leads in organization 
+    (org leads + unassigned leads with branch__isnull=True). 
+
+    Restricted roles see only their personally assigned leads.
+    Uses additional_roles JSONField support via RoleChecker logic.
+    """
+    from django.db.models import Q
+
+    q = Q()
+    if not user or not getattr(user, 'is_authenticated', False):
+        return q & Q(pk__in=[])
+
+    org = getattr(user, 'organization', None)
+    primary_role = getattr(user, 'role', None)
+    additional = getattr(user, 'additional_roles', None) or []
+    if isinstance(additional, (str, dict)):
+        additional = [additional] if isinstance(additional, str) else []
+    all_roles = {primary_role} | set(additional) if primary_role else set()
+
+    if org:
+        if all_roles & FULL_LEAD_ACCESS_ROLES:
+            q &= Q(branch__organization=org) | Q(branch__isnull=True)
+        else:
+            q &= Q(branch__organization=org)
+
+    if all_roles & RESTRICTED_ROLES:
+        q &= Q(assigned_to=user)
+    elif not (all_roles & FULL_LEAD_ACCESS_ROLES):
+        # non-full-access, non-restricted roles get strict branch filter (no unassigned)
+        bid = get_user_branch_id(user)
+        if bid:
+            q &= Q(branch_id=bid)
+
+    return q
+
+
 def apply_filters(view_instance, request, queryset):
     """
     Helper to apply DRF filter backends manually to an APIView.

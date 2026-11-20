@@ -14,8 +14,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from core.utils import (
     apply_filters, has_user_branch_access,
     get_user_branch_ids, get_role_filter_q,
+    get_lead_filter_q,
+    RESTRICTED_ROLES,
+    FULL_LEAD_ACCESS_ROLES,
+    get_user_role,
 )
-from core.sender import send_email
+
 from django.conf import settings
 
 from .serializers import (
@@ -47,29 +51,47 @@ ATTEMPT_DISPLAY = dict(ATTEMPT_TYPE_CHOICES)
 logger = logging.getLogger(__name__)
 
 # ── Roles ────────────────────────────────────────────────────────────────────────
+# RESTRICTED_ROLES and FULL_LEAD_ACCESS_ROLES imported from core.utils
+# (unified with reports, dashboard, RoleChecker/additional_roles support).
+# front_desk = full view access (all org leads + unassigned) but modify only
+# assigned-to-self or unassigned leads.
+SENIOR_ROLES = {
+    'sales_senior_executive', 'branch_manager', 'super_admin',
+    'admin_senior_executive', 'admin_executive'
+}
 
-# Roles that can only see leads explicitly assigned to them
-RESTRICTED_ROLES = {'counsellor', 'tele_caller', 'sales_executive'}
-
-# Roles that can see all leads and reassign them
-SENIOR_ROLES = {'sales_senior_executive', 'branch_manager', 'super_admin'}
-
-def _can_modify_lead(user, lead):
+def _can_modify_lead(user, lead=None):
     """
-    Determines if user has write/mutation access to a lead:
-    - Senior roles (sales_senior_executive, branch_manager, super_admin): True
-    - Front Desk: Can view ALL leads, but can ONLY modify/edit/status-update leads assigned to them.
-    - Junior sales roles (counsellor, tele_caller, sales_executive): Can only modify leads assigned to them.
+    Determines write access consistent with get_lead_filter_q + RoleChecker
+    (supports additional_roles JSONField).
+
+    - FULL modify for SENIOR_ROLES (branch_manager, sales_senior_executive,
+      super_admin, admin_*)
+    - front_desk / receptionist: full VIEW but modify only assigned-to-self
+      or unassigned leads (branch__isnull=True)
+    - RESTRICTED_ROLES: only their personally assigned leads.
     """
-    if not user or not user.is_authenticated:
+    if not user or not getattr(user, 'is_authenticated', False):
         return False
-    user_role = getattr(user, 'role', None)
-    if user_role in SENIOR_ROLES:
+
+    role_checker = get_user_role(user)
+    if not role_checker:
+        return False
+
+    if role_checker in SENIOR_ROLES or getattr(user, 'is_superuser', False):
         return True
-    if user_role in ('front_desk', 'receptionist'):
-        return bool(lead and (lead.assigned_to_id == user.id or lead.assigned_to_id is None))
-    if user_role in RESTRICTED_ROLES:
-        return bool(lead and lead.assigned_to_id == user.id)
+
+    if role_checker in ('front_desk', 'receptionist'):
+        return bool(
+            lead is None
+            or (lead and (lead.assigned_to_id == user.id or lead.assigned_to_id is None))
+        )
+
+    if role_checker in RESTRICTED_ROLES:
+        return bool(
+            lead is None or (lead and lead.assigned_to_id == user.id)
+        )
+
     return False
 
 SALES_ROLES = {
@@ -1852,40 +1874,20 @@ class TriggerSalesRemindersView(APIView):
 
 def get_lead_queryset(request):
     """
-    Returns a Lead queryset scoped to the requesting user's role.
-
-    - Counsellor / Tele Caller / Sales Executive  → only their assigned leads.
-    - All other authenticated roles (Senior / Manager / Admin / Front Desk)
-      → all leads within their organisation.
-    - Unauthenticated (AllowAny endpoints)  → all leads (no personal data risk
-      here since POST is public form submission and GET requires authentication).
+    Unified Lead queryset using centralized get_lead_filter_q(user) from core.utils.
+    Guarantees identical scoping (incl. front_desk full org+unassigned access,
+    restricted roles = assigned_to=self only, super_admin = org + unassigned)
+    with reports/services/leads.py, dashboard/services.py and tests.
     """
-    queryset = Lead.objects.all().order_by("-created_at")
-
-    # Scope by organisation when available (super admins see all leads)
-    if getattr(request.user, 'organization', None) and not (
-        getattr(request.user, 'is_superuser', False) or getattr(request.user, 'role', None) == 'super_admin'
-    ):
-        from django.db.models import Q as _Q
-        queryset = queryset.filter(
-            _Q(branch__isnull=True) |
-            _Q(branch__organization__isnull=True) |
-            _Q(branch__organization=request.user.organization)
-        )
-
     user = request.user
-    if user.is_authenticated:
-        role = getattr(user, 'role', None)            
-        if role != 'super_admin' and getattr(user, 'branch_id', None) and role != 'front_desk':
-            # Keep branch-scoped lead lists aligned with role dashboards.
-            queryset = queryset.filter(
-                Q(branch__isnull=True) | Q(branch_id=user.branch_id)
-            )
-        if role in RESTRICTED_ROLES:
-            # These roles can ONLY see leads assigned to them
-            queryset = queryset.filter(assigned_to=user)
+    if not getattr(user, 'is_authenticated', False):
+        # Public form POSTs (AllowAny) see nothing in list view; creation is separate.
+        return Lead.objects.none()
 
-    return queryset
+    q = get_lead_filter_q(user)
+    return Lead.objects.filter(q).select_related(
+        'assigned_to', 'branch', 'updated_by'
+    ).order_by("-created_at")
 
 
 class LeadListView(APIView):
@@ -2989,10 +2991,14 @@ class LeadTransferRequestReviewView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _is_cmo_or_super_admin(user):
-    if not user or not user.is_authenticated:
+    """Uses RoleChecker (primary role + additional_roles) for CMO/SuperAdmin access."""
+    if not user or not getattr(user, 'is_authenticated', False):
         return False
-    roles = [user.role] + (getattr(user, 'additional_roles', None) or [])
-    return 'cmo' in roles or 'super_admin' in roles or getattr(user, 'is_superuser', False)
+    role_checker = get_user_role(user)
+    return bool(
+        role_checker
+        and (role_checker == 'cmo' or role_checker == 'super_admin' or getattr(user, 'is_superuser', False))
+    )
 
 
 class SalesAttendanceApprovalListView(APIView):

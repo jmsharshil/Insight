@@ -143,7 +143,7 @@ ROLE_PERMISSIONS = {
     },
     'faculty': {
         'default_modules': ['support', 
-            'timetable', 'attendance', 'exams', 'leave', 'chat',
+            'timetable', 'attendance', 'exams', 'leave', 'chat', 'results'
             'notifications', 'payroll', 'settings', 'reimbursements', 'inventory',
         ],
         'canDelete': False,

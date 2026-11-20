@@ -3,18 +3,24 @@ from django.utils import timezone
 from django.db.models import Count, Avg, Q, F
 from django.db.models.functions import TruncDate
 from leads.models import Lead, LeadStage
+from core.utils import (
+    get_lead_filter_q,
+    RESTRICTED_ROLES,
+    FULL_LEAD_ACCESS_ROLES,
+    get_user_role,
+    get_user_branch_id,
+)
 
 
-def get_lead_report(user, params):
-    role = getattr(user, 'role', None)
-    bq = Q()
-    org = getattr(user, 'organization', None)
-    if org:
-        bq &= Q(branch__organization=org) | Q(branch__isnull=True)
-    if role != 'super_admin':
-        bid = getattr(user, 'branch_id', None)
-        if bid:
-            bq = Q(branch_id=bid)
+def get_lead_report(user, params=None):
+    """Unified lead report using centralized get_lead_filter_q for scoping parity
+    with dashboard and LeadListView (incl. front_desk as full-access role,
+    restricted roles see only assigned_to=self, super_admin sees org + unassigned).
+    """
+    if params is None:
+        params = {}
+
+    q = get_lead_filter_q(user)
 
     branch_id = params.get('branch_id')
     from_date = params.get('from_date')
@@ -22,20 +28,15 @@ def get_lead_report(user, params):
     assigned_to = params.get('assigned_to')
 
     if branch_id:
-        bq &= Q(branch_id=branch_id)
-
-    if user.is_authenticated:
-        role = getattr(user, 'role', None)
-        if role in {'counsellor', 'tele_caller', 'sales_executive'}:
-            # These roles can ONLY see leads assigned to them
-            bq &= Q(assigned_to=user)
-
-    qs = Lead.objects.filter(bq)
+        q &= Q(branch_id=branch_id)
     if from_date:
-        qs = qs.filter(created_at__date__gte=from_date)
+        q &= Q(created_at__date__gte=from_date)
     if to_date:
-        qs = qs.filter(created_at__date__lte=to_date)
+        q &= Q(created_at__date__lte=to_date)
+    if assigned_to:
+        q &= Q(assigned_to_id=assigned_to)
 
+    qs = Lead.objects.filter(q).select_related('assigned_to', 'branch')
     total = qs.count()
 
     # Stage counts
@@ -85,21 +86,34 @@ def get_lead_report(user, params):
     )
     by_source = [{'source': s['reference'] or 'unknown', 'count': s['count']} for s in by_source]
 
-    # By counsellor — leads assigned via onboarding's assigned_counsellor
-    # Use the Admission model counsellor linkage
+    # By counsellor — uses Admission.assigned_counsellor with same scoping
+    # as get_lead_filter_q (RoleChecker + additional_roles support).
+    # FULL_LEAD_ACCESS_ROLES see org + unassigned; restricted see only own.
     from onboarding.models import Admission
-    adm_bq = Q()
+    role_checker = get_user_role(user)
+    is_full_access = bool(role_checker and role_checker in FULL_LEAD_ACCESS_ROLES)
+    is_restricted = bool(role_checker and role_checker in RESTRICTED_ROLES)
+
+    adm_q = Q(assigned_counsellor__isnull=False)
+    org = getattr(user, 'organization', None)
     if org:
-        adm_bq &= Q(branch__organization=org)
-    if role != 'super_admin':
-        bid = getattr(user, 'branch_id', None)
+        if is_full_access:
+            adm_q &= Q(branch__organization=org) | Q(branch__isnull=True)
+        else:
+            adm_q &= Q(branch__organization=org)
+
+    if is_restricted:
+        adm_q &= Q(assigned_counsellor=user)
+    elif not is_full_access:
+        bid = get_user_branch_id(user)
         if bid:
-            adm_bq = Q(branch_id=bid)
+            adm_q &= Q(branch_id=bid)
+
     if branch_id:
-        adm_bq &= Q(branch_id=branch_id)
+        adm_q &= Q(branch_id=branch_id)
 
     counsellor_data = list(
-        Admission.objects.filter(adm_bq, assigned_counsellor__isnull=False)
+        Admission.objects.filter(adm_q)
         .values('assigned_counsellor_id', 'assigned_counsellor__name')
         .annotate(
             total_leads=Count('id'),
