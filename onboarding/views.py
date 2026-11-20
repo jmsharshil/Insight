@@ -592,6 +592,16 @@ def _setup_payment_bank_and_notify(admission):
         else:
             print(f"Skipping Razorpay link generation for admission {admission.id} because amount to pay is 0.")
 
+    # If the admission has already paid, submitted payment, or is enrolled, do not send payment requests
+    already_paid = (
+        admission.status in ('enrolled', 'payment_submitted', 'approval_pending')
+        or bool(getattr(admission, 'payment_screenshot', None))
+        or bool(getattr(admission, 'transaction_id', None))
+    )
+    if already_paid:
+        logger.info(f"Admission {admission.id} already paid/submitted — skipping payment setup notifications.")
+        return
+
     # ── WhatsApp Notification (independent of email) ─────────────────────────
     if admission.phone_student and is_online_choice:
         try:
@@ -1557,7 +1567,7 @@ class AdmissionApproveView(APIView):
                     f"Your admission is now queued for final Super Admin enrollment approval.\n\n"
                     f"Thank you,\nInsight Institute of Professional Studies"
                 )
-                std_emails = [e for e in [admission.email, admission.email_parent] if e]
+                std_emails = list(dict.fromkeys(filter(None, [admission.email, admission.email_parent])))
                 for rec_email in std_emails:
                     try:
                         send_email(
@@ -1569,7 +1579,7 @@ class AdmissionApproveView(APIView):
                     except Exception as m_err:
                         logger.error(f"Level 1 email to {rec_email} failed: {m_err}")
 
-                wa_l1_phones = [p for p in [admission.phone_student, admission.phone_father] if p]
+                wa_l1_phones = list(dict.fromkeys(filter(None, [admission.phone_student, admission.phone_father])))
                 for wa_p in wa_l1_phones:
                     try:
                         send_whatsapp_with_fallback(

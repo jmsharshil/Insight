@@ -830,7 +830,7 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             # and parent must still receive their receipt email & WhatsApp.
             if is_new_transaction:
                 receipt_sent = False
-                if payment:
+                if payment and not (getattr(payment, '_receipt_notified', None) is True):
                     try:
                         send_payment_receipt(payment, force_regenerate=True)
                         receipt_sent = True

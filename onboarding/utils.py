@@ -342,7 +342,7 @@ class AdmissionService:
         # 7. Send payment receipt (Email + WhatsApp)
         if payment:
             try:
-                send_payment_receipt(payment, force_regenerate=True)
+                send_payment_receipt(payment)
                 logger.info(f"Payment receipt dispatched for admission {admission.id}")
             except Exception as exc:
                 logger.error(f"Failed to dispatch payment receipt for admission {admission.id}: {exc}")

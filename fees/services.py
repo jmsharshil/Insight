@@ -497,6 +497,11 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
 
         # --- Send email/WhatsApp only if requested (default True for normal flow) ---
         if resend_notifications:
+            if getattr(payment, '_receipt_notified', None) is True:
+                logger.info(f"Receipt notification already dispatched for payment {getattr(payment, 'id', 'N/A')} — skipping duplicate.")
+                return
+            payment._receipt_notified = True
+
             # --- Send email to all recipients ---
             attachments = [pdf_attachment] if pdf_attachment else []
             for recipient in recipients:
