@@ -698,9 +698,11 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 admission.payment_submitted_at = admission.payment_submitted_at or now
                 admission.payment_amount = cumulative_paid
                 admission.razorpay_payment_id = rp_payment_id
+                if not is_partial:
+                    admission.razorpay_link = None
                 admission.save(update_fields=[
                     'transaction_id', 'payment_note', 'payment_submitted_at', 'payment_amount',
-                    'razorpay_payment_id', 'updated_at',
+                    'razorpay_payment_id', 'updated_at', 'razorpay_link'
                 ])
 
                 student = Student.objects.filter(admission=admission).first()
