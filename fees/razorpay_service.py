@@ -452,24 +452,36 @@ def send_admission_payment_notification(
 
                 for phone in phones:
                     try:
+                        components = [{
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": student_name},
+                                {"type": "text", "text": f"{float(amount_paid):,.2f}"},
+                                {"type": "text", "text": receipt_number},
+                                {"type": "text", "text": "Razorpay (Online)"},
+                                {"type": "text", "text": rp_payment_id or "N/A"},
+                            ]
+                        }]
                         if pdf_public_url:
-                            send_whatsapp_media(
-                                to=phone,
-                                media_type='document',
-                                link=pdf_public_url,
-                                caption=wa_caption,
-                                filename=f"Receipt_{receipt_number}.pdf",
-                            )
-                            logger.info(f"[Razorpay] ADM WhatsApp receipt (PDF) sent to {phone}")
-                        else:
-                            send_whatsapp_with_fallback(
-                                to=phone,
-                                template_name="payment_receipt_",
-                                language_code="en",
-                                components=[{"type": "body", "parameters": [{"type": "text", "text": student_name}]}],
-                                fallback_body=wa_caption,
-                            )
-                            logger.info(f"[Razorpay] ADM WhatsApp receipt (template/text) sent to {phone}")
+                            components.insert(0, {
+                                "type": "header",
+                                "parameters": [{
+                                    "type": "document",
+                                    "document": {
+                                        "link": pdf_public_url,
+                                        "filename": f"Receipt_{receipt_number}.pdf"
+                                    }
+                                }]
+                            })
+
+                        send_whatsapp_with_fallback(
+                            to=phone,
+                            template_name="payment_reciept_" if pdf_public_url else None,
+                            language_code="en",
+                            components=components if pdf_public_url else None,
+                            fallback_body=wa_caption,
+                        )
+                        logger.info(f"[Razorpay] ADM WhatsApp receipt sent to {phone}")
                     except Exception as wa_err:
                         logger.error(f"[Razorpay] ADM WhatsApp failed to {phone}: {wa_err}")
         except Exception as wa_import_err:

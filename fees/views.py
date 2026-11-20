@@ -776,7 +776,7 @@ class PaymentVerifyView(APIView):
                     except Exception as e:
                         logger.error(f'Failed to mark installment paid: {e}')
 
-                send_payment_receipt(payment)
+                send_payment_receipt(payment, force_regenerate=True)
 
                 return Response({
                     'success': True,

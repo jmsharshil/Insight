@@ -556,16 +556,18 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
                         pass
 
                     wa_caption = (
-                        f"✅ *Payment Receipt — Insight Institute*\n"
                         f"Dear {student_name},\n\n"
-                        f"Your payment of ₹{payment.amount:,.2f} has been verified.\n"
-                        f"Receipt No    : {payment.receipt_number or 'N/A'}\n"
-                        f"Transaction ID: {payment.transaction_ref or 'N/A'}\n"
-                        f"Payment Mode  : {getattr(payment, 'payment_mode', 'N/A').title()}\n\n"
-                        f"{('Download receipt: ' + pdf_url) if pdf_url else 'Official receipt is attached.'} "
-                        f"Keep it safe for your records.\n"
-                        f"— Insight Institute of Professional Studies"
+                        f"A payment of ₹{payment.amount:,.2f} has been successfully verified.\n\n"
+                        f"Receipt No: {payment.receipt_number or 'N/A'}\n"
+                        f"Payment Mode: {getattr(payment, 'payment_mode', 'N/A').title()}\n"
+                        f"Transaction Ref: {payment.transaction_ref or 'N/A'}\n\n"
+                        f"Thank you,\n"
+                        f"Insight Institute of Professional Studies"
                     )
+
+                    if pdf_url and not (pdf_url.startswith('http://') or pdf_url.startswith('https://')):
+                        backend_url = getattr(settings, 'BACKEND_URL', 'https://insightinstitute.co').rstrip('/')
+                        pdf_url = f"{backend_url}{pdf_url if pdf_url.startswith('/') else '/' + pdf_url}"
 
                     for phone in wa_phones:
                         try:
@@ -593,9 +595,9 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
 
                             send_whatsapp_with_fallback(
                                 to=phone,
-                                template_name="payment_reciept_",
+                                template_name="payment_reciept_" if pdf_url else None,
                                 language_code="en",
-                                components=components,
+                                components=components if pdf_url else None,
                                 fallback_body=wa_caption,
                             )
                             logger.info(
