@@ -113,10 +113,13 @@ def create_student_fee(student, acting_user=None):
                 plan.approved_by = acting_user
                 plan.approved_at = timezone.now()
                 plan.save(update_fields=['status', 'approved_by', 'approved_at'])
-            try:
-                send_payment_receipt(existing_payment)
-            except Exception as e:
-                logger.error(f"Receipt dispatch error: {e}")
+            payment_doc = getattr(existing_payment, 'payment_document', None)
+            has_doc = bool(payment_doc and getattr(payment_doc, 'name', None) and isinstance(payment_doc.name, str) and payment_doc.name.strip())
+            if not has_doc:
+                try:
+                    send_payment_receipt(existing_payment)
+                except Exception as e:
+                    logger.error(f"Receipt dispatch error: {e}")
         return student_fee
 
     # Create Payment if admission has payment info or offline choice
@@ -315,9 +318,27 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
     force_regenerate=True will clear any existing payment_document and force PDF regeneration.
     resend_notifications=False will skip email/WhatsApp (useful for bulk regeneration).
     """
+    if not payment:
+        return
+
+    # In-memory deduplication: prevent repeated sends within the same request lifecycle
+    if not force_regenerate and getattr(payment, '_receipt_notified', None) is True:
+        logger.info(f"Receipt notification already dispatched for payment {getattr(payment, 'id', 'N/A')} — skipping duplicate.")
+        return
+
     if not force_regenerate and getattr(payment, '_receipt_generated', False):
         logger.debug(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')}")
         return
+
+    # DB-persisted deduplication: if receipt document already exists and regeneration is not forced, skip
+    payment_doc = getattr(payment, 'payment_document', None)
+    if not force_regenerate and payment_doc:
+        doc_name = getattr(payment_doc, 'name', None)
+        if isinstance(doc_name, str) and doc_name.strip():
+            logger.info(f"Receipt already generated for payment {getattr(payment, 'id', 'N/A')} ({doc_name}) — skipping duplicate dispatch.")
+            payment._receipt_notified = True
+            payment._receipt_generated = True
+            return
 
     if force_regenerate and payment.payment_document:
         try:
@@ -334,7 +355,7 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
         from .pdf_services import generate_payment_receipt_pdf
 
         # --- Build recipient list first so we can always send at least a text email ---
-        recipients = set()
+        raw_recipients = set()
         adm = getattr(payment, 'admission', None)
         if not adm and getattr(payment, 'student', None) and hasattr(payment.student, 'admission'):
             adm = payment.student.admission
@@ -342,30 +363,37 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
         if payment.student:
             parent_email = getattr(payment.student, 'email_parent', None)
             if parent_email:
-                recipients.add(parent_email)
+                raw_recipients.add(parent_email)
             
             student_email = getattr(payment.student, 'email', None)
             if student_email:
-                recipients.add(student_email)
+                raw_recipients.add(student_email)
 
             try:
                 if (getattr(payment.student, 'user', None)
                         and getattr(payment.student.user, 'email', None)):
-                    recipients.add(payment.student.user.email)
+                    raw_recipients.add(payment.student.user.email)
             except Exception:
                 pass
             
             for em in get_recipient_emails(payment.student):
                 if em:
-                    recipients.add(em)
+                    raw_recipients.add(em)
 
         if adm:
             if getattr(adm, 'email', None):
-                recipients.add(adm.email)
+                raw_recipients.add(adm.email)
             if getattr(adm, 'email_parent', None):
-                recipients.add(adm.email_parent)
+                raw_recipients.add(adm.email_parent)
 
-        recipients = list(recipients)
+        recipients = []
+        seen_emails = set()
+        for em in raw_recipients:
+            if em and isinstance(em, str):
+                cleaned_em = em.strip().lower()
+                if cleaned_em and '@' in cleaned_em and cleaned_em not in seen_emails:
+                    seen_emails.add(cleaned_em)
+                    recipients.append(cleaned_em)
         if not recipients:
             logger.warning(
                 f"No email recipients found for payment {payment.id} "
@@ -529,16 +557,17 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
             # --- Send WhatsApp to student + parent phones (with PDF document) ---
             try:
                 from chat.notifications import send_whatsapp_with_fallback, send_whatsapp_media
+                from core.sender import WhatsAppSender
 
-                wa_phones = set()
+                raw_wa_phones = []
                 if getattr(payment.student, 'phone_student', None):
-                    wa_phones.add(payment.student.phone_student)
+                    raw_wa_phones.append(payment.student.phone_student)
                 if getattr(payment.student, 'phone_father', None):
-                    wa_phones.add(payment.student.phone_father)
+                    raw_wa_phones.append(payment.student.phone_father)
                 try:
                     if (getattr(payment.student, 'user', None)
                             and getattr(payment.student.user, 'phone', None)):
-                        wa_phones.add(payment.student.user.phone)
+                        raw_wa_phones.append(payment.student.user.phone)
                 except Exception:
                     pass
 
@@ -546,9 +575,16 @@ def send_payment_receipt(payment, force_regenerate=False, resend_notifications=T
                     for attr in ('phone_student', 'phone_father', 'phone_student_2', 'phone_father_2'):
                         val = getattr(adm, attr, None)
                         if val:
-                            wa_phones.add(val)
+                            raw_wa_phones.append(val)
 
-                wa_phones = list(filter(None, wa_phones))
+                wa_phones = []
+                seen_phones = set()
+                for phone_candidate in raw_wa_phones:
+                    cleaned = WhatsAppSender.clean_phone(phone_candidate)
+                    if cleaned and len(cleaned) >= 10 and cleaned not in seen_phones:
+                        seen_phones.add(cleaned)
+                        wa_phones.append(cleaned)
+
                 if not wa_phones:
                     logger.info(f"No WhatsApp phones found for payment {payment.id} — skipping WA.")
                 else:
