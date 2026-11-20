@@ -367,7 +367,12 @@ class Admission(models.Model):
 
     @property
     def total_fees(self):
-        """Total fees defined for this admission based on fee structure and module."""
+        """Total fees defined for this admission based on fee structure, payment_type and module.
+        Strictly prioritizes FeeStructure.total_amount for full_payment and token_amount for token
+        (as per requirement). Falls back to module-fee logic (ICSI/group adjustments) only for
+        other cases. Never falls back to ₹1 — uses course defaults or StudentFee instead.
+        """
+        from decimal import Decimal
         fs = self.fee_structure
         if not fs:
             try:
@@ -379,6 +384,17 @@ class Admission(models.Model):
 
         if fs:
             from onboarding.views import _get_module_fee
+            # Priority: full_payment → total_amount; token → token_amount (direct from FS)
+            if self.payment_type == 'full_payment':
+                total = getattr(fs, 'total_amount', 0)
+                if total and Decimal(str(total)) > Decimal('0'):
+                    return Decimal(str(total))
+            elif self.payment_type == 'token':
+                token_amt = getattr(fs, 'token_amount', 0)
+                if token_amt and Decimal(str(token_amt)) > Decimal('0'):
+                    return Decimal(str(token_amt))
+            # For finance or unset: use module fee (handles ICSI pay_yourself / pay_through_institute,
+            # group_module specific institute fees)
             fee = _get_module_fee(
                 fs,
                 self.group_module,
@@ -397,7 +413,14 @@ class Admission(models.Model):
             except Exception:
                 pass
 
-        return Decimal('0')
+        # Explicit course defaults (never ₹1)
+        default_course_fees = {
+            'cseet': Decimal('1000'),
+            'cs_executive': Decimal('2000'),
+            'cs_professional': Decimal('5000'),
+        }
+        normalized = (getattr(self, 'course', '') or '').strip().lower().replace(' ', '_').replace('-', '_')
+        return default_course_fees.get(normalized, Decimal('1000'))
 
     @property
     def remaining_fees(self):
