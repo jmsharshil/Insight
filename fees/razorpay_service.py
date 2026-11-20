@@ -18,6 +18,7 @@ import requests as http_requests
 from requests.auth import HTTPBasicAuth
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
