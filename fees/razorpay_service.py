@@ -560,6 +560,24 @@ def process_payment_link_paid_event(payload: dict) -> dict:
         amount_paid   = Decimal(str(amount_paid_paise)) / Decimal('100')
         rp_payment_id = pay_entity.get('id', '') or link_entity.get('id', '')
 
+        # ── Early Global Idempotency Check ────────────────────────────────
+        # If this Razorpay transaction reference has already been processed and saved as a Payment,
+        # return HTTP 200 immediately so Razorpay does not retry and trigger multiple receipts.
+        if rp_payment_id:
+            from .models import Payment
+            existing_payment = Payment.objects.filter(transaction_ref=rp_payment_id).first()
+            if existing_payment:
+                logger.info(
+                    f"[Razorpay] Duplicate webhook delivery for {rp_payment_id} — Payment "
+                    f"{existing_payment.id} already exists, returning success immediately."
+                )
+                return {
+                    "success": True,
+                    "processed": "SF" if reference_id.startswith('SF_') else ("ADM" if reference_id.startswith('ADM_') else "unknown"),
+                    "duplicate": True,
+                    "payment_id": str(existing_payment.id),
+                }
+
         # ── StudentFee flow ───────────────────────────────────────────────
         if reference_id.startswith('SF_'):
             notes = link_entity.get('notes', {}) or pay_entity.get('notes', {}) or {}
