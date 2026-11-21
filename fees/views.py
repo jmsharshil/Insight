@@ -1825,8 +1825,13 @@ class MyFeesAPIView(APIView):
             )
             description = f"Remaining Fee Payment ({course_name})"
 
-            customer_phone = student.phone_student or ''
-            clean_phone = re.sub(r'\D', '', customer_phone)
+            customer_phone = (
+                student.phone_student
+                or getattr(student, 'phone', '')
+                or (getattr(student.user, 'phone', '') if getattr(student, 'user', None) else '')
+                or (getattr(student.admission, 'phone_student', '') if getattr(student, 'admission', None) else '')
+            )
+            clean_phone = re.sub(r'\D', '', customer_phone or '')
             if len(clean_phone) > 10:
                 clean_phone = clean_phone[-10:]
 
@@ -1871,6 +1876,46 @@ class MyFeesAPIView(APIView):
                     'date': timezone.now().date().isoformat(),
                     'note': 'Remaining fee payment link generated via Razorpay.',
                 })
+
+            # Send WhatsApp razorpay_link template to student if phone is available
+            recipient_phone = clean_phone or getattr(student, 'phone_student', None) or (getattr(student.admission, 'phone_student', None) if getattr(student, 'admission', None) else None)
+            if recipient_phone and link_url:
+                try:
+                    from chat.notifications import send_whatsapp_with_fallback
+                    rzp_suffix = str(link_url).strip()
+                    for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
+                        if rzp_suffix.startswith(prefix):
+                            rzp_suffix = rzp_suffix[len(prefix):]
+                            break
+
+                    send_whatsapp_with_fallback(
+                        to=recipient_phone,
+                        template_name="razorpay_link",
+                        language_code="en",
+                        components=[
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": f"{float(amount_due):,.0f}"},
+                                ]
+                            },
+                            {
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": 0,
+                                "parameters": [
+                                    {"type": "text", "text": rzp_suffix}
+                                ]
+                            }
+                        ],
+                        fallback_body=(
+                            f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_due):,.0f}. "
+                            f"You can pay through clicking below: {link_url}"
+                        ),
+                    )
+                    logger.info(f"[MyFees] WhatsApp payment link sent to {recipient_phone} for student {student.id}")
+                except Exception as wa_err:
+                    logger.error(f"[MyFees] Failed to send WhatsApp razorpay_link to {recipient_phone}: {wa_err}")
 
             return Response({
                 'success': True,

@@ -178,39 +178,43 @@ class TaskScheduler:
         from .models import ScheduledTask
 
         task = None
+        fn = None
         for attempt in range(3):
             with transaction.atomic():
                 try:
-                    # Use select_for_update to lock the row and skip if another worker already grabbed it
-                    task = ScheduledTask.objects.select_for_update(skip_locked=True).get(id=task_id)
+                    # Row-level lock to ensure only one worker executes this task
+                    task = ScheduledTask.objects.select_for_update().get(id=task_id)
+
+                    # ── Guard: skip if already cancelled, completed, or running ────────
+                    if task.status in ("cancelled", "completed", "running"):
+                        print(f"[SCHEDULER] Task {task_id} is {task.status} — skipping execution.")
+                        return
+
+                    fn = cls._registry.get(task.task_type)
+                    if fn is None:
+                        logger.error(
+                            "[SCHEDULER] No registered function for task_type='%s'",
+                            task.task_type,
+                        )
+                        task.status = "failed"
+                        task.error_message = f"Unknown task_type: {task.task_type}"
+                        task.save(update_fields=["status", "error_message", "updated_at"])
+                        return
+
+                    # ── Mark running ─────────────────────────────────────────
+                    task.status = "running"
+                    task.started_at = timezone.now()
+                    task.save(update_fields=["status", "started_at", "updated_at"])
                     break
                 except ScheduledTask.DoesNotExist:
                     if attempt < 2:
                         time.sleep(0.3)
                     else:
-                        logger.warning("[SCHEDULER] Task %s not found in DB or already locked — skipping.", task_id)
+                        logger.warning("[SCHEDULER] Task %s not found in DB — skipping.", task_id)
                         return
 
-            # ── Guard: skip if already cancelled, completed, or running ────────
-            if task.status in ("cancelled", "completed", "running"):
-                print(f"[SCHEDULER] Task {task_id} is {task.status} — skipping execution.")
-                return
-
-            fn = cls._registry.get(task.task_type)
-            if fn is None:
-                logger.error(
-                    "[SCHEDULER] No registered function for task_type='%s'",
-                    task.task_type,
-                )
-                task.status = "failed"
-                task.error_message = f"Unknown task_type: {task.task_type}"
-                task.save(update_fields=["status", "error_message", "updated_at"])
-                return
-
-            # ── Mark running ─────────────────────────────────────────
-            task.status = "running"
-            task.started_at = timezone.now()
-            task.save(update_fields=["status", "started_at", "updated_at"])
+        if not task or task.status != "running" or fn is None:
+            return
 
         # Execute OUTSIDE the transaction so we don't hold the lock for the entire duration
         # of the task (which could be a long-running API call)
