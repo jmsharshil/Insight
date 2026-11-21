@@ -135,7 +135,8 @@ class TaskScheduler:
             f"recurring={is_recurring}"
         )
 
-        cls._schedule_in_memory(task.id, max(delay_seconds, 0))
+        from django.db import transaction
+        transaction.on_commit(lambda: cls._schedule_in_memory(task.id, max(delay_seconds, 0)))
         return task
 
     # ── Cancellation ─────────────────────────────────────────────
@@ -172,16 +173,23 @@ class TaskScheduler:
         Called by TASK_QUEUE workers.  Loads the DB row, runs the
         registered function, and updates the status accordingly.
         """
+        import time
         from django.db import transaction
         from .models import ScheduledTask
 
-        with transaction.atomic():
-            try:
-                # Use select_for_update to lock the row and skip if another worker already grabbed it
-                task = ScheduledTask.objects.select_for_update(skip_locked=True).get(id=task_id)
-            except ScheduledTask.DoesNotExist:
-                logger.warning("[SCHEDULER] Task %s not found in DB or already locked — skipping.", task_id)
-                return
+        task = None
+        for attempt in range(3):
+            with transaction.atomic():
+                try:
+                    # Use select_for_update to lock the row and skip if another worker already grabbed it
+                    task = ScheduledTask.objects.select_for_update(skip_locked=True).get(id=task_id)
+                    break
+                except ScheduledTask.DoesNotExist:
+                    if attempt < 2:
+                        time.sleep(0.3)
+                    else:
+                        logger.warning("[SCHEDULER] Task %s not found in DB or already locked — skipping.", task_id)
+                        return
 
             # ── Guard: skip if already cancelled, completed, or running ────────
             if task.status in ("cancelled", "completed", "running"):

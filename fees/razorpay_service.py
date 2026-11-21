@@ -586,16 +586,39 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 logger.error(f"Razorpay webhook: StudentFee {sf_id} not found.")
                 return {"success": False, "error": f"StudentFee {sf_id} not found."}
 
-            payment = Payment.objects.create(
-                student         = sf.student,
-                student_fee     = sf,
-                amount          = amount_paid,
-                payment_mode    = 'online',
-                transaction_ref = rp_payment_id,
-                status          = 'verified',
-                payment_date    = timezone.now().date(),
-                note            = f"Auto-verified via Razorpay webhook. Link: {link_entity.get('id')}",
-            )
+            # ── Idempotency ───────────────────────────────────────────────────
+            # Razorpay re-delivers a webhook (with back-off, minutes apart) whenever it does not
+            # get a fast 2xx. Without this guard every re-delivery created another Payment row
+            # and another receipt (email + WhatsApp) for the SAME Razorpay payment id.
+            with transaction.atomic():
+                # Row lock serialises concurrent deliveries of the same event.
+                sf = StudentFee.objects.select_for_update().select_related('student').get(pk=sf.pk)
+                duplicate_payment = (
+                    Payment.objects.filter(transaction_ref=rp_payment_id).first()
+                    if rp_payment_id else None
+                )
+                if duplicate_payment is not None:
+                    logger.info(
+                        f"[Razorpay] Duplicate webhook for {rp_payment_id} — Payment "
+                        f"{duplicate_payment.id} already exists, skipping."
+                    )
+                    return {
+                        "success": True,
+                        "processed": "SF",
+                        "duplicate": True,
+                        "payment_id": str(duplicate_payment.id),
+                    }
+
+                payment = Payment.objects.create(
+                    student         = sf.student,
+                    student_fee     = sf,
+                    amount          = amount_paid,
+                    payment_mode    = 'online',
+                    transaction_ref = rp_payment_id,
+                    status          = 'verified',
+                    payment_date    = timezone.now().date(),
+                    note            = f"Auto-verified via Razorpay webhook. Link: {link_entity.get('id')}",
+                )
             update_student_fee_status(sf.id)
             logger.info(f"[Razorpay] StudentFee {sf_id} verified. Payment: {payment.id}")
 
@@ -606,6 +629,34 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 logger.info(f"[Razorpay] Receipt sent for Payment {payment.id}")
             except Exception as receipt_err:
                 logger.error(f"[Razorpay] Failed to send receipt for Payment {payment.id}: {receipt_err}")
+
+            # ── Update the single history entry of this link (pending -> verified) ──
+            try:
+                from onboarding.models import Admission as _Adm
+                link_id_paid = link_entity.get('id')
+                link_adm = _Adm.objects.filter(razorpay_payment_link_id=link_id_paid).first() if link_id_paid else None
+                if link_adm:
+                    hist = list(link_adm.payment_history or [])
+                    for e in reversed(hist):
+                        if e.get('event') == 'payment_link_created' and e.get('razorpay_payment_link_id') == link_id_paid:
+                            e.update({
+                                'event': 'payment_approved',
+                                'status': 'verified',
+                                'level': 'auto',
+                                'approver_role': 'system_razorpay',
+                                'verified_by': 'Razorpay (Direct to Bank)',
+                                'verified_at': timezone.now().isoformat(),
+                                'timestamp': timezone.now().isoformat(),
+                                'transaction_id': rp_payment_id,
+                                'razorpay_payment_id': rp_payment_id,
+                                'amount_paid': float(amount_paid),
+                            })
+                            break
+                    link_adm.payment_history = hist
+                    link_adm.razorpay_payment_link = None
+                    link_adm.save(update_fields=['payment_history', 'razorpay_payment_link', 'updated_at'])
+            except Exception as hist_err:
+                logger.error(f"[Razorpay] Failed to update payment history for link {link_entity.get('id')}: {hist_err}")
 
             # ── Route Transfer ───────────────────────────────────────────────
             try:
@@ -805,17 +856,14 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 admission.save(update_fields=['payment_amount', 'updated_at'])
 
                 history = list(admission.payment_history or [])
-                for entry in reversed(history):
-                    if (
-                        entry.get('event') == 'payment_link_created'
+                link_entry = next(
+                    (
+                        entry for entry in reversed(history)
+                        if entry.get('event') == 'payment_link_created'
                         and entry.get('razorpay_payment_link_id') == link_entity.get('id')
-                    ):
-                        entry.update({
-                            'status': 'partially_paid' if is_partial else 'paid',
-                            'amount_paid': float(total_paid),
-                            'last_payment_amount': float(transaction_amount),
-                        })
-                        break
+                    ),
+                    None,
+                )
 
                 payment_event = 'payment_received' if is_partial else 'payment_approved'
                 payment_history_entry = {
@@ -842,10 +890,26 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                     ),
                     None,
                 )
+                # One history entry per payment: the entry created when the link was
+                # generated (status payment_pending) is updated in place to 'verified'
+                # instead of appending separate "notified" / "approved" rows.
                 if matching_entry:
                     matching_entry.update(payment_history_entry)
+                elif link_entry is not None:
+                    link_entry.update(payment_history_entry)
+                    if is_partial:
+                        # link stays active for the remaining amount: keep it as the link entry
+                        link_entry['event'] = 'payment_link_created'
                 else:
                     history.append(payment_history_entry)
+                # Drop legacy standalone "notified" rows for this link (older records).
+                history = [
+                    e for e in history
+                    if not (
+                        e.get('event') == 'payment_link_notified'
+                        and (not link_entry or e.get('razorpay_payment_link') == link_entry.get('razorpay_payment_link'))
+                    )
+                ]
                 admission.payment_history = history
                 admission.save(update_fields=['payment_history', 'updated_at'])
 

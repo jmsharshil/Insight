@@ -1752,62 +1752,125 @@ class MyFeesAPIView(APIView):
 
         # ── 2A. Online Payment via Razorpay ──────────────────────────────────
         if payment_choice == 'online':
-            from .razorpay_service import create_payment_link
+            from django.db import transaction
+            from decimal import Decimal
+            from .razorpay_service import create_payment_link, fetch_payment_link, cancel_payment_link
 
-            unique_ref = f"SF_{int(time.time())}_{student_fee.id.hex[:16]}"
-            course_name = (
-                student_fee.fee_structure.name
-                if (student_fee.fee_structure and student_fee.fee_structure.name)
-                else 'Insight Institute'
-            )
-            description = f"Remaining Fee Payment ({course_name})"
+            # Serialise concurrent requests (double click / retries) on the admission row so
+            # that two requests can never both create a payment link for the same dues.
+            with transaction.atomic():
+                admission = getattr(student, 'admission', None)
+                if admission is not None:
+                    admission = type(admission).objects.select_for_update().get(pk=admission.pk)
+                    student.admission = admission
 
-            customer_phone = student.phone_student or ''
-            clean_phone = re.sub(r'\D', '', customer_phone)
-            if len(clean_phone) > 10:
-                clean_phone = clean_phone[-10:]
+                    # ── Reuse guard: an unpaid link for these dues already exists ──
+                    history = list(admission.payment_history or [])
+                    pending_entry = next(
+                        (
+                            e for e in reversed(history)
+                            if e.get('event') == 'payment_link_created'
+                            and e.get('status') in ('pending', 'payment_pending', 'partially_paid')
+                            and e.get('razorpay_payment_link_id')
+                        ),
+                        None,
+                    )
+                    if pending_entry:
+                        old_link_id = pending_entry.get('razorpay_payment_link_id')
+                        live = fetch_payment_link(old_link_id)
+                        live_status = (live.get('data') or {}).get('status') if live.get('success') else None
+                        try:
+                            pending_amount = Decimal(str(pending_entry.get('amount') or 0))
+                        except Exception:
+                            pending_amount = Decimal('0')
+                        same_amount = pending_amount == Decimal(str(amount_due))
 
-            notes = {
-                'student_fee_id': str(student_fee.id),
-                'student_id': str(student.id),
-                'payment_type': 'full_payment',
-            }
+                        if live_status in ('expired', 'cancelled'):
+                            # Dead link -> allow generating a fresh one.
+                            pending_entry['status'] = live_status
+                            pending_entry['whatsapp_sent'] = pending_entry.get('whatsapp_sent', False)
+                            admission.payment_history = history
+                            admission.save(update_fields=['payment_history', 'updated_at'])
+                        elif live_status == 'paid':
+                            return Response({
+                                'success': False,
+                                'message': 'Your payment for this link has already been received and is being processed. Please check the payment history.',
+                                'data': {'payment_link_id': old_link_id, 'status': 'paid'},
+                            }, status=status.HTTP_409_CONFLICT)
+                        elif same_amount:
+                            # live_status is 'created' / 'partially_paid' / unknown (fetch failed)
+                            return Response({
+                                'success': False,
+                                'message': 'Your payment link for this payment is already generated. Please pay from the payment history.',
+                                'data': {
+                                    'payment_link_url': pending_entry.get('razorpay_payment_link') or admission.razorpay_payment_link,
+                                    'payment_link_id': old_link_id,
+                                    'amount': float(pending_amount),
+                                    'status': 'link_already_generated',
+                                },
+                            }, status=status.HTTP_409_CONFLICT)
+                        else:
+                            # Amount due changed since the old link was made -> replace it.
+                            cancel_payment_link(old_link_id)
+                            pending_entry['status'] = 'cancelled'
+                            pending_entry['note'] = 'Link cancelled: amount due changed.'
+                            admission.payment_history = history
+                            admission.save(update_fields=['payment_history', 'updated_at'])
 
-            result = create_payment_link(
-                amount=float(amount_due),
-                reference_id=unique_ref,
-                customer_name=student.full_name,
-                customer_email=student.email or '',
-                customer_contact=clean_phone,
-                description=description,
-                notes=notes,
-            )
+                unique_ref = f"SF_{int(time.time())}_{student_fee.id.hex[:16]}"
+                course_name = (
+                    student_fee.fee_structure.name
+                    if (student_fee.fee_structure and student_fee.fee_structure.name)
+                    else 'Insight Institute'
+                )
+                description = f"Remaining Fee Payment ({course_name})"
 
-            if not result.get('success'):
-                return Response({
-                    'success': False,
-                    'message': f"Failed to generate Razorpay payment link: {result.get('error', 'Unknown error')}",
-                    'detail': result.get('detail'),
-                }, status=status.HTTP_502_BAD_GATEWAY)
+                customer_phone = student.phone_student or ''
+                clean_phone = re.sub(r'\D', '', customer_phone)
+                if len(clean_phone) > 10:
+                    clean_phone = clean_phone[-10:]
 
-            rp_data = result.get('data', {})
-            link_url = rp_data.get('short_url') or rp_data.get('url') or ''
-            link_id = rp_data.get('id')
-
-            if getattr(student, 'admission', None):
-                student.admission.razorpay_payment_link = link_url
-                student.admission.razorpay_payment_link_id = link_id
-                student.admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
-                student.admission.add_payment_history_entry('payment_link_created', {
-                    'payment_choice': 'online',
+                notes = {
+                    'student_fee_id': str(student_fee.id),
+                    'student_id': str(student.id),
                     'payment_type': 'full_payment',
-                    'amount': float(amount_due),
-                    'razorpay_payment_link': link_url,
-                    'razorpay_payment_link_id': link_id,
-                    'status': 'pending',
-                    'date': timezone.now().date().isoformat(),
-                    'note': 'Remaining fee payment link generated via Razorpay.',
-                })
+                }
+
+                result = create_payment_link(
+                    amount=float(amount_due),
+                    reference_id=unique_ref,
+                    customer_name=student.full_name,
+                    customer_email=student.email or '',
+                    customer_contact=clean_phone,
+                    description=description,
+                    notes=notes,
+                )
+
+                if not result.get('success'):
+                    return Response({
+                        'success': False,
+                        'message': f"Failed to generate Razorpay payment link: {result.get('error', 'Unknown error')}",
+                        'detail': result.get('detail'),
+                    }, status=status.HTTP_502_BAD_GATEWAY)
+
+                rp_data = result.get('data', {})
+                link_url = rp_data.get('short_url') or rp_data.get('url') or ''
+                link_id = rp_data.get('id')
+
+                if getattr(student, 'admission', None):
+                    student.admission.razorpay_payment_link = link_url
+                    student.admission.razorpay_payment_link_id = link_id
+                    student.admission.save(update_fields=['razorpay_payment_link', 'razorpay_payment_link_id', 'updated_at'])
+                    student.admission.add_payment_history_entry('payment_link_created', {
+                        'payment_choice': 'online',
+                        'payment_type': 'full_payment',
+                        'amount': float(amount_due),
+                        'razorpay_payment_link': link_url,
+                        'razorpay_payment_link_id': link_id,
+                        'status': 'payment_pending',
+                        'date': timezone.now().date().isoformat(),
+                        'note': 'Remaining fee payment link generated via Razorpay.',
+                    })
 
             return Response({
                 'success': True,
@@ -1825,6 +1888,7 @@ class MyFeesAPIView(APIView):
                     'status': 'link_generated',
                 }
             }, status=status.HTTP_200_OK)
+
 
         # ── 2B. Cash / Cheque with Proof Upload ──────────────────────────────
         payment_proof = request.FILES.get('payment_proof') or request.FILES.get('payment_screenshot')
