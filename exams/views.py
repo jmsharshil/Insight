@@ -70,24 +70,28 @@ class ExamListCreateView(APIView):
     ordering_fields = '__all__'
 
     def _get_queryset(self, request):
+        """Unified queryset with proper multi-role support via RoleChecker.all_roles.
+        Fixes the 'faculty only' issue for users who have additional_roles including
+        'exam_supervisor' (now gets union of faculty + supervisor visibility).
+        """
         user = request.user
         role = _user_role(user)
+        all_roles = getattr(role, 'all_roles', {str(role)}) if role else set()
+
         qs = Exam.objects.filter(is_deleted=False).select_related('batch', 'subject', 'branch', 'created_by')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
 
-        if role == 'student':
+        if 'student' in all_roles:
             try:
                 from students.models import Student
                 from batches.models import BatchStudent
                 sp = Student.objects.select_related('batch').filter(user=user).order_by('-created_at').first()
                 if not sp:
                     raise Student.DoesNotExist
-                # Support both direct batch_id and many-to-many via BatchStudent
                 if sp.batch_id:
                     qs = qs.filter(batch_id=sp.batch_id)
                 else:
-                    # Fallback for students enrolled via BatchStudent relation
                     enrolled_batch_ids = BatchStudent.objects.filter(
                         student=sp
                     ).values_list('batch_id', flat=True)
@@ -96,45 +100,65 @@ class ExamListCreateView(APIView):
                     else:
                         logger.warning(f"Student {user.email} has no batch assignment")
                         qs = qs.none()
-                # Students should see scheduled, ongoing, and results (for viewing marks)
                 qs = qs.filter(status__in=['scheduled', 'ongoing', 'completed', 'results_published'])
-                logger.info(f"Student {user.email} (batch={sp.batch_id}) can see {qs.count()} exams")
+                logger.info(f"Student {user.email} (batch={getattr(sp, 'batch_id', None)}) can see {qs.count()} exams")
             except Student.DoesNotExist:
                 logger.error(f"No Student profile found for user {user.email} (role=student)")
                 qs = qs.none()
             except Exception as e:
                 logger.error(f"Student exam filter error for {user.email}: {e}")
                 qs = qs.none()
-        elif role == 'faculty':
+            qs = apply_filters(self, request, qs)
+            return qs
+
+        # Staff roles: build visibility Q with OR (union) so faculty+supervisor works
+        visibility_q = Q()
+        applied = False
+
+        if 'faculty' in all_roles:
+            applied = True
             try:
                 from faculty.models import FacultyProfile
                 fp = FacultyProfile.objects.only('id').get(user=user)
                 faculty_id = fp.id
-                qs = qs.filter(
-                    Q(created_by=user) | 
+                faculty_q = (
+                    Q(created_by=user) |
                     Q(faculty_id=faculty_id) |
                     Q(batch__batch_faculty__faculty_id=faculty_id)
-                ).distinct()
+                )
+                visibility_q |= faculty_q
             except Exception:
-                # Fallback: just show what they created
-                qs = qs.filter(created_by=user)
-        elif role == 'exam_supervisor':
+                visibility_q |= Q(created_by=user)
+
+        if 'exam_supervisor' in all_roles:
+            applied = True
             branch_ids = get_user_branch_ids(user)
+            supervisor_q = Q(supervisors=user)  # explicit M2M (ensures supervisors see their assigned exams)
             if branch_ids:
-                qs = qs.filter(branch_id__in=branch_ids)
-        elif role == 'paper_checker':
+                supervisor_q |= Q(branch_id__in=branch_ids)
+            visibility_q |= supervisor_q
+            logger.info(
+                f"Exam supervisor {getattr(user, 'email', user.id)} "
+                f"added visibility for {Exam.objects.filter(supervisor_q).count()} exams"
+            )
+
+        if 'paper_checker' in all_roles:
+            applied = True
             try:
-                qs = qs.filter(Q(marksheets__paper_checker=user) | Q(paper_checkers=user)).distinct()
-                count = qs.count()
+                paper_q = Q(marksheets__paper_checker=user) | Q(paper_checkers=user)
+                visibility_q |= paper_q
+                count = Exam.objects.filter(paper_q).distinct().count()
                 logger.info(
                     f"Paper checker {getattr(user, 'email', getattr(user, 'id', 'unknown'))} "
-                    f"can see {count} assigned exams "
-                    f"(marksheets__paper_checker OR paper_checkers M2M)"
+                    f"can see {count} assigned exams (M2M)"
                 )
             except Exception as e:
                 logger.error(f"Paper checker exam filter error for {getattr(user, 'email', user)}: {e}")
-                qs = qs.none()
-        elif role != 'super_admin':
+
+        if applied:
+            qs = qs.filter(visibility_q).distinct()
+        elif 'super_admin' not in all_roles:
+            # Default branch scoping for other authenticated staff
             branch_ids = get_user_branch_ids(user)
             if branch_ids:
                 qs = qs.filter(branch_id__in=branch_ids)
@@ -1833,77 +1857,172 @@ class OMRUploadView(APIView):
 
 
 class SupervisorDutyPhotoView(APIView):
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
+    def get(self, request, exam_id):
+        """Return unified supervisor duty status (with submission flags, payable_hours,
+        late_minutes, and absolute photo URLs). 
+        - Normal `exam_supervisor`: single dict for their own record.
+        - `super_admin` (or ADMIN_ROLES): list of *all* supervisors' duty logs for the exam.
+        """
+        role = _user_role(request.user)
+        roles = set(getattr(request.user, 'additional_roles', []) or [])
+        roles.add(getattr(request.user, 'role', ''))
+        if 'exam_supervisor' not in roles and role not in ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Exam supervisor role (or admin) required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_admin = role in ADMIN_ROLES
+
+        # Non-admins must be explicitly assigned via Exam.supervisors M2M
+        if not is_admin and not exam.supervisors.filter(id=request.user.id).exists():
+            return Response({'success': False, 'message': 'You are not assigned as supervisor for this exam.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if is_admin:
+            # Super admin sees **all** duty photos/logs (bypasses per-supervisor check)
+            duties_qs = SupervisorDutyLog.objects.filter(exam=exam).select_related('supervisor').order_by('supervisor__email')
+            data = []
+            for duty in duties_qs:
+                data.append({
+                    'exam_id': str(exam.id),
+                    'supervisor_id': str(duty.supervisor.id),
+                    'supervisor_name': getattr(duty.supervisor, 'name', duty.supervisor.email),
+                    'supervisor_email': duty.supervisor.email,
+                    'is_start_submitted': bool(duty.start_submitted_at),
+                    'is_end_submitted': bool(duty.end_submitted_at),
+                    'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+                    'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+                    'late_minutes': getattr(duty, 'late_minutes', 0),
+                    'payable_hours': float(getattr(duty, 'payable_hours', 0) or 0),
+                    'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if getattr(duty, 'start_photo', None) and duty.start_photo else None,
+                    'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if getattr(duty, 'end_photo', None) and duty.end_photo else None,
+                })
+            return Response({'success': True, 'data': data, 'count': len(data)})
+        else:
+            # Normal supervisor: own record only (create-on-demand not done here)
+            try:
+                duty = SupervisorDutyLog.objects.get(exam=exam, supervisor=request.user)
+                data = {
+                    'exam_id': str(exam.id),
+                    'supervisor_id': str(request.user.id),
+                    'is_start_submitted': bool(duty.start_submitted_at),
+                    'is_end_submitted': bool(duty.end_submitted_at),
+                    'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+                    'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+                    'late_minutes': getattr(duty, 'late_minutes', 0),
+                    'payable_hours': float(getattr(duty, 'payable_hours', 0) or 0),
+                    'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if duty.start_photo else None,
+                    'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if duty.end_photo else None,
+                }
+            except SupervisorDutyLog.DoesNotExist:
+                data = {
+                    'exam_id': str(exam.id),
+                    'supervisor_id': str(request.user.id),
+                    'is_start_submitted': False,
+                    'is_end_submitted': False,
+                    'start_submitted_at': None,
+                    'end_submitted_at': None,
+                    'late_minutes': 0,
+                    'payable_hours': 0.0,
+                    'start_photo_url': None,
+                    'end_photo_url': None,
+                }
+            return Response({'success': True, 'data': data})
+
     def post(self, request, exam_id):
-        duty_type = request.data.get('type', '').lower()
+        """Upload start/end duty photo. Enforces sequencing (start before end), 15-min early-start
+        window for lateness, no duplicates. Calculates payable_hours on 'end' (rounded to 1 decimal).
+        Returns unified data matching GET response shape. Only assigned exam_supervisors.
+        """
+        duty_type = request.data.get('type', '').lower().strip()
         photo = request.FILES.get('photo')
         if duty_type not in ('start', 'end') or not photo:
             return Response(
-                {'success': False, 'message': 'type must be start or end and photo is required.'},
+                {'success': False, 'message': 'type must be "start" or "end" and photo is required.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        exam = Exam.objects.filter(id=exam_id).first()
-        if not exam or not exam.supervisors.filter(id=request.user.id).exists():
-            return Response({'success': False, 'message': 'You are not assigned to this exam.'}, status=status.HTTP_403_FORBIDDEN)
-
-        roles = set(request.user.additional_roles or [])
-        roles.add(request.user.role)
+        role = _user_role(request.user)
+        roles = set(getattr(request.user, 'additional_roles', []) or [])
+        roles.add(getattr(request.user, 'role', ''))
         if 'exam_supervisor' not in roles:
             return Response({'success': False, 'message': 'Exam supervisor role required.'}, status=status.HTTP_403_FORBIDDEN)
 
-        duty, _ = SupervisorDutyLog.objects.get_or_create(exam=exam, supervisor=request.user)
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not exam.supervisors.filter(id=request.user.id).exists():
+            return Response({'success': False, 'message': 'You are not assigned to this exam.'}, status=status.HTTP_403_FORBIDDEN)
+
+        duty, created = SupervisorDutyLog.objects.get_or_create(
+            exam=exam, supervisor=request.user,
+            defaults={'late_minutes': 0, 'payable_hours': 0}
+        )
         now = timezone.now()
+        logger.info(f"Supervisor {request.user.email} submitting {duty_type} photo for exam {exam.id} (created={created})")
 
         if duty_type == 'start':
             if duty.start_submitted_at:
                 return Response({'success': False, 'message': 'Start photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
-            deadline_naive = datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)
-            deadline = timezone.make_aware(deadline_naive, timezone.get_current_timezone())
+            # 15-minute early-start window for lateness calculation
+            try:
+                deadline_naive = datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)
+                deadline = timezone.make_aware(deadline_naive, timezone.get_current_timezone())
+                duty.late_minutes = max(0, int((now - deadline).total_seconds() // 60))
+            except (TypeError, AttributeError):
+                duty.late_minutes = 0
+                logger.warning(f"Could not compute late_minutes for exam {exam.id} (missing schedule time)")
+
             duty.start_photo = photo
             duty.start_submitted_at = now
-            duty.late_minutes = max(0, int((now - deadline).total_seconds() // 60))
             duty.save()
-        else:
+        else:  # end
             if not duty.start_submitted_at:
                 return Response({'success': False, 'message': 'Upload the start photo first.'}, status=status.HTTP_400_BAD_REQUEST)
             if duty.end_submitted_at:
                 return Response({'success': False, 'message': 'End photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+
             duty.end_photo = photo
             duty.end_submitted_at = now
+            if duty.start_submitted_at:
+                hours = (now - duty.start_submitted_at).total_seconds() / 3600.0
+                # Model is DecimalField — store precisely
+                from decimal import Decimal
+                duty.payable_hours = Decimal(str(round(hours, 1)))
             duty.save()
 
-        return Response({
-            'success': True,
-            'message': f'{duty_type.title()} photo submitted.',
-            'data': {
-                'exam_id': str(exam.id),
-                'type': duty_type,
-                'submitted_at': now.isoformat(),
-                'deadline': (
-                    timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.start_time)
-                        - timedelta(minutes=15),
-                        timezone.get_current_timezone(),
-                    ).isoformat()
-                    if duty_type == 'start' else None
-                ),
-                'late_minutes': duty.late_minutes,
-            },
-        })
+        # Return unified shape matching the updated GET (with flags + URLs)
+        response_data = {
+            'exam_id': str(exam.id),
+            'supervisor_id': str(request.user.id),
+            'is_start_submitted': bool(duty.start_submitted_at),
+            'is_end_submitted': bool(duty.end_submitted_at),
+            'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+            'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+            'late_minutes': duty.late_minutes,
+            'payable_hours': float(duty.payable_hours or 0),
+            'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if duty.start_photo else None,
+            'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if duty.end_photo else None,
+        }
 
         return Response({
             'success': True,
-            'score': score,
-            'total': total_possible,
-            'is_pass': is_pass,
-            'correct': sum(1 for b in breakdown if b['result'] == 'correct'),
-            'wrong': sum(1 for b in breakdown if b['result'] == 'wrong'),
-            'unanswered': sum(1 for b in breakdown if b['result'] == 'unanswered'),
-            'breakdown': breakdown,
-            'marksheet_id': str(ms.id),
-        }, status=status.HTTP_200_OK)
+            'message': f'{duty_type.title()} photo submitted successfully.',
+            'data': response_data,
+        })
 
 
 class OMRBulkUploadView(APIView):
