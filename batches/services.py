@@ -468,9 +468,8 @@ def resolve_combo_future_batch(admission):
         batch_attempt=batch_attempt,
         attempt_year=attempt_year,
         group_module=group_module,
-        is_active=True,
         end_date__gte=today,
-    )
+    ).filter(Q(is_active=True) | Q(is_auto_created=True))   # combo batches stay inactive, still reusable
     common = common.filter(branch=branch) if branch else common.filter(branch__isnull=True)
 
     fs_ids = [
@@ -491,7 +490,7 @@ def resolve_combo_future_batch(admission):
     current = admission.combo_future_batch if admission.combo_future_batch_id else None
     if current is not None:
         enrolled = current.batch_students.count()
-        if current.is_active and (enrolled < current.max_students) \
+        if (enrolled < current.max_students) \
                 and current.batch_attempt == batch_attempt and current.attempt_year == attempt_year:
             return current
 
@@ -534,7 +533,7 @@ def resolve_combo_future_batch(admission):
             group_module=group_module,
             auto_sequence=sequence,
             is_auto_created=True,
-            is_active=True,
+            is_active=False,   # future combo batch stays inactive until it is activated manually
             start_date=batch_start,
             end_date=batch_end,
             organization=getattr(branch, 'organization', None) if branch else None,

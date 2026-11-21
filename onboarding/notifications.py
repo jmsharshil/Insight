@@ -351,22 +351,30 @@ def parse_admission_payment_payload(payload_str: str, text_str: str = "") -> Tup
       - "APPROVE IIPS-000001" / "REJECT IIPS-000001"
       - "APPROVE 123" / "REJECT 123"
       - "APPROVE ADMISSION IIPS-000001"
+
+    Specific adm_pay_* prefixes are checked FIRST. Explicit cross-namespace guard prevents
+    leakage from sales_att_*, reimb_*, emp_leave_*, student_leave_* modules.
     """
     s = str(payload_str or "").strip()
     t = str(text_str or "").strip()
 
+    # Explicit cross-namespace guard against other approval modules (prevents fall-through)
+    s_lower = (s + " " + t).lower()
+    if any(guard in s_lower for guard in ('sales_att', 'sales_attendance', 'reimb_', 'reimbursement', 'emp_leave_', 'employee_leave', 'student_leave_', 'leave_')):
+        return None, None
+
     action = None
     adm_id_str = None
 
-    # Check button payload formats
-    for prefix in ("adm_pay_approve:", "payment_approve:", "pay_approve:", "adm_pay_approve_", "approve:", "approve_"):
+    # Specific-prefix-first matching (adm_pay_* before generic)
+    for prefix in ("adm_pay_approve:", "adm_pay_approve_", "payment_approve:", "pay_approve:"):
         if s.startswith(prefix):
             action = "approve"
             adm_id_str = s[len(prefix):]
             break
 
     if not action:
-        for prefix in ("adm_pay_reject:", "payment_reject:", "pay_reject:", "adm_pay_reject_", "reject:", "reject_"):
+        for prefix in ("adm_pay_reject:", "adm_pay_reject_", "payment_reject:", "pay_reject:"):
             if s.startswith(prefix):
                 action = "reject"
                 adm_id_str = s[len(prefix):]
@@ -378,14 +386,14 @@ def parse_admission_payment_payload(payload_str: str, text_str: str = "") -> Tup
         if len(parts) >= 2:
             first = parts[0].lower()
             last = parts[-1].strip()
-            if "approve" in first or (len(parts) > 2 and "approve" in parts[1].lower()):
+            if any(p in first for p in ("adm_pay", "admission", "pay")) and ("approve" in first or (len(parts) > 2 and "approve" in parts[1].lower())):
                 action = "approve"
                 adm_id_str = last
-            elif "reject" in first or (len(parts) > 2 and "reject" in parts[1].lower()):
+            elif any(p in first for p in ("adm_pay", "admission", "pay")) and ("reject" in first or (len(parts) > 2 and "reject" in parts[1].lower())):
                 action = "reject"
                 adm_id_str = last
 
-    # Check plain text commands
+    # Check plain text commands (with admission keyword preference)
     if not action and t:
         upper_t = t.upper()
         match_approve = re.search(r'\bAPPROVE\b\s*(?:ADMISSION\s*)?([A-Z0-9_-]+)', upper_t)

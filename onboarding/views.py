@@ -499,7 +499,7 @@ def _setup_payment_bank_and_notify(admission):
 
             # Record payment link generation event in payment_history
             if razorpay_link_url:
-                admission.update_payment_history_entry('payment_link_created', {
+                link_entry_updates = {
                     'payment_choice': 'online',
                     'amount': float(amount_to_pay),
                     'total_fees': float(admission.total_fees or 0),
@@ -507,17 +507,24 @@ def _setup_payment_bank_and_notify(admission):
                     'remaining_fees': float(admission.remaining_fees or 0),
                     'razorpay_payment_link': razorpay_link_url,
                     'razorpay_payment_link_id': rp_link_id,
-                    'status': 'pending',
-                }, fallback_event='payment_link_created', fallback_data={
-                    'payment_choice': 'online',
-                    'amount': float(amount_to_pay),
-                    'total_fees': float(admission.total_fees or 0),
-                    'token_amount': float(getattr(admission.fee_structure, 'token_amount', 0) or 0),
-                    'remaining_fees': float(admission.remaining_fees or 0),
-                    'razorpay_payment_link': razorpay_link_url,
-                    'razorpay_payment_link_id': rp_link_id,
-                    'status': 'pending',
-                })
+                }
+                # Never move an already (partially) paid entry back to payment_pending.
+                existing_link_entry = next(
+                    (
+                        e for e in reversed(admission.payment_history or [])
+                        if e.get('event') == 'payment_link_created'
+                        and e.get('razorpay_payment_link') == razorpay_link_url
+                    ),
+                    None,
+                )
+                if not existing_link_entry or existing_link_entry.get('status') not in ('partially_paid', 'verified', 'paid'):
+                    link_entry_updates['status'] = 'payment_pending'
+                admission.update_payment_history_entry(
+                    'payment_link_created',
+                    link_entry_updates,
+                    fallback_event='payment_link_created',
+                    fallback_data={**link_entry_updates, 'status': 'payment_pending'},
+                )
                 print(f"Payment history entry 'payment_link_created' recorded for admission {admission.id}")
         except Exception as e:
             print(f"Failed to create Razorpay link for admission {admission.id} (amount={amount_to_pay}): {e}", exc_info=True)
@@ -592,16 +599,28 @@ def _setup_payment_bank_and_notify(admission):
                             for entry in history
                         )
                         if not link_already_sent:
+                            # Keep ONE history entry per payment: the "sent on WhatsApp" info is
+                            # stored on the payment_link_created entry instead of a separate
+                            # payment_link_notified entry.
+                            marked = False
                             for entry in history:
                                 if entry.get('event') == 'payment_link_created' and entry.get('razorpay_payment_link') == razorpay_link_url:
                                     entry['whatsapp_sent'] = True
-                            history.append({
-                                'event': 'payment_link_notified',
-                                'razorpay_payment_link': razorpay_link_url,
-                                'phone': admission.phone_student,
-                                'date': timezone.now().date().isoformat(),
-                                'timestamp': timezone.now().isoformat(),
-                            })
+                                    entry['whatsapp_phone'] = admission.phone_student
+                                    marked = True
+                            if not marked:
+                                history.append({
+                                    'event': 'payment_link_created',
+                                    'payment_choice': 'online',
+                                    'amount': float(amount_to_pay),
+                                    'razorpay_payment_link': razorpay_link_url,
+                                    'razorpay_payment_link_id': rp_link_id,
+                                    'status': 'payment_pending',
+                                    'whatsapp_sent': True,
+                                    'whatsapp_phone': admission.phone_student,
+                                    'date': timezone.now().date().isoformat(),
+                                    'timestamp': timezone.now().isoformat(),
+                                })
                             locked.payment_history = history
                             locked.save(update_fields=['payment_history', 'updated_at'])
                             admission.payment_history = history
@@ -885,6 +904,7 @@ class AdmissionListView(APIView):
                     first_name=lead.first_name,
                     surname=lead.surname,
                     email=lead.email or '',
+                    email_parent=data.get('email_parent') or '',
                     phone_student=lead.phone_student,
                     course=lead.course,
                     group_module=lead.group_module,

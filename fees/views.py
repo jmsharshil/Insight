@@ -1750,10 +1750,73 @@ class MyFeesAPIView(APIView):
                 'message': "Invalid payment_choice. Must be 'online', 'cash', or 'cheque'."
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        from django.db import transaction
+        from decimal import Decimal
+        from .razorpay_service import create_payment_link, fetch_payment_link, cancel_payment_link
+
+        # ── Reuse guard: an active unpaid Razorpay link for these dues already exists ──
+        # Blocks BOTH generating another Razorpay link AND submitting cash/cheque while link is active.
+        admission = getattr(student, 'admission', None)
+        if admission is not None:
+            with transaction.atomic():
+                admission = type(admission).objects.select_for_update().get(pk=admission.pk)
+                student.admission = admission
+
+                history = list(admission.payment_history or [])
+                pending_entry = next(
+                    (
+                        e for e in reversed(history)
+                        if e.get('event') == 'payment_link_created'
+                        and e.get('status') in ('pending', 'payment_pending', 'partially_paid')
+                        and e.get('razorpay_payment_link_id')
+                    ),
+                    None,
+                )
+                if pending_entry:
+                    old_link_id = pending_entry.get('razorpay_payment_link_id')
+                    live = fetch_payment_link(old_link_id)
+                    live_status = (live.get('data') or {}).get('status') if live.get('success') else None
+                    try:
+                        pending_amount = Decimal(str(pending_entry.get('amount') or 0))
+                    except Exception:
+                        pending_amount = Decimal('0')
+                    same_amount = pending_amount == Decimal(str(amount_due))
+
+                    if live_status in ('expired', 'cancelled'):
+                        # Dead link -> allow generating a fresh one or paying offline.
+                        pending_entry['status'] = live_status
+                        pending_entry['whatsapp_sent'] = pending_entry.get('whatsapp_sent', False)
+                        admission.payment_history = history
+                        admission.save(update_fields=['payment_history', 'updated_at'])
+                    elif live_status == 'paid':
+                        return Response({
+                            'success': False,
+                            'message': 'Your payment for this link has already been received and is being processed. Please check the payment history.',
+                            'data': {'payment_link_id': old_link_id, 'status': 'paid'},
+                        }, status=status.HTTP_409_CONFLICT)
+                    elif same_amount:
+                        # live_status is 'created' / 'partially_paid' / unknown (fetch failed)
+                        # An active unpaid link exists: block both online generation and cash/cheque submission.
+                        return Response({
+                            'success': False,
+                            'message': 'Your payment link for this payment is already generated. Please pay from the payment history.',
+                            'data': {
+                                'payment_link_url': pending_entry.get('razorpay_payment_link') or admission.razorpay_payment_link,
+                                'payment_link_id': old_link_id,
+                                'amount': float(pending_amount),
+                                'status': 'link_already_generated',
+                            },
+                        }, status=status.HTTP_409_CONFLICT)
+                    else:
+                        # Amount due changed since the old link was made -> replace it.
+                        cancel_payment_link(old_link_id)
+                        pending_entry['status'] = 'cancelled'
+                        pending_entry['note'] = 'Link cancelled: amount due changed.'
+                        admission.payment_history = history
+                        admission.save(update_fields=['payment_history', 'updated_at'])
+
         # ── 2A. Online Payment via Razorpay ──────────────────────────────────
         if payment_choice == 'online':
-            from .razorpay_service import create_payment_link
-
             unique_ref = f"SF_{int(time.time())}_{student_fee.id.hex[:16]}"
             course_name = (
                 student_fee.fee_structure.name
@@ -1762,8 +1825,13 @@ class MyFeesAPIView(APIView):
             )
             description = f"Remaining Fee Payment ({course_name})"
 
-            customer_phone = student.phone_student or ''
-            clean_phone = re.sub(r'\D', '', customer_phone)
+            customer_phone = (
+                student.phone_student
+                or getattr(student, 'phone', '')
+                or (getattr(student.user, 'phone', '') if getattr(student, 'user', None) else '')
+                or (getattr(student.admission, 'phone_student', '') if getattr(student, 'admission', None) else '')
+            )
+            clean_phone = re.sub(r'\D', '', customer_phone or '')
             if len(clean_phone) > 10:
                 clean_phone = clean_phone[-10:]
 
@@ -1804,10 +1872,50 @@ class MyFeesAPIView(APIView):
                     'amount': float(amount_due),
                     'razorpay_payment_link': link_url,
                     'razorpay_payment_link_id': link_id,
-                    'status': 'pending',
+                    'status': 'payment_pending',
                     'date': timezone.now().date().isoformat(),
                     'note': 'Remaining fee payment link generated via Razorpay.',
                 })
+
+            # Send WhatsApp razorpay_link template to student if phone is available
+            recipient_phone = clean_phone or getattr(student, 'phone_student', None) or (getattr(student.admission, 'phone_student', None) if getattr(student, 'admission', None) else None)
+            if recipient_phone and link_url:
+                try:
+                    from chat.notifications import send_whatsapp_with_fallback
+                    rzp_suffix = str(link_url).strip()
+                    for prefix in ("https://rzp.io/", "http://rzp.io/", "rzp.io/"):
+                        if rzp_suffix.startswith(prefix):
+                            rzp_suffix = rzp_suffix[len(prefix):]
+                            break
+
+                    send_whatsapp_with_fallback(
+                        to=recipient_phone,
+                        template_name="razorpay_link",
+                        language_code="en",
+                        components=[
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {"type": "text", "text": f"{float(amount_due):,.0f}"},
+                                ]
+                            },
+                            {
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": 0,
+                                "parameters": [
+                                    {"type": "text", "text": rzp_suffix}
+                                ]
+                            }
+                        ],
+                        fallback_body=(
+                            f"INSIGHT INSTITUTE OF PROFESSIONAL STUDIES has requested payment of INR {float(amount_due):,.0f}. "
+                            f"You can pay through clicking below: {link_url}"
+                        ),
+                    )
+                    logger.info(f"[MyFees] WhatsApp payment link sent to {recipient_phone} for student {student.id}")
+                except Exception as wa_err:
+                    logger.error(f"[MyFees] Failed to send WhatsApp razorpay_link to {recipient_phone}: {wa_err}")
 
             return Response({
                 'success': True,
@@ -1825,6 +1933,7 @@ class MyFeesAPIView(APIView):
                     'status': 'link_generated',
                 }
             }, status=status.HTTP_200_OK)
+
 
         # ── 2B. Cash / Cheque with Proof Upload ──────────────────────────────
         payment_proof = request.FILES.get('payment_proof') or request.FILES.get('payment_screenshot')

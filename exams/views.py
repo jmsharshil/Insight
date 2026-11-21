@@ -173,16 +173,25 @@ class ExamListCreateView(APIView):
             logger.error(f"Exam creation error: {e}")
             return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Ensure paper checkers are added to the exam (populates M2M using available checkers
-        # or fallback to faculty/creator if none configured). This fixes paper checkers
-        # not being associated with the exam for visibility in paper_checker role queries
-        # and for auto-assignment of marksheets.
+        # Force 'scheduled' status on creation (no mandatory draft stage)
+        if exam.status != 'scheduled':
+            exam.status = 'scheduled'
+            exam.save(update_fields=['status'])
+
+        # Call ensure_* to populate M2M paper_checkers/supervisors immediately (signals may also trigger)
+        try:
+            exam.ensure_paper_checkers()
+            exam.ensure_supervisors()
+        except Exception as e:
+            logger.warning(f"Failed to ensure checkers/supervisors for new exam {exam.id}: {e}")
+
+        # Legacy assignment for marksheets compatibility
         try:
             assign_papers_to_checker(exam.id)
         except Exception as e:
             logger.warning(f"Failed to auto-assign paper checkers for new exam {exam.id}: {e}")
 
-        # Send notifications
+        # Send notifications (uses approved Meta template with sanitized params, HTTPS URLs)
         from .services import notify_exam_scheduled
         try:
             notify_exam_scheduled(exam)
@@ -190,7 +199,7 @@ class ExamListCreateView(APIView):
             logger.error(f"Failed to send exam schedule notifications for exam {exam.id}: {e}")
 
         return Response({
-            'success': True, 'message': 'Exam created.',
+            'success': True, 'message': 'Exam created and scheduled.',
             'data': ExamListSerializer(exam, context={'request': request}).data,
         }, status=status.HTTP_201_CREATED)
 
@@ -226,6 +235,7 @@ class ExamDetailView(APIView):
         if exam is None:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        # Allow updates on 'scheduled' (and 'draft' if any remain); block only terminal states
         if exam.status in ['ongoing', 'completed', 'results_published']:
             return Response({'success': False, 'message': 'Cannot edit exam in current status.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -245,6 +255,7 @@ class ExamDetailView(APIView):
         if exam is None:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        # Allow updates on 'scheduled' (and 'draft' if any remain); block only terminal states
         if exam.status in ['ongoing', 'completed', 'results_published']:
             return Response({'success': False, 'message': 'Cannot edit exam in current status.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1294,8 +1305,9 @@ class MalpracticeDetailView(APIView):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ExamScheduleView(APIView):
-    """Dedicated API to schedule an exam (sets status='scheduled').
-    Can only be done on 'draft' exams with future scheduled_date.
+    """Dedicated (but now optional) API to schedule an exam (sets status='scheduled').
+    No longer requires 'draft' status — creation already implies 'scheduled'.
+    Retained for backward compatibility and explicit scheduling flows.
     """
 
     def post(self, request, exam_id):
@@ -1311,10 +1323,11 @@ class ExamScheduleView(APIView):
         except Exam.DoesNotExist:
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if exam.status != 'draft':
+        # Relaxed: allow on draft or already scheduled; block only terminal states (matches DetailView)
+        if exam.status in ['ongoing', 'completed', 'results_published']:
             return Response({
                 'success': False,
-                'message': f'Cannot schedule exam. Current status is "{exam.status}". Must be "draft".'
+                'message': f'Cannot schedule exam in terminal status "{exam.status}".'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if exam.scheduled_date < timezone.now().date():
@@ -1323,15 +1336,22 @@ class ExamScheduleView(APIView):
                 'message': 'Cannot schedule an exam for a past date.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        exam.status = 'scheduled'
-        exam.save(update_fields=['status'])
+        was_draft = exam.status == 'draft'
+        if exam.status != 'scheduled':
+            exam.status = 'scheduled'
+            exam.save(update_fields=['status'])
+            msg = 'Exam has been scheduled successfully.'
+        else:
+            msg = 'Exam was already scheduled.'
 
-        # Ensure paper checkers M2M is populated when scheduling (if not done at create)
+        # Ensure M2M populated (idempotent)
         try:
             exam.ensure_paper_checkers()
+            exam.ensure_supervisors()
         except Exception as e:
-            logger.warning(f"Failed to ensure paper checkers on schedule for exam {exam_id}: {e}")
+            logger.warning(f"Failed to ensure paper checkers/supervisors on schedule for exam {exam_id}: {e}")
 
+        # Notify only on transition or first schedule (services has guards)
         from .services import notify_exam_scheduled
         try:
             notify_exam_scheduled(exam)
@@ -1340,8 +1360,8 @@ class ExamScheduleView(APIView):
 
         return Response({
             'success': True,
-            'message': 'Exam has been scheduled successfully.',
-            'data': ExamListSerializer(exam).data
+            'message': msg,
+            'data': ExamListSerializer(exam, context={'request': request}).data
         })
 
 

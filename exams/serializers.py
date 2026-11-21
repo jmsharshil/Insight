@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     Exam, Question, Choice, ExamSession, StudentAnswer,
     SeatArrangement, MalpracticeReport, ScreenEvent,
-    SubjectPaper,
+    SubjectPaper, EXAM_STATUS_CHOICES,
 )
 
 from core.utils import get_role_filter_q
@@ -265,8 +265,8 @@ class ExamListSerializer(serializers.ModelSerializer):
             print(f"can_start_exam=False: Batch mismatch. student.batch_id={student.batch_id}, exam.batch_id={obj.batch_id}")
             return False
 
-        # Block only on terminal statuses — time is the primary gate
-        if obj.status in ['draft', 'completed', 'results_published']:
+        # Block only terminal statuses (no draft stage; scheduled is startable at correct time)
+        if obj.status in ['completed', 'results_published']:
             print(f"can_start_exam=False: Status is blocked. obj.status={obj.status}")
             return False
 
@@ -360,7 +360,7 @@ class ExamListSerializer(serializers.ModelSerializer):
     def get_attendance_percentage(self, obj):
         """Compute exam attendance %: (attended students / total enrolled) * 100.
         Uses MarkSheet records — students not marked absent are considered attended.
-        Returns None for exams not yet conducted (draft/scheduled).
+        Returns None for exams not yet conducted (scheduled or draft).
         """
         if obj.status in ('draft', 'scheduled'):
             return None
@@ -386,6 +386,12 @@ class ExamListSerializer(serializers.ModelSerializer):
 
 class ExamCreateSerializer(serializers.ModelSerializer):
     total_marks = serializers.IntegerField(required=False, default=0)
+    status = serializers.ChoiceField(
+        choices=EXAM_STATUS_CHOICES,
+        default='scheduled',
+        required=False,
+        help_text='Defaults to "scheduled". Draft stage is no longer mandatory.'
+    )
     paper_checkers = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(get_role_filter_q('paper_checker'), is_active=True),
         many=True, required=False, allow_empty=True, write_only=True

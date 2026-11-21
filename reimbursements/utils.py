@@ -302,46 +302,47 @@ def parse_reimbursement_payload(payload_str, text_str=""):
     if not payload_str and not text_str:
         return None, None
 
+    s = str(payload_str or "").strip()
+    t = str(text_str or "").strip()
+
+    # Explicit guard against cross-namespace leakage (sales, leave, admission)
+    s_lower = (s + " " + t).lower()
+    if any(guard in s_lower for guard in ('sales_att', 'sales_attendance', 'adm_pay_', 'admission', 'emp_leave_', 'student_leave_', 'leave_')):
+        return None, None
+
     action = None
     reimb_id = None
 
-    candidates = [str(payload_str or "").strip(), str(text_str or "").strip()]
-    for s in candidates:
-        if not s:
+    candidates = [s, t]
+    for cand in candidates:
+        if not cand:
             continue
-        s_lower = s.lower()
-        if s_lower.startswith("reimb_approve:") or s_lower.startswith("reimbursement_approve:"):
+        s_lower = cand.lower()
+        if s_lower.startswith("reimb_approve:") or s_lower.startswith("reimbursement_approve:") or s_lower.startswith("reimb_approve_"):
             action = "approve"
-            reimb_id = s.split(":", 1)[1].strip()
+            reimb_id = cand.split(":", 1)[-1].split("_")[-1].strip()
             break
-        elif s_lower.startswith("reimb_reject:") or s_lower.startswith("reimbursement_reject:"):
+        elif s_lower.startswith("reimb_reject:") or s_lower.startswith("reimbursement_reject:") or s_lower.startswith("reimb_reject_"):
             action = "reject"
-            reimb_id = s.split(":", 1)[1].strip()
+            reimb_id = cand.split(":", 1)[-1].split("_")[-1].strip()
             break
-        elif s_lower.startswith("reimb_approve_") or s_lower.startswith("reimbursement_approve_") or s_lower.startswith("approve_reimb_"):
-            action = "approve"
-            reimb_id = s.split("_", 2)[-1].strip()
-            break
-        elif s_lower.startswith("reimb_reject_") or s_lower.startswith("reimbursement_reject_") or s_lower.startswith("reject_reimb_"):
-            action = "reject"
-            reimb_id = s.split("_", 2)[-1].strip()
-            break
-        elif ":" in s and ("reimb" in s_lower or "reimbursement" in s_lower):
-            parts = s.split(":")
+        elif ":" in cand and ("reimb" in s_lower or "reimbursement" in s_lower):
+            parts = cand.split(":")
             if len(parts) >= 2:
-                if "approve" in parts[0].lower():
+                p0 = parts[0].lower()
+                if "approve" in p0:
                     action = "approve"
                     reimb_id = parts[-1].strip()
                     break
-                elif "reject" in parts[0].lower():
+                elif "reject" in p0:
                     action = "reject"
                     reimb_id = parts[-1].strip()
                     break
         elif s_lower.startswith("approve") or s_lower.startswith("reject"):
             for prefix, act in [("approve", "approve"), ("reject", "reject")]:
                 if s_lower.startswith(prefix):
-                    remainder = s[len(prefix):].strip(" :_-#")
-                    if remainder:
+                    remainder = cand[len(prefix):].strip(" :_-#")
+                    if remainder and not any(g in remainder.lower() for g in ('sales', 'leave', 'adm', 'pay')):
                         action = act
                         reimb_id = remainder
                         break
@@ -351,7 +352,7 @@ def parse_reimbursement_payload(payload_str, text_str=""):
     if reimb_id:
         try:
             import uuid
-            uuid_obj = uuid.UUID(reimb_id.strip())
+            uuid_obj = uuid.UUID(str(reimb_id).strip())
             reimb_id = str(uuid_obj)
         except (ValueError, TypeError):
             reimb_id = None
@@ -614,7 +615,14 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
             if reimb.status == 'approved_by_accountant':
                 send_whatsapp_text(
                     to=sender_wa_id,
-                    body=f"This reimbursement claim '{reimb.title}' has already been approved by Accountant and is awaiting final approval from Super Admin."
+                    body=f"This reimbursement claim '{reimb.title}' for {applicant_name} has already been approved by Accountant and is awaiting Super Admin final approval."
+                )
+                return True
+
+            if reimb.status == 'approved':
+                send_whatsapp_text(
+                    to=sender_wa_id,
+                    body=f"This reimbursement claim '{reimb.title}' for {applicant_name} has already been fully approved."
                 )
                 return True
 
@@ -641,8 +649,16 @@ def handle_reimbursement_whatsapp_approval(sender_wa_id, payload_str, text_str="
 
             send_whatsapp_text(
                 to=sender_wa_id,
-                body=f"✅ You have approved the reimbursement claim '{reimb.title}' (₹{reimb.amount}) for {applicant_name}. It is now pending final approval from Super Admin."
+                body=f"✅ You (Accountant) have APPROVED the reimbursement claim '{reimb.title}' (₹{reimb.amount}) for {applicant_name}. It is now pending final Super Admin approval."
             )
+
+            # Notify Super Admin(s) with update template (includes proof URL)
+            try:
+                for sa in User.objects.filter(is_active=True):
+                    if is_super_admin_user(sa) and sa.id != approver.id:
+                        send_reimbursement_update_whatsapp_notification(reimb, sa)
+            except Exception as e:
+                logger.error("[WA REIMB] Failed notifying Super Admin of accountant approval: %s", e)
 
             try:
                 send_system_notification(
