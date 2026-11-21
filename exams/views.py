@@ -1833,7 +1833,59 @@ class OMRUploadView(APIView):
 
 
 class SupervisorDutyPhotoView(APIView):
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request, exam_id):
+        """Return current supervisor duty status, submission timestamps, late minutes,
+        payable hours, and absolute URLs to uploaded start/end photos (if any).
+        """
+        role = _user_role(request.user)
+        roles = set(getattr(request.user, 'additional_roles', []) or [])
+        roles.add(getattr(request.user, 'role', ''))
+        if 'exam_supervisor' not in roles:
+            return Response({'success': False, 'message': 'Exam supervisor role required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not exam.supervisors.filter(id=request.user.id).exists():
+            return Response({'success': False, 'message': 'You are not assigned as supervisor for this exam.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            duty = SupervisorDutyLog.objects.get(exam=exam, supervisor=request.user)
+            data = {
+                'exam_id': str(exam.id),
+                'supervisor_id': str(request.user.id),
+                'start_submitted': bool(duty.start_submitted_at),
+                'end_submitted': bool(duty.end_submitted_at),
+                'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+                'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+                'late_minutes': duty.late_minutes,
+                'payable_hours': float(duty.payable_hours or 0),
+                'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if duty.start_photo else None,
+                'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if duty.end_photo else None,
+            }
+        except SupervisorDutyLog.DoesNotExist:
+            data = {
+                'exam_id': str(exam.id),
+                'supervisor_id': str(request.user.id),
+                'start_submitted': False,
+                'end_submitted': False,
+                'start_submitted_at': None,
+                'end_submitted_at': None,
+                'late_minutes': 0,
+                'payable_hours': 0.0,
+                'start_photo_url': None,
+                'end_photo_url': None,
+            }
+
+        return Response({'success': True, 'data': data})
 
     def post(self, request, exam_id):
         duty_type = request.data.get('type', '').lower()
@@ -1844,12 +1896,19 @@ class SupervisorDutyPhotoView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        exam = Exam.objects.filter(id=exam_id).first()
-        if not exam or not exam.supervisors.filter(id=request.user.id).exists():
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not exam.supervisors.filter(id=request.user.id).exists():
             return Response({'success': False, 'message': 'You are not assigned to this exam.'}, status=status.HTTP_403_FORBIDDEN)
 
-        roles = set(request.user.additional_roles or [])
-        roles.add(request.user.role)
+        roles = set(getattr(request.user, 'additional_roles', []) or [])
+        roles.add(getattr(request.user, 'role', ''))
         if 'exam_supervisor' not in roles:
             return Response({'success': False, 'message': 'Exam supervisor role required.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1872,6 +1931,9 @@ class SupervisorDutyPhotoView(APIView):
                 return Response({'success': False, 'message': 'End photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
             duty.end_photo = photo
             duty.end_submitted_at = now
+            if duty.start_submitted_at:
+                hours = (now - duty.start_submitted_at).total_seconds() / 3600.0
+                duty.payable_hours = round(hours, 1)
             duty.save()
 
         return Response({
@@ -1890,20 +1952,9 @@ class SupervisorDutyPhotoView(APIView):
                     if duty_type == 'start' else None
                 ),
                 'late_minutes': duty.late_minutes,
+                'payable_hours': float(duty.payable_hours or 0),
             },
         })
-
-        return Response({
-            'success': True,
-            'score': score,
-            'total': total_possible,
-            'is_pass': is_pass,
-            'correct': sum(1 for b in breakdown if b['result'] == 'correct'),
-            'wrong': sum(1 for b in breakdown if b['result'] == 'wrong'),
-            'unanswered': sum(1 for b in breakdown if b['result'] == 'unanswered'),
-            'breakdown': breakdown,
-            'marksheet_id': str(ms.id),
-        }, status=status.HTTP_200_OK)
 
 
 class OMRBulkUploadView(APIView):
