@@ -252,10 +252,7 @@ Best Regards,
 {org_title} Team
 """
 
-    # Only dispatch email to parent if parent has a distinct email from student
-    student_email_clean = (student_user.email or '').strip().lower()
-    parent_email_clean = (parent_user.email or '').strip().lower()
-    if parent_email_clean and parent_email_clean != student_email_clean:
+    if parent_user.email:
         send_email(
             to=parent_user.email,
             subject=subject,
@@ -275,10 +272,7 @@ Best Regards,
             organization=parent_user.organization,
         )
 
-    # Only dispatch WhatsApp to parent if parent has a distinct phone number from student
-    student_phone_clean = re.sub(r'\D', '', student_user.phone or '')
-    parent_phone_clean = re.sub(r'\D', '', parent_user.phone or '')
-    if parent_phone_clean and parent_phone_clean != student_phone_clean:
+    if parent_user.phone:
         try:
             send_whatsapp_with_fallback(
                 to=parent_user.phone,
