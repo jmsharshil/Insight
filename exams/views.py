@@ -1837,9 +1837,95 @@ class SupervisorDutyPhotoView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request, exam_id):
-        """Return current supervisor duty status, submission timestamps, late minutes,
-        payable hours, and absolute URLs to uploaded start/end photos (if any).
+        """Return unified supervisor duty status (with submission flags, payable_hours,
+        late_minutes, and absolute photo URLs). 
+        - Normal `exam_supervisor`: single dict for their own record.
+        - `super_admin` (or ADMIN_ROLES): list of *all* supervisors' duty logs for the exam.
         """
+        role = _user_role(request.user)
+        roles = set(getattr(request.user, 'additional_roles', []) or [])
+        roles.add(getattr(request.user, 'role', ''))
+        if 'exam_supervisor' not in roles and role not in ADMIN_ROLES:
+            return Response({'success': False, 'message': 'Exam supervisor role (or admin) required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            qs = Exam.objects.filter(is_deleted=False)
+            if getattr(request.user, 'organization', None):
+                qs = qs.filter(branch__organization=request.user.organization)
+            exam = qs.get(id=exam_id)
+        except Exam.DoesNotExist:
+            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_admin = role in ADMIN_ROLES
+
+        # Non-admins must be explicitly assigned via Exam.supervisors M2M
+        if not is_admin and not exam.supervisors.filter(id=request.user.id).exists():
+            return Response({'success': False, 'message': 'You are not assigned as supervisor for this exam.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if is_admin:
+            # Super admin sees **all** duty photos/logs (bypasses per-supervisor check)
+            duties_qs = SupervisorDutyLog.objects.filter(exam=exam).select_related('supervisor').order_by('supervisor__email')
+            data = []
+            for duty in duties_qs:
+                data.append({
+                    'exam_id': str(exam.id),
+                    'supervisor_id': str(duty.supervisor.id),
+                    'supervisor_name': getattr(duty.supervisor, 'name', duty.supervisor.email),
+                    'supervisor_email': duty.supervisor.email,
+                    'is_start_submitted': bool(duty.start_submitted_at),
+                    'is_end_submitted': bool(duty.end_submitted_at),
+                    'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+                    'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+                    'late_minutes': getattr(duty, 'late_minutes', 0),
+                    'payable_hours': float(getattr(duty, 'payable_hours', 0) or 0),
+                    'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if getattr(duty, 'start_photo', None) and duty.start_photo else None,
+                    'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if getattr(duty, 'end_photo', None) and duty.end_photo else None,
+                })
+            return Response({'success': True, 'data': data, 'count': len(data)})
+        else:
+            # Normal supervisor: own record only (create-on-demand not done here)
+            try:
+                duty = SupervisorDutyLog.objects.get(exam=exam, supervisor=request.user)
+                data = {
+                    'exam_id': str(exam.id),
+                    'supervisor_id': str(request.user.id),
+                    'is_start_submitted': bool(duty.start_submitted_at),
+                    'is_end_submitted': bool(duty.end_submitted_at),
+                    'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+                    'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+                    'late_minutes': getattr(duty, 'late_minutes', 0),
+                    'payable_hours': float(getattr(duty, 'payable_hours', 0) or 0),
+                    'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if duty.start_photo else None,
+                    'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if duty.end_photo else None,
+                }
+            except SupervisorDutyLog.DoesNotExist:
+                data = {
+                    'exam_id': str(exam.id),
+                    'supervisor_id': str(request.user.id),
+                    'is_start_submitted': False,
+                    'is_end_submitted': False,
+                    'start_submitted_at': None,
+                    'end_submitted_at': None,
+                    'late_minutes': 0,
+                    'payable_hours': 0.0,
+                    'start_photo_url': None,
+                    'end_photo_url': None,
+                }
+            return Response({'success': True, 'data': data})
+
+    def post(self, request, exam_id):
+        """Upload start/end duty photo. Enforces sequencing (start before end), 15-min early-start
+        window for lateness, no duplicates. Calculates payable_hours on 'end' (rounded to 1 decimal).
+        Returns unified data matching GET response shape. Only assigned exam_supervisors.
+        """
+        duty_type = request.data.get('type', '').lower().strip()
+        photo = request.FILES.get('photo')
+        if duty_type not in ('start', 'end') or not photo:
+            return Response(
+                {'success': False, 'message': 'type must be "start" or "end" and photo is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         role = _user_role(request.user)
         roles = set(getattr(request.user, 'additional_roles', []) or [])
         roles.add(getattr(request.user, 'role', ''))
@@ -1855,105 +1941,63 @@ class SupervisorDutyPhotoView(APIView):
             return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         if not exam.supervisors.filter(id=request.user.id).exists():
-            return Response({'success': False, 'message': 'You are not assigned as supervisor for this exam.'}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            duty = SupervisorDutyLog.objects.get(exam=exam, supervisor=request.user)
-            data = {
-                'exam_id': str(exam.id),
-                'supervisor_id': str(request.user.id),
-                'start_submitted': bool(duty.start_submitted_at),
-                'end_submitted': bool(duty.end_submitted_at),
-                'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
-                'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
-                'late_minutes': duty.late_minutes,
-                'payable_hours': float(duty.payable_hours or 0),
-                'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if duty.start_photo else None,
-                'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if duty.end_photo else None,
-            }
-        except SupervisorDutyLog.DoesNotExist:
-            data = {
-                'exam_id': str(exam.id),
-                'supervisor_id': str(request.user.id),
-                'start_submitted': False,
-                'end_submitted': False,
-                'start_submitted_at': None,
-                'end_submitted_at': None,
-                'late_minutes': 0,
-                'payable_hours': 0.0,
-                'start_photo_url': None,
-                'end_photo_url': None,
-            }
-
-        return Response({'success': True, 'data': data})
-
-    def post(self, request, exam_id):
-        duty_type = request.data.get('type', '').lower()
-        photo = request.FILES.get('photo')
-        if duty_type not in ('start', 'end') or not photo:
-            return Response(
-                {'success': False, 'message': 'type must be start or end and photo is required.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            qs = Exam.objects.filter(is_deleted=False)
-            if getattr(request.user, 'organization', None):
-                qs = qs.filter(branch__organization=request.user.organization)
-            exam = qs.get(id=exam_id)
-        except Exam.DoesNotExist:
-            return Response({'success': False, 'message': 'Exam not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        if not exam.supervisors.filter(id=request.user.id).exists():
             return Response({'success': False, 'message': 'You are not assigned to this exam.'}, status=status.HTTP_403_FORBIDDEN)
 
-        roles = set(getattr(request.user, 'additional_roles', []) or [])
-        roles.add(getattr(request.user, 'role', ''))
-        if 'exam_supervisor' not in roles:
-            return Response({'success': False, 'message': 'Exam supervisor role required.'}, status=status.HTTP_403_FORBIDDEN)
-
-        duty, _ = SupervisorDutyLog.objects.get_or_create(exam=exam, supervisor=request.user)
+        duty, created = SupervisorDutyLog.objects.get_or_create(
+            exam=exam, supervisor=request.user,
+            defaults={'late_minutes': 0, 'payable_hours': 0}
+        )
         now = timezone.now()
+        logger.info(f"Supervisor {request.user.email} submitting {duty_type} photo for exam {exam.id} (created={created})")
 
         if duty_type == 'start':
             if duty.start_submitted_at:
                 return Response({'success': False, 'message': 'Start photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
-            deadline_naive = datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)
-            deadline = timezone.make_aware(deadline_naive, timezone.get_current_timezone())
+            # 15-minute early-start window for lateness calculation
+            try:
+                deadline_naive = datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)
+                deadline = timezone.make_aware(deadline_naive, timezone.get_current_timezone())
+                duty.late_minutes = max(0, int((now - deadline).total_seconds() // 60))
+            except (TypeError, AttributeError):
+                duty.late_minutes = 0
+                logger.warning(f"Could not compute late_minutes for exam {exam.id} (missing schedule time)")
+
             duty.start_photo = photo
             duty.start_submitted_at = now
-            duty.late_minutes = max(0, int((now - deadline).total_seconds() // 60))
             duty.save()
-        else:
+        else:  # end
             if not duty.start_submitted_at:
                 return Response({'success': False, 'message': 'Upload the start photo first.'}, status=status.HTTP_400_BAD_REQUEST)
             if duty.end_submitted_at:
                 return Response({'success': False, 'message': 'End photo already submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+
             duty.end_photo = photo
             duty.end_submitted_at = now
             if duty.start_submitted_at:
                 hours = (now - duty.start_submitted_at).total_seconds() / 3600.0
-                duty.payable_hours = round(hours, 1)
+                # Model is DecimalField — store precisely
+                from decimal import Decimal
+                duty.payable_hours = Decimal(str(round(hours, 1)))
             duty.save()
+
+        # Return unified shape matching the updated GET (with flags + URLs)
+        response_data = {
+            'exam_id': str(exam.id),
+            'supervisor_id': str(request.user.id),
+            'is_start_submitted': bool(duty.start_submitted_at),
+            'is_end_submitted': bool(duty.end_submitted_at),
+            'start_submitted_at': duty.start_submitted_at.isoformat() if duty.start_submitted_at else None,
+            'end_submitted_at': duty.end_submitted_at.isoformat() if duty.end_submitted_at else None,
+            'late_minutes': duty.late_minutes,
+            'payable_hours': float(duty.payable_hours or 0),
+            'start_photo_url': build_absolute_url(duty.start_photo.url, request=request) if duty.start_photo else None,
+            'end_photo_url': build_absolute_url(duty.end_photo.url, request=request) if duty.end_photo else None,
+        }
 
         return Response({
             'success': True,
-            'message': f'{duty_type.title()} photo submitted.',
-            'data': {
-                'exam_id': str(exam.id),
-                'type': duty_type,
-                'submitted_at': now.isoformat(),
-                'deadline': (
-                    timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.start_time)
-                        - timedelta(minutes=15),
-                        timezone.get_current_timezone(),
-                    ).isoformat()
-                    if duty_type == 'start' else None
-                ),
-                'late_minutes': duty.late_minutes,
-                'payable_hours': float(duty.payable_hours or 0),
-            },
+            'message': f'{duty_type.title()} photo submitted successfully.',
+            'data': response_data,
         })
 
 
