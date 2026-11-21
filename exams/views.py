@@ -70,24 +70,28 @@ class ExamListCreateView(APIView):
     ordering_fields = '__all__'
 
     def _get_queryset(self, request):
+        """Unified queryset with proper multi-role support via RoleChecker.all_roles.
+        Fixes the 'faculty only' issue for users who have additional_roles including
+        'exam_supervisor' (now gets union of faculty + supervisor visibility).
+        """
         user = request.user
         role = _user_role(user)
+        all_roles = getattr(role, 'all_roles', {str(role)}) if role else set()
+
         qs = Exam.objects.filter(is_deleted=False).select_related('batch', 'subject', 'branch', 'created_by')
         if getattr(request.user, 'organization', None):
             qs = qs.filter(branch__organization=request.user.organization)
 
-        if role == 'student':
+        if 'student' in all_roles:
             try:
                 from students.models import Student
                 from batches.models import BatchStudent
                 sp = Student.objects.select_related('batch').filter(user=user).order_by('-created_at').first()
                 if not sp:
                     raise Student.DoesNotExist
-                # Support both direct batch_id and many-to-many via BatchStudent
                 if sp.batch_id:
                     qs = qs.filter(batch_id=sp.batch_id)
                 else:
-                    # Fallback for students enrolled via BatchStudent relation
                     enrolled_batch_ids = BatchStudent.objects.filter(
                         student=sp
                     ).values_list('batch_id', flat=True)
@@ -96,45 +100,65 @@ class ExamListCreateView(APIView):
                     else:
                         logger.warning(f"Student {user.email} has no batch assignment")
                         qs = qs.none()
-                # Students should see scheduled, ongoing, and results (for viewing marks)
                 qs = qs.filter(status__in=['scheduled', 'ongoing', 'completed', 'results_published'])
-                logger.info(f"Student {user.email} (batch={sp.batch_id}) can see {qs.count()} exams")
+                logger.info(f"Student {user.email} (batch={getattr(sp, 'batch_id', None)}) can see {qs.count()} exams")
             except Student.DoesNotExist:
                 logger.error(f"No Student profile found for user {user.email} (role=student)")
                 qs = qs.none()
             except Exception as e:
                 logger.error(f"Student exam filter error for {user.email}: {e}")
                 qs = qs.none()
-        elif role == 'faculty':
+            qs = apply_filters(self, request, qs)
+            return qs
+
+        # Staff roles: build visibility Q with OR (union) so faculty+supervisor works
+        visibility_q = Q()
+        applied = False
+
+        if 'faculty' in all_roles:
+            applied = True
             try:
                 from faculty.models import FacultyProfile
                 fp = FacultyProfile.objects.only('id').get(user=user)
                 faculty_id = fp.id
-                qs = qs.filter(
-                    Q(created_by=user) | 
+                faculty_q = (
+                    Q(created_by=user) |
                     Q(faculty_id=faculty_id) |
                     Q(batch__batch_faculty__faculty_id=faculty_id)
-                ).distinct()
+                )
+                visibility_q |= faculty_q
             except Exception:
-                # Fallback: just show what they created
-                qs = qs.filter(created_by=user)
-        elif role == 'exam_supervisor':
+                visibility_q |= Q(created_by=user)
+
+        if 'exam_supervisor' in all_roles:
+            applied = True
             branch_ids = get_user_branch_ids(user)
+            supervisor_q = Q(supervisors=user)  # explicit M2M (ensures supervisors see their assigned exams)
             if branch_ids:
-                qs = qs.filter(branch_id__in=branch_ids)
-        elif role == 'paper_checker':
+                supervisor_q |= Q(branch_id__in=branch_ids)
+            visibility_q |= supervisor_q
+            logger.info(
+                f"Exam supervisor {getattr(user, 'email', user.id)} "
+                f"added visibility for {Exam.objects.filter(supervisor_q).count()} exams"
+            )
+
+        if 'paper_checker' in all_roles:
+            applied = True
             try:
-                qs = qs.filter(Q(marksheets__paper_checker=user) | Q(paper_checkers=user)).distinct()
-                count = qs.count()
+                paper_q = Q(marksheets__paper_checker=user) | Q(paper_checkers=user)
+                visibility_q |= paper_q
+                count = Exam.objects.filter(paper_q).distinct().count()
                 logger.info(
                     f"Paper checker {getattr(user, 'email', getattr(user, 'id', 'unknown'))} "
-                    f"can see {count} assigned exams "
-                    f"(marksheets__paper_checker OR paper_checkers M2M)"
+                    f"can see {count} assigned exams (M2M)"
                 )
             except Exception as e:
                 logger.error(f"Paper checker exam filter error for {getattr(user, 'email', user)}: {e}")
-                qs = qs.none()
-        elif role != 'super_admin':
+
+        if applied:
+            qs = qs.filter(visibility_q).distinct()
+        elif 'super_admin' not in all_roles:
+            # Default branch scoping for other authenticated staff
             branch_ids = get_user_branch_ids(user)
             if branch_ids:
                 qs = qs.filter(branch_id__in=branch_ids)
