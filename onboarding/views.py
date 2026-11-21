@@ -904,6 +904,7 @@ class AdmissionListView(APIView):
                     first_name=lead.first_name,
                     surname=lead.surname,
                     email=lead.email or '',
+                    email_parent=data.get('email_parent') or '',
                     phone_student=lead.phone_student,
                     course=lead.course,
                     group_module=lead.group_module,

@@ -12,12 +12,13 @@ import hmac
 import hashlib
 import json
 import logging
+import threading
 from decimal import Decimal
 
 import requests as http_requests
 from requests.auth import HTTPBasicAuth
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, close_old_connections
 from django.db.models import Q
 
 logger = logging.getLogger(__name__)
@@ -539,7 +540,109 @@ def transfer_payment_to_linked_account(payment_id: str, amount_in_inr: float, li
         return False
 
 
-def process_payment_link_paid_event(payload: dict) -> dict:
+def _dispatch_sf_post_payment_tasks(payment_id, sf_id, rp_payment_id, amount_paid, student_email):
+    """
+    Runs slow post-payment tasks (receipt PDF generation, Azure upload, email/WhatsApp dispatch,
+    Route transfer) in a background thread so the Razorpay webhook immediately returns HTTP 200
+    within milliseconds (<5s timeout).
+    """
+    def _worker():
+        close_old_connections()
+        try:
+            from .models import Payment
+            from .services import send_payment_receipt
+            payment = Payment.objects.filter(id=payment_id).first()
+            if payment:
+                try:
+                    send_payment_receipt(payment)
+                    logger.info(f"[Razorpay Async] Receipt sent for Payment {payment.id}")
+                except Exception as receipt_err:
+                    logger.error(f"[Razorpay Async] Failed to send receipt for Payment {payment.id}: {receipt_err}")
+
+            if student_email:
+                try:
+                    from onboarding.models import Admission
+                    admission = Admission.objects.filter(email=student_email).order_by('-submitted_at').first()
+                    if admission and admission.bank_account and admission.bank_account.razorpay_account_id:
+                        transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
+                except Exception as e:
+                    logger.error(f"[Razorpay Route Async] Transfer failed for SF {sf_id}: {e}")
+        except Exception as outer_err:
+            logger.error(f"[Razorpay Async] Error in SF worker for Payment {payment_id}: {outer_err}")
+        finally:
+            close_old_connections()
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
+def _dispatch_adm_post_payment_tasks(payment_id, admission_id, rp_payment_id, transaction_amount, is_partial, bank_account_rp_id=None):
+    """
+    Runs slow admission post-payment tasks (receipt PDF generation, Azure upload, email/WhatsApp,
+    Route transfer) in a background thread so the Razorpay webhook returns HTTP 200 immediately.
+    """
+    def _worker():
+        close_old_connections()
+        try:
+            from .models import Payment
+            from .services import send_payment_receipt, send_admission_payment_notification
+            from onboarding.models import Admission
+
+            receipt_sent = False
+            payment = Payment.objects.filter(id=payment_id).first() if payment_id else None
+
+            if payment:
+                has_existing_receipt = bool(
+                    getattr(payment, '_receipt_notified', None) is True
+                    or (
+                        getattr(payment, 'payment_document', None)
+                        and isinstance(getattr(payment.payment_document, 'name', None), str)
+                        and payment.payment_document.name.strip()
+                    )
+                )
+                if has_existing_receipt:
+                    receipt_sent = True
+                    logger.info(f"[Razorpay Async] Receipt already dispatched for payment {payment.id} — skipping duplicate.")
+                elif not (getattr(payment, '_receipt_notified', None) is True):
+                    try:
+                        send_payment_receipt(payment)
+                        receipt_sent = True
+                        logger.info(f"[Razorpay Async] Receipt sent for ADM Payment {payment.id}")
+                    except Exception as exc:
+                        logger.error(f"[Razorpay Async] Receipt dispatch failed for {rp_payment_id}: {exc}")
+
+            if not receipt_sent or is_partial:
+                try:
+                    admission = Admission.objects.filter(id=admission_id).first()
+                    if admission:
+                        send_admission_payment_notification(
+                            admission,
+                            float(transaction_amount),
+                            rp_payment_id,
+                            is_partial=is_partial,
+                        )
+                except Exception as notify_err:
+                    logger.error(f"[Razorpay Async] ADM notification failed for {admission_id}: {notify_err}")
+
+            if bank_account_rp_id:
+                try:
+                    transfer_payment_to_linked_account(
+                        rp_payment_id,
+                        transaction_amount,
+                        bank_account_rp_id,
+                    )
+                except Exception as exc:
+                    logger.error(f"[Razorpay Route Async] Transfer failed for ADM {admission_id}: {exc}")
+        except Exception as outer_err:
+            logger.error(f"[Razorpay Async] Error in ADM worker for {admission_id}: {outer_err}")
+        finally:
+            close_old_connections()
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
+def process_payment_link_paid_event(payload: dict, async_dispatch: bool = True) -> dict:
     """
     Handle the 'payment_link.paid' Razorpay webhook event.
 
@@ -640,14 +743,6 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             update_student_fee_status(sf.id)
             logger.info(f"[Razorpay] StudentFee {sf_id} verified. Payment: {payment.id}")
 
-            # ── Auto-send receipt (email + WhatsApp) ─────────────────────
-            try:
-                from .services import send_payment_receipt
-                send_payment_receipt(payment)
-                logger.info(f"[Razorpay] Receipt sent for Payment {payment.id}")
-            except Exception as receipt_err:
-                logger.error(f"[Razorpay] Failed to send receipt for Payment {payment.id}: {receipt_err}")
-
             # ── Update the single history entry of this link (pending -> verified) ──
             try:
                 from onboarding.models import Admission as _Adm
@@ -676,14 +771,34 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             except Exception as hist_err:
                 logger.error(f"[Razorpay] Failed to update payment history for link {link_entity.get('id')}: {hist_err}")
 
-            # ── Route Transfer ───────────────────────────────────────────────
-            try:
-                from onboarding.models import Admission
-                admission = Admission.objects.filter(email=sf.student.email).order_by('-submitted_at').first()
-                if admission and admission.bank_account and admission.bank_account.razorpay_account_id:
-                    transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
-            except Exception as e:
-                logger.error(f"[Razorpay Route] Transfer failed for SF {sf_id}: {e}")
+            # ── Auto-send receipt (email + WhatsApp) and Route transfer ─────────
+            # Must run asynchronously so the Razorpay webhook responds with HTTP 200 within
+            # milliseconds (<5s timeout). Heavy PDF generation, Azure Blob upload, SMTP email,
+            # and WhatsApp API calls will run in the background.
+            student_email = getattr(sf.student, 'email', None) if sf.student else None
+            if async_dispatch:
+                _dispatch_sf_post_payment_tasks(
+                    payment_id=payment.id,
+                    sf_id=sf.id,
+                    rp_payment_id=rp_payment_id,
+                    amount_paid=amount_paid,
+                    student_email=student_email,
+                )
+            else:
+                try:
+                    from .services import send_payment_receipt
+                    send_payment_receipt(payment)
+                    logger.info(f"[Razorpay] Receipt sent for Payment {payment.id}")
+                except Exception as receipt_err:
+                    logger.error(f"[Razorpay] Failed to send receipt for Payment {payment.id}: {receipt_err}")
+
+                try:
+                    from onboarding.models import Admission
+                    admission = Admission.objects.filter(email=student_email).order_by('-submitted_at').first() if student_email else None
+                    if admission and admission.bank_account and admission.bank_account.razorpay_account_id:
+                        transfer_payment_to_linked_account(rp_payment_id, amount_paid, admission.bank_account.razorpay_account_id)
+                except Exception as e:
+                    logger.error(f"[Razorpay Route] Transfer failed for SF {sf_id}: {e}")
 
             return {"success": True, "processed": "SF", "payment_id": str(payment.id)}
 
@@ -951,51 +1066,63 @@ def process_payment_link_paid_event(payload: dict) -> dict:
             # Payment is verified regardless of profile creation status; the student
             # and parent must still receive their receipt email & WhatsApp.
             if is_new_transaction:
-                receipt_sent = False
-                has_existing_receipt = bool(
-                    payment
-                    and (
-                        getattr(payment, '_receipt_notified', None) is True
-                        or (
-                            getattr(payment, 'payment_document', None)
-                            and isinstance(getattr(payment.payment_document, 'name', None), str)
-                            and payment.payment_document.name.strip()
+                bank_account_rp_id = (
+                    admission.bank_account.razorpay_account_id
+                    if (admission.bank_account and admission.bank_account.razorpay_account_id)
+                    else None
+                )
+                if async_dispatch:
+                    _dispatch_adm_post_payment_tasks(
+                        payment_id=payment.id if payment else None,
+                        admission_id=admission.id,
+                        rp_payment_id=rp_payment_id,
+                        transaction_amount=transaction_amount,
+                        is_partial=is_partial,
+                        bank_account_rp_id=bank_account_rp_id,
+                    )
+                else:
+                    receipt_sent = False
+                    has_existing_receipt = bool(
+                        payment
+                        and (
+                            getattr(payment, '_receipt_notified', None) is True
+                            or (
+                                getattr(payment, 'payment_document', None)
+                                and isinstance(getattr(payment.payment_document, 'name', None), str)
+                                and payment.payment_document.name.strip()
+                            )
                         )
                     )
-                )
-                if has_existing_receipt:
-                    receipt_sent = True
-                    logger.info(f"[Razorpay] Receipt already dispatched for payment {getattr(payment, 'id', 'N/A')} — skipping duplicate.")
-                elif payment and not (getattr(payment, '_receipt_notified', None) is True):
-                    try:
-                        send_payment_receipt(payment)
+                    if has_existing_receipt:
                         receipt_sent = True
-                    except Exception as exc:
-                        logger.error(f"[Razorpay] Receipt dispatch failed for {rp_payment_id}: {exc}")
+                        logger.info(f"[Razorpay] Receipt already dispatched for payment {getattr(payment, 'id', 'N/A')} — skipping duplicate.")
+                    elif payment and not (getattr(payment, '_receipt_notified', None) is True):
+                        try:
+                            send_payment_receipt(payment)
+                            receipt_sent = True
+                        except Exception as exc:
+                            logger.error(f"[Razorpay] Receipt dispatch failed for {rp_payment_id}: {exc}")
 
-                # Only send admission-level notification as FALLBACK if
-                # send_payment_receipt failed or payment record was missing,
-                # OR for partial payments (which don't create a student yet).
-                if not receipt_sent or is_partial:
+                    if not receipt_sent or is_partial:
+                        try:
+                            send_admission_payment_notification(
+                                admission,
+                                float(transaction_amount),
+                                rp_payment_id,
+                                is_partial=is_partial,
+                            )
+                        except Exception as notify_err:
+                            logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
+
                     try:
-                        send_admission_payment_notification(
-                            admission,
-                            float(transaction_amount),
-                            rp_payment_id,
-                            is_partial=is_partial,
-                        )
-                    except Exception as notify_err:
-                        logger.error(f"[Razorpay] ADM notification failed for {adm_id}: {notify_err}")
-
-                try:
-                    if admission.bank_account and admission.bank_account.razorpay_account_id:
-                        transfer_payment_to_linked_account(
-                            rp_payment_id,
-                            transaction_amount,
-                            admission.bank_account.razorpay_account_id,
-                        )
-                except Exception as exc:
-                    logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {exc}")
+                        if bank_account_rp_id:
+                            transfer_payment_to_linked_account(
+                                rp_payment_id,
+                                transaction_amount,
+                                bank_account_rp_id,
+                            )
+                    except Exception as exc:
+                        logger.error(f"[Razorpay Route] Transfer failed for ADM {adm_id}: {exc}")
 
             if profile_creation_error:
                 logger.error(
