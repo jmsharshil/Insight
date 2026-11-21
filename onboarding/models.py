@@ -554,7 +554,12 @@ class Admission(models.Model):
                 proof_url = str(self.payment_screenshot)
 
         # If payment link was generated but missing from history, synthesize it
-        has_link_entry = any(item.get('event') == 'payment_link_created' for item in history)
+        has_link_entry = any(
+            item.get('event') == 'payment_link_created'
+            or item.get('razorpay_payment_link_id')
+            or item.get('razorpay_payment_link')
+            for item in history
+        )
         if not has_link_entry and self.razorpay_payment_link:
             expected_pay_amount = self.payment_amount
             if not expected_pay_amount or expected_pay_amount <= 0:
@@ -568,7 +573,7 @@ class Admission(models.Model):
                 'amount': float(expected_pay_amount),
                 'razorpay_payment_link': self.razorpay_payment_link,
                 'razorpay_payment_link_id': self.razorpay_payment_link_id,
-                'status': 'paid' if self.is_razorpay_paid else 'pending',
+                'status': 'verified' if self.is_razorpay_paid else 'payment_pending',
                 'created_at': self.submitted_at.isoformat() if self.submitted_at else None,
                 'date': self.submitted_at.date().isoformat() if self.submitted_at else None,
             })
@@ -598,8 +603,11 @@ class Admission(models.Model):
             try:
                 for p in self.student_profile.payments.all():
                     has_entry = any(
-                        item.get('receipt_number') == p.receipt_number or 
-                        (item.get('transaction_id') == p.transaction_ref and item.get('status') == p.status)
+                        (p.receipt_number and item.get('receipt_number') == p.receipt_number) or 
+                        (p.transaction_ref and (
+                            item.get('transaction_id') == p.transaction_ref
+                            or item.get('razorpay_payment_id') == p.transaction_ref
+                        ))
                         for item in history
                     )
                     if not has_entry:
@@ -627,7 +635,12 @@ class Admission(models.Model):
                 pass
 
         # If payment was submitted/received but missing from history, synthesize it
-        has_payment_entry = any(item.get('event') in ('payment_received', 'payment_submitted', 'payment_verified', 'payment_approved', 'payment_approval_pending') for item in history)
+        has_payment_entry = any(
+            item.get('event') in ('payment_received', 'payment_submitted', 'payment_verified', 'payment_approved', 'payment_approval_pending')
+            or item.get('transaction_id')
+            or item.get('razorpay_payment_id')
+            for item in history
+        )
         if not has_payment_entry and (self.razorpay_payment_id or self.payment_submitted_at or self.transaction_id or self.payment_screenshot):
             expected_pay_amount = self.payment_amount
             if not expected_pay_amount or expected_pay_amount <= 0:
@@ -703,6 +716,20 @@ class Admission(models.Model):
             else:
                 item.setdefault('payment_screenshot', None)
                 item.setdefault('payment_proof', None)
+
+        # Deduplicate history: ensure only ONE entry per payment link / transaction.
+        # If both 'payment_link_created' and 'payment_approved' exist for the same link,
+        # keep the verified 'payment_approved' entry so only 1 entry is returned.
+        deduped = []
+        seen_keys = set()
+        for item in reversed(history):
+            key = item.get('razorpay_payment_link_id') or item.get('transaction_id') or item.get('razorpay_payment_id') or item.get('receipt_number')
+            if key:
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+            deduped.append(item)
+        history = list(reversed(deduped))
 
         return history
 

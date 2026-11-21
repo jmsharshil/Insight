@@ -856,14 +856,23 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                 admission.save(update_fields=['payment_amount', 'updated_at'])
 
                 history = list(admission.payment_history or [])
+                link_id_to_match = link_entity.get('id') or getattr(admission, 'razorpay_payment_link_id', None)
                 link_entry = next(
                     (
                         entry for entry in reversed(history)
                         if entry.get('event') == 'payment_link_created'
-                        and entry.get('razorpay_payment_link_id') == link_entity.get('id')
+                        and (
+                            (link_id_to_match and entry.get('razorpay_payment_link_id') == link_id_to_match)
+                            or not entry.get('razorpay_payment_link_id')
+                        )
                     ),
                     None,
                 )
+                if not link_entry:
+                    # Fallback to the latest payment_link_created entry
+                    link_entries = [e for e in history if e.get('event') == 'payment_link_created']
+                    if link_entries:
+                        link_entry = link_entries[-1]
 
                 payment_event = 'payment_received' if is_partial else 'payment_approved'
                 payment_history_entry = {
@@ -902,14 +911,21 @@ def process_payment_link_paid_event(payload: dict) -> dict:
                         link_entry['event'] = 'payment_link_created'
                 else:
                     history.append(payment_history_entry)
-                # Drop legacy standalone "notified" rows for this link (older records).
-                history = [
-                    e for e in history
-                    if not (
-                        e.get('event') == 'payment_link_notified'
-                        and (not link_entry or e.get('razorpay_payment_link') == link_entry.get('razorpay_payment_link'))
-                    )
-                ]
+
+                # Ensure deduplication: drop legacy notified entries and any duplicate
+                # payment_link_created entries for this link
+                cleaned_history = []
+                seen_keys = set()
+                for e in reversed(history):
+                    if e.get('event') == 'payment_link_notified':
+                        continue
+                    key = e.get('razorpay_payment_link_id') or e.get('transaction_id') or e.get('razorpay_payment_id')
+                    if key and not is_partial:
+                        if key in seen_keys:
+                            continue
+                        seen_keys.add(key)
+                    cleaned_history.append(e)
+                history = list(reversed(cleaned_history))
                 admission.payment_history = history
                 admission.save(update_fields=['payment_history', 'updated_at'])
 
