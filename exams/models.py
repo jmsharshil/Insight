@@ -57,7 +57,7 @@ class Exam(models.Model):
     scheduled_date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
-    status = models.CharField(max_length=20, choices=EXAM_STATUS_CHOICES, default='draft')
+    status = models.CharField(max_length=20, choices=EXAM_STATUS_CHOICES, default='scheduled')
     instructions = models.TextField(blank=True)
 
     # Geo-boundary enforcement (FRD §4.6.1)
