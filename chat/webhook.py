@@ -232,11 +232,11 @@ class WhatsAppWebhookView(View):
                 from reimbursements.utils import handle_reimbursement_whatsapp_approval
                 handled = handle_reimbursement_whatsapp_approval(sender_wa_id, text_body, text_body)
             if not handled:
+                from leads.utils import handle_sales_attendance_whatsapp_approval
+                handled = handle_sales_attendance_whatsapp_approval(sender_wa_id, text_body, text_body)
+            if not handled:
                 from onboarding.notifications import handle_admission_payment_whatsapp_approval
                 handled = handle_admission_payment_whatsapp_approval(sender_wa_id, text_body, text_body)
-            if not handled:
-                from leads.utils import handle_sales_attendance_whatsapp_approval
-                handle_sales_attendance_whatsapp_approval(sender_wa_id, text_body, text_body)
         except Exception as e:
             logger.error("[WHATSAPP WEBHOOK] Error in text approval handler: %s", e)
 
@@ -308,11 +308,11 @@ class WhatsAppWebhookView(View):
                 from reimbursements.utils import handle_reimbursement_whatsapp_approval
                 handled = handle_reimbursement_whatsapp_approval(sender_wa_id, reply_id, reply_title)
             if not handled:
+                from leads.utils import handle_sales_attendance_whatsapp_approval
+                handled = handle_sales_attendance_whatsapp_approval(sender_wa_id, reply_id, reply_title)
+            if not handled:
                 from onboarding.notifications import handle_admission_payment_whatsapp_approval
                 handled = handle_admission_payment_whatsapp_approval(sender_wa_id, reply_id, reply_title)
-            if not handled:
-                from leads.utils import handle_sales_attendance_whatsapp_approval
-                handle_sales_attendance_whatsapp_approval(sender_wa_id, reply_id, reply_title)
         except Exception as e:
             logger.error("[WHATSAPP WEBHOOK] Error in interactive approval handler: %s", e)
 
@@ -340,11 +340,11 @@ class WhatsAppWebhookView(View):
                 from reimbursements.utils import handle_reimbursement_whatsapp_approval
                 handled = handle_reimbursement_whatsapp_approval(sender_wa_id, payload, text)
             if not handled:
+                from leads.utils import handle_sales_attendance_whatsapp_approval
+                handled = handle_sales_attendance_whatsapp_approval(sender_wa_id, payload, text)
+            if not handled:
                 from onboarding.notifications import handle_admission_payment_whatsapp_approval
                 handled = handle_admission_payment_whatsapp_approval(sender_wa_id, payload, text)
-            if not handled:
-                from leads.utils import handle_sales_attendance_whatsapp_approval
-                handle_sales_attendance_whatsapp_approval(sender_wa_id, payload, text)
         except Exception as e:
             logger.error("[WHATSAPP WEBHOOK] Error in button approval handler: %s", e)
 

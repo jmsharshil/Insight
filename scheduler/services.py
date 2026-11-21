@@ -179,114 +179,123 @@ class TaskScheduler:
 
         task = None
         fn = None
+
+        # Try up to 3 times to acquire a row lock on the task
         for attempt in range(3):
             with transaction.atomic():
                 try:
-                    # Row-level lock to ensure only one worker executes this task
-                    task = ScheduledTask.objects.select_for_update().get(id=task_id)
-
-                    # ── Guard: skip if already cancelled, completed, or running ────────
-                    if task.status in ("cancelled", "completed", "running"):
-                        print(f"[SCHEDULER] Task {task_id} is {task.status} — skipping execution.")
-                        return
-
-                    fn = cls._registry.get(task.task_type)
-                    if fn is None:
-                        logger.error(
-                            "[SCHEDULER] No registered function for task_type='%s'",
-                            task.task_type,
-                        )
-                        task.status = "failed"
-                        task.error_message = f"Unknown task_type: {task.task_type}"
-                        task.save(update_fields=["status", "error_message", "updated_at"])
-                        return
-
-                    # ── Mark running ─────────────────────────────────────────
-                    task.status = "running"
-                    task.started_at = timezone.now()
-                    task.save(update_fields=["status", "started_at", "updated_at"])
-                    break
+                    task = ScheduledTask.objects.select_for_update(skip_locked=True).get(id=task_id)
                 except ScheduledTask.DoesNotExist:
                     if attempt < 2:
                         time.sleep(0.3)
+                        continue
                     else:
-                        logger.warning("[SCHEDULER] Task %s not found in DB — skipping.", task_id)
+                        logger.warning(
+                            "[SCHEDULER] Task %s not found in DB or already locked — skipping.",
+                            task_id,
+                        )
                         return
 
-        if not task or task.status != "running" or fn is None:
+                # Guard against races: another worker may have updated status
+                if task.status in ("cancelled", "completed", "running"):
+                    print(f"[SCHEDULER] Task {task_id} is {task.status} — skipping execution.")
+                    return
+
+                fn = cls._registry.get(task.task_type)
+                if fn is None:
+                    logger.error(
+                        "[SCHEDULER] No registered function for task_type='%s'",
+                        task.task_type,
+                    )
+                    task.status = "failed"
+                    task.error_message = f"Unknown task_type: {task.task_type}"
+                    task.save(update_fields=["status", "error_message", "updated_at"])
+                    return
+
+                # Mark as running while we still hold the lock
+                task.status = "running"
+                task.started_at = timezone.now()
+                task.save(update_fields=["status", "started_at", "updated_at"])
+                break  # Successfully prepared; release lock on tx exit
+
+        if task is None or fn is None:
+            logger.error("[SCHEDULER] Failed to load/prepare task %s", task_id)
             return
 
-        # Execute OUTSIDE the transaction so we don't hold the lock for the entire duration
-        # of the task (which could be a long-running API call)
-
+        # ── Execute OUTSIDE the transaction/lock (long-running tasks OK) ──
         try:
             print(f"[SCHEDULER] Executing task {task_id} ({task.task_type})...")
             fn(**task.task_kwargs)
 
-            # ── Success ──────────────────────────────────────────
-            task.status = "completed"
-            task.completed_at = timezone.now()
-            task.save(update_fields=["status", "completed_at", "updated_at"])
+            # Success
+            with transaction.atomic():
+                task = ScheduledTask.objects.get(id=task_id)
+                task.status = "completed"
+                task.completed_at = timezone.now()
+                task.save(update_fields=["status", "completed_at", "updated_at"])
             print(f"[SCHEDULER] Task {task_id} completed successfully.")
 
         except Exception as exc:
             logger.exception(
                 "[SCHEDULER] Task %s (%s) failed: %s",
-                task_id, task.task_type, exc,
+                task_id, getattr(task, 'task_type', 'unknown'), exc,
             )
-            task.retry_count += 1
+            with transaction.atomic():
+                task = ScheduledTask.objects.get(id=task_id)
+                task.retry_count += 1
 
-            if task.retry_count < task.max_retries:
-                # ── Retry with exponential backoff ───────────────
-                backoff = 2 ** task.retry_count
-                task.status = "pending"
-                task.scheduled_at = timezone.now() + timedelta(seconds=backoff)
-                task.error_message = str(exc)
-                task.save(update_fields=[
-                    "status", "retry_count", "scheduled_at",
-                    "error_message", "updated_at",
-                ])
+                if task.retry_count < task.max_retries:
+                    # Retry with exponential backoff
+                    backoff = 2 ** task.retry_count
+                    task.status = "pending"
+                    task.scheduled_at = timezone.now() + timedelta(seconds=backoff)
+                    task.error_message = str(exc)
+                    task.save(update_fields=[
+                        "status", "retry_count", "scheduled_at",
+                        "error_message", "updated_at",
+                    ])
+                    print(
+                        f"[SCHEDULER] Task {task_id} will retry "
+                        f"({task.retry_count}/{task.max_retries}) in {backoff}s"
+                    )
+                    cls._schedule_in_memory(task_id, backoff)
+                    return  # Don't reach recurring reschedule on retry
+                else:
+                    task.status = "failed"
+                    task.error_message = str(exc)
+                    task.save(update_fields=[
+                        "status", "retry_count", "error_message", "updated_at",
+                    ])
+                    print(f"[SCHEDULER] Task {task_id} failed permanently after {task.max_retries} retries.")
+
+        # ── Recurring: schedule next iteration (runs for both success and final failure) ──
+        try:
+            task.refresh_from_db()
+            if task.is_recurring and task.interval_seconds:
+                next_delay = task.interval_seconds
+
+                # Wall-clock sensitive tasks (prevents drift)
+                WALL_CLOCK_TASKS = {
+                    "detect_missing_scans_all_branches": (22, 30),
+                }
+                if task.task_type in WALL_CLOCK_TASKS:
+                    target_h, target_m = WALL_CLOCK_TASKS[task.task_type]
+                    next_delay = cls._seconds_until_target_ist(target_h, target_m)
+
                 print(
-                    f"[SCHEDULER] Task {task_id} will retry "
-                    f"({task.retry_count}/{task.max_retries}) in {backoff}s"
+                    f"[SCHEDULER] Recurring task '{task.task_type}' — "
+                    f"scheduling next run in {next_delay}s"
                 )
-                cls._schedule_in_memory(task_id, backoff)
-                return  # Don't reschedule recurring yet
-            else:
-                task.status = "failed"
-                task.error_message = str(exc)
-                task.save(update_fields=[
-                    "status", "retry_count", "error_message", "updated_at",
-                ])
-                print(f"[SCHEDULER] Task {task_id} failed permanently after {task.max_retries} retries.")
-
-        # ── Recurring: schedule the next iteration ───────────────
-        if task.is_recurring and task.interval_seconds:
-            next_delay = task.interval_seconds
-
-            # For wall-clock-sensitive tasks, compute the actual delay
-            # to the target IST time instead of a blind +24h offset.
-            # This prevents drift if the task runs a few minutes late.
-            WALL_CLOCK_TASKS = {
-                # task_type → (target_hour, target_minute)
-                "detect_missing_scans_all_branches": (22, 30),
-            }
-            if task.task_type in WALL_CLOCK_TASKS:
-                target_h, target_m = WALL_CLOCK_TASKS[task.task_type]
-                next_delay = cls._seconds_until_target_ist(target_h, target_m)
-
-            print(
-                f"[SCHEDULER] Recurring task '{task.task_type}' — "
-                f"scheduling next run in {next_delay}s"
-            )
-            cls.schedule(
-                task_type=task.task_type,
-                task_kwargs=task.task_kwargs if task.task_kwargs else None,
-                delay_seconds=next_delay,
-                is_recurring=True,
-                interval_seconds=task.interval_seconds,
-                max_retries=task.max_retries,
-            )
+                cls.schedule(
+                    task_type=task.task_type,
+                    task_kwargs=task.task_kwargs if task.task_kwargs else None,
+                    delay_seconds=next_delay,
+                    is_recurring=True,
+                    interval_seconds=task.interval_seconds,
+                    max_retries=task.max_retries,
+                )
+        except Exception as rec_exc:
+            logger.warning("[SCHEDULER] Failed to reschedule recurring task %s: %s", task_id, rec_exc)
 
     # ── Reconciliation ───────────────────────────────────────────
 
