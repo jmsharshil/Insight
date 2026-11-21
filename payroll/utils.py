@@ -9,6 +9,12 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def _user_role(user):
+    """Consistent with exams/views.py to support additional_roles via RoleChecker."""
+    from core.utils import get_user_role
+    return get_user_role(user)
+
+
 def _joining_anniversary(joining_date, anniversary_year):
     """Return the joining anniversary for a year, clamping leap-day dates to month-end."""
     if not joining_date:
@@ -544,8 +550,41 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
             daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
 
+    # Supervisor duty integration for faculty (primary or additional 'exam_supervisor' role).
+    # This ensures gross_salary, total_hours in per_day_deduction_log, hour_based_amount,
+    # late penalties and net salary correctly include payable_hours from SupervisorDutyLog.
+    # Uses RoleChecker.all_roles (consistent with exams/views.py multi-role fix).
+    # Fixes the reported "gross amount / total_hours per-day reduction" bug for faculty.
+    supervisor_duty_pay = Decimal(0)
+    supervisor_hours = Decimal(0)
+    role_checker = _user_role(faculty_profile.user)
+    all_roles = getattr(role_checker, 'all_roles', {str(role_checker)}) if role_checker else set()
+    if 'exam_supervisor' in all_roles:
+        from exams.models import SupervisorDutyLog
+        duty_logs = SupervisorDutyLog.objects.filter(
+            supervisor=faculty_profile.user,
+            exam__scheduled_date__year=year,
+            exam__scheduled_date__month=month,
+            start_submitted_at__isnull=False,
+            payable_hours__gt=0,
+        ).select_related('exam')
+        for log in duty_logs:
+            h = Decimal(str(getattr(log, 'payable_hours', 0)))
+            supervisor_hours += h
+            rate = fac_hourly_rate
+            duty_gross = h * rate
+            supervisor_duty_pay += duty_gross
+            d_str = None
+            if getattr(log.exam, 'scheduled_date', None):
+                d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
+            if d_str:
+                daily_stats[d_str]['total_hours'] += h
+                daily_stats[d_str]['gross_salary'] += duty_gross
+                if getattr(log, 'late_minutes', 0) > 0:
+                    daily_stats[d_str]['late_minutes'] += log.late_minutes
+
     # total_hours: only actual hours worked (no guaranteed base session_hours inflation)
-    total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
+    total_hours = (total_session_minutes + qr_extra_minutes + (supervisor_hours * Decimal(60))) / Decimal(60)
 
     # 4. Compute hour_based_amount per subject
     hour_based_amount = Decimal(0)
@@ -561,6 +600,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     # Add QR-only hours at default rate (no base session_hours inflation for visiting/part-time)
     qr_extra_hours = qr_extra_minutes / Decimal(60)
     hour_based_amount += qr_extra_hours * fac_hourly_rate
+    hour_based_amount += supervisor_duty_pay
     # NOTE: fac_session_hours is NOT added here. For visiting faculty, only actual worked hours
     # are paid. session_hours on profile is just a reference/default, not a guaranteed minimum.
 
@@ -735,6 +775,34 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             d_str = d_date.strftime('%Y-%m-%d')
             daily_stats[d_str]['late_minutes'] = d_delay
 
+    # Supervisor duty late penalty for faculty with exam_supervisor role (or additional_roles).
+    # This ensures per_day_deduction_log 'deduction' / 'penalty_amount', total_late_penalty_minutes,
+    # late_penalty, and net salary are correct for multi-role faculty. Uses same RoleChecker
+    # pattern as the exam visibility fix. This completes the per-day reduction calculation fix.
+    role_checker = _user_role(faculty_profile.user)
+    all_roles = getattr(role_checker, 'all_roles', {str(role_checker)}) if role_checker else set()
+    if 'exam_supervisor' in all_roles:
+        from exams.models import SupervisorDutyLog
+        duty_logs = SupervisorDutyLog.objects.filter(
+            supervisor=faculty_profile.user,
+            exam__scheduled_date__year=year,
+            exam__scheduled_date__month=month,
+            late_minutes__gt=0,
+        ).select_related('exam')
+        for log in duty_logs:
+            if policy and policy.deduction_per_minute > 0:
+                penalty = Decimal(log.late_minutes) * deduction_rate
+                if getattr(policy, 'max_deduction_per_session', 0) > 0:
+                    penalty = min(penalty, policy.max_deduction_per_session)
+                late_penalty += penalty
+                total_late_penalty_minutes += log.late_minutes
+                d_str = log.exam.scheduled_date.strftime('%Y-%m-%d') if getattr(log.exam, 'scheduled_date', None) else None
+                if d_str and d_str in daily_stats:
+                    daily_stats[d_str]['deduction'] = daily_stats[d_str].get('deduction', Decimal(0)) + penalty
+                    daily_stats[d_str]['penalty_minutes'] = daily_stats[d_str].get('penalty_minutes', 0) + log.late_minutes
+                if d_str and d_str not in late_dates:
+                    late_dates.append(d_str)
+
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
         net_salary = max(Decimal(0), stat['gross_salary'] - stat['deduction'])
@@ -744,8 +812,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             'gross_salary': str(round(stat['gross_salary'], 2)),
             'deduction': str(round(stat['deduction'], 2)),
             'net_salary': str(round(net_salary, 2)),
-            'late_minutes': stat['late_minutes'],
-            'penalty_minutes': stat['penalty_minutes'],
+            'late_minutes': stat.get('late_minutes', 0),
+            'penalty_minutes': stat.get('penalty_minutes', 0),
             'penalty_amount': str(round(stat['deduction'], 2)),
         })
 
@@ -1273,8 +1341,37 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             daily_stats[d_str]['total_hours'] += diff_minutes / Decimal(60)
             daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * fac_hourly_rate
 
+    # Supervisor duty for preview (to keep consistent with compute_payslip_for_faculty)
+    supervisor_duty_pay = Decimal(0)
+    supervisor_hours = Decimal(0)
+    role_checker = _user_role(faculty_profile.user)
+    all_roles = getattr(role_checker, 'all_roles', {str(role_checker)}) if role_checker else set()
+    if 'exam_supervisor' in all_roles:
+        from exams.models import SupervisorDutyLog
+        duty_logs = SupervisorDutyLog.objects.filter(
+            supervisor=faculty_profile.user,
+            exam__scheduled_date__year=year,
+            exam__scheduled_date__month=month,
+            start_submitted_at__isnull=False,
+            payable_hours__gt=0,
+        ).select_related('exam')
+        for log in duty_logs:
+            h = Decimal(str(getattr(log, 'payable_hours', 0)))
+            supervisor_hours += h
+            rate = fac_hourly_rate
+            duty_gross = h * rate
+            supervisor_duty_pay += duty_gross
+            d_str = None
+            if getattr(log.exam, 'scheduled_date', None):
+                d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
+            if d_str:
+                daily_stats[d_str]['total_hours'] += h
+                daily_stats[d_str]['gross_salary'] += duty_gross
+                if getattr(log, 'late_minutes', 0) > 0:
+                    daily_stats[d_str]['late_minutes'] += log.late_minutes
+
     # total_hours: only actual hours worked (no guaranteed base session_hours inflation)
-    total_hours = (total_session_minutes + qr_extra_minutes) / Decimal(60)
+    total_hours = (total_session_minutes + qr_extra_minutes + (supervisor_hours * Decimal(60))) / Decimal(60)
 
     hour_based_amount = Decimal(0)
     for subject_id, hours in subject_hours.items():
@@ -1289,6 +1386,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     # Add QR-only hours at default rate (no base session_hours inflation for visiting/part-time)
     qr_extra_hours = qr_extra_minutes / Decimal(60)
     hour_based_amount += qr_extra_hours * fac_hourly_rate
+    hour_based_amount += supervisor_duty_pay
     # NOTE: fac_session_hours is NOT added here.
 
     sessions_count = sessions.count()
@@ -1467,6 +1565,29 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         for d_date, d_delay in daily_delays.items():
             d_str = d_date.strftime('%Y-%m-%d')
             daily_stats[d_str]['late_minutes'] = d_delay
+
+    # Supervisor duty late penalty (preview version)
+    role_checker = _user_role(faculty_profile.user)
+    all_roles = getattr(role_checker, 'all_roles', {str(role_checker)}) if role_checker else set()
+    if 'exam_supervisor' in all_roles:
+        from exams.models import SupervisorDutyLog
+        duty_logs = SupervisorDutyLog.objects.filter(
+            supervisor=faculty_profile.user,
+            exam__scheduled_date__year=year,
+            exam__scheduled_date__month=month,
+            late_minutes__gt=0,
+        ).select_related('exam')
+        for log in duty_logs:
+            if policy and policy.deduction_per_minute > 0:
+                penalty = Decimal(log.late_minutes) * deduction_rate
+                if getattr(policy, 'max_deduction_per_session', 0) > 0:
+                    penalty = min(penalty, policy.max_deduction_per_session)
+                late_penalty += penalty
+                total_late_penalty_minutes += log.late_minutes
+                d_str = log.exam.scheduled_date.strftime('%Y-%m-%d') if getattr(log.exam, 'scheduled_date', None) else None
+                if d_str and d_str in daily_stats:
+                    daily_stats[d_str]['deduction'] = daily_stats[d_str].get('deduction', Decimal(0)) + penalty
+                    daily_stats[d_str]['penalty_minutes'] = daily_stats[d_str].get('penalty_minutes', 0) + log.late_minutes
 
     per_day_deduction_log = []
     for d_str, stat in sorted(daily_stats.items()):
