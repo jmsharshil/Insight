@@ -1998,10 +1998,33 @@ class SupervisorDutyPhotoView(APIView):
             duty.end_photo = photo
             duty.end_submitted_at = now
             if duty.start_submitted_at:
-                hours = (now - duty.start_submitted_at).total_seconds() / 3600.0
-                # Model is DecimalField — store precisely
                 from decimal import Decimal
-                duty.payable_hours = Decimal(str(round(hours, 1)))
+                try:
+                    exam_start_dt = timezone.make_aware(
+                        datetime.combine(exam.scheduled_date, exam.start_time),
+                        timezone.get_current_timezone()
+                    )
+                    exam_end_dt = timezone.make_aware(
+                        datetime.combine(exam.scheduled_date, exam.end_time),
+                        timezone.get_current_timezone()
+                    )
+                    if exam_end_dt < exam_start_dt:
+                        exam_end_dt += timedelta(days=1)
+
+                    # Do not count after exam end time as extra time (cap at exam_end_dt)
+                    eff_end = min(now, exam_end_dt)
+                    # 15-minute reporting window before exam is not extra overtime (starts at exam_start_dt)
+                    eff_start = max(duty.start_submitted_at, exam_start_dt)
+
+                    if eff_end > eff_start:
+                        hours = (eff_end - eff_start).total_seconds() / 3600.0
+                    else:
+                        hours = 0.0
+                    duty.payable_hours = Decimal(str(round(hours, 1)))
+                except Exception as e:
+                    logger.warning(f"Fallback computing payable_hours for exam {exam.id}: {e}")
+                    hours = (now - duty.start_submitted_at).total_seconds() / 3600.0
+                    duty.payable_hours = Decimal(str(round(hours, 1)))
             duty.save()
 
         # Return unified shape matching the updated GET (with flags + URLs)

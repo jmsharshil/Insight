@@ -1,0 +1,148 @@
+flowchart TD
+  Start([Start])
+  SA[Super Admin Login]
+  Start --> SA
+  AddSource[Add New Source]
+  SA --> AddSource
+  SourceDetails[Enter Source Details]
+  AddSource --> SourceDetails
+  SourceName[Source Name]
+  SourceDetails --> SourceName
+  SourceType{Select Source Type}
+  SourceName --> SourceType
+  NoSchool[No School Required]
+  SourceType -->|Social Media| NoSchool
+  SourceType -->|Google Ads| NoSchool
+  SourceType -->|Existing Student| NoSchool
+  SelectSchool[Select School for Seminar]
+  SourceType -->|Seminar / Workshop| SelectSchool
+  CheckSchool{School Required?}
+  SourceType -->|Other Types| CheckSchool
+  CheckSchool -->|Yes| SelectSchool
+  CheckSchool -->|No| NoSchool
+  SetIncentive[Set Total Incentive Amount]
+  SelectSchool --> SetIncentive
+  NoSchool --> SetIncentive
+  DefinePercent[Define % Distribution]
+  SetIncentive --> DefinePercent
+  Role1[School %]
+  DefinePercent --> Role1
+  Role2[Tele Caller %]
+  Role1 --> Role2
+  Role3[Counsellor %]
+  Role2 --> Role3
+  Role4[Sales Person %]
+  Role3 --> Role4
+  Role5[Front Desk %]
+  Role4 --> Role5
+  SaveSource[Save Source + Rules]
+  Role5 --> SaveSource
+  SourceReady[(Source Ready for Use)]
+  SaveSource --> SourceReady
+  LeadCapture{Lead Capture Method}
+  SourceReady --> LeadCapture
+  Form[User Fills Form]
+  LeadCapture -->|Contact / Inquiry / Admission Form| Form
+  SelectSource[Select Source from Dropdown]
+  Form --> SelectSource
+  SchoolCheck{Does Source require School?}
+  SelectSource --> SchoolCheck
+  SchoolDropdown[Select School from Dropdown]
+  SchoolCheck -->|Yes| SchoolDropdown
+  SchoolExists{School in list?}
+  SchoolDropdown --> SchoolExists
+  SaveLeadForm[Save Lead / Inquiry]
+  SchoolExists -->|Yes| SaveLeadForm
+  EnterSchoolName[Enter School Name manually]
+  SchoolExists -->|No| EnterSchoolName
+  EnterSchoolName --> SaveLeadForm
+  SchoolCheck -->|No| SaveLeadForm
+  ExcelUpload[Sales uploads Excel]
+  LeadCapture -->|Sales Excel Upload| ExcelUpload
+  MapSource[Map Source Type from Excel]
+  ExcelUpload --> MapSource
+  SaveLeadExcel[Create Inquiry / Lead with Source]
+  MapSource --> SaveLeadExcel
+  LeadCreated[(Lead Created<br/>with Source + School)]
+  SaveLeadForm --> LeadCreated
+  SaveLeadExcel --> LeadCreated
+  AdmissionProcess[Admission Process]
+  LeadCreated --> AdmissionProcess
+  Payment{Payment Completed?}
+  AdmissionProcess --> Payment
+  WaitPayment[Wait for Payment]
+  Payment -->|No| WaitPayment
+  WaitPayment --> Payment
+  CreateStudent[Create Student Record]
+  Payment -->|Yes| CreateStudent
+  TriggerIncentive[Trigger Incentive Calculation Engine]
+  CreateStudent --> TriggerIncentive
+  LookupSource[Lookup Source of this Lead]
+  TriggerIncentive --> LookupSource
+  GetRules[Get Incentive Rules of Source]
+  LookupSource --> GetRules
+  CalcTotal[Get Total Incentive Amount]
+  GetRules --> CalcTotal
+  CalcSplit[Calculate Amount for each Role]
+  CalcTotal --> CalcSplit
+  CalcSchool[School Amount = Total × School %]
+  CalcSplit --> CalcSchool
+  CalcTele[Tele Caller Amount]
+  CalcSplit --> CalcTele
+  CalcCounsellor[Counsellor Amount]
+  CalcSplit --> CalcCounsellor
+  CalcSales[Sales Person Amount]
+  CalcSplit --> CalcSales
+  CalcFrontDesk[Front Desk Amount]
+  CalcSplit --> CalcFrontDesk
+  CreateEntries[Create Incentive Entries<br/>Status = Pending Approval]
+  CalcSchool --> CreateEntries
+  CalcTele --> CreateEntries
+  CalcCounsellor --> CreateEntries
+  CalcSales --> CreateEntries
+  CalcFrontDesk --> CreateEntries
+  PendingList[(Incentive Entries<br/>Pending Approval)]
+  CreateEntries --> PendingList
+  SAReview[Super Admin Reviews Entries]
+  PendingList --> SAReview
+  Decision{Approve / Reject?}
+  SAReview --> Decision
+  Rejected[Status = Rejected]
+  Decision -->|Reject| Rejected
+  EndReject([End - No Incentive])
+  Rejected --> EndReject
+  Approved[Status = Approved]
+  Decision -->|Approve| Approved
+  ScheduleAnnual[Schedule Annual Payout<br/>Linked to User Payslip]
+  Approved --> ScheduleAnnual
+  AnnualDue[(Incentive Scheduled<br/>for Annual Release)]
+  ScheduleAnnual --> AnnualDue
+  AnnualCheck{Annual cycle<br/>completed?}
+  AnnualDue --> AnnualCheck
+  WaitCycle[Wait for Annual Cycle to Complete]
+  AnnualCheck -->|No| WaitCycle
+  WaitCycle --> AnnualCheck
+  MakePayable[Release This Year's Incentive<br/>Status = Payable]
+  AnnualCheck -->|Yes| MakePayable
+  PayslipClaim[Incentive Claimable<br/>in Payslip]
+  MakePayable --> PayslipClaim
+  PayslipClaim --> AnnualCheck
+  classDef admin fill:#4A90E2,stroke:#2c5aa0,color:white
+  classDef data fill:#9013FE,stroke:#5a0b9e,color:white
+  classDef decision fill:#F5A623,stroke:#c17d0e,color:black
+  classDef endnode fill:#D0021B,stroke:#8b0112,color:white
+  classDef process fill:#7ED321,stroke:#4a8c15,color:black
+  class AddSource,DefinePercent,SA,SAReview,SaveSource,SourceDetails admin
+  class AnnualDue,LeadCreated,PendingList,SourceReady data
+  class AnnualCheck,Decision,LeadCapture,Payment,SchoolCheck,SchoolExists,SourceType decision
+  class EndReject endnode
+  class AdmissionProcess,CalcSplit,CreateEntries,CreateStudent,ExcelUpload,Form,MakePayable,ScheduleAnnual,TriggerIncentive,WaitCycle process
+  %% ==================== 1. SOURCE CONFIGURATION ====================
+  %% ==================== 2. LEAD CAPTURE ====================
+  %% Form Path
+  %% Excel Path
+  %% ==================== 3. ADMISSION & PAYMENT ====================
+  %% ==================== 4. INCENTIVE CALCULATION ====================
+  %% ==================== 5. APPROVAL ====================
+  %% ==================== 6. ANNUAL PAYOUT ====================
+  %% Styling
