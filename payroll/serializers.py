@@ -50,32 +50,32 @@ class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
             from batches.models import TimetableSlot
             from datetime import datetime
             dow = sr.session_date.weekday()
-            slot = TimetableSlot.objects.filter(
+            ref_time = obj.scheduled_time or sr.start_time
+            candidate_slots = list(TimetableSlot.objects.filter(
                 models.Q(day_of_week=dow) | models.Q(session_date=sr.session_date),
                 batch_id=sr.batch_id, subject_id=sr.subject_id
-            ).first()
-            if not slot and getattr(sr, 'faculty', None):
-                ref_time = obj.scheduled_time or sr.start_time
-                fac_slots = TimetableSlot.objects.filter(
+            ))
+            if not candidate_slots and getattr(sr, 'faculty', None):
+                candidate_slots = list(TimetableSlot.objects.filter(
                     models.Q(day_of_week=dow) | models.Q(session_date=sr.session_date),
                     faculty=sr.faculty,
-                )
-                if ref_time:
-                    s_dt = datetime.combine(sr.session_date, ref_time)
-                    best_slot = None
-                    best_diff = 999999
-                    for cand_slot in fac_slots:
-                        if cand_slot.start_time:
-                            c_dt = datetime.combine(sr.session_date, cand_slot.start_time)
-                            diff_sec = abs((c_dt - s_dt).total_seconds())
-                            if diff_sec < best_diff and diff_sec <= 60 * 60:
-                                best_diff = diff_sec
-                                best_slot = cand_slot
-                    slot = best_slot
-                else:
-                    slot = fac_slots.first()
-            if slot and slot.end_time:
-                return slot.end_time.strftime('%H:%M:%S')
+                ))
+            if ref_time and candidate_slots:
+                s_dt = datetime.combine(sr.session_date, ref_time)
+                best_slot = None
+                best_diff = 999999
+                for cand_slot in candidate_slots:
+                    if cand_slot.start_time:
+                        c_dt = datetime.combine(sr.session_date, cand_slot.start_time)
+                        diff_sec = abs((c_dt - s_dt).total_seconds())
+                        if diff_sec < best_diff:
+                            best_diff = diff_sec
+                            best_slot = cand_slot
+                if best_slot and best_slot.end_time:
+                    return best_slot.end_time.strftime('%H:%M:%S')
+            elif candidate_slots and candidate_slots[0].end_time:
+                return candidate_slots[0].end_time.strftime('%H:%M:%S')
+
             if sr.end_time:
                 return sr.end_time.strftime('%H:%M:%S')
         return None
