@@ -146,6 +146,28 @@ def _fmt_currency(value):
     return format(value.quantize(Decimal('0.01')), '.2f')
 
 
+def get_exam_supervisor_pay(user, hours, fallback_rate=Decimal(0)):
+    """
+    Get supervisor pay for an exam based on duration:
+    Checks user.exam_pay_1_5_hours, exam_pay_2_hours, exam_pay_2_5_hours, exam_pay_3_hours.
+    Falls back to hours * fallback_rate.
+    """
+    if user and hours is not None:
+        try:
+            h_dec = Decimal(str(hours))
+            if h_dec == Decimal('1.5') and getattr(user, 'exam_pay_1_5_hours', 0) and Decimal(str(user.exam_pay_1_5_hours)) > 0:
+                return Decimal(str(user.exam_pay_1_5_hours))
+            elif (h_dec == Decimal('2') or h_dec == Decimal('2.0')) and getattr(user, 'exam_pay_2_hours', 0) and Decimal(str(user.exam_pay_2_hours)) > 0:
+                return Decimal(str(user.exam_pay_2_hours))
+            elif h_dec == Decimal('2.5') and getattr(user, 'exam_pay_2_5_hours', 0) and Decimal(str(user.exam_pay_2_5_hours)) > 0:
+                return Decimal(str(user.exam_pay_2_5_hours))
+            elif (h_dec == Decimal('3') or h_dec == Decimal('3.0')) and getattr(user, 'exam_pay_3_hours', 0) and Decimal(str(user.exam_pay_3_hours)) > 0:
+                return Decimal(str(user.exam_pay_3_hours))
+        except Exception:
+            pass
+    return Decimal(str(hours or 0)) * fallback_rate
+
+
 def _get_reimbursements_for_user(user, payroll_run):
     """
     Look up approved, unpaid reimbursements for a user to be credited in this payroll run.
@@ -679,7 +701,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 pass
         supervisor_hours += h
         duty_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
-        duty_gross = h * duty_rate
+        duty_gross = get_exam_supervisor_pay(getattr(faculty_profile, 'user', None), h, fallback_rate=duty_rate)
         supervisor_duty_pay += duty_gross
         d_str = None
         if getattr(log.exam, 'scheduled_date', None):
@@ -1761,7 +1783,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 pass
         supervisor_hours += h
         duty_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
-        duty_gross = h * duty_rate
+        duty_gross = get_exam_supervisor_pay(getattr(faculty_profile, 'user', None), h, fallback_rate=duty_rate)
         supervisor_duty_pay += duty_gross
         d_str = None
         if getattr(log.exam, 'scheduled_date', None):
@@ -2708,7 +2730,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
                     pass
             supervisor_hours += h
             rate = user_hr_rate
-            duty_gross = h * rate
+            duty_gross = get_exam_supervisor_pay(user, h, fallback_rate=rate)
             supervisor_duty_pay += duty_gross
             d_str = None
             if getattr(log, 'exam', None) and getattr(log.exam, 'scheduled_date', None):

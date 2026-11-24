@@ -9,7 +9,8 @@ EMPLOYEE_FIELDS = [
     'employee_id', 'qualification', 'specialization', 'subject_expertise', 'level', 'levels',
     'employment_type', 'joining_date', 'hourly_rate', 'session_hours', 'salary', 
     'bank_account', 'ifsc_code', 'pan_number', 'aadhar_number', 'work_start_time', 'work_end_time', 
-    'working_hours', 'weekly_schedule', 'salary_retention_percentage', 'per_paper_rate'
+    'working_hours', 'weekly_schedule', 'salary_retention_percentage', 'per_paper_rate',
+    'exam_pay_1_5_hours', 'exam_pay_2_hours', 'exam_pay_2_5_hours', 'exam_pay_3_hours'
 ]
 
 
@@ -118,6 +119,19 @@ class EmployeeFieldsMixin:
             
         if not is_paper_checker:
             ret.pop('per_paper_rate', None)
+
+        if not is_exam_supervisor:
+            ret.pop('exam_pay_1_5_hours', None)
+            ret.pop('exam_pay_2_hours', None)
+            ret.pop('exam_pay_2_5_hours', None)
+            ret.pop('exam_pay_3_hours', None)
+        else:
+            ret['exam_supervisor_pay'] = {
+                '1.5': str(getattr(instance, 'exam_pay_1_5_hours', 0) or '0.00'),
+                '2.0': str(getattr(instance, 'exam_pay_2_hours', 0) or '0.00'),
+                '2.5': str(getattr(instance, 'exam_pay_2_5_hours', 0) or '0.00'),
+                '3.0': str(getattr(instance, 'exam_pay_3_hours', 0) or '0.00'),
+            }
             
         return ret
 
@@ -263,7 +277,33 @@ class EmployeeFieldsMixin:
             if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
                 mutable_data[f] = None
                 
-        numeric_fields = ['hourly_rate', 'session_hours', 'salary', 'working_hours', 'salary_retention_percentage', 'per_paper_rate']
+        # Support dict or aliases for exam_supervisor_pay
+        esp = mutable_data.get('exam_supervisor_pay') or mutable_data.get('supervisor_pay')
+        if isinstance(esp, str):
+            import json
+            try:
+                esp = json.loads(esp)
+            except Exception:
+                esp = None
+        if isinstance(esp, dict):
+            if '1.5' in esp:
+                mutable_data['exam_pay_1_5_hours'] = esp['1.5']
+            if '2' in esp or '2.0' in esp:
+                mutable_data['exam_pay_2_hours'] = esp.get('2', esp.get('2.0'))
+            if '2.5' in esp:
+                mutable_data['exam_pay_2_5_hours'] = esp['2.5']
+            if '3' in esp or '3.0' in esp:
+                mutable_data['exam_pay_3_hours'] = esp.get('3', esp.get('3.0'))
+
+        if 'exam_pay_2_0_hours' in mutable_data and 'exam_pay_2_hours' not in mutable_data:
+            mutable_data['exam_pay_2_hours'] = mutable_data.pop('exam_pay_2_0_hours')
+        if 'exam_pay_3_0_hours' in mutable_data and 'exam_pay_3_hours' not in mutable_data:
+            mutable_data['exam_pay_3_hours'] = mutable_data.pop('exam_pay_3_0_hours')
+
+        numeric_fields = [
+            'hourly_rate', 'session_hours', 'salary', 'working_hours', 'salary_retention_percentage', 'per_paper_rate',
+            'exam_pay_1_5_hours', 'exam_pay_2_hours', 'exam_pay_2_5_hours', 'exam_pay_3_hours'
+        ]
         for f in numeric_fields:
             if f in mutable_data and mutable_data[f] in ['', 'null', 'undefined', None]:
                 mutable_data[f] = 0
@@ -321,6 +361,12 @@ class EmployeeFieldsMixin:
                     
             if not is_paper_checker:
                 attrs.pop('per_paper_rate', None)
+
+            if not is_exam_supervisor:
+                attrs.pop('exam_pay_1_5_hours', None)
+                attrs.pop('exam_pay_2_hours', None)
+                attrs.pop('exam_pay_2_5_hours', None)
+                attrs.pop('exam_pay_3_hours', None)
 
             # Auto-calculate and process weekly_schedule if present
             weekly_sched = attrs.get('weekly_schedule')
