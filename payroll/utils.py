@@ -362,33 +362,46 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     })
 
     used_att_ids_for_sessions = set()
+    used_slot_ids_for_sessions = set()
     for s in sessions:
         session_dates.add(s.session_date)
         
-        # Calculate scheduled duration
+        # Calculate scheduled duration — closest-match slot, no duplicates
         from batches.models import TimetableSlot
         from django.db.models import Q
         dow = s.session_date.weekday()
-        slot = TimetableSlot.objects.filter(
+        s_dt = datetime.combine(s.session_date, s.start_time)
+        candidate_slots = TimetableSlot.objects.filter(
             Q(day_of_week=dow) | Q(session_date=s.session_date),
             batch_id=s.batch_id, subject_id=s.subject_id
-        ).first()
-        s_dt = datetime.combine(s.session_date, s.start_time)
+        )
+        slot = None
+        best_diff = 999999
+        for c_slot in candidate_slots:
+            if c_slot.id in used_slot_ids_for_sessions:
+                continue
+            if c_slot.start_time:
+                c_dt = datetime.combine(s.session_date, c_slot.start_time)
+                diff_sec = abs((c_dt - s_dt).total_seconds())
+                if diff_sec < best_diff:
+                    best_diff = diff_sec
+                    slot = c_slot
         if not slot:
             fac_slots = TimetableSlot.objects.filter(
                 Q(day_of_week=dow) | Q(session_date=s.session_date),
                 faculty=faculty_profile,
             )
-            best_slot = None
-            best_diff = 999999
             for c_slot in fac_slots:
+                if c_slot.id in used_slot_ids_for_sessions:
+                    continue
                 if c_slot.start_time:
                     c_dt = datetime.combine(s.session_date, c_slot.start_time)
                     diff_sec = abs((c_dt - s_dt).total_seconds())
                     if diff_sec < best_diff and diff_sec <= 60 * 60:
                         best_diff = diff_sec
-                        best_slot = c_slot
-            slot = best_slot
+                        slot = c_slot
+        if slot:
+            used_slot_ids_for_sessions.add(slot.id)
 
         from attendance.models import EmployeeAttendanceRecord
         candidate_atts = EmployeeAttendanceRecord.objects.filter(
@@ -739,32 +752,44 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
     session_late_details = []
     daily_delays = defaultdict(int)  # Used for full_time and log audit
     used_att_ids_for_deviation = set()
+    used_slot_ids_for_deviation = set()
 
     for s in sessions:
         from batches.models import TimetableSlot
         from django.db.models import Q
         dow = s.session_date.weekday()
-        slot = TimetableSlot.objects.filter(
+        s_dt = datetime.combine(s.session_date, s.start_time)
+        candidate_slots = TimetableSlot.objects.filter(
             Q(day_of_week=dow) | Q(session_date=s.session_date),
             batch_id=s.batch_id, subject_id=s.subject_id
-        ).first()
-
-        s_dt = datetime.combine(s.session_date, s.start_time)
+        )
+        slot = None
+        best_diff = 999999
+        for c_slot in candidate_slots:
+            if c_slot.id in used_slot_ids_for_deviation:
+                continue
+            if c_slot.start_time:
+                c_dt = datetime.combine(s.session_date, c_slot.start_time)
+                diff_sec = abs((c_dt - s_dt).total_seconds())
+                if diff_sec < best_diff:
+                    best_diff = diff_sec
+                    slot = c_slot
         if not slot:
             fac_slots = TimetableSlot.objects.filter(
                 Q(day_of_week=dow) | Q(session_date=s.session_date),
                 faculty=faculty_profile,
             )
-            best_slot = None
-            best_diff = 999999
             for c_slot in fac_slots:
+                if c_slot.id in used_slot_ids_for_deviation:
+                    continue
                 if c_slot.start_time:
                     c_dt = datetime.combine(s.session_date, c_slot.start_time)
                     diff_sec = abs((c_dt - s_dt).total_seconds())
                     if diff_sec < best_diff and diff_sec <= 60 * 60:
                         best_diff = diff_sec
-                        best_slot = c_slot
-            slot = best_slot
+                        slot = c_slot
+        if slot:
+            used_slot_ids_for_deviation.add(slot.id)
 
         scheduled_time = slot.start_time if (slot and slot.start_time) else None
         scheduled_end_time = slot.end_time if (slot and slot.end_time) else None
@@ -844,6 +869,14 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             pen_min = max(0, total_dev - grace) if total_dev > grace else 0
             pen_amt = min(Decimal(pen_min) * deduction_rate, max_deduction)
 
+        s_exact_mins = s.duration_minutes
+        if not s_exact_mins and s.start_time and s.end_time:
+            s_dt_tmp = datetime.combine(s.session_date, s.start_time)
+            e_dt_tmp = datetime.combine(s.session_date, s.end_time)
+            if e_dt_tmp < s_dt_tmp:
+                e_dt_tmp += timedelta(days=1)
+            s_exact_mins = int((e_dt_tmp - s_dt_tmp).total_seconds() / 60)
+
         d_str = s.session_date.strftime('%Y-%m-%d')
         session_obj = {
             'id': str(s.id),
@@ -855,7 +888,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             'actual_start': actual_start.strftime('%H:%M:%S') if actual_start else None,
             'actual_end': actual_end.strftime('%H:%M:%S') if actual_end else None,
             'duration_hours': str(round(session_actual_minutes / Decimal(60), 2)),
-            'duration_minutes': int(round(session_actual_minutes)),
+            'duration_minutes': s_exact_mins,
             'gross_salary': str(round(session_gross, 2)),
             'late_minutes': late_in_min,
             'early_out_minutes': early_out_min,
@@ -873,7 +906,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                 'scheduled_end': scheduled_end_time.strftime('%H:%M:%S') if scheduled_end_time else None,
                 'actual_start': actual_start,
                 'actual_end': actual_end.strftime('%H:%M:%S') if actual_end else None,
-                'duration_minutes': int(round(session_actual_minutes)),
+                'duration_minutes': s_exact_mins,
                 'late_minutes': late_in_min,
                 'early_out_minutes': early_out_min,
                 'penalty_minutes': pen_min,
@@ -1428,34 +1461,47 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     })
 
     used_att_ids_for_sessions = set()
+    used_slot_ids_for_sessions = set()
     chapter_monthly_minutes = defaultdict(Decimal)
     for s in sessions:
         session_dates.add(s.session_date)
         
-        # Calculate scheduled duration
+        # Calculate scheduled duration — closest-match slot, no duplicates
         from batches.models import TimetableSlot
         from django.db.models import Q
         dow = s.session_date.weekday()
-        slot = TimetableSlot.objects.filter(
+        s_dt = datetime.combine(s.session_date, s.start_time)
+        candidate_slots = TimetableSlot.objects.filter(
             Q(day_of_week=dow) | Q(session_date=s.session_date),
             batch_id=s.batch_id, subject_id=s.subject_id
-        ).first()
-        s_dt = datetime.combine(s.session_date, s.start_time)
+        )
+        slot = None
+        best_diff = 999999
+        for c_slot in candidate_slots:
+            if c_slot.id in used_slot_ids_for_sessions:
+                continue
+            if c_slot.start_time:
+                c_dt = datetime.combine(s.session_date, c_slot.start_time)
+                diff_sec = abs((c_dt - s_dt).total_seconds())
+                if diff_sec < best_diff:
+                    best_diff = diff_sec
+                    slot = c_slot
         if not slot:
             fac_slots = TimetableSlot.objects.filter(
                 Q(day_of_week=dow) | Q(session_date=s.session_date),
                 faculty=faculty_profile,
             )
-            best_slot = None
-            best_diff = 999999
             for c_slot in fac_slots:
+                if c_slot.id in used_slot_ids_for_sessions:
+                    continue
                 if c_slot.start_time:
                     c_dt = datetime.combine(s.session_date, c_slot.start_time)
                     diff_sec = abs((c_dt - s_dt).total_seconds())
                     if diff_sec < best_diff and diff_sec <= 60 * 60:
                         best_diff = diff_sec
-                        best_slot = c_slot
-            slot = best_slot
+                        slot = c_slot
+        if slot:
+            used_slot_ids_for_sessions.add(slot.id)
 
         from attendance.models import EmployeeAttendanceRecord
         candidate_atts = EmployeeAttendanceRecord.objects.filter(
@@ -1835,32 +1881,44 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
     session_late_details = []
     daily_delays = defaultdict(int)
     used_att_ids_for_deviation = set()
+    used_slot_ids_for_deviation = set()
 
     for s in sessions:
         from batches.models import TimetableSlot
         from django.db.models import Q
         dow = s.session_date.weekday()
-        slot = TimetableSlot.objects.filter(
+        s_dt = datetime.combine(s.session_date, s.start_time)
+        candidate_slots = TimetableSlot.objects.filter(
             Q(day_of_week=dow) | Q(session_date=s.session_date),
             batch_id=s.batch_id, subject_id=s.subject_id
-        ).first()
-
-        s_dt = datetime.combine(s.session_date, s.start_time)
+        )
+        slot = None
+        best_diff = 999999
+        for c_slot in candidate_slots:
+            if c_slot.id in used_slot_ids_for_deviation:
+                continue
+            if c_slot.start_time:
+                c_dt = datetime.combine(s.session_date, c_slot.start_time)
+                diff_sec = abs((c_dt - s_dt).total_seconds())
+                if diff_sec < best_diff:
+                    best_diff = diff_sec
+                    slot = c_slot
         if not slot:
             fac_slots = TimetableSlot.objects.filter(
                 Q(day_of_week=dow) | Q(session_date=s.session_date),
                 faculty=faculty_profile,
             )
-            best_slot = None
-            best_diff = 999999
             for c_slot in fac_slots:
+                if c_slot.id in used_slot_ids_for_deviation:
+                    continue
                 if c_slot.start_time:
                     c_dt = datetime.combine(s.session_date, c_slot.start_time)
                     diff_sec = abs((c_dt - s_dt).total_seconds())
                     if diff_sec < best_diff and diff_sec <= 60 * 60:
                         best_diff = diff_sec
-                        best_slot = c_slot
-            slot = best_slot
+                        slot = c_slot
+        if slot:
+            used_slot_ids_for_deviation.add(slot.id)
 
         scheduled_time = slot.start_time if (slot and slot.start_time) else None
         scheduled_end_time = slot.end_time if (slot and slot.end_time) else None
@@ -1940,6 +1998,14 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             pen_min = max(0, total_dev - grace) if total_dev > grace else 0
             pen_amt = min(Decimal(pen_min) * deduction_rate, max_deduction)
 
+        s_exact_mins = s.duration_minutes
+        if not s_exact_mins and s.start_time and s.end_time:
+            s_dt_tmp = datetime.combine(s.session_date, s.start_time)
+            e_dt_tmp = datetime.combine(s.session_date, s.end_time)
+            if e_dt_tmp < s_dt_tmp:
+                e_dt_tmp += timedelta(days=1)
+            s_exact_mins = int((e_dt_tmp - s_dt_tmp).total_seconds() / 60)
+
         d_str = s.session_date.strftime('%Y-%m-%d')
         session_obj = {
             'id': str(s.id),
@@ -1951,7 +2017,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             'actual_start': actual_start.strftime('%H:%M:%S') if actual_start else None,
             'actual_end': actual_end.strftime('%H:%M:%S') if actual_end else None,
             'duration_hours': str(round(session_actual_minutes / Decimal(60), 2)),
-            'duration_minutes': int(round(session_actual_minutes)),
+            'duration_minutes': s_exact_mins,
             'gross_salary': str(round(session_gross, 2)),
             'late_minutes': late_in_min,
             'early_out_minutes': early_out_min,
@@ -1969,7 +2035,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                 'scheduled_end': scheduled_end_time.strftime('%H:%M:%S') if scheduled_end_time else None,
                 'actual_start': actual_start,
                 'actual_end': actual_end.strftime('%H:%M:%S') if actual_end else None,
-                'duration_minutes': int(round(session_actual_minutes)),
+                'duration_minutes': s_exact_mins,
                 'late_minutes': late_in_min,
                 'early_out_minutes': early_out_min,
                 'penalty_minutes': pen_min,

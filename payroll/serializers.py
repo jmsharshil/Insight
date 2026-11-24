@@ -111,20 +111,18 @@ class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
     def get_duration_minutes(self, obj):
         sr = getattr(obj, 'session_report', None)
         if sr:
-            act_start = obj.actual_start or sr.start_time
-            act_end_str = self.get_actual_end(obj)
-            if act_start and act_end_str:
+            if sr.duration_minutes:
+                return sr.duration_minutes
+            if sr.start_time and sr.end_time:
                 from datetime import datetime, timedelta
                 try:
-                    s_dt = datetime.combine(sr.session_date, act_start)
-                    e_dt = datetime.combine(sr.session_date, datetime.strptime(act_end_str, '%H:%M:%S').time())
+                    s_dt = datetime.combine(sr.session_date, sr.start_time)
+                    e_dt = datetime.combine(sr.session_date, sr.end_time)
                     if e_dt < s_dt:
                         e_dt += timedelta(days=1)
-                    worked = int((e_dt - s_dt).total_seconds() / 60)
-                    return min(sr.duration_minutes, worked) if sr.duration_minutes else worked
+                    return int((e_dt - s_dt).total_seconds() / 60)
                 except Exception:
                     pass
-            return sr.duration_minutes or 0
         return 0
 
     def get_early_out_minutes(self, obj):
@@ -478,7 +476,8 @@ class MyPaySlipSerializer(PaySlipSerializer):
     class Meta:
         model = PaySlip
         fields = [
-            'id', 'payroll_month', 'payroll_year', 'payroll_status', 'branch_name',
+            'id', 'faculty', 'user_id', 'faculty_name', 'employee_id',
+            'payroll_month', 'payroll_year', 'payroll_status', 'branch_name',
             'basic_salary', 'gross_salary', 'total_hours', 'total_session_hours', 'hour_based_amount',
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
             'late_deduction_log', 'absence_deduction_log',
