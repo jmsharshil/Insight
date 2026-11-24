@@ -146,6 +146,22 @@ def _fmt_currency(value):
     return format(value.quantize(Decimal('0.01')), '.2f')
 
 
+def get_duration_category(hours):
+    try:
+        h = float(hours)
+        if abs(h - 1.5) <= 0.25:
+            return '1.5'
+        elif abs(h - 2.0) <= 0.25:
+            return '2.0'
+        elif abs(h - 2.5) <= 0.25:
+            return '2.5'
+        elif abs(h - 3.0) <= 0.25:
+            return '3.0'
+        return str(round(h, 1))
+    except Exception:
+        return '1.5'
+
+
 def get_exam_supervisor_pay(user, hours, fallback_rate=Decimal(0)):
     """
     Get supervisor pay for an exam based on duration:
@@ -154,18 +170,233 @@ def get_exam_supervisor_pay(user, hours, fallback_rate=Decimal(0)):
     """
     if user and hours is not None:
         try:
-            h_dec = Decimal(str(hours))
-            if h_dec == Decimal('1.5') and getattr(user, 'exam_pay_1_5_hours', 0) and Decimal(str(user.exam_pay_1_5_hours)) > 0:
+            cat = get_duration_category(hours)
+            if cat == '1.5' and getattr(user, 'exam_pay_1_5_hours', 0) and Decimal(str(user.exam_pay_1_5_hours)) > 0:
                 return Decimal(str(user.exam_pay_1_5_hours))
-            elif (h_dec == Decimal('2') or h_dec == Decimal('2.0')) and getattr(user, 'exam_pay_2_hours', 0) and Decimal(str(user.exam_pay_2_hours)) > 0:
+            elif cat == '2.0' and getattr(user, 'exam_pay_2_hours', 0) and Decimal(str(user.exam_pay_2_hours)) > 0:
                 return Decimal(str(user.exam_pay_2_hours))
-            elif h_dec == Decimal('2.5') and getattr(user, 'exam_pay_2_5_hours', 0) and Decimal(str(user.exam_pay_2_5_hours)) > 0:
+            elif cat == '2.5' and getattr(user, 'exam_pay_2_5_hours', 0) and Decimal(str(user.exam_pay_2_5_hours)) > 0:
                 return Decimal(str(user.exam_pay_2_5_hours))
-            elif (h_dec == Decimal('3') or h_dec == Decimal('3.0')) and getattr(user, 'exam_pay_3_hours', 0) and Decimal(str(user.exam_pay_3_hours)) > 0:
+            elif cat == '3.0' and getattr(user, 'exam_pay_3_hours', 0) and Decimal(str(user.exam_pay_3_hours)) > 0:
                 return Decimal(str(user.exam_pay_3_hours))
         except Exception:
             pass
     return Decimal(str(hours or 0)) * fallback_rate
+
+
+def build_exam_supervisor_summary(user, month, year, fallback_rate=Decimal(0)):
+    """
+    Build exam-wise breakdown and statistics for an exam supervisor:
+    - Duration categories: 1.5, 2.0, 2.5, 3.0 hours
+    - Attendance: present / absent
+    - Punctuality: on_time / late
+    - Amounts & deductions calculated according to new hour-wise pay fields (exam_pay_*_hours)
+    """
+    if not user:
+        return None
+
+    from exams.models import Exam, SupervisorDutyLog
+    from datetime import datetime, timedelta
+
+    # 1. Fetch duty logs for this supervisor and month
+    duty_logs = list(SupervisorDutyLog.objects.filter(
+        supervisor=user,
+        exam__scheduled_date__year=year,
+        exam__scheduled_date__month=month,
+    ).select_related('exam', 'exam__batch', 'exam__subject'))
+
+    logged_exam_ids = {log.exam_id for log in duty_logs}
+
+    # 2. Fetch assigned exams that don't have duty logs
+    unlogged_assigned = list(Exam.objects.filter(
+        supervisors=user,
+        scheduled_date__year=year,
+        scheduled_date__month=month,
+        is_deleted=False
+    ).exclude(id__in=logged_exam_ids).select_related('batch', 'subject'))
+
+    # Check if user has exam_supervisor role
+    roles = []
+    if getattr(user, 'role', None):
+        roles.append(user.role)
+    if getattr(user, 'additional_roles', None):
+        roles.extend(user.additional_roles)
+    is_supervisor = ('exam_supervisor' in roles)
+
+    total_assigned = len(duty_logs) + len(unlogged_assigned)
+    if total_assigned == 0 and not is_supervisor:
+        return None
+
+    exams_list = []
+    duration_stats = {
+        '1.5': {'count': 0, 'rate': Decimal(str(getattr(user, 'exam_pay_1_5_hours', 0) or 0)), 'gross_pay': Decimal(0), 'deductions': Decimal(0), 'net_pay': Decimal(0)},
+        '2.0': {'count': 0, 'rate': Decimal(str(getattr(user, 'exam_pay_2_hours', 0) or 0)), 'gross_pay': Decimal(0), 'deductions': Decimal(0), 'net_pay': Decimal(0)},
+        '2.5': {'count': 0, 'rate': Decimal(str(getattr(user, 'exam_pay_2_5_hours', 0) or 0)), 'gross_pay': Decimal(0), 'deductions': Decimal(0), 'net_pay': Decimal(0)},
+        '3.0': {'count': 0, 'rate': Decimal(str(getattr(user, 'exam_pay_3_hours', 0) or 0)), 'gross_pay': Decimal(0), 'deductions': Decimal(0), 'net_pay': Decimal(0)},
+    }
+
+    total_present = 0
+    total_absent = 0
+    total_on_time = 0
+    total_late = 0
+    total_gross = Decimal(0)
+    total_deductions = Decimal(0)
+    total_hours = Decimal(0)
+
+    # Process duty logs
+    for log in duty_logs:
+        exam = log.exam
+        raw_hours = log.payable_hours
+        if not raw_hours or raw_hours <= 0:
+            if exam and exam.duration_minutes:
+                raw_hours = Decimal(str(round(exam.duration_minutes / 60.0, 1)))
+            else:
+                raw_hours = Decimal('1.5')
+
+        cat = get_duration_category(raw_hours)
+        if cat not in duration_stats:
+            duration_stats[cat] = {'count': 0, 'rate': Decimal(0), 'gross_pay': Decimal(0), 'deductions': Decimal(0), 'net_pay': Decimal(0)}
+
+        rate = get_exam_supervisor_pay(user, cat, fallback_rate=fallback_rate)
+        duration_stats[cat]['rate'] = rate
+
+        is_present = bool(log.start_submitted_at)
+        late_mins = log.late_minutes or 0
+
+        exp_reporting_str = None
+        if exam and exam.start_time and exam.scheduled_date:
+            exp_time = (datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)).time()
+            exp_reporting_str = exp_time.strftime('%H:%M:%S')
+
+            if is_present and log.start_submitted_at:
+                try:
+                    exp_dt = timezone.make_aware(
+                        datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15),
+                        timezone.get_current_timezone()
+                    )
+                    if log.start_submitted_at > exp_dt:
+                        diff = int((log.start_submitted_at - exp_dt).total_seconds() // 60)
+                        if diff > late_mins:
+                            late_mins = diff
+                except Exception:
+                    pass
+
+        if is_present:
+            total_present += 1
+            punctuality = 'late' if late_mins > 0 else 'on_time'
+            if punctuality == 'late':
+                total_late += 1
+            else:
+                total_on_time += 1
+
+            gross = rate
+            dur_mins = int(Decimal(cat) * Decimal(60)) if cat in ('1.5', '2.0', '2.5', '3.0') else int(float(raw_hours) * 60)
+            if dur_mins <= 0 and exam:
+                dur_mins = exam.duration_minutes or 90
+            per_min = (gross / Decimal(dur_mins)) if dur_mins > 0 else Decimal(0)
+            deduction = min(gross, round(Decimal(late_mins) * per_min, 2)) if late_mins > 0 else Decimal(0)
+            net = max(Decimal(0), gross - deduction)
+
+            total_hours += Decimal(cat)
+            total_gross += gross
+            total_deductions += deduction
+
+            duration_stats[cat]['count'] += 1
+            duration_stats[cat]['gross_pay'] += gross
+            duration_stats[cat]['deductions'] += deduction
+            duration_stats[cat]['net_pay'] += net
+        else:
+            total_absent += 1
+            punctuality = 'absent'
+            gross = Decimal(0)
+            deduction = Decimal(0)
+            net = Decimal(0)
+
+        exams_list.append({
+            'duty_log_id': str(log.id),
+            'exam_id': str(exam.id) if exam else None,
+            'exam_title': exam.title if exam else 'Exam',
+            'scheduled_date': exam.scheduled_date.strftime('%Y-%m-%d') if exam and exam.scheduled_date else None,
+            'start_time': exam.start_time.strftime('%H:%M:%S') if exam and exam.start_time else None,
+            'end_time': exam.end_time.strftime('%H:%M:%S') if exam and exam.end_time else None,
+            'duration_minutes': (exam.duration_minutes if exam else None) or int(float(raw_hours) * 60),
+            'duration_hours': str(raw_hours),
+            'duration_category': cat,
+            'batch_id': str(exam.batch_id) if exam and exam.batch_id else None,
+            'batch_name': exam.batch.name if exam and exam.batch else '',
+            'subject_id': str(exam.subject_id) if exam and exam.subject_id else None,
+            'subject_name': exam.subject.name if exam and exam.subject else '',
+            'status': 'present' if is_present else 'absent',
+            'punctuality': punctuality,
+            'actual_start_time': timezone.localtime(log.start_submitted_at).strftime('%H:%M:%S') if log.start_submitted_at else None,
+            'expected_reporting_time': exp_reporting_str,
+            'late_minutes': late_mins,
+            'rate': str(rate.quantize(Decimal('0.01'))),
+            'gross_amount': str(gross.quantize(Decimal('0.01'))),
+            'deduction': str(deduction.quantize(Decimal('0.01'))),
+            'net_amount': str(net.quantize(Decimal('0.01'))),
+        })
+
+    # Process unlogged assigned exams (absent)
+    for exam in unlogged_assigned:
+        total_absent += 1
+        raw_hours = Decimal(str(round((exam.duration_minutes or 90) / 60.0, 1)))
+        cat = get_duration_category(raw_hours)
+        rate = get_exam_supervisor_pay(user, cat, fallback_rate=fallback_rate)
+
+        exp_reporting_str = None
+        if exam.start_time and exam.scheduled_date:
+            exp_time = (datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15)).time()
+            exp_reporting_str = exp_time.strftime('%H:%M:%S')
+
+        exams_list.append({
+            'duty_log_id': None,
+            'exam_id': str(exam.id),
+            'exam_title': exam.title,
+            'scheduled_date': exam.scheduled_date.strftime('%Y-%m-%d') if exam.scheduled_date else None,
+            'start_time': exam.start_time.strftime('%H:%M:%S') if exam.start_time else None,
+            'end_time': exam.end_time.strftime('%H:%M:%S') if exam.end_time else None,
+            'duration_minutes': exam.duration_minutes or 90,
+            'duration_hours': str(raw_hours),
+            'duration_category': cat,
+            'batch_id': str(exam.batch_id) if exam.batch_id else None,
+            'batch_name': exam.batch.name if exam.batch else '',
+            'subject_id': str(exam.subject_id) if exam.subject_id else None,
+            'subject_name': exam.subject.name if exam.subject else '',
+            'status': 'absent',
+            'punctuality': 'absent',
+            'actual_start_time': None,
+            'expected_reporting_time': exp_reporting_str,
+            'late_minutes': 0,
+            'rate': str(rate.quantize(Decimal('0.01'))),
+            'gross_amount': '0.00',
+            'deduction': '0.00',
+            'net_amount': '0.00',
+        })
+
+    formatted_duration_stats = {}
+    for k, v in duration_stats.items():
+        formatted_duration_stats[k] = {
+            'count': v['count'],
+            'rate': str(v['rate'].quantize(Decimal('0.01'))),
+            'gross_pay': str(v['gross_pay'].quantize(Decimal('0.01'))),
+            'deductions': str(v['deductions'].quantize(Decimal('0.01'))),
+            'net_pay': str(v['net_pay'].quantize(Decimal('0.01'))),
+        }
+
+    return {
+        'total_exams_assigned': total_assigned,
+        'total_exams_present': total_present,
+        'total_exams_absent': total_absent,
+        'total_exams_on_time': total_on_time,
+        'total_exams_late': total_late,
+        'total_hours': str(total_hours.quantize(Decimal('0.01'))),
+        'total_gross_pay': str(total_gross.quantize(Decimal('0.01'))),
+        'total_late_deduction': str(total_deductions.quantize(Decimal('0.01'))),
+        'total_net_pay': str((total_gross - total_deductions).quantize(Decimal('0.01'))),
+        'duration_breakdown': formatted_duration_stats,
+        'exams': exams_list
+    }
 
 
 def _get_reimbursements_for_user(user, payroll_run):
@@ -655,60 +886,26 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * qr_rate
 
     # Supervisor duty integration for faculty (primary or additional 'exam_supervisor' role).
-    # Uses RoleChecker.all_roles (consistent with exams/views.py:1869 and core.utils.get_user_role).
-    # payable_hours (pre-computed, post-exam extra time excluded) and late_minutes accumulated into
-    # daily_stats, total_hours, hour_based_amount, per_day_deduction_log and penalties.
-    # SupervisorDutyLog filtered on start_submitted_at__isnull=False, payable_hours__gt=0.
+    # Uses build_exam_supervisor_summary for duration-based pay (1.5, 2.0, 2.5, 3.0) and late deductions.
     supervisor_duty_pay = Decimal(0)
     supervisor_hours = Decimal(0)
-    supervisor_duty_logs = []
-    from exams.models import SupervisorDutyLog
-    duty_logs = SupervisorDutyLog.objects.filter(
-        supervisor=faculty_profile.user,
-        exam__scheduled_date__year=year,
-        exam__scheduled_date__month=month,
-        start_submitted_at__isnull=False,
-        payable_hours__gt=0,
-    ).select_related('exam')
-    supervisor_duty_logs = list(duty_logs)
-    for log in supervisor_duty_logs:
-        h = Decimal(str(getattr(log, 'payable_hours', 0)))
-        exam = getattr(log, 'exam', None)
-        if exam and getattr(exam, 'start_time', None) and getattr(exam, 'end_time', None) and getattr(exam, 'scheduled_date', None):
-            try:
-                exam_start_dt = timezone.make_aware(
-                    datetime.combine(exam.scheduled_date, exam.start_time),
-                    timezone.get_current_timezone()
-                )
-                exam_end_dt = timezone.make_aware(
-                    datetime.combine(exam.scheduled_date, exam.end_time),
-                    timezone.get_current_timezone()
-                )
-                if exam_end_dt < exam_start_dt:
-                    exam_end_dt += timedelta(days=1)
-                if getattr(log, 'start_submitted_at', None) and getattr(log, 'end_submitted_at', None):
-                    eff_start = max(log.start_submitted_at, exam_start_dt)
-                    eff_end = min(log.end_submitted_at, exam_end_dt)
-                    if eff_end > eff_start:
-                        h = Decimal(str(round((eff_end - eff_start).total_seconds() / 3600.0, 2)))
-                    else:
-                        h = Decimal(0)
-                elif exam_end_dt > exam_start_dt:
-                    max_exam_h = Decimal(str(round((exam_end_dt - exam_start_dt).total_seconds() / 3600.0, 2)))
-                    if h > max_exam_h:
-                        h = max_exam_h
-            except Exception:
-                pass
-        supervisor_hours += h
-        duty_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
-        duty_gross = get_exam_supervisor_pay(getattr(faculty_profile, 'user', None), h, fallback_rate=duty_rate)
-        supervisor_duty_pay += duty_gross
-        d_str = None
-        if getattr(log.exam, 'scheduled_date', None):
-            d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
-        if d_str:
-            daily_stats[d_str]['total_hours'] += h
-            daily_stats[d_str]['gross_salary'] += duty_gross
+    duty_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
+    supervisor_summary = build_exam_supervisor_summary(
+        getattr(faculty_profile, 'user', None), month, year, fallback_rate=duty_rate
+    )
+    if supervisor_summary:
+        supervisor_duty_pay = Decimal(supervisor_summary['total_gross_pay'])
+        supervisor_hours = Decimal(supervisor_summary['total_hours'])
+        for ex in supervisor_summary['exams']:
+            d_str = ex.get('scheduled_date')
+            if d_str:
+                daily_stats[d_str]['total_hours'] += Decimal(ex['duration_category'])
+                daily_stats[d_str]['gross_salary'] += Decimal(ex['gross_amount'])
+                if Decimal(ex['deduction']) > 0:
+                    daily_stats[d_str]['deduction'] += Decimal(ex['deduction'])
+                    daily_stats[d_str]['late_minutes'] += ex['late_minutes']
+                    daily_stats[d_str]['penalty_minutes'] += ex['late_minutes']
+                    daily_stats[d_str]['late_penalty'] = daily_stats[d_str].get('late_penalty', Decimal(0)) + Decimal(ex['deduction'])
 
     # total_hours: only actual hours worked (no guaranteed base session_hours inflation)
     total_hours = (total_session_minutes + qr_extra_minutes + (supervisor_hours * Decimal(60))) / Decimal(60)
@@ -1044,44 +1241,13 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
                     late_dates.append(d_str)
 
     # Dedicated supervisor late-penalty block (post session/QR logic, after main visiting/full-time).
-    # Supervisor reporting deadline is 15 minutes before exam start; lateness past that deadline is deducted.
-    for log in supervisor_duty_logs:
-            late_mins = getattr(log, 'late_minutes', 0)
-            exam = getattr(log, 'exam', None)
-            if exam and getattr(exam, 'start_time', None) and getattr(exam, 'scheduled_date', None) and getattr(log, 'start_submitted_at', None):
-                try:
-                    expected_start_dt = timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15),
-                        timezone.get_current_timezone()
-                    )
-                    if log.start_submitted_at > expected_start_dt:
-                        actual_late = int((log.start_submitted_at - expected_start_dt).total_seconds() // 60)
-                        if actual_late > late_mins:
-                            late_mins = actual_late
-                except Exception:
-                    pass
-            if late_mins > 0:
-                penalty = Decimal(late_mins) * deduction_rate
-                if max_deduction < Decimal('999999'):
-                    penalty = min(penalty, max_deduction)
-                d_str = None
-                if getattr(log.exam, 'scheduled_date', None):
-                    d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
-                if d_str and d_str in daily_stats:
-                    # Cap to gross only when gross > 0 (avoid silencing deductions when pay rate is separately configured)
-                    gross = daily_stats[d_str]['gross_salary']
-                    if gross > 0:
-                        current_ded = daily_stats[d_str].get('deduction', Decimal(0))
-                        if penalty > gross - current_ded:
-                            penalty = max(Decimal(0), gross - current_ded)
-                    daily_stats[d_str]['late_penalty'] = daily_stats[d_str].get('late_penalty', Decimal(0)) + penalty
-                    daily_stats[d_str]['deduction'] += penalty
-                    daily_stats[d_str]['late_minutes'] += late_mins
-                    daily_stats[d_str]['penalty_minutes'] += late_mins
-                late_penalty += penalty
-                total_late_penalty_minutes += late_mins
-                if d_str and d_str not in late_dates:
-                    late_dates.append(d_str)
+    if supervisor_summary:
+        late_penalty += Decimal(supervisor_summary['total_late_deduction'])
+        total_late_penalty_minutes += sum(ex['late_minutes'] for ex in supervisor_summary['exams'])
+        for ex in supervisor_summary['exams']:
+            d_str = ex.get('scheduled_date')
+            if d_str and Decimal(ex['deduction']) > 0 and d_str not in late_dates:
+                late_dates.append(d_str)
 
     # per_day_deduction_log is built AFTER absence deductions (below) so it can include per-absent-day entries.
     # Placeholder — will be populated after section 8.
@@ -1408,6 +1574,7 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             grace_applied=detail['grace_applied'],
         )
 
+    payslip._exam_supervisor_summary = supervisor_summary
     return payslip
 
 
@@ -1739,58 +1906,26 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             qr_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
             daily_stats[d_str]['gross_salary'] += (diff_minutes / Decimal(60)) * qr_rate
 
-    # Supervisor duty integration for preview (post-QR, uses top-level has_exam_supervisor_role from RoleChecker.all_roles).
-    # Shares supervisor_duty_logs list with dedicated late-penalty block below to eliminate duplicate queries/blocks.
+    # Supervisor duty integration for preview (duration-based pay and deductions).
     supervisor_duty_pay = Decimal(0)
     supervisor_hours = Decimal(0)
-    supervisor_duty_logs = []
-    from exams.models import SupervisorDutyLog
-    duty_logs = SupervisorDutyLog.objects.filter(
-        supervisor=faculty_profile.user,
-        exam__scheduled_date__year=year,
-        exam__scheduled_date__month=month,
-        start_submitted_at__isnull=False,
-        payable_hours__gt=0,
-    ).select_related('exam')
-    supervisor_duty_logs = list(duty_logs)
-    for log in supervisor_duty_logs:
-        h = Decimal(str(getattr(log, 'payable_hours', 0)))
-        exam = getattr(log, 'exam', None)
-        if exam and getattr(exam, 'start_time', None) and getattr(exam, 'end_time', None) and getattr(exam, 'scheduled_date', None):
-            try:
-                exam_start_dt = timezone.make_aware(
-                    datetime.combine(exam.scheduled_date, exam.start_time),
-                    timezone.get_current_timezone()
-                )
-                exam_end_dt = timezone.make_aware(
-                    datetime.combine(exam.scheduled_date, exam.end_time),
-                    timezone.get_current_timezone()
-                )
-                if exam_end_dt < exam_start_dt:
-                    exam_end_dt += timedelta(days=1)
-                if getattr(log, 'start_submitted_at', None) and getattr(log, 'end_submitted_at', None):
-                    eff_start = max(log.start_submitted_at, exam_start_dt)
-                    eff_end = min(log.end_submitted_at, exam_end_dt)
-                    if eff_end > eff_start:
-                        h = Decimal(str(round((eff_end - eff_start).total_seconds() / 3600.0, 2)))
-                    else:
-                        h = Decimal(0)
-                elif exam_end_dt > exam_start_dt:
-                    max_exam_h = Decimal(str(round((exam_end_dt - exam_start_dt).total_seconds() / 3600.0, 2)))
-                    if h > max_exam_h:
-                        h = max_exam_h
-            except Exception:
-                pass
-        supervisor_hours += h
-        duty_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
-        duty_gross = get_exam_supervisor_pay(getattr(faculty_profile, 'user', None), h, fallback_rate=duty_rate)
-        supervisor_duty_pay += duty_gross
-        d_str = None
-        if getattr(log.exam, 'scheduled_date', None):
-            d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
-        if d_str:
-            daily_stats[d_str]['total_hours'] += h
-            daily_stats[d_str]['gross_salary'] += duty_gross
+    duty_rate = fac_hourly_rate if fac_hourly_rate > 0 else effective_fac_hourly_rate
+    supervisor_summary = build_exam_supervisor_summary(
+        getattr(faculty_profile, 'user', None), month, year, fallback_rate=duty_rate
+    )
+    if supervisor_summary:
+        supervisor_duty_pay = Decimal(supervisor_summary['total_gross_pay'])
+        supervisor_hours = Decimal(supervisor_summary['total_hours'])
+        for ex in supervisor_summary['exams']:
+            d_str = ex.get('scheduled_date')
+            if d_str:
+                daily_stats[d_str]['total_hours'] += Decimal(ex['duration_category'])
+                daily_stats[d_str]['gross_salary'] += Decimal(ex['gross_amount'])
+                if Decimal(ex['deduction']) > 0:
+                    daily_stats[d_str]['deduction'] += Decimal(ex['deduction'])
+                    daily_stats[d_str]['late_minutes'] += ex['late_minutes']
+                    daily_stats[d_str]['penalty_minutes'] += ex['late_minutes']
+                    daily_stats[d_str]['late_penalty'] = daily_stats[d_str].get('late_penalty', Decimal(0)) + Decimal(ex['deduction'])
 
     # total_hours: only actual hours worked (no guaranteed base session_hours inflation)
     total_hours = (total_session_minutes + qr_extra_minutes + (supervisor_hours * Decimal(60))) / Decimal(60)
@@ -2173,44 +2308,13 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
                     late_dates.append(d_str)
 
     # Dedicated supervisor late-penalty block (post session/QR logic, after main visiting/full-time).
-    # Supervisor reporting deadline is 15 minutes before exam start; lateness past that deadline is deducted.
-    for log in supervisor_duty_logs:
-            late_mins = getattr(log, 'late_minutes', 0)
-            exam = getattr(log, 'exam', None)
-            if exam and getattr(exam, 'start_time', None) and getattr(exam, 'scheduled_date', None) and getattr(log, 'start_submitted_at', None):
-                try:
-                    expected_start_dt = timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15),
-                        timezone.get_current_timezone()
-                    )
-                    if log.start_submitted_at > expected_start_dt:
-                        actual_late = int((log.start_submitted_at - expected_start_dt).total_seconds() // 60)
-                        if actual_late > late_mins:
-                            late_mins = actual_late
-                except Exception:
-                    pass
-            if late_mins > 0:
-                penalty = Decimal(late_mins) * deduction_rate
-                if max_deduction < Decimal('999999'):
-                    penalty = min(penalty, max_deduction)
-                d_str = None
-                if getattr(log.exam, 'scheduled_date', None):
-                    d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
-                if d_str and d_str in daily_stats:
-                    # Cap to gross only when gross > 0 (avoid silencing deductions when pay rate is separately configured)
-                    gross = daily_stats[d_str]['gross_salary']
-                    if gross > 0:
-                        current_ded = daily_stats[d_str].get('deduction', Decimal(0))
-                        if penalty > gross - current_ded:
-                            penalty = max(Decimal(0), gross - current_ded)
-                    daily_stats[d_str]['late_penalty'] = daily_stats[d_str].get('late_penalty', Decimal(0)) + penalty
-                    daily_stats[d_str]['deduction'] += penalty
-                    daily_stats[d_str]['late_minutes'] += late_mins
-                    daily_stats[d_str]['penalty_minutes'] += late_mins
-                late_penalty += penalty
-                total_late_penalty_minutes += late_mins
-                if d_str and d_str not in late_dates:
-                    late_dates.append(d_str)
+    if supervisor_summary:
+        late_penalty += Decimal(supervisor_summary['total_late_deduction'])
+        total_late_penalty_minutes += sum(ex['late_minutes'] for ex in supervisor_summary['exams'])
+        for ex in supervisor_summary['exams']:
+            d_str = ex.get('scheduled_date')
+            if d_str and Decimal(ex['deduction']) > 0 and d_str not in late_dates:
+                late_dates.append(d_str)
 
     attended_dates = session_dates | set(qr_by_date.keys())
     if has_custom_sched:
@@ -2404,6 +2508,7 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
         'leaves_taken': int(leave_days),
         'working_days': days_with_attendance if faculty_profile.employment_type != 'full_time' else working_days,
         'sessions_conducted': sessions_count,
+        'exam_supervisor_summary': supervisor_summary,
     }
 
 
@@ -2673,108 +2778,41 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     supervisor_duty_pay = Decimal(0)
     supervisor_hours = Decimal(0)
     daily_stats = defaultdict(lambda: {'total_hours': Decimal(0), 'gross_salary': Decimal(0), 'deduction': Decimal(0), 'late_minutes': 0, 'penalty_minutes': 0})
-    supervisor_duty_logs = []
+    # Supervisor duty integration for staff/exam_supervisor:
+    # Uses build_exam_supervisor_summary for duration-based pay (1.5, 2.0, 2.5, 3.0) and late deductions.
+    supervisor_summary = None
+    user_hr_rate = Decimal(str(getattr(user, 'hourly_rate', 0) or 0))
+    if user_hr_rate <= 0 and getattr(user, 'salary', 0) > 0:
+        user_hr_rate = (Decimal(str(user.salary)) / Decimal(30)) / Decimal(getattr(user, 'working_hours', 8) or 8)
 
-    from exams.models import SupervisorDutyLog
+    deduction_rate = Decimal(0)
+    if getattr(user, 'salary', 0) > 0:
+        work_minutes = Decimal(getattr(user, 'working_hours', 8) or 8) * Decimal(60)
+        deduction_rate = (Decimal(str(getattr(user, 'salary', 0))) / Decimal(30)) / work_minutes
+    elif user_hr_rate > 0:
+        deduction_rate = user_hr_rate / Decimal(60)
+    late_penalty_rate = deduction_rate
 
-    duty_logs = SupervisorDutyLog.objects.filter(
-        supervisor=user,
-        exam__scheduled_date__year=year,
-        exam__scheduled_date__month=month,
-        start_submitted_at__isnull=False,
-        payable_hours__gt=0,
-    ).select_related('exam')
-    supervisor_duty_logs = list(duty_logs)
-
-    if supervisor_duty_logs or has_exam_supervisor_role:
-        user_hr_rate = Decimal(str(getattr(user, 'hourly_rate', 0) or 0))
-        if user_hr_rate <= 0 and getattr(user, 'salary', 0) > 0:
-            user_hr_rate = (Decimal(str(user.salary)) / Decimal(30)) / Decimal(getattr(user, 'working_hours', 8) or 8)
-
-        deduction_rate = Decimal(0)
-        if getattr(user, 'salary', 0) > 0:
-            work_minutes = Decimal(getattr(user, 'working_hours', 8) or 8) * Decimal(60)
-            deduction_rate = (Decimal(str(getattr(user, 'salary', 0))) / Decimal(30)) / work_minutes
-        elif user_hr_rate > 0:
-            deduction_rate = user_hr_rate / Decimal(60)
-        late_penalty_rate = deduction_rate
-        max_deduction = Decimal('999999')
-
-        for log in supervisor_duty_logs:
-            h = Decimal(str(getattr(log, 'payable_hours', 0)))
-            exam = getattr(log, 'exam', None)
-            if exam and getattr(exam, 'start_time', None) and getattr(exam, 'end_time', None) and getattr(exam, 'scheduled_date', None):
-                try:
-                    exam_start_dt = timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.start_time),
-                        timezone.get_current_timezone()
-                    )
-                    exam_end_dt = timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.end_time),
-                        timezone.get_current_timezone()
-                    )
-                    if exam_end_dt < exam_start_dt:
-                        exam_end_dt += timedelta(days=1)
-                    if getattr(log, 'start_submitted_at', None) and getattr(log, 'end_submitted_at', None):
-                        eff_start = max(log.start_submitted_at, exam_start_dt)
-                        eff_end = min(log.end_submitted_at, exam_end_dt)
-                        if eff_end > eff_start:
-                            h = Decimal(str(round((eff_end - eff_start).total_seconds() / 3600.0, 2)))
-                        else:
-                            h = Decimal(0)
-                    elif exam_end_dt > exam_start_dt:
-                        max_exam_h = Decimal(str(round((exam_end_dt - exam_start_dt).total_seconds() / 3600.0, 2)))
-                        if h > max_exam_h:
-                            h = max_exam_h
-                except Exception:
-                    pass
-            supervisor_hours += h
-            rate = user_hr_rate
-            duty_gross = get_exam_supervisor_pay(user, h, fallback_rate=rate)
-            supervisor_duty_pay += duty_gross
-            d_str = None
-            if getattr(log, 'exam', None) and getattr(log.exam, 'scheduled_date', None):
-                d_str = log.exam.scheduled_date.strftime('%Y-%m-%d')
+    supervisor_summary = build_exam_supervisor_summary(user, month, year, fallback_rate=user_hr_rate)
+    if supervisor_summary:
+        supervisor_duty_pay = Decimal(supervisor_summary['total_gross_pay'])
+        supervisor_hours = Decimal(supervisor_summary['total_hours'])
+        late_penalty += Decimal(supervisor_summary['total_late_deduction'])
+        total_late_penalty_minutes += sum(ex['late_minutes'] for ex in supervisor_summary['exams'])
+        for ex in supervisor_summary['exams']:
+            d_str = ex.get('scheduled_date')
             if d_str:
-                daily_stats[d_str]['total_hours'] += h
-                daily_stats[d_str]['gross_salary'] += duty_gross
-
-            late_mins = getattr(log, 'late_minutes', 0)
-            if exam and getattr(exam, 'start_time', None) and getattr(exam, 'scheduled_date', None) and getattr(log, 'start_submitted_at', None):
-                try:
-                    expected_start_dt = timezone.make_aware(
-                        datetime.combine(exam.scheduled_date, exam.start_time) - timedelta(minutes=15),
-                        timezone.get_current_timezone()
-                    )
-                    if log.start_submitted_at > expected_start_dt:
-                        actual_late = int((log.start_submitted_at - expected_start_dt).total_seconds() // 60)
-                        if actual_late > late_mins:
-                            late_mins = actual_late
-                except Exception:
-                    pass
-            if late_mins > 0:
-                penalty = Decimal(late_mins) * deduction_rate
-                if max_deduction < Decimal('999999'):
-                    penalty = min(penalty, max_deduction)
-                # Cap penalty to gross_salary only when gross > 0 (avoid silencing deduction when pay rate is separately configured)
-                if d_str:
-                    gross = daily_stats[d_str]['gross_salary']
-                    if gross > 0:
-                        current_ded = daily_stats[d_str].get('deduction', Decimal(0))
-                        if penalty > gross - current_ded:
-                            penalty = max(Decimal(0), gross - current_ded)
-                    daily_stats[d_str]['deduction'] += penalty
-                    daily_stats[d_str]['late_minutes'] += late_mins
-                    daily_stats[d_str]['penalty_minutes'] += late_mins
-                late_penalty += penalty
-                total_late_penalty_minutes += late_mins
-                if d_str and d_str not in late_dates:
-                    late_dates.append(d_str)
+                daily_stats[d_str]['total_hours'] += Decimal(ex['duration_category'])
+                daily_stats[d_str]['gross_salary'] += Decimal(ex['gross_amount'])
+                if Decimal(ex['deduction']) > 0:
+                    daily_stats[d_str]['deduction'] += Decimal(ex['deduction'])
+                    daily_stats[d_str]['late_minutes'] += ex['late_minutes']
+                    daily_stats[d_str]['penalty_minutes'] += ex['late_minutes']
+                    daily_stats[d_str]['late_penalty'] = daily_stats[d_str].get('late_penalty', Decimal(0)) + Decimal(ex['deduction'])
+                    if d_str not in late_dates:
+                        late_dates.append(d_str)
 
     # Integrate supervisor duty into totals (align with compute_payslip_for_faculty).
-    # Now hour_based_amount includes supervisor_duty_pay; total_hours includes
-    # supervisor_hours (even for full_time staff). Removed duplicate +supervisor_duty_pay
-    # from net_before_retention below.
     hour_based_amount += supervisor_duty_pay
     total_hours += supervisor_hours
 
@@ -3010,6 +3048,7 @@ def compute_payslip_for_user(user, month, year, payroll_run):
     if odometer_readings:
         odometer_readings.update(payslip=payslip, payroll_run=payroll_run)
 
+    payslip._exam_supervisor_summary = supervisor_summary
     return payslip
 
 

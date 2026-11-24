@@ -160,6 +160,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
     gross_salary = serializers.SerializerMethodField()
     late_deduction_log = serializers.SerializerMethodField()
     absence_deduction_log = serializers.SerializerMethodField()
+    exam_supervisor_summary = serializers.SerializerMethodField()
 
     def get_total_hours(self, obj):
         return str(round(getattr(obj, 'total_session_hours', 0) or 0, 2))
@@ -182,7 +183,8 @@ class PaySlipSerializer(serializers.ModelSerializer):
             'leave_notes',
             'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'is_manually_adjusted', 'late_logs',
-            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count',
+            'exam_supervisor_summary',
         ]
 
     hourly_rate = serializers.SerializerMethodField()
@@ -191,6 +193,33 @@ class PaySlipSerializer(serializers.ModelSerializer):
     session_hours = serializers.SerializerMethodField()
     salary = serializers.SerializerMethodField()
     visiting_count = serializers.SerializerMethodField()
+
+    def get_exam_supervisor_summary(self, obj):
+        if hasattr(obj, '_exam_supervisor_summary') and obj._exam_supervisor_summary is not None:
+            return obj._exam_supervisor_summary
+
+        target_user = obj.user or (obj.faculty.user if obj.faculty else None)
+        if not target_user:
+            return None
+
+        payroll_run = getattr(obj, 'payroll_run', None)
+        if not payroll_run:
+            return None
+
+        from payroll.utils import build_exam_supervisor_summary
+        fallback_rate = Decimal(0)
+        if obj.faculty and obj.faculty.hourly_rate:
+            fallback_rate = obj.faculty.hourly_rate
+        elif target_user.hourly_rate:
+            fallback_rate = target_user.hourly_rate
+
+        summary = build_exam_supervisor_summary(
+            target_user,
+            month=payroll_run.month,
+            year=payroll_run.year,
+            fallback_rate=fallback_rate,
+        )
+        return summary
 
     def get_visiting_count(self, obj):
         if self.get_employment_type(obj) != 'full_time':
@@ -489,5 +518,6 @@ class MyPaySlipSerializer(PaySlipSerializer):
             'leave_notes',
             'net_salary', 'leaves_taken', 'working_days',
             'sessions_conducted', 'is_disbursed', 'is_manually_adjusted', 'late_logs',
-            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count'
+            'hourly_rate', 'per_paper_rate', 'employment_type', 'session_hours', 'salary', 'visiting_count',
+            'exam_supervisor_summary',
         ]
