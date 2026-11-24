@@ -1,7 +1,8 @@
 from django.urls import path
 from .views import (
     FacultyListCreateView, FacultyDetailView, FacultyQRIDView,
-    FacultyQRCheckinView, SubjectHourlyRateView, SubjectRateDetailView,
+    FacultyQRCheckinView, FacultyCheckoutSessionReportView,
+    SubjectHourlyRateView, SubjectRateDetailView,
     SessionListCreateView, SessionDetailView, SessionSummaryView,
     FacultySessionsView, FacultyExtraHoursView,
 )
@@ -9,6 +10,8 @@ from .views import (
 urlpatterns = [
     path('faculty/', FacultyListCreateView.as_view(), name='faculty-list-create'),
     path('faculty/qr-checkin/', FacultyQRCheckinView.as_view(), name='faculty-qr-checkin'),
+    path('faculty/checkout-session-report/', FacultyCheckoutSessionReportView.as_view(), name='faculty-checkout-session-report'),
+    path('faculty/session-reports/autofill/', FacultyCheckoutSessionReportView.as_view(), name='faculty-session-reports-autofill'),
     path('faculty/extra-hours/', FacultyExtraHoursView.as_view(), name='faculty-extra-hours'),
     path('faculty/sessions/', SessionListCreateView.as_view(), name='session-list-create'),
     path('faculty/sessions/summary/', SessionSummaryView.as_view(), name='session-summary'),

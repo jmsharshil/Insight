@@ -182,6 +182,152 @@ Returns QR code URL (generates on-demand if missing).
 }
 ```
 
+**`GET /faculty/checkout-session-report/`** (Aliases: `GET /faculty/session-reports/autofill/`, `GET /faculty/qr-checkin/`)
+Auto-fetches the current active session's batch, subject, chapters, and timings for faculty checkout.
+- Authenticated faculty members automatically get their own session pre-fill.
+- Query parameters supported:
+  - `?qr_data=EMP-2026-0001` (pass scanned QR code directly)
+  - `?faculty_id=<uuid>` (for admins and branch managers)
+- Returns `batch_id`, `batch_name`, `subject_id`, `subject_name`, `chapter_ids`, and `topics_covered` directly at top-level for immediate submission, plus `current_session`, `session_reports`, `today_slots`, and `batches` hierarchy.
+
+**Success Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "faculty_id": "98dad2dc-be2c-4850-a950-62ce660b7d0c",
+    "faculty_name": "Tulsi Kerai",
+    "employee_id": "EMP-7E78-0002",
+    "branch_id": "7e78038f-c8e8-41fd-86a3-73d4194a5b98",
+    "branch_name": "JMS TEST",
+    "date": "24-11-2026",
+    "iso_date": "2026-11-24",
+    "start_time": "12:45",
+    "end_time": "14:45",
+    "batch_id": "d19c5c0f-5d1e-47a3-a142-cfcb8ab5a5ed",
+    "batch_name": "NAR_CSEET_JUNE_27_102",
+    "subject_id": "5de907cc-d3b8-470f-946e-df0bc09a7acb",
+    "subject_name": "BUSINESS COMMUNICATION",
+    "timetable_slot_id": "5784148a-912d-4b98-9aef-4ef2c1c6885f",
+    "classroom_name": "ROOM 201",
+    "chapter_ids": [
+      "cdc68b8d-2ef3-4c0b-b64b-2436d6ea21c3"
+    ],
+    "chapter_names": [
+      "Communication"
+    ],
+    "chapter_covered": "Communication",
+    "topics_covered": "test",
+    "completion_percentage": 100,
+    "status": "completed",
+    "attendance": {
+      "is_checked_in": true,
+      "check_in_time": "12:49:07",
+      "check_out_time": "14:45:00",
+      "duration_minutes": 116,
+      "attendance_record_id": "78ee72ff-3444-4e90-a19c-47ea3330757f"
+    },
+    "current_session": {
+      "timetable_slot_id": "5784148a-912d-4b98-9aef-4ef2c1c6885f",
+      "batch_id": "d19c5c0f-5d1e-47a3-a142-cfcb8ab5a5ed",
+      "batch_name": "NAR_CSEET_JUNE_27_102",
+      "subject_id": "5de907cc-d3b8-470f-946e-df0bc09a7acb",
+      "subject_name": "BUSINESS COMMUNICATION",
+      "classroom_id": "08d8585d-3b3f-4507-8565-41603020f85f",
+      "classroom_name": "ROOM 201",
+      "session_type": "regular",
+      "session_name": "test",
+      "slot_code": "P3",
+      "scheduled_start_time": "12:45",
+      "scheduled_end_time": "14:45",
+      "start_time": "12:45",
+      "end_time": "14:45",
+      "duration_minutes": 120,
+      "session_date": "2026-11-24",
+      "chapter_ids": [
+        "cdc68b8d-2ef3-4c0b-b64b-2436d6ea21c3"
+      ],
+      "chapter_names": [
+        "Communication"
+      ],
+      "chapter_covered": "Communication",
+      "topics_covered": "test",
+      "completion_percentage": 100,
+      "status": "completed",
+      "notes": "",
+      "already_submitted": false,
+      "is_current": true,
+      "available_chapters": [
+        {
+          "id": "cdc68b8d-2ef3-4c0b-b64b-2436d6ea21c3",
+          "name": "Communication",
+          "order": 1,
+          "description": ""
+        }
+      ]
+    },
+    "session_reports": [
+      {
+        "timetable_slot_id": "5784148a-912d-4b98-9aef-4ef2c1c6885f",
+        "batch_id": "d19c5c0f-5d1e-47a3-a142-cfcb8ab5a5ed",
+        "batch_name": "NAR_CSEET_JUNE_27_102",
+        "subject_id": "5de907cc-d3b8-470f-946e-df0bc09a7acb",
+        "subject_name": "BUSINESS COMMUNICATION",
+        "chapter_ids": ["cdc68b8d-2ef3-4c0b-b64b-2436d6ea21c3"],
+        "chapter_covered": "Communication",
+        "topics_covered": "test",
+        "status": "completed",
+        "completion_percentage": 100,
+        "start_time": "12:45",
+        "end_time": "14:45",
+        "duration_minutes": 120,
+        "session_date": "2026-11-24"
+      }
+    ],
+    "today_slots": [
+      {
+        "timetable_slot_id": "2f20a15e-66dc-4dbd-baa8-42aad549a14a",
+        "slot_code": "P1",
+        "scheduled_start_time": "08:00",
+        "scheduled_end_time": "10:00",
+        "already_submitted": true,
+        "existing_report_id": "84a9a997-034e-4ac9-a857-5bd6e52eb0bb",
+        "is_current": false
+      },
+      {
+        "timetable_slot_id": "5784148a-912d-4b98-9aef-4ef2c1c6885f",
+        "slot_code": "P3",
+        "scheduled_start_time": "12:45",
+        "scheduled_end_time": "14:45",
+        "already_submitted": false,
+        "existing_report_id": null,
+        "is_current": true
+      }
+    ],
+    "batches": [
+      {
+        "id": "d19c5c0f-5d1e-47a3-a142-cfcb8ab5a5ed",
+        "name": "NAR_CSEET_JUNE_27_102",
+        "subjects": [
+          {
+            "id": "5de907cc-d3b8-470f-946e-df0bc09a7acb",
+            "name": "BUSINESS COMMUNICATION",
+            "chapters": [
+              {
+                "id": "cdc68b8d-2ef3-4c0b-b64b-2436d6ea21c3",
+                "name": "Communication",
+                "order": 1
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "has_pending_reports": true
+  }
+}
+```
+
 **`POST /faculty/qr-checkin/`** — Faculty-only endpoint for mobile QR scan.
 
 **Request Body (Check-out with Session Report):**
