@@ -31,6 +31,7 @@ class LateEntryPolicyInputSerializer(serializers.Serializer):
 class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
     scheduled_end = serializers.SerializerMethodField()
     actual_end = serializers.SerializerMethodField()
+    duration_minutes = serializers.SerializerMethodField()
     early_out_minutes = serializers.SerializerMethodField()
     penalty_minutes = serializers.SerializerMethodField()
 
@@ -38,7 +39,7 @@ class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
         model = SessionLatePenaltyLog
         fields = [
             'id', 'session_report', 'scheduled_time', 'scheduled_end',
-            'actual_start', 'actual_end',
+            'actual_start', 'actual_end', 'duration_minutes',
             'late_minutes', 'early_out_minutes', 'penalty_minutes',
             'penalty_amount', 'grace_applied'
         ]
@@ -106,6 +107,25 @@ class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
             if sr.end_time:
                 return sr.end_time.strftime('%H:%M:%S')
         return None
+
+    def get_duration_minutes(self, obj):
+        sr = getattr(obj, 'session_report', None)
+        if sr:
+            act_start = obj.actual_start or sr.start_time
+            act_end_str = self.get_actual_end(obj)
+            if act_start and act_end_str:
+                from datetime import datetime, timedelta
+                try:
+                    s_dt = datetime.combine(sr.session_date, act_start)
+                    e_dt = datetime.combine(sr.session_date, datetime.strptime(act_end_str, '%H:%M:%S').time())
+                    if e_dt < s_dt:
+                        e_dt += timedelta(days=1)
+                    worked = int((e_dt - s_dt).total_seconds() / 60)
+                    return min(sr.duration_minutes, worked) if sr.duration_minutes else worked
+                except Exception:
+                    pass
+            return sr.duration_minutes or 0
+        return 0
 
     def get_early_out_minutes(self, obj):
         sched_end = self.get_scheduled_end(obj)
@@ -336,6 +356,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
                 results.append({
                     'date': item.get('date'),
                     'total_hours': item.get('total_hours', '0.00'),
+                    'duration_minutes': item.get('duration_minutes', int(round(float(item.get('total_hours', 0) or 0) * 60))),
                     'gross_salary': item.get('gross_salary', '0.00'),
                     'late_minutes': late_mins,
                     'early_out_minutes': early_mins,
@@ -358,6 +379,7 @@ class PaySlipSerializer(serializers.ModelSerializer):
                     'absence_deduction': str(abs_ded),
                     'deduction': str(abs_ded),
                     'total_hours': item.get('total_hours', '0.00'),
+                    'duration_minutes': item.get('duration_minutes', int(round(float(item.get('total_hours', 0) or 0) * 60))),
                     'gross_salary': item.get('gross_salary', '0.00'),
                     'net_salary': item.get('net_salary', '0.00'),
                     'sessions': item.get('sessions', []),
