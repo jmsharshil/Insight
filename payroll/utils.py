@@ -840,9 +840,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             diff_end = (sched_end_dt - actual_end_dt).total_seconds() / 60
             early_out_min = max(0, int(diff_end))
 
-            late_pen_mins = max(0, late_in_min - grace) if late_in_min > grace else 0
-            early_pen_mins = max(0, early_out_min - grace) if early_out_min > grace else 0
-            pen_min = late_pen_mins + early_pen_mins
+            total_dev = late_in_min + early_out_min
+            pen_min = max(0, total_dev - grace) if total_dev > grace else 0
             pen_amt = min(Decimal(pen_min) * deduction_rate, max_deduction)
 
         d_str = s.session_date.strftime('%Y-%m-%d')
@@ -922,9 +921,8 @@ def compute_payslip_for_faculty(faculty_profile, month, year, payroll_run):
             processed_dates.add(d_date)
             late_dev = deviation['late_in']
             early_dev = deviation['early_out']
-            late_pen = max(Decimal(0), late_dev - Decimal(grace)) if late_dev > Decimal(grace) else Decimal(0)
-            early_pen = max(Decimal(0), early_dev - Decimal(grace)) if early_dev > Decimal(grace) else Decimal(0)
-            penalty_min = int(late_pen + early_pen)
+            total_dev = late_dev + early_dev
+            penalty_min = max(0, int(total_dev - Decimal(grace))) if total_dev > Decimal(grace) else 0
             daily_stats[d_str]['late_minutes'] += int(late_dev)
             daily_stats[d_str]['early_out_minutes'] += int(early_dev)
             if penalty_min > 0:
@@ -1935,9 +1933,8 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             diff_end = (sched_end_dt - actual_end_dt).total_seconds() / 60
             early_out_min = max(0, int(diff_end))
 
-            late_pen_mins = max(0, late_in_min - grace) if late_in_min > grace else 0
-            early_pen_mins = max(0, early_out_min - grace) if early_out_min > grace else 0
-            pen_min = late_pen_mins + early_pen_mins
+            total_dev = late_in_min + early_out_min
+            pen_min = max(0, total_dev - grace) if total_dev > grace else 0
             pen_amt = min(Decimal(pen_min) * deduction_rate, max_deduction)
 
         d_str = s.session_date.strftime('%Y-%m-%d')
@@ -2017,9 +2014,8 @@ def preview_payslip_for_faculty(faculty_profile, month, year):
             processed_dates.add(d_date)
             late_dev = deviation['late_in']
             early_dev = deviation['early_out']
-            late_pen = max(Decimal(0), late_dev - Decimal(grace)) if late_dev > Decimal(grace) else Decimal(0)
-            early_pen = max(Decimal(0), early_dev - Decimal(grace)) if early_dev > Decimal(grace) else Decimal(0)
-            penalty_min = int(late_pen + early_pen)
+            total_dev = late_dev + early_dev
+            penalty_min = max(0, int(total_dev - Decimal(grace))) if total_dev > Decimal(grace) else 0
             daily_stats[d_str]['late_minutes'] += int(late_dev)
             daily_stats[d_str]['early_out_minutes'] += int(early_dev)
             if penalty_min > 0:

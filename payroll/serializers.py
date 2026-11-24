@@ -124,9 +124,8 @@ class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
     def get_penalty_minutes(self, obj):
         late_min = getattr(obj, 'late_minutes', 0) or 0
         early_min = self.get_early_out_minutes(obj)
-        late_pen = max(0, late_min - 5) if late_min > 5 else 0
-        early_pen = max(0, early_min - 5) if early_min > 5 else 0
-        return late_pen + early_pen
+        total_dev = late_min + early_min
+        return max(0, total_dev - 5) if total_dev > 5 else 0
 
 
 class PaySlipSerializer(serializers.ModelSerializer):
