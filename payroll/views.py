@@ -24,12 +24,29 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+
 PAYROLL_GENERATE_ROLES = ['accountant', 'super_admin']
 PAYROLL_VIEW_ROLES = ['accountant', 'super_admin', 'branch_manager']
 PAYROLL_APPROVE_ROLES = ['branch_manager', 'super_admin']
 PAYROLL_DISBURSE_ROLES = ['super_admin', 'accountant']
 LATE_POLICY_VIEW_ROLES = ['super_admin', 'branch_manager', 'accountant']
 LATE_POLICY_EDIT_ROLES = ['super_admin', 'branch_manager']
+
+
+def _safe_delete_payslips(qs):
+    """
+    Null-out any FK references on reimbursements / odometer readings before
+    bulk-deleting a PaySlip queryset, to avoid IntegrityError from the
+    'NO ACTION' FK constraint on reimbursements.payslip_id.
+    """
+    from reimbursements.models import Reimbursement
+    Reimbursement.objects.filter(payslip__in=qs).update(payslip=None)
+    try:
+        from leads.models import OdometerReading
+        OdometerReading.objects.filter(payslip__in=qs).update(payslip=None)
+    except Exception:
+        pass
+    qs.delete()
 
 
 def _user_role(user):
@@ -50,14 +67,15 @@ def notify(recipient_user_id, title, body, metadata=None, email_template=None, e
             email_subject=email_subject,
         )
 
+
 def _send_payslip_emails_async(payslips_list):
-    from core.sender import send_email
-    import logging
-    from payroll.pdf_services import generate_payslip_pdf
     import threading
-    
+    import logging
+    from core.sender import send_email
+    from payroll.pdf_services import generate_payslip_pdf
+
     logger = logging.getLogger(__name__)
-    
+
     def _send():
         for ps in payslips_list:
             recipient_user = ps.faculty.user if ps.faculty else ps.user
@@ -239,11 +257,11 @@ class PayrollListCreateView(APIView):
                     # Already exists as draft → regenerate, but preserve manually adjusted payslips
                     if role_filter:
                         if role_filter == 'faculty':
-                            pr.payslips.filter(faculty__isnull=False, is_manually_adjusted=False).delete()
+                            _safe_delete_payslips(pr.payslips.filter(faculty__isnull=False, is_manually_adjusted=False))
                         else:
-                            pr.payslips.filter(get_role_filter_q(role_filter, prefix='user__'), is_manually_adjusted=False).delete()
+                            _safe_delete_payslips(pr.payslips.filter(get_role_filter_q(role_filter, prefix='user__'), is_manually_adjusted=False))
                     else:
-                        pr.payslips.filter(is_manually_adjusted=False).delete()
+                        _safe_delete_payslips(pr.payslips.filter(is_manually_adjusted=False))
 
                     adjusted_faculty_ids = set(pr.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
                     adjusted_user_ids = set(pr.payslips.filter(is_manually_adjusted=True, user__isnull=False).values_list('user_id', flat=True))
@@ -324,7 +342,7 @@ class PayrollListCreateView(APIView):
         if existing_run:
             if existing_run.status == 'draft':
                 # Regenerate payslips for draft — preserve manually adjusted ones
-                existing_run.payslips.filter(is_manually_adjusted=False).delete()
+                _safe_delete_payslips(existing_run.payslips.filter(is_manually_adjusted=False))
                 faculty_list = FacultyProfile.objects.filter(branch=d['branch_id'], is_active=True)
 
                 adjusted_faculty_ids = set(existing_run.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
@@ -436,7 +454,7 @@ class PayrollDetailView(APIView):
                 ).exclude(id__in=faculty_user_ids)
 
                 # Only delete payslips that have NOT been manually adjusted
-                pr.payslips.filter(is_manually_adjusted=False).delete()
+                _safe_delete_payslips(pr.payslips.filter(is_manually_adjusted=False))
 
                 # Skip regeneration for employees whose payslip was manually adjusted
                 adjusted_faculty_ids = set(pr.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))
@@ -531,7 +549,7 @@ class PayrollPayslipsView(APIView):
                 ).exclude(id__in=faculty_user_ids)
 
                 # Only delete payslips that have NOT been manually adjusted
-                pr.payslips.filter(is_manually_adjusted=False).delete()
+                _safe_delete_payslips(pr.payslips.filter(is_manually_adjusted=False))
 
                 # Skip regeneration for employees whose payslip was manually adjusted
                 adjusted_faculty_ids = set(pr.payslips.filter(is_manually_adjusted=True, faculty__isnull=False).values_list('faculty_id', flat=True))

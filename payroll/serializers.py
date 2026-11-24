@@ -1,3 +1,5 @@
+from decimal import Decimal
+from django.db import models
 from rest_framework import serializers
 from .models import LateEntryPolicy, PayrollRun, PaySlip, SessionLatePenaltyLog
 from branch.models import Branch
@@ -27,10 +29,104 @@ class LateEntryPolicyInputSerializer(serializers.Serializer):
 
 
 class SessionLatePenaltyLogSerializer(serializers.ModelSerializer):
+    scheduled_end = serializers.SerializerMethodField()
+    actual_end = serializers.SerializerMethodField()
+    early_out_minutes = serializers.SerializerMethodField()
+    penalty_minutes = serializers.SerializerMethodField()
+
     class Meta:
         model = SessionLatePenaltyLog
-        fields = ['id', 'session_report', 'scheduled_time', 'actual_start',
-                  'late_minutes', 'penalty_amount', 'grace_applied']
+        fields = [
+            'id', 'session_report', 'scheduled_time', 'scheduled_end',
+            'actual_start', 'actual_end',
+            'late_minutes', 'early_out_minutes', 'penalty_minutes',
+            'penalty_amount', 'grace_applied'
+        ]
+
+    def get_scheduled_end(self, obj):
+        sr = getattr(obj, 'session_report', None)
+        if sr:
+            from batches.models import TimetableSlot
+            from datetime import datetime
+            dow = sr.session_date.weekday()
+            slot = TimetableSlot.objects.filter(
+                models.Q(day_of_week=dow) | models.Q(session_date=sr.session_date),
+                batch_id=sr.batch_id, subject_id=sr.subject_id
+            ).first()
+            if not slot and getattr(sr, 'faculty', None):
+                ref_time = obj.scheduled_time or sr.start_time
+                fac_slots = TimetableSlot.objects.filter(
+                    models.Q(day_of_week=dow) | models.Q(session_date=sr.session_date),
+                    faculty=sr.faculty,
+                )
+                if ref_time:
+                    s_dt = datetime.combine(sr.session_date, ref_time)
+                    best_slot = None
+                    best_diff = 999999
+                    for cand_slot in fac_slots:
+                        if cand_slot.start_time:
+                            c_dt = datetime.combine(sr.session_date, cand_slot.start_time)
+                            diff_sec = abs((c_dt - s_dt).total_seconds())
+                            if diff_sec < best_diff and diff_sec <= 60 * 60:
+                                best_diff = diff_sec
+                                best_slot = cand_slot
+                    slot = best_slot
+                else:
+                    slot = fac_slots.first()
+            if slot and slot.end_time:
+                return slot.end_time.strftime('%H:%M:%S')
+            if sr.end_time:
+                return sr.end_time.strftime('%H:%M:%S')
+        return None
+
+    def get_actual_end(self, obj):
+        sr = getattr(obj, 'session_report', None)
+        if sr:
+            from attendance.models import EmployeeAttendanceRecord
+            from django.utils import timezone as dj_timezone
+            from datetime import datetime
+            ref_time = obj.actual_start or sr.start_time
+            if ref_time:
+                s_dt = datetime.combine(sr.session_date, ref_time)
+                candidate_atts = EmployeeAttendanceRecord.objects.filter(
+                    user=sr.faculty.user,
+                    date=sr.session_date,
+                    checked_in_at__isnull=False,
+                )
+                best_att = None
+                best_diff = 999999
+                for cand in candidate_atts:
+                    cand_in = dj_timezone.localtime(cand.checked_in_at).replace(tzinfo=None)
+                    diff_sec = abs((cand_in - s_dt).total_seconds())
+                    if diff_sec < best_diff and diff_sec <= 60 * 60:
+                        best_diff = diff_sec
+                        best_att = cand
+                if best_att and best_att.checked_out_at:
+                    return dj_timezone.localtime(best_att.checked_out_at).time().strftime('%H:%M:%S')
+            if sr.end_time:
+                return sr.end_time.strftime('%H:%M:%S')
+        return None
+
+    def get_early_out_minutes(self, obj):
+        sched_end = self.get_scheduled_end(obj)
+        act_end = self.get_actual_end(obj)
+        if sched_end and act_end:
+            from datetime import datetime
+            try:
+                t_sched = datetime.strptime(sched_end, '%H:%M:%S')
+                t_act = datetime.strptime(act_end, '%H:%M:%S')
+                diff = (t_sched - t_act).total_seconds() / 60
+                return max(0, int(diff))
+            except Exception:
+                pass
+        return 0
+
+    def get_penalty_minutes(self, obj):
+        late_min = getattr(obj, 'late_minutes', 0) or 0
+        early_min = self.get_early_out_minutes(obj)
+        late_pen = max(0, late_min - 5) if late_min > 5 else 0
+        early_pen = max(0, early_min - 5) if early_min > 5 else 0
+        return late_pen + early_pen
 
 
 class PaySlipSerializer(serializers.ModelSerializer):
@@ -43,13 +139,24 @@ class PaySlipSerializer(serializers.ModelSerializer):
     reimbursement_notes = serializers.SerializerMethodField()
     odometer_notes = serializers.SerializerMethodField()
     leave_notes = serializers.SerializerMethodField()
+    total_hours = serializers.SerializerMethodField()
+    gross_salary = serializers.SerializerMethodField()
+    late_deduction_log = serializers.SerializerMethodField()
+    absence_deduction_log = serializers.SerializerMethodField()
+
+    def get_total_hours(self, obj):
+        return str(round(getattr(obj, 'total_session_hours', 0) or 0, 2))
+
+    def get_gross_salary(self, obj):
+        return str(round((getattr(obj, 'basic_salary', 0) or 0) + (getattr(obj, 'hour_based_amount', 0) or 0), 2))
 
     class Meta:
         model = PaySlip
         fields = [
             'id', 'faculty', 'user_id', 'faculty_name', 'employee_id',
-            'basic_salary', 'total_session_hours', 'hour_based_amount',
+            'basic_salary', 'gross_salary', 'total_hours', 'total_session_hours', 'hour_based_amount',
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
+            'late_deduction_log', 'absence_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'retention_refund_amount', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'extra_shift_allowance',
@@ -218,6 +325,46 @@ class PaySlipSerializer(serializers.ModelSerializer):
             return str(obj.faculty.user_id)
         return None
 
+    def get_late_deduction_log(self, obj):
+        raw_log = getattr(obj, 'per_day_deduction_log', []) or []
+        results = []
+        for item in raw_log:
+            late_mins = item.get('late_minutes', 0) or 0
+            early_mins = item.get('early_out_minutes', 0) or 0
+            penalty_mins = item.get('penalty_minutes', 0) or 0
+            penalty_amt = Decimal(str(item.get('penalty_amount', '0') or 0))
+            if late_mins > 0 or early_mins > 0 or penalty_mins > 0 or penalty_amt > 0:
+                results.append({
+                    'date': item.get('date'),
+                    'total_hours': item.get('total_hours', '0.00'),
+                    'gross_salary': item.get('gross_salary', '0.00'),
+                    'late_minutes': late_mins,
+                    'early_out_minutes': early_mins,
+                    'penalty_minutes': penalty_mins,
+                    'penalty_amount': str(item.get('penalty_amount', '0.00')),
+                    'deduction': str(item.get('penalty_amount', '0.00')),
+                    'net_salary': item.get('net_salary', '0.00'),
+                    'sessions': item.get('sessions', []),
+                })
+        return results
+
+    def get_absence_deduction_log(self, obj):
+        raw_log = getattr(obj, 'per_day_deduction_log', []) or []
+        results = []
+        for item in raw_log:
+            abs_ded = Decimal(str(item.get('absence_deduction', '0') or 0))
+            if abs_ded > 0:
+                results.append({
+                    'date': item.get('date'),
+                    'absence_deduction': str(abs_ded),
+                    'deduction': str(abs_ded),
+                    'total_hours': item.get('total_hours', '0.00'),
+                    'gross_salary': item.get('gross_salary', '0.00'),
+                    'net_salary': item.get('net_salary', '0.00'),
+                    'sessions': item.get('sessions', []),
+                })
+        return results
+
 
 class PayrollRunListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -311,8 +458,9 @@ class MyPaySlipSerializer(PaySlipSerializer):
         model = PaySlip
         fields = [
             'id', 'payroll_month', 'payroll_year', 'payroll_status', 'branch_name',
-            'basic_salary', 'total_session_hours', 'hour_based_amount',
+            'basic_salary', 'gross_salary', 'total_hours', 'total_session_hours', 'hour_based_amount',
             'late_penalty', 'late_penalty_minutes', 'per_day_deduction_log',
+            'late_deduction_log', 'absence_deduction_log',
             'absence_deductions', 'leave_deductions',
             'retention_deduction', 'retention_refund_amount', 'other_deductions', 'deduction_note',
             'attendance_bonus', 'leave_encashment', 'bonus', 'extra_shift_allowance',
