@@ -43,6 +43,7 @@ urlpatterns = [
     path('api/v1/dashboard/', include('dashboard.urls')),
     path('api/v1/support/', include('support.urls')),
     path('api/v1/reimbursements/', include('reimbursements.urls')),
+    path('api/v1/finance/', include('schofee_finance.urls')),
 ]
 
 if settings.DEBUG:

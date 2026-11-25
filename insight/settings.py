@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     'dashboard',
     'support',
     'reimbursements',
+    'schofee_finance',
     'django_filters',
 ]
 
@@ -436,3 +437,10 @@ AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-05-0
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "1234")
+
+# SchoFee B2B API Configuration (v3.0)
+SCHOFEE_BASE_URL = os.environ.get("SCHOFEE_BASE_URL", "https://api-staging.schofee.com").rstrip("/")
+SCHOFEE_CLIENT_ID = os.environ.get("SCHOFEE_CLIENT_ID", "")
+SCHOFEE_CLIENT_SECRET = os.environ.get("SCHOFEE_CLIENT_SECRET", "")
+SCHOFEE_SCOPES = os.environ.get("SCHOFEE_SCOPES", "").strip()
+SCHOFEE_TIMEOUT_SECONDS = int(os.environ.get("SCHOFEE_TIMEOUT_SECONDS", "30"))

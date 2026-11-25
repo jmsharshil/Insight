@@ -1,0 +1,2200 @@
+{
+  "info": {
+    "_postman_id": "b75ba032-ccc6-4b94-962d-2b1e9a7c3d14",
+    "name": "SchoFee B2B API",
+    "description": "# 🚀 Get started here\n\nThis template guides you through CRUD operations (GET, POST, PUT, DELETE), variables, and tests.\n\n## 🔖 **How to use this template**\n\n#### **Step 1: Send requests**\n\nRESTful APIs allow you to perform CRUD operations using the POST, GET, PUT, and DELETE HTTP methods.\n\nThis collection contains each of these [request](https://learning.postman.com/docs/sending-requests/requests/) types. Open each request and click \"Send\" to see what happens.\n\n#### **Step 2: View responses**\n\nObserve the response tab for status code (200 OK), response time, and size.\n\n#### **Step 3: Send new Body data**\n\nUpdate or add new data in \"Body\" in the POST request. Typically, Body data is also used in PUT request.\n\n```\n{\n    \"name\": \"Add your name in the body\"\n}\n\n ```\n\n#### **Step 4: Update the variable**\n\nVariables enable you to store and reuse values in Postman. We have created a [variable](https://learning.postman.com/docs/sending-requests/variables/) called `base_url` with the sample request [https://postman-api-learner.glitch.me](https://postman-api-learner.glitch.me). Replace it with your API endpoint to customize this collection.\n\n#### **Step 5: Add tests in the \"Scripts\" tab**\n\nAdding tests to your requests can help you confirm that your API is working as expected. You can write test scripts in JavaScript and view the output in the \"Test Results\" tab.\n\n<img src=\"https://content.pstmn.io/fa30ea0a-373d-4545-a668-e7b283cca343/aW1hZ2UucG5n\" alt=\"\" height=\"1530\" width=\"2162\">\n\n## 💪 Pro tips\n\n- Use folders to group related requests and organize the collection.\n    \n- Add more [scripts](https://learning.postman.com/docs/writing-scripts/intro-to-scripts/) to verify if the API works as expected and execute workflows.\n    \n\n## 💡Related templates\n\n[API testing basics](https://go.postman.co/redirect/workspace?type=personal&collectionTemplateId=e9a37a28-055b-49cd-8c7e-97494a21eb54&sourceTemplateId=ddb19591-3097-41cf-82af-c84273e56719)  \n[API documentation](https://go.postman.co/redirect/workspace?type=personal&collectionTemplateId=e9c28f47-1253-44af-a2f3-20dce4da1f18&sourceTemplateId=ddb19591-3097-41cf-82af-c84273e56719)  \n[Authorization methods](https://go.postman.co/redirect/workspace?type=personal&collectionTemplateId=31a9a6ed-4cdf-4ced-984c-d12c9aec1c27&sourceTemplateId=ddb19591-3097-41cf-82af-c84273e56719)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "39706448"
+  },
+  "item": [
+    {
+      "name": "token",
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            {
+              "key": "password",
+              "value": "7BmQTHs8bmGdSRwVXt8NF5t9zbZO4Ch33S3g2yxP8jM",
+              "type": "string"
+            },
+            {
+              "key": "username",
+              "value": "schofee-test-9398edb0b9e4436093ee766a19259b89",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "client_credentials",
+              "type": "text",
+              "uuid": "f2c7abbf-ef91-4382-a5f1-c6f94b42978c"
+            },
+            {
+              "key": "scope",
+              "value": "courses:read banks:read students:write loan-applications:write loan-applications:read verification:request verification:write",
+              "type": "text",
+              "uuid": "90a5446a-2204-45a5-8f7c-b33797a78371"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/oauth/token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "oauth",
+            "token"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text",
+                  "uuid": "f2c7abbf-ef91-4382-a5f1-c6f94b42978c"
+                },
+                {
+                  "key": "scope",
+                  "value": "courses:read",
+                  "type": "text",
+                  "uuid": "90a5446a-2204-45a5-8f7c-b33797a78371"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/oauth/token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "oauth",
+                "token"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Cache-Control",
+              "value": "no-store"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 08:13:04 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"access_token\": \"AvIMIyAKocI3EET14fzpwohrWZVBlKpZ4ro1yTbtLY8\",\n    \"expires_in\": 600,\n    \"scope\": \"courses:read\",\n    \"token_type\": \"Bearer\"\n}"
+        },
+        {
+          "name": "Invalid scope",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text",
+                  "uuid": "f2c7abbf-ef91-4382-a5f1-c6f94b42978c"
+                },
+                {
+                  "key": "scope",
+                  "value": "courses:read",
+                  "type": "text",
+                  "uuid": "90a5446a-2204-45a5-8f7c-b33797a78371"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/oauth/token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "oauth",
+                "token"
+              ]
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Cache-Control",
+              "value": "no-store"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 08:23:58 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"invalid_scope\"\n}"
+        },
+        {
+          "name": "invalid scope",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text",
+                  "uuid": "f2c7abbf-ef91-4382-a5f1-c6f94b42978c"
+                },
+                {
+                  "key": "scope",
+                  "value": "courses:read banks:read students:write loan-applications:write loan-applications:read",
+                  "type": "text",
+                  "uuid": "90a5446a-2204-45a5-8f7c-b33797a78371"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/oauth/token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "oauth",
+                "token"
+              ]
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Cache-Control",
+              "value": "no-store"
+            },
+            {
+              "key": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 07:06:33 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"invalid_scope\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "courses",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "ukceudmImsX4wfZnq6IoAQ3GKTzwyiVT9xEPW1uuGHY",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/courses?page=1&pageSize=10",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "courses"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/courses?page=1&pageSize=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "courses"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "",
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 08:18:09 GMT"
+            }
+          ],
+          "cookie": [
+            {
+              "expires": "Invalid Date",
+              "domain": "",
+              "path": ""
+            }
+          ],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Request completed.\",\n    \"data\": {\n        \"page\": 1,\n        \"pageSize\": 10,\n        \"totalCount\": 11,\n        \"items\": [\n            {\n                \"id\": \"08df17d2-0b14-4d31-8fb3-63374fc5f40c\",\n                \"courseName\": \"Advanced Excel\",\n                \"courseCode\": \"COCOU260011\",\n                \"courseFees\": 10000,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d2-0553-4346-8ddb-8992d249ac6e\",\n                \"courseName\": \"Full Stack Development\",\n                \"courseCode\": \"COCOU260010\",\n                \"courseFees\": 3423,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-fa7c-4b78-8402-c0cd81634bb5\",\n                \"courseName\": \"MBA - Finance\",\n                \"courseCode\": \"COCOU260009\",\n                \"courseFees\": 3454,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-8e41-41a1-82d1-7388ec431802\",\n                \"courseName\": \"C++ Programming\",\n                \"courseCode\": \"COCOU260008\",\n                \"courseFees\": 5435,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-8738-47a7-813b-3332db96e4cf\",\n                \"courseName\": \"UI / UX Design\",\n                \"courseCode\": \"COCOU260007\",\n                \"courseFees\": 4534,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-7f77-44df-86aa-fa1170235e51\",\n                \"courseName\": \"Test 4\",\n                \"courseCode\": \"COCOU260006\",\n                \"courseFees\": 4545,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-779b-42ff-8e82-886fb8100183\",\n                \"courseName\": \"Test 3\",\n                \"courseCode\": \"COCOU260005\",\n                \"courseFees\": 45454654,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-68d5-4722-8e4a-8062ddd86d53\",\n                \"courseName\": \"Test 2\",\n                \"courseCode\": \"COCOU260004\",\n                \"courseFees\": 32323,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df17d1-60e8-4fff-884f-a3af13c6bd9f\",\n                \"courseName\": \"Test 1\",\n                \"courseCode\": \"COCOU260003\",\n                \"courseFees\": 50000,\n                \"maxEmiMonths\": 0\n            },\n            {\n                \"id\": \"08df12e8-c3ca-4925-8002-9e7b8744f6d9\",\n                \"courseName\": \"Bachelor of Technology (B.Tech) 2\",\n                \"courseCode\": \"COCOU260002\",\n                \"courseFees\": 320000,\n                \"maxEmiMonths\": 0\n            }\n        ]\n    },\n    \"traceId\": \"40000013-0006-f900-b63f-84710c7967bb\"\n}"
+        },
+        {
+          "name": "Authentication required",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/courses?page=1&pageSize=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "courses"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "status": "Unauthorized",
+          "code": 401,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "WWW-Authenticate",
+              "value": "Bearer"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 09:59:18 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 401,\n    \"message\": \"Authentication is required.\",\n    \"data\": null,\n    \"traceId\": \"4000001d-0006-f900-b63f-84710c7967bb\",\n    \"errorCode\": \"UNAUTHENTICATED\",\n    \"errors\": []\n}"
+        }
+      ]
+    },
+    {
+      "name": "banks",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "3VDVRKB0KeNNmeTm8x4HcHV5frJcw4po9Ylem_4lf_w",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/banks?page=1&pageSize=10",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "banks"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "pageSize",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Insufficient scope",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/banks?page=1&pageSize=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "banks"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "status": "Forbidden",
+          "code": 403,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 08:20:23 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 403,\n    \"message\": \"Insufficient scope.\",\n    \"data\": null,\n    \"traceId\": \"40000006-0008-fc00-b63f-84710c7967bb\",\n    \"errorCode\": \"INSUFFICIENT_SCOPE\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/banks?page=1&pageSize=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "banks"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 08:29:33 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Request completed.\",\n    \"data\": {\n        \"items\": [\n            {\n                \"institutionID\": 1,\n                \"displayName\": \"HDFC Bank\"\n            },\n            {\n                \"institutionID\": 2,\n                \"displayName\": \"State Bank of India\"\n            },\n            {\n                \"institutionID\": 3,\n                \"displayName\": \"ICICI Bank Ltd\"\n            },\n            {\n                \"institutionID\": 4,\n                \"displayName\": \"Axis Bank\"\n            },\n            {\n                \"institutionID\": 5,\n                \"displayName\": \"Kotak Mahindra Bank\"\n            },\n            {\n                \"institutionID\": 6,\n                \"displayName\": \"Andhra Bank\"\n            },\n            {\n                \"institutionID\": 7,\n                \"displayName\": \"IDBI Bank\"\n            },\n            {\n                \"institutionID\": 8,\n                \"displayName\": \"Canara Bank\"\n            },\n            {\n                \"institutionID\": 9,\n                \"displayName\": \"Punjab National Bank\"\n            },\n            {\n                \"institutionID\": 10,\n                \"displayName\": \"Central Bank of India\"\n            },\n            {\n                \"institutionID\": 11,\n                \"displayName\": \"Yes Bank Ltd\"\n            },\n            {\n                \"institutionID\": 12,\n                \"displayName\": \"Indian Bank\"\n            },\n            {\n                \"institutionID\": 13,\n                \"displayName\": \"Federal Bank\"\n            },\n            {\n                \"institutionID\": 14,\n                \"displayName\": \"Citibank\"\n            },\n            {\n                \"institutionID\": 15,\n                \"displayName\": \"Bank of India\"\n            },\n            {\n                \"institutionID\": 16,\n                \"displayName\": \"Union Bank of India\"\n            },\n            {\n                \"institutionID\": 17,\n                \"displayName\": \"Bank of Baroda\"\n            },\n            {\n                \"institutionID\": 19,\n                \"displayName\": \"Dena Bank\"\n            },\n            {\n                \"institutionID\": 20,\n                \"displayName\": \"Vijaya Bank\"\n            },\n            {\n                \"institutionID\": 21,\n                \"displayName\": \"Corporation Bank\"\n            },\n            {\n                \"institutionID\": 22,\n                \"displayName\": \"Oriental Bank of Commerce\"\n            },\n            {\n                \"institutionID\": 23,\n                \"displayName\": \"United Bank of India\"\n            },\n            {\n                \"institutionID\": 24,\n                \"displayName\": \"Syndicate Bank\"\n            },\n            {\n                \"institutionID\": 25,\n                \"displayName\": \"Standard Chartered Bank\"\n            },\n            {\n                \"institutionID\": 26,\n                \"displayName\": \"IndusInd Bank Ltd\"\n            },\n            {\n                \"institutionID\": 27,\n                \"displayName\": \"Allahabad Bank\"\n            },\n            {\n                \"institutionID\": 28,\n                \"displayName\": \"Karnataka Bank\"\n            },\n            {\n                \"institutionID\": 29,\n                \"displayName\": \"IDFC FIRST Bank Ltd\"\n            },\n            {\n                \"institutionID\": 30,\n                \"displayName\": \"Indian Overseas Bank\"\n            },\n            {\n                \"institutionID\": 31,\n                \"displayName\": \"Paytm Payments Bank\"\n            },\n            {\n                \"institutionID\": 32,\n                \"displayName\": \"Karur Vysya Bank\"\n            },\n            {\n                \"institutionID\": 33,\n                \"displayName\": \"Ujjivan Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 34,\n                \"displayName\": \"UCO Bank\"\n            },\n            {\n                \"institutionID\": 35,\n                \"displayName\": \"South Indian Bank\"\n            },\n            {\n                \"institutionID\": 36,\n                \"displayName\": \"RBL (Ratnakar) Bank\"\n            },\n            {\n                \"institutionID\": 37,\n                \"displayName\": \"Fino Payments Bank\"\n            },\n            {\n                \"institutionID\": 38,\n                \"displayName\": \"Bank of Maharashtra\"\n            },\n            {\n                \"institutionID\": 39,\n                \"displayName\": \"AU Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 40,\n                \"displayName\": \"Punjab and Sind Bank\"\n            },\n            {\n                \"institutionID\": 41,\n                \"displayName\": \"Fincare Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 42,\n                \"displayName\": \"Dbs Bank\"\n            },\n            {\n                \"institutionID\": 43,\n                \"displayName\": \"Bandhan Bank\"\n            },\n            {\n                \"institutionID\": 44,\n                \"displayName\": \"Municipal Bank\"\n            },\n            {\n                \"institutionID\": 45,\n                \"displayName\": \"Utkarsh Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 46,\n                \"displayName\": \"Jana Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 47,\n                \"displayName\": \"Esaf Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 48,\n                \"displayName\": \"Equitas Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 49,\n                \"displayName\": \"CITY UNION BANK LTD\"\n            },\n            {\n                \"institutionID\": 50,\n                \"displayName\": \"India Post Payments Bank\"\n            },\n            {\n                \"institutionID\": 51,\n                \"displayName\": \"DCB Bank Ltd\"\n            },\n            {\n                \"institutionID\": 69,\n                \"displayName\": \"Saraswat co-operative Bank Ltd\"\n            },\n            {\n                \"institutionID\": 70,\n                \"displayName\": \"Airtel Payments Bank\"\n            },\n            {\n                \"institutionID\": 71,\n                \"displayName\": \"Tamilnad Mercentile Bank Ltd.\"\n            },\n            {\n                \"institutionID\": 72,\n                \"displayName\": \"Rajasthan Marudhara Gramin Bank\"\n            },\n            {\n                \"institutionID\": 73,\n                \"displayName\": \"Abhyudaya Co-Operative Bank Ltd\"\n            },\n            {\n                \"institutionID\": 74,\n                \"displayName\": \"Jammu&Kashmir Bank\"\n            },\n            {\n                \"institutionID\": 75,\n                \"displayName\": \"Karnataka Vikas Grameena Bank\"\n            },\n            {\n                \"institutionID\": 76,\n                \"displayName\": \"AP GRAMEENA VIKAS BANK\"\n            },\n            {\n                \"institutionID\": 77,\n                \"displayName\": \"Punjab and Sind Bank\"\n            },\n            {\n                \"institutionID\": 78,\n                \"displayName\": \"Thane Janata Sahakari Bank\"\n            },\n            {\n                \"institutionID\": 79,\n                \"displayName\": \"THE COSMOS CO-OP. BANK LTD\"\n            },\n            {\n                \"institutionID\": 80,\n                \"displayName\": \"CSB Bank Ltd.\"\n            },\n            {\n                \"institutionID\": 81,\n                \"displayName\": \"GP Parsik Bank\"\n            },\n            {\n                \"institutionID\": 82,\n                \"displayName\": \"Dhanlaxmi Bank\"\n            },\n            {\n                \"institutionID\": 83,\n                \"displayName\": \"Shamrao Vithal Co-op. Bank Ltd.\"\n            },\n            {\n                \"institutionID\": 84,\n                \"displayName\": \"Telangana State Co-operative Apex Bank Ltd.\"\n            },\n            {\n                \"institutionID\": 85,\n                \"displayName\": \"Janata Sahakari Bank Ltd.\"\n            },\n            {\n                \"institutionID\": 86,\n                \"displayName\": \"Kalyan Janata Sahakari Bank Ltd.\"\n            },\n            {\n                \"institutionID\": 87,\n                \"displayName\": \"kallapana awade Bank\"\n            },\n            {\n                \"institutionID\": 88,\n                \"displayName\": \"Sarva Haryana Gramin Bank\"\n            },\n            {\n                \"institutionID\": 89,\n                \"displayName\": \"Post Office Saving Bank\"\n            },\n            {\n                \"institutionID\": 90,\n                \"displayName\": \"Sarvodaya Commercial Co-Operactive Bank Limited\"\n            },\n            {\n                \"institutionID\": 91,\n                \"displayName\": \"NKGSB Bank\"\n            },\n            {\n                \"institutionID\": 92,\n                \"displayName\": \"HSBC\"\n            },\n            {\n                \"institutionID\": 93,\n                \"displayName\": \"ACME BANK\"\n            },\n            {\n                \"institutionID\": 94,\n                \"displayName\": \"FinShareBankServer\"\n            },\n            {\n                \"institutionID\": 95,\n                \"displayName\": \"Setu FIP\"\n            },\n            {\n                \"institutionID\": 96,\n                \"displayName\": \"Finvu Bank Ltd\"\n            },\n            {\n                \"institutionID\": 98,\n                \"displayName\": \"Tripura Gramin Bank\"\n            },\n            {\n                \"institutionID\": 108,\n                \"displayName\": \"Federal Bank Ltd\"\n            },\n            {\n                \"institutionID\": 110,\n                \"displayName\": \"Deutsche Bank\"\n            },\n            {\n                \"institutionID\": 112,\n                \"displayName\": \"Jana Small Finance Bank\"\n            },\n            {\n                \"institutionID\": 114,\n                \"displayName\": \"Saraswat Bank\"\n            },\n            {\n                \"institutionID\": 133,\n                \"displayName\": \"IDFC FIRST Bank Ltd(Micro Business Loan)\"\n            },\n            {\n                \"institutionID\": 134,\n                \"displayName\": \"Yes Bank Ltd (Micro Business Loan)\"\n            },\n            {\n                \"institutionID\": 135,\n                \"displayName\": \"Kotak Bank Ltd\"\n            }\n        ]\n    },\n    \"traceId\": \"4000001e-0009-ff00-b63f-84710c7967bb\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "students",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "iwnIOE0ooY4isJnCQex15TfydEZ0PitJ7hAH1VS_nUg",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": " student-create-004",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"externalStudentRef\": \"EXT-STU-1004\",\r\n  \"studentInfo\": {\r\n    \"email\": \"student@example.com\",\r\n    \"mobileNumber\": \"9000000001\",\r\n    \"pan\": \"ABCPD1234E\",\r\n    \"aadhaar\": \"123456789012\",\r\n    \"fullName\": \"Aarav Dev Shah\",\r\n    \"firstName\": \"Aarav\",\r\n    \"middleName\": \"Dev\",\r\n    \"lastName\": \"Shah\",\r\n    \"dateOfBirth\": \"2005-04-12\",\r\n    \"gender\": \"M\",\r\n    \"address\": \"12 Example Road\",\r\n    \"city\": \"Ahmedabad\",\r\n    \"state\": \"Gujarat\",\r\n    \"zipCode\": \"380001\",\r\n    \"photo\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n    \"panDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n    \"aadhaarDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\"\r\n  },\r\n  \"applicants\": [\r\n    {\r\n      \"name\": \"Meera Shah\",\r\n      \"firstName\": \"Meera\",\r\n      \"lastName\": \"Shah\",\r\n      \"pan\": \"XYZPF5678G\",\r\n      \"aadhaar\": \"234567890123\",\r\n      \"email\": \"applicant@example.com\",\r\n      \"mobileNumber\": \"9000000002\",\r\n      \"dateOfBirth\": \"1980-06-15\",\r\n      \"gender\": \"F\",\r\n      \"address\": \"12 Example Road\",\r\n      \"city\": \"Ahmedabad\",\r\n      \"state\": \"Gujarat\",\r\n      \"zipCode\": \"380001\",\r\n      \"photo\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n      \"panDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n      \"aadhaarDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\"\r\n    }\r\n  ],\r\n  \"coApplicants\": []\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/students",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "students"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Idempotency conflict",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-001",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalStudentRef\": \"POSTMAN-STU-002\",\r\n  \"studentInfo\": {\r\n    \"fullName\": \"Test Student Two\",\r\n    \"firstName\": \"Test\",\r\n    \"lastName\": \"Student\",\r\n    \"pan\":\"ABCPA4554D\",\r\n    \"gender\":\"male\",\r\n    \"address\":\"jgsdfsagh afjaiksdfja lkasfhal asfjahsfa, ajugsfag, jasjhfgahf, 6523426.\",\r\n    \"email\": \"student001@example.test\",\r\n    \"mobileNumber\": \"9000000101\",\r\n    \"dateOfBirth\": \"2004-05-20\"\r\n  },\r\n  \"applicants\": [\r\n    {\r\n      \"name\": \"Test Applicant Two\",\r\n      \"email\": \"applicant001@example.test\",\r\n      \"mobileNumber\": \"9000000102\",\r\n      \"pan\":\"DGSPA2326H\",\r\n      \"dateOfBirth\": \"2004-05-22\",\r\n      \"gender\":\"female\",\r\n    \"address\":\"hgaidfga jgsdfsagh afjaiksdfja lkasfhal asfjahsfa, ajugsfag, jasjhfgahf, 6523426.\"\r\n    }\r\n  ],\r\n  \"coApplicants\": []\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students"
+              ]
+            }
+          },
+          "status": "Conflict",
+          "code": 409,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 13:06:38 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 409,\n    \"message\": \"The idempotency key was used with different data.\",\n    \"data\": null,\n    \"traceId\": \"8b1a7887779c432c9f8c8f024aef1229\",\n    \"errorCode\": \"IDEMPOTENCY_CONFLICT\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Expired token",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-002",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalStudentRef\": \"POSTMAN-STU-002\",\r\n  \"studentInfo\": {\r\n    \"fullName\": \"Test Student Two\",\r\n    \"firstName\": \"Test\",\r\n    \"lastName\": \"Student\",\r\n    \"pan\":\"ABCPA4554D\",\r\n    \"gender\":\"male\",\r\n    \"address\":\"jgsdfsagh afjaiksdfja lkasfhal asfjahsfa, ajugsfag, jasjhfgahf, 6523426.\",\r\n    \"email\": \"student001@example.test\",\r\n    \"mobileNumber\": \"9000000101\",\r\n    \"dateOfBirth\": \"2004-05-20\"\r\n  },\r\n  \"applicants\": [\r\n    {\r\n      \"name\": \"Test Applicant Two\",\r\n      \"email\": \"applicant001@example.test\",\r\n      \"mobileNumber\": \"9000000102\",\r\n      \"pan\":\"DGSPA2326H\",\r\n      \"dateOfBirth\": \"2004-05-22\",\r\n      \"gender\":\"female\",\r\n    \"address\":\"hgaidfga jgsdfsagh afjaiksdfja lkasfhal asfjahsfa, ajugsfag, jasjhfgahf, 6523426.\"\r\n    }\r\n  ],\r\n  \"coApplicants\": []\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students"
+              ]
+            }
+          },
+          "status": "Unauthorized",
+          "code": 401,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "WWW-Authenticate",
+              "value": "Bearer"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 13:11:04 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 401,\n    \"message\": \"Authentication is required.\",\n    \"data\": null,\n    \"traceId\": \"d50d7390343649a682246566f293ffee\",\n    \"errorCode\": \"UNAUTHENTICATED\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Out of scope request",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-002",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalStudentRef\": \"POSTMAN-STU-002\",\r\n  \"studentInfo\": {\r\n    \"fullName\": \"Test Student Two\",\r\n    \"firstName\": \"Test\",\r\n    \"lastName\": \"Student\",\r\n    \"pan\":\"ABCPA4554D\",\r\n    \"gender\":\"male\",\r\n    \"address\":\"jgsdfsagh afjaiksdfja lkasfhal asfjahsfa, ajugsfag, jasjhfgahf, 6523426.\",\r\n    \"email\": \"student001@example.test\",\r\n    \"mobileNumber\": \"9000000101\",\r\n    \"dateOfBirth\": \"2004-05-20\"\r\n  },\r\n  \"applicants\": [\r\n    {\r\n      \"name\": \"Test Applicant Two\",\r\n      \"email\": \"applicant001@example.test\",\r\n      \"mobileNumber\": \"9000000102\",\r\n      \"pan\":\"DGSPA2326H\",\r\n      \"dateOfBirth\": \"2004-05-22\",\r\n      \"gender\":\"female\",\r\n    \"address\":\"hgaidfga jgsdfsagh afjaiksdfja lkasfhal asfjahsfa, ajugsfag, jasjhfgahf, 6523426.\"\r\n    }\r\n  ],\r\n  \"coApplicants\": []\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students"
+              ]
+            }
+          },
+          "status": "Forbidden",
+          "code": 403,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 13:12:05 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 403,\n    \"message\": \"Insufficient scope.\",\n    \"data\": null,\n    \"traceId\": \"71ed3a122ceb4bf6aab79114d09a9418\",\n    \"errorCode\": \"INSUFFICIENT_SCOPE\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-004",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalStudentRef\": \"EXT-STU-1004\",\r\n  \"studentInfo\": {\r\n    \"email\": \"student@example.com\",\r\n    \"mobileNumber\": \"9000000001\",\r\n    \"pan\": \"ABCPD1234E\",\r\n    \"aadhaar\": \"123456789012\",\r\n    \"fullName\": \"Aarav Dev Shah\",\r\n    \"firstName\": \"Aarav\",\r\n    \"middleName\": \"Dev\",\r\n    \"lastName\": \"Shah\",\r\n    \"dateOfBirth\": \"2005-04-12\",\r\n    \"gender\": \"M\",\r\n    \"address\": \"12 Example Road\",\r\n    \"city\": \"Ahmedabad\",\r\n    \"state\": \"Gujarat\",\r\n    \"zipCode\": \"380001\",\r\n    \"photo\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n    \"panDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n    \"aadhaarDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\"\r\n  },\r\n  \"applicants\": [\r\n    {\r\n      \"name\": \"Meera Shah\",\r\n      \"firstName\": \"Meera\",\r\n      \"lastName\": \"Shah\",\r\n      \"pan\": \"XYZPF5678G\",\r\n      \"aadhaar\": \"234567890123\",\r\n      \"email\": \"applicant@example.com\",\r\n      \"mobileNumber\": \"9000000002\",\r\n      \"dateOfBirth\": \"1980-06-15\",\r\n      \"gender\": \"F\",\r\n      \"address\": \"12 Example Road\",\r\n      \"city\": \"Ahmedabad\",\r\n      \"state\": \"Gujarat\",\r\n      \"zipCode\": \"380001\",\r\n      \"photo\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n      \"panDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\r\n      \"aadhaarDocument\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\"\r\n    }\r\n  ],\r\n  \"coApplicants\": []\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 15:35:31 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Student created successfully.\",\n    \"data\": {\n        \"studentId\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\n        \"externalStudentRef\": \"EXT-STU-1004\",\n        \"participants\": [\n            {\n                \"participantId\": \"08df4652-bec5-4de7-8c7b-91174b272493\",\n                \"role\": \"APPLICANT\"\n            }\n        ]\n    },\n    \"traceId\": \"4e24d45a2b534f5997ab0c0bda02f2f6\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "documents",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": " student-create-003",
+            "type": "text",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "documentFile",
+              "type": "file",
+              "uuid": "d9daa73f-7af4-4c5d-8f48-cd74f79dc32e",
+              "src": "/C:/Users/Riken/Downloads/EaseUS_2026_11_19_19_08_03.png"
+            },
+            {
+              "key": "documentFor",
+              "value": "4",
+              "type": "text",
+              "uuid": "edb893b2-29db-4eea-a7cf-b30f38be3257"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/students/documents",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "students",
+            "documents"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "documents",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-003",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "documentFile",
+                  "type": "file",
+                  "uuid": "d9daa73f-7af4-4c5d-8f48-cd74f79dc32e",
+                  "src": "/C:/Users/Riken/Downloads/EaseUS_2026_11_19_19_08_03.png"
+                },
+                {
+                  "key": "documentFor",
+                  "value": "6",
+                  "type": "text",
+                  "uuid": "edb893b2-29db-4eea-a7cf-b30f38be3257"
+                }
+              ],
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students",
+                "documents"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 15:04:20 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Document uploaded successfully.\",\n    \"data\": {\n        \"path\": \"StudentDocuments/B2B/08df0979cc2e456a8b0b43c4220bf98b/570BBAABD1CD38EE32189C6B4AEF30028102496011853B7829085FFFA7BDE878/6/03de19145207494ba990f8642973ebc7.png\",\n        \"link\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/B2B/08df0979cc2e456a8b0b43c4220bf98b/570BBAABD1CD38EE32189C6B4AEF30028102496011853B7829085FFFA7BDE878/6/03de19145207494ba990f8642973ebc7.png?sv=2025-05-05&se=2026-11-19T16%3A04%3A19Z&sr=b&sp=r&sig=QpoA2ugkNKOibInA2tRho3HIgIMqcKk6aGfFBLFEaT0%3D\"\n    },\n    \"traceId\": \"2923de9749bc4f2086ba7137877ad5ea\"\n}"
+        },
+        {
+          "name": "documents",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-003",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "documentFile",
+                  "type": "file",
+                  "uuid": "d9daa73f-7af4-4c5d-8f48-cd74f79dc32e",
+                  "src": "/C:/Users/Riken/Downloads/EaseUS_2026_11_19_19_08_03.png"
+                },
+                {
+                  "key": "documentFor",
+                  "value": "500",
+                  "type": "text",
+                  "uuid": "edb893b2-29db-4eea-a7cf-b30f38be3257"
+                }
+              ],
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students",
+                "documents"
+              ]
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 15:06:44 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 400,\n    \"message\": \"Document file or documentFor is invalid.\",\n    \"data\": null,\n    \"traceId\": \"0e69c1b9fb484b849fe30a602bb78650\",\n    \"errorCode\": \"VALIDATION_ERROR\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "documents",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": " student-create-003",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "documentFile",
+                  "type": "file",
+                  "uuid": "d9daa73f-7af4-4c5d-8f48-cd74f79dc32e",
+                  "src": "/C:/Users/Riken/Downloads/EaseUS_2026_11_19_19_08_03.png"
+                },
+                {
+                  "key": "documentFor",
+                  "value": "4",
+                  "type": "text",
+                  "uuid": "edb893b2-29db-4eea-a7cf-b30f38be3257"
+                }
+              ],
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/students/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "students",
+                "documents"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Thu, 19 Nov 2026 15:30:01 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Document uploaded successfully.\",\n    \"data\": {\n        \"path\": \"StudentDocuments/StudentPhoto_20-11-2026 02:30:01_EaseUS_2026_11_19_19_08_03.png\",\n        \"link\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-19T16%3A30%3A01Z&sr=b&sp=r&sig=MWPfHjr%2FoPpjOI%2B35hPTb2iKCBkNFYfkUKahiSKblRA%3D\"\n    },\n    \"traceId\": \"027384a99fff44aa93c1abf21c2bc852\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "loan-applications",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "vW-mXzy5AKVLeIJBPK0YMEyHepxgYaW3feiqXw0CuV8",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "DEMO-LOAN-003",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"externalApplicationRef\": \"DEMO-LOAN-003\",\r\n  \"studentId\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\r\n  \"courseId\": \"08df17d1-fa7c-4b78-8402-c0cd81634bb5\",\r\n  \"numberOfEmis\": 12,\r\n  \"numberOfAdvanceEmi\": 1,\r\n  \"downpaymentAmount\": 100,\r\n  \"discountPercentage\": 10\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/loan-applications",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "loan-applications"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Resource not found",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalApplicationRef\": \"DEMO-LOAN-002\",\r\n  \"studentId\": \"08df125a-aff1-4a02-8ec9-0e7bd2ee0f6e\",\r\n  \"courseId\": \"08df17d2-0553-4346-8ddb-8992d249ac6e\",\r\n  \"numberOfEmis\": 12,\r\n  \"numberOfAdvanceEmi\": 1,\r\n  \"downpaymentAmount\": 5000,\r\n  \"discountPercentage\": 10\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications"
+              ]
+            }
+          },
+          "status": "Not Found",
+          "code": 404,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 06:16:47 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 404,\n    \"message\": \"The requested resource was not found.\",\n    \"data\": null,\n    \"traceId\": \"9098d2a583674dad988d8b80cfc63caf\",\n    \"errorCode\": \"RESOURCE_NOT_FOUND\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Invalid loan amount provided",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalApplicationRef\": \"DEMO-LOAN-002\",\r\n  \"studentId\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\r\n  \"courseId\": \"08df17d2-0553-4346-8ddb-8992d249ac6e\",\r\n  \"numberOfEmis\": 12,\r\n  \"numberOfAdvanceEmi\": 1,\r\n  \"downpaymentAmount\": 5000,\r\n  \"discountPercentage\": 10\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications"
+              ]
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 06:20:19 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 400,\n    \"message\": \"Loan amounts are invalid for the course.\",\n    \"data\": null,\n    \"traceId\": \"4a6669043fb044cf960357769845ccf1\",\n    \"errorCode\": \"VALIDATION_ERROR\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Same external application reference provided",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalApplicationRef\": \"DEMO-LOAN-002\",\r\n  \"studentId\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\r\n  \"courseId\": \"08df17d2-0553-4346-8ddb-8992d249ac6e\",\r\n  \"numberOfEmis\": 12,\r\n  \"numberOfAdvanceEmi\": 1,\r\n  \"downpaymentAmount\": 100,\r\n  \"discountPercentage\": 10\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications"
+              ]
+            }
+          },
+          "status": "Conflict",
+          "code": 409,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 06:22:16 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 409,\n    \"message\": \"The application reference already exists.\",\n    \"data\": null,\n    \"traceId\": \"ace699c8211b49a683daa8bf4bc9882c\",\n    \"errorCode\": \"DUPLICATE_RESOURCE\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "active application already exists",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalApplicationRef\": \"DEMO-LOAN-003\",\r\n  \"studentId\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\r\n  \"courseId\": \"08df17d2-0553-4346-8ddb-8992d249ac6e\",\r\n  \"numberOfEmis\": 12,\r\n  \"numberOfAdvanceEmi\": 1,\r\n  \"downpaymentAmount\": 100,\r\n  \"discountPercentage\": 10\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications"
+              ]
+            }
+          },
+          "status": "Conflict",
+          "code": 409,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 06:23:29 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 409,\n    \"message\": \"An active application already exists for this course.\",\n    \"data\": null,\n    \"traceId\": \"896ebef2486749d49de57038acffb48a\",\n    \"errorCode\": \"STATE_CONFLICT\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"externalApplicationRef\": \"DEMO-LOAN-003\",\r\n  \"studentId\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\r\n  \"courseId\": \"08df17d1-fa7c-4b78-8402-c0cd81634bb5\",\r\n  \"numberOfEmis\": 12,\r\n  \"numberOfAdvanceEmi\": 1,\r\n  \"downpaymentAmount\": 100,\r\n  \"discountPercentage\": 10\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 06:43:04 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Thank you for your application! We have successfully registered it.\",\n    \"data\": {\n        \"loanAppID\": \"08df479a-a6c8-4863-8aaf-9ad877500390\",\n        \"customerID\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\n        \"loanStatusID\": 1,\n        \"createdDate\": \"2026-11-21T06:42:45.8539165Z\"\n    },\n    \"traceId\": \"15e707cbddab4f17b581525e839bca99\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "loan-applications/loanApplicationId",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "vKXZ-AL3Mv5rflep-8tPKZGllQF5FCL5H_ff4c6qBa8",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "loan-applications",
+            "{{loanApplicationId}}"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Authentication required",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}"
+              ]
+            }
+          },
+          "status": "Unauthorized",
+          "code": 401,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "WWW-Authenticate",
+              "value": "Bearer"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 07:04:00 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 401,\n    \"message\": \"Authentication is required.\",\n    \"data\": null,\n    \"traceId\": \"2681a44048a341ceb3dd8d4c145e5cf4\",\n    \"errorCode\": \"UNAUTHENTICATED\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Insufficient scope",
+          "originalRequest": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "DEMO-LOAN-003",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}"
+              ]
+            }
+          },
+          "status": "Forbidden",
+          "code": 403,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 07:05:30 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 403,\n    \"message\": \"Insufficient scope.\",\n    \"data\": null,\n    \"traceId\": \"2c217c4a795946c098030d13b7353249\",\n    \"errorCode\": \"INSUFFICIENT_SCOPE\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 08:34:07 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Request completed.\",\n    \"data\": {\n        \"studentID\": \"08df4652-beaa-4b00-8729-f39e9206ff4d\",\n        \"loanApplicationID\": \"08df479a-a6c8-4863-8aaf-9ad877500390\",\n        \"loanApplicationCode\": \"COLA261108\",\n        \"studentInfo\": {\n            \"studentName\": \"Aarav Dev Shah\",\n            \"studentCode\": \"COS261104\",\n            \"course\": \"MBA - Finance\",\n            \"dateOfBirth\": \"2005-04-12\",\n            \"gender\": \"Male\",\n            \"creditScore\": null,\n            \"abb\": null,\n            \"lastTimeCreditScoreFetchDate\": null,\n            \"pan\": \"ABCPD1234E\",\n            \"mobileNumber\": \"9000000001\",\n            \"emailAddress\": \"student@example.com\",\n            \"address\": \"12 Example Road\",\n            \"photo\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-21T09%3A34%3A06Z&sr=b&sp=r&sig=8wqV2p1otaGtCEwaZmUBfZEs0WleAnB9h9v3B14yFzI%3D\",\n            \"panDocument\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-21T09%3A34%3A06Z&sr=b&sp=r&sig=8wqV2p1otaGtCEwaZmUBfZEs0WleAnB9h9v3B14yFzI%3D\",\n            \"aadharDocument\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-21T09%3A34%3A06Z&sr=b&sp=r&sig=8wqV2p1otaGtCEwaZmUBfZEs0WleAnB9h9v3B14yFzI%3D\"\n        },\n        \"loanStructure\": {\n            \"courseID\": \"08df17d1-fa7c-4b78-8402-c0cd81634bb5\",\n            \"course\": \"MBA - Finance\",\n            \"tenureInYears\": 12,\n            \"agreedFee\": 3454,\n            \"discountRate\": 10,\n            \"discountAmount\": 345.4,\n            \"netAgreedFee\": 3108.6,\n            \"downPayment\": 100,\n            \"emiPlanInMonths\": 12,\n            \"advancedEMIMonths\": 1,\n            \"advancedEMIAmount\": 250.72,\n            \"remainingEMIs\": 11,\n            \"disbursementToInstitute\": 3008.6,\n            \"netLoanAmount\": 3008.6,\n            \"emiAmount\": 250.72,\n            \"emiAmountDescription\": \"Estimated 250.72 per month for 12 instalments; final EMI depends on eligibility and lender pricing.\",\n            \"emiCostType\": null,\n            \"netCostToCustomer\": 0\n        },\n        \"creditScore\": null,\n        \"abb\": null,\n        \"consent\": {\n            \"consentedAt\": null,\n            \"items\": [\n                {\n                    \"line\": \"I explicitly agree to Terms and Conditions and Privacy Policy of Credorbit Technologies Private Limited (Brand Name “Schofee”).\",\n                    \"status\": false\n                },\n                {\n                    \"line\": \"I authorize Credorbit Technologies Private Limited (Brand Name “Schofee”) and its lending partners (Armour Capital) to:\\n- Access or download my CKYC records from the CKYCR.\\n- Act as my authorized representative to obtain my Credit Information from credit bureaus and/or alternate sources for:\\n  - Assessing my credit profile.\\n  - Managing loan processing and repayment.\\n  - Offering any services related to my loan or financial profile.\\nThis consent remains valid:\\n- For the full duration of my loan tenure, or\\n- Up to 6 months from the date of consent collection, whichever is later.\",\n                    \"status\": false\n                },\n                {\n                    \"line\": \"I hereby consent to share and provide access to my documents from DigiLocker for verification purposes with Lending Partners.\",\n                    \"status\": false\n                },\n                {\n                    \"line\": \"I further agree that Credorbit Technologies Private Limited (Brand Name “Schofee”) has given me the option to provide or deny consent for the use of my KYC, financial, or personal data. I understand that:\\n- My data may be shared with Lenders or authorized service providers only for the purposes mentioned in Terms and Conditions and Privacy Policy of Credorbit Technologies Private Limited (Brand Name “Schofee”).\\n- I can revoke my consent at any time, and request deletion of my personal data.\\n- Revoking data access may affect the services being provided to me.\",\n                    \"status\": false\n                },\n                {\n                    \"line\": \"I agree to allow Credorbit Technologies Private Limited (Brand Name “Schofee”) and/or its Lender partners to send me important information and updates over Whatsapp, SMS, call or E-mail.\",\n                    \"status\": false\n                }\n            ]\n        },\n        \"applicants\": [\n            {\n                \"participantID\": \"08df4652-bec5-4de7-8c7b-91174b272493\",\n                \"participantUserType\": 13,\n                \"name\": \"Meera Shah\",\n                \"pan\": \"XYZPF5678G\",\n                \"dateOfBirth\": \"1980-06-15\",\n                \"gender\": \"F\",\n                \"mobileNumber\": \"9000000002\",\n                \"emailAddress\": \"applicant@example.com\",\n                \"address\": \"12 Example Road\",\n                \"city\": \"Ahmedabad\",\n                \"state\": \"Gujarat\",\n                \"pinCode\": \"380001\",\n                \"relation\": \"Person\",\n                \"photo\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-21T09%3A34%3A05Z&sr=b&sp=r&sig=aJDMfT%2BmDpDhrk0TknPgWauAqFxZsroN9cNo%2BOOZdTg%3D\",\n                \"panDocument\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-21T09%3A34%3A05Z&sr=b&sp=r&sig=aJDMfT%2BmDpDhrk0TknPgWauAqFxZsroN9cNo%2BOOZdTg%3D\",\n                \"aadharDocument\": \"https://credstagestorage.blob.core.windows.net/credorbit-dev/StudentDocuments/StudentPhoto_20-11-2026 02%3A30%3A01_EaseUS_2026_11_19_19_08_03.png?sv=2025-05-05&se=2026-11-21T09%3A34%3A05Z&sr=b&sp=r&sig=aJDMfT%2BmDpDhrk0TknPgWauAqFxZsroN9cNo%2BOOZdTg%3D\",\n                \"isVerified\": false,\n                \"verificationStatus\": \"Pending Verification\"\n            }\n        ],\n        \"coApplicants\": [],\n        \"isPaymentDone\": false,\n        \"bankDetails\": [],\n        \"courseId\": \"08df17d1-fa7c-4b78-8402-c0cd81634bb5\",\n        \"externalApplicationRef\": \"DEMO-LOAN-003\",\n        \"status\": \"PENDING\"\n    },\n    \"traceId\": \"1c1276ef2c5f4ea78b1b9c263cb6edea\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "required-actions",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "ROUsfdMMO8Q1H58LkGLQo9gzdfJ-Vl0pc7C4gpHRJbY",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/required-actions",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "loan-applications",
+            "{{loanApplicationId}}",
+            "required-actions"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Succcess",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/required-actions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "required-actions"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 09:43:51 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"Request completed.\",\n    \"data\": {\n        \"items\": [\n            {\n                \"type\": \"PARTICIPANT_VERIFICATION\",\n                \"status\": \"PENDING\",\n                \"participantId\": \"08df4652-bec5-4de7-8c7b-91174b272493\",\n                \"participantUserType\": 13\n            }\n        ]\n    },\n    \"traceId\": \"962c1159af844953ae47cebdcec2ad74\"\n}"
+        },
+        {
+          "name": "No required action",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/required-actions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "required-actions"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 10:46:08 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"No required actions.\",\n    \"data\": {\n        \"items\": []\n    },\n    \"traceId\": \"ec6ee5554d4a43d8aecef6c5d62c371e\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "participants/{{participantId}}/otp-requests",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "Pti2PLHo_MCpvQ6GNVXl-qRARn4NCtQ9JkVYGsJ9-PI",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-requests",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "loan-applications",
+            "{{loanApplicationId}}",
+            "participants",
+            "{{participantId}}",
+            "otp-requests"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "scope insufficient",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-requests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "participants",
+                "{{participantId}}",
+                "otp-requests"
+              ]
+            }
+          },
+          "status": "Forbidden",
+          "code": 403,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 09:09:27 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 403,\n    \"message\": \"Insufficient scope.\",\n    \"data\": null,\n    \"traceId\": \"49e5caf60aa4499a95d157b7cf92d3b6\",\n    \"errorCode\": \"INSUFFICIENT_SCOPE\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "resource not found",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-requests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "participants",
+                "{{participantId}}",
+                "otp-requests"
+              ]
+            }
+          },
+          "status": "Not Found",
+          "code": 404,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 09:12:13 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 404,\n    \"message\": \"The requested resource was not found.\",\n    \"data\": null,\n    \"traceId\": \"261b34c2b6f54aa48388a88fb13546af\",\n    \"errorCode\": \"RESOURCE_NOT_FOUND\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-requests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "participants",
+                "{{participantId}}",
+                "otp-requests"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 09:39:37 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"OTP sent successfully.\",\n    \"data\": {\n        \"verificationId\": \"bc6cd048-0716-4d76-b3f0-774041880302\",\n        \"status\": \"SENT\"\n    },\n    \"traceId\": \"f872ddd4901e4c02a2e544aaadb5161b\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "otp-verifications",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "Pti2PLHo_MCpvQ6GNVXl-qRARn4NCtQ9JkVYGsJ9-PI",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "\r\n{\r\n  \"verificationId\": \"bc6cd048-0716-4d76-b3f0-774041880302\",\r\n  \"otp\": \"1234\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-verifications",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "loan-applications",
+            "{{loanApplicationId}}",
+            "participants",
+            "{{participantId}}",
+            "otp-verifications"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "data invalid",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"verificationId\":\"bc6cd048-0716-4d76-b3f0-774041880302\",\r\n    \"otp\":1234\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-verifications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "participants",
+                "{{participantId}}",
+                "otp-verifications"
+              ]
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 09:47:22 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 400,\n    \"message\": \"Verification data is invalid.\",\n    \"data\": null,\n    \"traceId\": \"733a0cb7c6fd44c78d116853c9aaf136\",\n    \"errorCode\": \"VALIDATION_ERROR\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Invalid/expired otp",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "\r\n{\r\n  \"verificationId\": \"bc6cd048-0716-4d76-b3f0-774041880302\",\r\n  \"otp\": \"1234\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-verifications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "participants",
+                "{{participantId}}",
+                "otp-verifications"
+              ]
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 09:50:21 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": false,\n    \"statusCode\": 400,\n    \"message\": \"The OTP is invalid or expired.\",\n    \"data\": null,\n    \"traceId\": \"5456b381ae78435d9e3daeec20f50e65\",\n    \"errorCode\": \"VALIDATION_ERROR\",\n    \"errors\": []\n}"
+        },
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "\r\n{\r\n  \"verificationId\": \"bc6cd048-0716-4d76-b3f0-774041880302\",\r\n  \"otp\": \"1234\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/loan-applications/{{loanApplicationId}}/participants/{{participantId}}/otp-verifications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "loan-applications",
+                "{{loanApplicationId}}",
+                "participants",
+                "{{participantId}}",
+                "otp-verifications"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": "Transfer-Encoding",
+              "value": "chunked"
+            },
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "Server",
+              "value": "Microsoft-IIS/10.0"
+            },
+            {
+              "key": "X-Powered-By",
+              "value": "ASP.NET"
+            },
+            {
+              "key": "Date",
+              "value": "Sat, 21 Nov 2026 10:40:15 GMT"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": true,\n    \"statusCode\": 200,\n    \"message\": \"OTP verified successfully.\",\n    \"data\": {\n        \"verified\": true\n    },\n    \"traceId\": \"b53057115d454d6fbb23b71533c13c3a\"\n}"
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "id",
+      "value": "1"
+    },
+    {
+      "key": "base_url",
+      "value": "https://template.postman-echo.com"
+    }
+  ]
+}

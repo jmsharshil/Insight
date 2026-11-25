@@ -1003,6 +1003,14 @@ class AdmissionListView(APIView):
                 admission.lead.save(update_fields=['branch'])
             resolve_combo_executive_course(admission)
 
+            # ── Hook for SchoFee Finance ─────────────────────────────────────────
+            if admission.payment_type == 'finance':
+                try:
+                    from schofee_finance.services.pipeline import handle_admission_finance_hook
+                    handle_admission_finance_hook(admission)
+                except Exception as fe:
+                    logger.error(f"Finance hook error for admission {admission.id}: {fe}")
+
             if any([data.get('payment_choice'), data.get('payment_screenshot'), data.get('transaction_id')]):
                 try:
                     from .utils import sync_admission_payment
